@@ -100,7 +100,6 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", clickFora);
   }, []);
 
-  // 📡 Interpretador de Planilhas Google nativo e veloz da V1 integrado à V2
   const fetchGoogleSheet = async (sheetName: string) => {
     try {
       const sheetId = "1uJ_BysO5VW6DLxoDuoy2ZKzEtRBcptydAa87Ih8cRCw";
@@ -146,28 +145,24 @@ export default function DashboardPage() {
         }
       }
 
-      // 1. Carrega Métricas do Comitê de Crédito (Supa)
+      // 1. Comitê de Crédito
       let queryAnalises = supabase.from("analises").select("*");
-      if (isComercial) {
-        queryAnalises = queryAnalises.eq("comercial", userNome);
-      }
+      if (isComercial) { queryAnalises = queryAnalises.eq("comercial", userNome); }
       const resAnalises = await queryAnalises;
       setAnalises(resAnalises.data || []);
 
-      // 2. Coleta em lote os dados do Google Sheets preenchido
+      // 2. Coleta do Google Sheets
       const [vopRaw, cartRaw, receitasRaw] = await Promise.all([
         fetchGoogleSheet("LANCAMENTOS_VOP"),
         fetchGoogleSheet("BASE_CARTEIRA"),
         fetchGoogleSheet("RECEITAS")
       ]);
 
-      // 3. Processamento das regras de cruzamento de VOP com Trava Comercial
+      // 3. Processamento VOP
       const vopMap: { [key: string]: any } = {};
       vopRaw.forEach((r: any) => {
         const cedente = simplificarNome(r["cedente"]);
         if (!cedente) return;
-        
-        // Se for Comercial, ignora dados de cedentes de terceiros
         if (isComercial && !allowedCedentes.includes(cedente)) return;
 
         const mes_ano = String(r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
@@ -179,13 +174,11 @@ export default function DashboardPage() {
       const vopFinal = Object.values(vopMap);
       setDashVop(vopFinal);
 
-      // 4. Processamento das regras de cruzamento de Carteira (Risco) com Trava Comercial
+      // 4. Processamento Carteira
       const cartMap: { [key: string]: any } = {};
       cartRaw.forEach((r: any) => {
         const cedente = simplificarNome(r["cedente"]);
         if (!cedente) return;
-
-        // Se for Comercial, ignora dados de risco de terceiros
         if (isComercial && !allowedCedentes.includes(cedente)) return;
 
         if (!cartMap[cedente]) {
@@ -200,7 +193,7 @@ export default function DashboardPage() {
       const cartFinal = Object.values(cartMap);
       setDashCarteira(cartFinal);
 
-      // 5. Processamento das regras de cruzamento de Receitas com Trava Comercial
+      // 5. Processamento Receitas
       const recMap: { [key: string]: any } = {};
       receitasRaw.forEach((r: any) => {
         const emp = String(r["empresa"] || "").trim().toUpperCase();
@@ -209,7 +202,6 @@ export default function DashboardPage() {
         if (!rawCedente || !dataOp) return;
 
         const cedente = simplificarNome(rawCedente);
-        // Se for Comercial, ignora receitas de terceiros
         if (isComercial && !allowedCedentes.includes(cedente)) return;
 
         const mes_ano = extrairMesAnoDeDataBR(dataOp);
@@ -226,7 +218,7 @@ export default function DashboardPage() {
       const recFinal = Object.values(recMap);
       setDashReceitas(recFinal);
 
-      // 6. Montagem dos Meses e Cedentes Permitidos para Filtro na Tela
+      // 6. Configuração de Filtros
       const mesesUnicos = Array.from(new Set([
         ...vopFinal.map(v => formatarMesAno(v.mes_ano)),
         ...recFinal.map(r => formatarMesAno(r.mes_ano))
@@ -235,7 +227,11 @@ export default function DashboardPage() {
         return (parseInt(yB) * 100 + parseInt(mB)) - (parseInt(yA) * 100 + parseInt(mA));
       });
       setListaMeses(mesesUnicos);
-      if (mesesSel.length === 0 && mesesUnicos.length > 0) setMesesSel([mesesUnicos[0]]);
+      
+      // 🎯 Fix: Inicia selecionando TODOS os meses para forçar a exibição instantânea de dados históricos
+      if (mesesSel.length === 0 && mesesUnicos.length > 0) {
+        setMesesSel(mesesUnicos);
+      }
 
       const cedentesUnicos = Array.from(new Set([
         ...vopFinal.map(v => v.cedente),
@@ -246,7 +242,7 @@ export default function DashboardPage() {
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
 
     } catch (err) {
-      console.error("Erro no processamento geral do Dashboard via Sheets:", err);
+      console.error("Erro no processamento geral:", err);
     } finally {
       setCarregando(false);
     }
@@ -258,17 +254,17 @@ export default function DashboardPage() {
     setSincronizando(true);
     await carregarDashboardFiel();
     setSincronizando(false);
-    alert("🔄 Sincronizado! Planilhas lidas em tempo real com mapeamento comercial ativo.");
+    alert("🔄 Sincronizado! Dados lidos com sucesso.");
   };
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
-    const bateEmpresa = Pattern = empresasSel.includes(emp.toUpperCase());
+    const bateEmpresa = empresasSel.includes(emp.toUpperCase()); // 🎯 Fix: Removido 'Pattern =' que corrompia a leitura
     const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
     const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced.toUpperCase());
     return bateEmpresa && bateMes && bateCedente;
   };
 
-  const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
+  const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === listaMeses.length ? "Todos" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
 
   let aprovadosMes = 0; let recusadosMes = 0; let somaDias = 0; let qtdSla = 0;
   analises.forEach(a => {
@@ -276,7 +272,6 @@ export default function DashboardPage() {
     if (dRec) {
       const m_a = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
       const bateMes = mesesSel.length === 0 || mesesSel.includes(m_a);
-      
       if (bateMes) {
         if ((a.status || "").toLowerCase() === "aprovado") aprovadosMes++;
         if (["reprovado", "recusado"].includes((a.status || "").toLowerCase())) recusadosMes++;
@@ -337,12 +332,12 @@ export default function DashboardPage() {
 
   const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
-  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Puxando dados vivos das planilhas...</div>;
+  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Conectando às planilhas integradas Ned Capital...</div>;
 
   return (
     <div className="space-y-8 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans text-slate-800">
       
-      {/* 🛠️ CONJUNTO DE MULTI-FILTROS */}
+      {/* MULTI-FILTROS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
         <div ref={refEmp} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[11px] tracking-wider mb-1.5">Filtrar Origem (Empresa):</label>
@@ -365,7 +360,7 @@ export default function DashboardPage() {
         <div ref={refMes} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[11px] tracking-wider mb-1.5">Mês de Referência:</label>
           <button onClick={() => setOpenMes(!openMes)} className="w-full text-left p-2.5 border border-slate-300 rounded-lg bg-slate-50 font-bold text-xs flex justify-between items-center outline-none">
-            <span className="truncate">{mesesSel.length === 0 ? "Todos os Meses" : mesesSel.length === 1 ? `Mês: ${mesesSel[0]}` : `${mesesSel.length} Meses Selecionados`}</span>
+            <span className="truncate">{mesesSel.length === 0 ? "Todos os Meses" : mesesSel.length === listaMeses.length ? "Todos os Meses" : mesesSel.length === 1 ? `Mês: ${mesesSel[0]}` : `${mesesSel.length} Meses`}</span>
             <span>▼</span>
           </button>
           {openMes && (
@@ -422,7 +417,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* CARDS METRICOS */}
+      {/* METRICAS DE CADASTRO */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Crédito e Cadastro</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -441,6 +436,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* VALORES OPERADOS */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Valores Operados Mensal</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -455,6 +451,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* RECEITAS */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Receitas</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
@@ -477,6 +474,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* HISTORICO VIDA TODA */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Valores Operados Geral (Vida Toda)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -495,6 +493,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* RISCO ATUAL */}
       <div className="space-y-3 pt-2">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Risco (Foto Atual da Carteira)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -513,6 +512,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* VENCIDOS */}
       <div className="space-y-3 pt-2">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Títulos Vencidos (Foto Atual)</h3>
         <div className="flex justify-center">
@@ -527,3 +527,26 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* SINCRO */}
+      <div className="flex justify-between items-center bg-slate-50 border border-slate-200 p-4 rounded-xl mt-8 shadow-xs">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">📊</span>
+          <div className="flex flex-col">
+            <span className="text-xs font-bold text-slate-700">Painel Integrado Ned Capital</span>
+            <span className="text-[10px] font-bold text-slate-400">🔥 Filtros Cruzados Ativos — Conexão Direta e Pura via Google Sheets</span>
+          </div>
+        </div>
+        <button 
+          onClick={sincronizarGoogleSheets} 
+          disabled={sincronizando}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs shadow-sm disabled:opacity-50"
+        >
+          {sincronizando ? "⏳ Puxando..." : "🔄 Forçar Re-Leitura dos Lançamentos"}
+        </button>
+      </div>
+
+    </div>
+  );
+}
