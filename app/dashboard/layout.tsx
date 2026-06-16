@@ -70,13 +70,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         <div className="p-6">
           <div className="mb-8 flex justify-between items-center">
-            <div>
-              <h1 className="text-xl font-black text-white tracking-tight leading-none">
-                Intra<span className="text-blue-500">Ned</span>
-              </h1>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1">
-                Controle & Gestão
-              </p>
+            {/* 🎯 Bloco corrigido: Adicionado o ícone da Ned de forma limpa e flex */}
+            <div className="flex items-center gap-3">
+              <img 
+                src="/favicon.ico" 
+                alt="Ned Capital" 
+                className="w-7 h-7 object-contain bg-white rounded p-0.5 shrink-0"
+              />
+              <div>
+                <h1 className="text-xl font-black text-white tracking-tight leading-none">
+                  Intra<span className="text-blue-500">Ned</span>
+                </h1>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1">
+                  Controle & Gestão
+                </p>
+              </div>
             </div>
 
             <button 
@@ -143,7 +151,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* 🎯 Fix: Adicionado 'relative' e o componente de notificação em tempo real */}
+        {/* 🔔 Mantém a estrutura de scroll e o notificador intocados */}
         <main className="flex-1 p-6 md:p-8 overflow-y-auto relative">
           {children}
           <NotificadorComite />
