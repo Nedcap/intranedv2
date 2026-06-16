@@ -36,7 +36,7 @@ function ResetSenhaForm() {
           return;
         }
 
-        // 🎯 Fix: Garante a interpretação da string de data de forma segura independente do local
+        // 🎯 Garante a interpretação da string de data de forma segura independente do local
         const expira = new Date(data.token_expira).getTime();
         const agora = Date.now();
 
@@ -67,10 +67,9 @@ function ResetSenhaForm() {
     }
 
     try {
-      options;
       setCarregando(true);
 
-      // Executa o RPC que salva com hash e limpa os tokens do banco
+      // 🎯 Executa o RPC que salva com hash e limpa os tokens do banco (options fantasma removido!)
       const { error } = await supabase.rpc("atualizar_senha_cripto", {
         p_usuario_id: usuarioValido.id,
         p_nova_senha: novaSenha.trim()
@@ -80,7 +79,7 @@ function ResetSenhaForm() {
 
       alert("🎉 Senha redefinida com sucesso com criptografia de segurança!");
       
-      // 🎯 Fix: Empurra o usuário para a tela inicial correta do sistema
+      // Empurra o usuário para a tela inicial correta do sistema
       router.push("/");
     } catch (err: any) {
       console.error(err);
@@ -100,7 +99,8 @@ function ResetSenhaForm() {
         <div className="w-full max-w-sm bg-white p-6 rounded-xl border border-red-200 shadow-md text-center space-y-3">
           <h2 className="text-red-600 font-black text-base">⚠️ Link Inválido ou Expirado</h2>
           <p className="text-slate-500 font-medium">Este link de recuperação já foi utilizado ou passou do prazo de validade de 1 hora.</p>
-          <a href="/esqueci-senha" className="px-4 py-2 bg-slate-950 text-white font-bold rounded-lg inline-block text-xs mt-2">Solicitar Novo Link</a>
+          {/* 🎯 Redireciona de volta para a raiz do login onde o modal real está ativo */}
+          <a href="/" className="px-4 py-2 bg-slate-950 text-white font-bold rounded-lg inline-block text-xs mt-2">Solicitar Novo Link</a>
         </div>
       </div>
     );

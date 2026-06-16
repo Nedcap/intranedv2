@@ -16,7 +16,6 @@ export default function EsqueciSenhaPage() {
       setCarregando(true);
       setMensagem({ tipo: "", texto: "" });
 
-      // 🎯 Fix: Envia o e-mail padronizado em caixa baixa para evitar desencontro de strings no banco
       const emailTratado = email.trim().toLowerCase();
 
       const res = await fetch("/api/recuperar", {
@@ -27,22 +26,21 @@ export default function EsqueciSenhaPage() {
 
       const data = await res.json();
 
-      if (!res.ok || data.success === false) {
+      // 🎯 Fix: Alinhado com a resposta real da API route ({ enviado: true }) evitando o falso erro do .success
+      if (!res.ok || data.error) {
         throw new Error(data.error || "Erro na requisição da API");
       }
 
       setMensagem({ 
         tipo: "sucesso", 
-        texto: "🎉 Se o e-mail estiver ativo no ecossistema, as instruções de renovação foram disparadas!" 
+        texto: "🎉 Se o e-mail informado estiver ativo no ecossistema, as instruções de redefinição foram disparadas!" 
       });
       setEmail("");
     } catch (err: any) {
       console.error(err);
       setMensagem({ 
         tipo: "erro", 
-        texto: err.message === "Erro na requisição da API" 
-          ? "❌ Falha ao processar a recuperação de senha no servidor." 
-          : `❌ Erro: ${err.message}` 
+        texto: `❌ Erro ao processar: ${err.message || "Falha de comunicação com o servidor."}` 
       });
     } finally {
       setCarregando(false);
@@ -50,11 +48,24 @@ export default function EsqueciSenhaPage() {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-slate-50 text-[13px] font-medium text-slate-700">
+    <div className="flex h-screen items-center justify-center bg-slate-100 flex-col p-4 font-sans text-[13px] font-medium text-slate-700">
       <div className="w-full max-w-sm bg-white p-6 rounded-xl border border-slate-200 shadow-md space-y-4">
-        <div className="text-center">
-          <h2 className="text-xl font-black text-slate-900">Ned Capital</h2>
-          <p className="text-slate-400 text-xs mt-1">Recuperação Cadastral de Acesso</p>
+        
+        {/* 🎯 LOGO DA NED INTEGRADINHA E CENTRALIZADA IGUAL AO CARD DE LOGIN PRINCIPAL */}
+        <div className="flex flex-col items-center select-none text-center">
+          <div className="relative w-fit mx-auto flex items-center h-8 pl-1">
+            <img 
+              src="/favicon.ico" 
+              alt="Ned Capital" 
+              className="absolute -left-7 h-7 w-auto object-contain shrink-0" 
+            />
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+              Intra<span className="text-blue-500">Ned</span>
+            </h1>
+          </div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2.5 w-full">
+            Controle & Gestão
+          </p>
         </div>
 
         {mensagem.texto && (
@@ -72,17 +83,18 @@ export default function EsqueciSenhaPage() {
               value={email} 
               onChange={(e) => setEmail(e.target.value)} 
               placeholder="exemplo@nedcapital.com.br" 
-              className="p-2 border border-slate-200 rounded-lg bg-white outline-none focus:border-blue-500 font-medium" 
+              className="p-2.5 border border-slate-200 bg-blue-50/30 rounded-lg outline-none focus:border-blue-500 font-semibold text-slate-800" 
             />
           </div>
           <button 
             type="submit" 
             disabled={carregando} 
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-lg cursor-pointer transition-all disabled:opacity-50"
+            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold p-2.5 rounded-lg cursor-pointer transition-all disabled:opacity-50 text-xs uppercase tracking-wider"
           >
             {carregando ? "ENVIANDO INSTRUÇÕES..." : "🔐 Solicitar Nova Senha"}
           </button>
         </form>
+        
         <div className="text-center pt-2">
           <a href="/" className="text-blue-600 hover:underline text-xs font-bold transition-all">Voltar para o Login</a>
         </div>
