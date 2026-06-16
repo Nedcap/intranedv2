@@ -1,131 +1,128 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation"; 
-import { supabase } from "@/lib/supabase"; 
-import { obterRotasMaster } from "@/lib/rotas"; 
-import "./globals.css"; 
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-export default function Login() {
+export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [erro, setErro] = useState("");
-  
-  const router = useRouter(); 
+  const [carregando, setCarregando] = useState(false);
 
-  const autenticar = async (e: React.FormEvent) => {
-    e.preventDefault(); 
-    setLoading(true);
-    setErro("");
+  useEffect(() => {
+    // Se o usuário já tiver sessão ativa, joga direto para o painel principal
+    const logado = localStorage.getItem("intraned_user");
+    if (logado) router.push("/dashboard");
+  }, [router]);
 
-    // 🎯 Fix: Normaliza o e-mail para caixa baixa na entrada do fluxo
-    const emailTratado = email.trim().toLowerCase();
+  const tratarLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !senha.trim()) return;
 
     try {
-      const { data, error } = await supabase.rpc("verificar_login", {
-        p_email: emailTratado,
-        p_senha: senha.trim()
-      });
+      setCarregando(true);
+      const emailTratado = email.trim().toLowerCase();
 
-      if (error || !data || data.length === 0) {
-        setErro("E-mail ou senha incorretos.");
-      } else {
-        const usuarioLogado = data[0];
+      const { data, error } = await supabase
+        .from("usuarios")
+        .select("*")
+        .eq("email", emailTratado)
+        .eq("senha", senha.trim())
+        .maybeSingle();
 
-        // Busca as permissões usando a string tratada para não quebrar no .eq
-        const { data: dadosColaborador } = await supabase
-          .from("usuarios")
-          .select("permissoes")
-          .eq("email", emailTratado)
-          .maybeSingle();
+      if (error) throw error;
 
-        let abasFinais = [];
-        if (usuarioLogado.cargo === "Master") {
-          abasFinais = obterRotasMaster();
-        } else if (dadosColaborador && dadosColaborador.permissoes) {
-          abasFinais = dadosColaborador.permissoes;
-        }
-
-        // 🎯 Fix: Salva as duas chaves no payload para blindar o DashboardLayout contra falhas de leitura
-        const payloadSessao = {
-          nome: usuarioLogado.nome,
-          perfil: usuarioLogado.cargo || "Comercial",
-          cargo: usuarioLogado.cargo || "Comercial",
-          permissoes: abasFinais,
-          abas_permitidas: abasFinais 
-        };
-
-        localStorage.setItem("intraned_user", JSON.stringify(payloadSessao));
-        router.push("/dashboard");
+      if (!data) {
+        alert("❌ Acesso negado. Verifique os dados inseridos.");
+        return;
       }
-    } catch (err) {
+
+      // Cria a sessão local com as permissões de rota ativas
+      localStorage.setItem("intraned_user", JSON.stringify({
+        id: data.id,
+        nome: data.nome,
+        email: data.email,
+        cargo: data.cargo,
+        permissoes: data.permissoes || []
+      }));
+
+      router.push("/dashboard");
+    } catch (err: any) {
       console.error(err);
-      setErro("Ocorreu um erro de conexão com o banco.");
+      alert(`Erro no servidor: ${err.message}`);
     } finally {
-      setLoading(false);
+      setCarregando(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 font-sans text-[13px] text-slate-800">
-      <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-lg border border-slate-200">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
+      <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        <div className="text-center mb-6">
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-            Intra<span className="text-blue-600">Ned</span>
-          </h1>
-          <p className="text-slate-400 mt-1 font-bold text-[10px] uppercase tracking-widest">
-            Controle e Gestão
+        {/* 🎯 CABEÇALHO DO CARD COM LOGO ALINHADA LADO A LADO NO LOGIN */}
+        <div className="flex flex-col items-center">
+          <div className="flex items-center gap-3 justify-center w-full select-none">
+            <img 
+              src="/favicon.ico" 
+              alt="Ned Capital" 
+              className="h-8 w-auto object-contain shrink-0" 
+            />
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+              Intra<span className="text-blue-500">Ned</span>
+            </h1>
+          </div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2 text-center w-full">
+            Controle & Gestão
           </p>
         </div>
 
-        <form onSubmit={autenticar} className="space-y-5">
-          {erro && (
-            <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md text-center font-bold">
-              {erro}
-            </div>
-          )}
-
-          <div className="space-y-1">
-            <label className="block font-bold text-slate-700">E-mail:</label>
-            <input
-              type="email"
+        {/* FORMULÁRIO DE LOGIN */}
+        <form onSubmit={tratarLogin} className="space-y-4 pt-2">
+          <div className="flex flex-col space-y-1">
+            <label className="font-bold text-slate-700">E-mail:</label>
+            <input 
+              type="email" 
+              required
+              placeholder="seu.nome@nedcapital.com.br"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="usuario@nedcapital.com.br"
-              required
-              className="w-full p-2.5 border border-slate-300 rounded-lg outline-none bg-white focus:border-blue-500 transition-all font-medium"
+              className="p-2.5 border border-slate-200 bg-blue-50/30 rounded-lg outline-none focus:border-blue-500 font-semibold text-slate-800"
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="block font-bold text-slate-700">Senha:</label>
-            <input
-              type="password"
+          <div className="flex flex-col space-y-1">
+            <label className="font-bold text-slate-700">Senha:</label>
+            <input 
+              type="password" 
+              required
+              placeholder="••••••••••••"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
-              placeholder="Digite sua senha"
-              required
-              className="w-full p-2.5 border border-slate-300 rounded-lg outline-none bg-white focus:border-blue-500 transition-all font-medium"
+              className="p-2.5 border border-slate-200 bg-blue-50/30 rounded-lg outline-none focus:border-blue-500 font-semibold text-slate-800"
             />
           </div>
 
-          <button
+          <button 
             type="submit"
-            disabled={loading}
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg transition-all cursor-pointer disabled:opacity-70"
+            disabled={carregando}
+            className="w-full p-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg transition-colors cursor-pointer uppercase tracking-wider text-xs shadow-md disabled:opacity-50"
           >
-            {loading ? "Autenticando..." : "ENTRAR NO SISTEMA"}
+            {carregando ? "Autenticando..." : "Entrar no Sistema"}
           </button>
         </form>
 
-        <div className="text-center pt-5 border-t border-slate-100 mt-5">
-          <a href="/esqueci-senha" className="text-blue-600 hover:underline text-xs font-bold transition-all">
+        <div className="text-center pt-2">
+          <button 
+            type="button"
+            onClick={() => alert("Entre em contato com o administrador do sistema para redefinir suas credenciais.")}
+            className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0"
+          >
             Esqueceu sua senha? Recuperar acesso
-          </a>
+          </button>
         </div>
+
       </div>
     </div>
   );
