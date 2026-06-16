@@ -11,6 +11,7 @@ export interface RotaSistema {
 export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Dashboard Principal", path: "/dashboard", icone: "📈", categoria: "Operações", defaultMaster: true },
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Operações", defaultMaster: true },
+  { nome: "Controle Comercial", path: "/dashboard/comercial", icone: "🎯", categoria: "Operações", defaultMaster: true },
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Carteira", path: "/dashboard/carteira", icone: "📊", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Operações", defaultMaster: true },
@@ -22,6 +23,6 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true }
 ];
 
-// 🎯 Fix: Agora a função respeita a flag de controle para permitir rotas ocultas ou em testes no futuro
+// Fix: Agora a função respeita a flag de controle para permitir rotas ocultas ou em testes no futuro
 export const obterRotasMaster = () => 
   MAPA_DE_ROTAS.filter(r => r.defaultMaster === true).map(r => r.path);
