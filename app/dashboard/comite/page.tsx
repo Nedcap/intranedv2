@@ -8,9 +8,13 @@ export default function ComitePage() {
   const [analises, setAnalises] = useState<any[]>([]);
   const [empresasAnalise, setEmpresasAnalise] = useState<any[]>([]); 
   const [carregando, setCarregando] = useState(true);
-  const [empresaSelecionada, setEmpresaSelecionada] = useState<any>(null);
+  
+  // 🎯 Mudança de Estado: Guarda o ID da empresa aberta na tabela para o painel embutido
+  const [idEmpresaExpandida, setEditandoEmpresaExpandida] = useState<string | null>(null);
+  const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [novaMsg, setNovaMsg] = useState("");
+  
   const [membroVoto, setMembroVoto] = useState("");
   const [opcaoVoto, setOpcaoVoto] = useState("");
   const [justificativaVoto, setJustificativaVoto] = useState("");
@@ -18,7 +22,6 @@ export default function ComitePage() {
   const [avisoCopia, setAvisoCopia] = useState(false);
   
   const [conteudoHtmlPreview, setConteudoHtmlPreview] = useState<string | null>(null);
-
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
   
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -31,7 +34,6 @@ export default function ComitePage() {
   const carregarComite = async () => {
     try {
       setCarregando(true);
-      
       const userStr = localStorage.getItem("intraned_user");
       let queryComite = supabase.from("analises").select("*");
       let queryEsteira = supabase.from("em_analise").select("*");
@@ -39,28 +41,28 @@ export default function ComitePage() {
       if (userStr) {
         const user = JSON.parse(userStr);
         const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-        
-        // Se for comercial, isola os dados para ele ver apenas o que é dele
         if (cargoUser === "comercial") {
           queryComite = queryComite.eq("comercial", user.nome);
           queryEsteira = queryEsteira.eq("agente_nome", user.nome);
         }
       }
       
-      // 1. Carrega Empresas em Comitê
       const { data: dataComite } = await queryComite.order("criado_em", { ascending: false });
       if (dataComite) {
-        setAnalises(dataComite.filter(a => {
+        const filtradas = dataComite.filter(a => {
           const st = (a.status || "").toLowerCase();
           return st.includes("comit") || st.includes("aberto") || st === "em análise" || st === "";
-        }));
+        });
+        setAnalises(filtradas);
+
+        // Puxa carga inicial de votos de todas as empresas listadas
+        filtradas.forEach(item => {
+          carregarVotosIniciais(item.empresa_nome);
+        });
       }
 
-      // 2. Carrega Empresas em Esteira de Análise
       const { data: dataAnalise } = await queryEsteira.order("data_envio", { ascending: false });
-      if (dataAnalise) {
-        setEmpresasAnalise(dataAnalise);
-      }
+      if (dataAnalise) setEmpresasAnalise(dataAnalise);
 
     } catch (err) {
       console.error("Erro ao carregar dados:", err);
@@ -69,22 +71,58 @@ export default function ComitePage() {
     }
   };
 
-  useEffect(() => { 
+  const carregarVotosIniciais = async (empresaNome: string) => {
+    const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
+    if (data) {
+      setVotosAoVivo(prev => ({ ...p, [empresaNome]: data }));
+    }
+  };
+
+  // 📡 REALTIME BROADCAST: Liga a escuta em tempo real das tabelas do Supabase
+  useEffect(() => {
     carregarComite(); 
-    
+
     try {
       const userStr = localStorage.getItem("intraned_user");
       if (userStr) {
         const parsed = JSON.parse(userStr);
         setNomeUsuarioLogado(parsed.nome || "Comercial Ned");
-        if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") {
-          setIsMaster(true);
-        }
+        if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") setIsMaster(true);
       }
-    } catch (e) { console.error("Erro ao ler sessão local", e); }
-  }, []);
+    } catch (e) { console.error(e); }
 
-  const obtener_emails_notificacao = async (empresaNome: string) => {
+    // Escuta Realtime para Votos
+    const canalVotos = supabase
+      .channel("votos-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, () => {
+        analises.forEach(item => carregarVotosIniciais(item.empresa_nome));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalVotos);
+    };
+  }, [analises.length]);
+
+  // Escuta Realtime para o Chat Interno da Empresa Expandida
+  useEffect(() => {
+    if (!idEmpresaExpandida) return;
+    const empresaAlvo = analises.find(a => a.id === idEmpresaExpandida);
+    if (!empresaAlvo) return;
+
+    const canalChat = supabase
+      .channel("chat-live")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_comite", filter: `empresa_nome=eq.${empresaAlvo.empresa_nome}` }, (payload) => {
+        setChatMsgs(prev => [...prev, payload.new]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalChat);
+    };
+  }, [idEmpresaExpandida]);
+
+  const obter_emails_notificacao = async (empresaNome: string) => {
     const emails = new Set<string>();
     try {
       const { data: masters } = await supabase.from("usuarios").select("email").eq("cargo", "Master");
@@ -140,25 +178,23 @@ export default function ComitePage() {
 
       await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
 
-      alert(`✅ Orquestração concluída! Empresa removida do Comitê e movida para ${decisaoFinal}.`);
+      alert(`✅ Orquestração concluída! Empresa movida para ${decisaoFinal}.`);
       await carregarComite();
-
     } catch (err: any) {
-      console.error(err);
       alert(`❌ Erro no painel Master: ${err.message}`);
     } finally {
       setCarregando(false);
     }
   };
 
-  const processarVotoWeb = async () => {
+  const processarVotoWeb = async (empresaItem: any) => {
     if (!membroVoto || !opcaoVoto || !justificativaVoto) {
       alert("Por favor, preencha todos os campos do voto.");
       return;
     }
     try {
       setEnviandoVoto(true);
-      const e = empresaSelecionada.empresa_nome;
+      const e = empresaItem.empresa_nome;
       
       await supabase.from("votos").insert({ 
         empresa_nome: e, 
@@ -171,7 +207,7 @@ export default function ComitePage() {
       const emailsAlvo = await obtener_emails_notificacao(e);
 
       if (membroVoto === "Decisão") {
-        const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaSelecionada.id);
+        const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
         const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
@@ -182,12 +218,10 @@ export default function ComitePage() {
         await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
       }
       
-      alert("🗳️ Voto processado com sucesso!");
+      alert("🗳️ Voto computado com sucesso!");
       setJustificativaVoto(""); 
-      setEmpresaSelecionada(null); 
-      await carregarComite();
+      await carregarVotosIniciais(e);
     } catch (err: any) { 
-      console.error(err);
       alert(`❌ Erro ao computar voto: ${err.message}`);
     } finally { 
       setEnviandoVoto(false); 
@@ -202,24 +236,20 @@ export default function ComitePage() {
       setCarregando(true);
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData?.session?.user;
-
       const nomeDoAgente = user?.user_metadata?.nome || user?.email || nomeUsuarioLogado || "Comercial Ned";
       const dataFormatada = new Date().toISOString().split("T")[0];
 
       const { error } = await supabase.from("em_analise").insert({
         agente_comercial_id: user?.id || null,
         agente_nome: nomeDoAgente,
-        nome_empresa: nomeNovaEmpresa.trim().toUpperCase(), // 🎯 Trava preventiva de string limpa
+        nome_empresa: nomeNovaEmpresa.trim().toUpperCase(),
         data_envio: dataFormatada
       });
 
       if (error) throw error;
-
       setNomeNovaEmpresa("");
       await carregarComite();
-      alert("✅ Empresa enviada para análise com sucesso!");
     } catch (err: any) {
-      console.error(err);
       alert(`❌ Erro inesperado: ${err.message}`);
     } finally {
       setCarregando(false);
@@ -232,9 +262,7 @@ export default function ComitePage() {
       let dataBanco: string | null = item.nova_data_envio;
       if (novaDataEnvio) {
         const partes = novaDataEnvio.split("/");
-        if (partes.length === 3) {
-          dataBanco = `${partes[2]}-${partes[1]}-${partes[0]}`;
-        }
+        if (partes.length === 3) dataBanco = `${partes[2]}-${partes[1]}-${partes[0]}`;
       }
 
       const { error } = await supabase.from("em_analise").update({
@@ -243,37 +271,43 @@ export default function ComitePage() {
       }).eq("id", item.id);
 
       if (error) throw error;
-
       setEditandoId(null); setPendenciaTexto(""); setNovaDataEnvio("");
       await carregarComite();
     } catch (err: any) { 
-      console.error(err);
       alert(`❌ Erro ao atualizar: ${err.message}`);
     } finally { setCarregando(false); }
   };
 
   const handleDeletarAnalise = async (id: string) => {
-    if (!confirm("Tem certeza que deseja remover esta empresa da esteira de análise?")) return;
+    if (!confirm("Tem certeza que deseja remover esta empresa?")) return;
     try {
       setCarregando(true);
       const { error } = await supabase.from("em_analise").delete().eq("id", id);
       if (error) throw error;
       await carregarComite();
     } catch (err: any) { 
-      console.error(err);
       alert(`❌ Erro ao deletar: ${err.message}`);
     } finally { setCarregando(false); }
   };
 
-  const abrirChatVotacao = async (empresa: any) => {
-    setEmpresaSelecionada(empresa);
-    const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
-    if (data) setChatMsgs(data);
+  const alternarPainelInterno = async (empresa: any) => {
+    if (idEmpresaExpandida === empresa.id) {
+      setEditandoEmpresaExpandida(null);
+      setChatMsgs([]);
+    } else {
+      setEditandoEmpresaExpandida(empresa.id);
+      const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
+      if (data) setChatMsgs(data);
+    }
   };
 
-  const enviarMensagemChat = async () => {
+  const enviarMensagemChat = async (empresaNome: string) => {
     if (!novaMsg.trim()) return;
-    const { data } = await supabase.from("chat_comite").insert({ empresa_nome: empresaSelecionada.empresa_nome, usuario: "Alyson (Web)", mensagem: novaMsg.trim() }).select();
+    const { data } = await supabase.from("chat_comite").insert({ 
+      empresa_nome: empresaNome, 
+      usuario: nomeUsuarioLogado || "Alyson (Web)", 
+      mensagem: novaMsg.trim() 
+    }).select();
     if (data) setChatMsgs([...chatMsgs, data[0]]);
     setNovaMsg("");
   };
@@ -281,7 +315,6 @@ export default function ComitePage() {
   const tratarAberturaAnalise = async (caminho: string) => {
     if (!caminho) return alert("Esta análise ainda não possui relatório gerado.");
     const urlLimpa = caminho.trim();
-    
     if (urlLimpa.startsWith("http")) { 
       try {
         const res = await fetch(urlLimpa);
@@ -293,10 +326,8 @@ export default function ComitePage() {
         return;
       }
     }
-    
     const partes = urlLimpa.split(/[\\/]/);
     const nomeArquivo = partes[partes.length - 1].trim();
-
     try {
       const { data, error } = await supabase.storage.from("analises").download(nomeArquivo);
       if (error) {
@@ -305,10 +336,7 @@ export default function ComitePage() {
         setTimeout(() => setAvisoCopia(false), 4000);
         return;
       }
-      if (data) {
-        const htmlText = await data.text();
-        setConteudoHtmlPreview(htmlText);
-      }
+      if (data) setConteudoHtmlPreview(await data.text());
     } catch (err) { console.error(err); }
   };
 
@@ -335,26 +363,105 @@ export default function ComitePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-              {analises.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/50">
-                  <td className="p-2.5 font-bold text-slate-900">{item.empresa_nome}</td>
-                  <td className="p-2.5 text-slate-500">{item.comercial || "-"}</td>
-                  <td className="p-2.5 text-center text-slate-500">{item.data_recebimento ? new Date(item.data_recebimento.split("T")[0]+"T12:00:00").toLocaleDateString("pt-BR") : "-"}</td>
-                  <td className="p-2.5 text-center">
-                    <span className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-md uppercase">{item.status || "Em análise"}</span>
-                  </td>
-                  <td className="p-2.5 flex gap-2 justify-center">
-                    <button onClick={() => tratarAberturaAnalise(item.caminho_local)} className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded border border-slate-200 text-xs cursor-pointer transition-colors">📄 Análise</button>
-                    <button onClick={() => abrirChatVotacao(item)} className="px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs cursor-pointer transition-colors">Votar / Chat</button>
-                  </td>
-                  {isMaster && (
-                    <td className="p-2.5 bg-slate-50 border-l border-slate-200 text-center space-x-2">
-                      <button onClick={() => forcarDecisaoMaster(item, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">✅ Aprovar</button>
-                      <button onClick={() => forcarDecisaoMaster(item, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">⛔ Reprovar</button>
-                    </td>
-                  )}
-                </tr>
-              ))}
+              {analises.map((item) => {
+                const painelAberto = idEmpresaExpandida === item.id;
+                const listaDeVotos = votosAoVivo[item.empresa_nome] || [];
+                return (
+                  <tr key={item.id} style={{ display: "contents" }}>
+                    
+                    {/* LINHA MASTER PRINCIPAL */}
+                    <tr className="hover:bg-slate-50/50">
+                      <td className="p-2.5 font-bold text-slate-900">{item.empresa_nome}</td>
+                      <td className="p-2.5 text-slate-500">{item.comercial || "-"}</td>
+                      <td className="p-2.5 text-center text-slate-500">{item.data_recebimento ? new Date(item.data_recebimento.split("T")[0]+"T12:00:00").toLocaleDateString("pt-BR") : "-"}</td>
+                      <td className="p-2.5 text-center">
+                        <span className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-md uppercase">{item.status || "Em análise"}</span>
+                      </td>
+                      <td className="p-2.5 flex gap-2 justify-center">
+                        <button onClick={() => tratarAberturaAnalise(item.caminho_local)} className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded border border-slate-200 text-xs cursor-pointer transition-colors">📄 Análise</button>
+                        <button onClick={() => alternarPainelInterno(item)} className={`px-2.5 py-0.5 font-bold rounded text-xs cursor-pointer transition-colors ${painelAberto ? "bg-slate-800 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>
+                          {painelAberto ? "✕ Fechar" : "💬 Votar / Chat"}
+                        </button>
+                      </td>
+                      {isMaster && (
+                        <td className="p-2.5 bg-slate-50 border-l border-slate-200 text-center space-x-2">
+                          <button onClick={() => forcarDecisaoMaster(item, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">✅ Aprovar</button>
+                          <button onClick={() => forcarDecisaoMaster(item, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">⛔ Reprovar</button>
+                        </td>
+                      )}
+                    </tr>
+
+                    {/* 🎯 NÍVEL 2 INTERNO: COMPONENTE DE VOTAÇÃO E CHAT EM TEMPO REAL INJETADO DE FATO */}
+                    {painelAberto && (
+                      <tr>
+                        <td colSpan={isMaster ? 6 : 5} className="bg-slate-50/50 p-4 border-l-4 border-blue-600">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
+                            
+                            {/* Bloco Esquerdo: Painel de Votos Ativo */}
+                            <div className="space-y-3 border-r border-slate-100 pr-4">
+                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">🗳️ Painel de Votação</span>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select value={membroVoto} onChange={(e) => setMembroVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
+                                  <option value="">Membro</option><option value="Diego">Diego</option><option value="Alyson">Alyson</option><option value="Decisão">Decisão</option>
+                                </select>
+                                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
+                                  <option value="">Voto</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
+                                </select>
+                              </div>
+                              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Parecer técnico ou justificativa..." className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-medium outline-none h-14 resize-none" />
+                              <button onClick={() => processarVotoWeb(item)} disabled={enviandoVoto} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2 rounded transition-all cursor-pointer">
+                                {enviandoVoto ? "Computando..." : "Registrar Voto Oficial"}
+                              </button>
+                            </div>
+
+                            {/* Bloco Central: Votos Computados Ao Vivo */}
+                            <div className="space-y-2 border-r border-slate-100 pr-4 overflow-y-auto max-h-[220px]">
+                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">📋 Votos Registrados (Ao Vivo)</span>
+                              {listaDeVotos.length === 0 ? (
+                                <p className="text-slate-400 italic text-xs py-4 text-center">Nenhum voto computado.</p>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {listaDeVotos.map((v: any, idx: number) => (
+                                    <div key={idx} className="p-2 border border-slate-100 rounded bg-slate-50/50 flex flex-col gap-0.5 text-xs">
+                                      <div className="flex justify-between items-center font-bold">
+                                        <span className="text-slate-800">{v.membro_nome}</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-black ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{v.voto}</span>
+                                      </div>
+                                      <span className="text-slate-500 italic font-medium">"{v.justificativa}"</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Bloco Direito: Chat e Discussão do Comitê */}
+                            <div className="flex flex-col h-[220px]">
+                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider mb-2">💬 Discussão e Alinhamentos</span>
+                              <div className="flex-1 overflow-y-auto border border-slate-100 rounded p-2 space-y-2 bg-slate-50/30">
+                                {chatMsgs.length === 0 ? (
+                                  <p className="text-center text-slate-400 py-8 text-xs">Nenhum comentário na mesa.</p>
+                                ) : (
+                                  chatMsgs.map((m: any) => (
+                                    <div key={m.id} className="bg-white p-2 rounded border border-slate-100 shadow-2xs text-xs">
+                                      <span className="font-bold text-blue-600">{m.usuario}</span>: <span className="text-slate-700 font-medium">{m.mensagem}</span>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                              <div className="flex gap-2 mt-2 shrink-0">
+                                <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(item.empresa_nome)} placeholder="Mensagem..." className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs outline-none focus:border-blue-500 font-semibold text-slate-800" />
+                                <button onClick={() => enviarMensagemChat(item.empresa_nome)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 rounded cursor-pointer transition-all">Mandar</button>
+                              </div>
+                            </div>
+
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -442,48 +549,6 @@ export default function ComitePage() {
             </div>
             <div className="flex-1 bg-white min-h-0">
               <iframe srcDoc={conteudoHtmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL VOTAÇÃO / CHAT */}
-      {empresaSelecionada && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden max-h-[85vh]">
-            <div className="flex justify-between items-center bg-slate-50 border-b border-slate-200 p-3 shrink-0">
-              <h3 className="font-bold text-slate-800 text-sm truncate max-w-[320px]">💬 Painel: {empresaSelecionada.empresa_nome}</h3>
-              <button onClick={() => setEmpresaSelecionada(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base px-2 cursor-pointer">✕</button>
-            </div>
-            <div className="p-3 bg-slate-50/50 border-b border-slate-100 space-y-2 shrink-0">
-              <div className="grid grid-cols-2 gap-2">
-                <select value={membroVoto} onChange={(e) => setMembroVoto(e.target.value)} className="p-1.5 bg-white border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
-                  <option value="">Membro</option><option value="Diego">Diego</option><option value="Alyson">Alyson</option><option value="Decisão">Decisão</option>
-                </select>
-                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-1.5 bg-white border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
-                  <option value="">Voto</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
-                </select>
-              </div>
-              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer técnico..." className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-medium outline-none h-12 resize-none" />
-              <button onClick={processarVotoWeb} disabled={enviandoVoto} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-1.5 rounded cursor-pointer transition-all">
-                {enviandoVoto ? "Enviando..." : "🗳️ Registrar Voto / Decisão"}
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 bg-white space-y-2 min-h-[150px]">
-              <span className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Discussão Interna:</span>
-              {chatMsgs.length === 0 ? (
-                <p className="text-center text-slate-400 py-6 text-xs">Nenhum comentário.</p>
-              ) : (
-                chatMsgs.map(m => (
-                  <div key={m.id} className="bg-slate-50 p-2 rounded border border-slate-100 text-xs">
-                    <span className="font-bold text-blue-600">{m.usuario}</span>: <span className="text-slate-700 font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="flex gap-2 p-3 border-t border-slate-200 bg-slate-50 shrink-0">
-              <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat()} placeholder="Comentário..." className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs outline-none focus:border-blue-500 font-medium" />
-              <button onClick={enviarMensagemChat} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 rounded cursor-pointer transition-all">Enviar</button>
             </div>
           </div>
         </div>
