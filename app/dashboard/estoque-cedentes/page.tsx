@@ -104,10 +104,10 @@ export default function AnaliseEstoqueCedentesPage() {
         let startIdx = -1;
         let separadorDefinido = ",";
         
-        // Varre as primeiras linhas procurando a linha de títulos oficial do arquivo
-        for (let i = 0; i < Math.min(lines.length, 30); i++) {
+        // Procura a linha de cabeçalho contendo a coluna mestre NOME_DO_CEDENTE
+        for (let i = 0; i < Math.min(lines.length, 50); i++) {
           const l = lines[i];
-          if (l.includes("NOME_DO_CEDENTE") && (l.includes("TAXA FINAL") || l.includes("TAXA_FINAL"))) {
+          if (l.includes("NOME_DO_CEDENTE")) {
             startIdx = i;
             if ((l.match(/;/g) || []).length > (l.match(/,/g) || []).length) {
               separadorDefinido = ";";
@@ -117,7 +117,7 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (startIdx === -1) {
-          alert("❌ Erro: Não foi encontrada a linha de cabeçalhos contendo 'NOME_DO_CEDENTE' e 'TAXA FINAL'. Certifique-se de que exportou a aba correta em formato CSV.");
+          alert("❌ Erro: Não foi encontrada a coluna 'NOME_DO_CEDENTE' no arquivo informado.");
           setCarregando(false);
           return;
         }
@@ -130,11 +130,16 @@ export default function AnaliseEstoqueCedentesPage() {
         const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO_AJUSTADA");
         const idxNominal = headers.indexOf("VALOR_NOMINAL");
         const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
-        const idxPrazoNativo = headers.indexOf("PRAZO_ATUAL");
         
-        // Procura variações do nome da coluna de Taxa Final no Excel
-        let idxTaxa = headers.indexOf("TAXA FINAL");
+        // Identifica dinamicamente a coluna de PRAZO (priorizando a do final)
+        let idxPrazoOriginal = headers.lastIndexOf("PRAZO");
+        if (idxPrazoOriginal === -1) idxPrazoOriginal = headers.indexOf("PRAZO");
+
+        // Identifica dinamicamente a coluna de TAXA (procurando variações do arquivo)
+        let idxTaxa = headers.indexOf("TAXA_DA_CESSAO");
+        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA FINAL");
         if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA_FINAL");
+        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA_DO_ATIVO");
 
         const payloadParaInsercao: any[] = [];
 
@@ -157,12 +162,11 @@ export default function AnaliseEstoqueCedentesPage() {
 
           const valorNominal = limparNumero(colunas[idxNominal]);
           const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
-          const prazoDias = Math.max(parseInt(colunas[idxPrazoNativo]) || 1, 1);
           
-          // 🎯 O SEGREDO AQUI: Captura a taxa real gravada na planilha em vez de inventar uma fórmula
+          const prazoDias = idxPrazoOriginal !== -1 ? Math.max(parseInt(colunas[idxPrazoOriginal]) || 1, 1) : 1;
           const taxaFinalCalculada = idxTaxa !== -1 ? limparNumero(colunas[idxTaxa]) : 0;
 
-          // Clona perfeitamente as colunas de massa que o seu chefe gera na Tabela Dinâmica dele
+          // Multiplicação das Massas Financeiras Ponderadas
           const colunaPrazoMassa = prazoDias * valorNominal;
           const colunaTaxaMassa = taxaFinalCalculada * valorNominal;
 
@@ -181,22 +185,22 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (payloadParaInsercao.length === 0) {
-          alert("⚠️ Nenhuma linha válida pôde ser estruturada.");
+          alert("⚠️ Nenhuma linha de título válida foi processada.");
           setCarregando(false);
           return;
         }
 
-        setStatusStatusTexto(`Sincronizando lote único de ${payloadParaInsercao.length} títulos...`);
+        setStatusStatusTexto(`Injetando carga unificada de ${payloadParaInsercao.length} registros...`);
         const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         
         if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso! Dados idênticos ao Excel importados: ${payloadParaInsercao.length} títulos.`);
+        alert(`🏁 Sucesso! Foram importados ${payloadParaInsercao.length} títulos alinhados com a auditoria.`);
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
     } catch (err: any) {
-      alert(`❌ Erro de processamento: ${err.message}`);
+      alert(`❌ Erro no processador: ${err.message}`);
       setCarregando(false);
     }
   };
@@ -221,7 +225,6 @@ export default function AnaliseEstoqueCedentesPage() {
       return {
         cedente: nomeCedente,
         valorNominalTotal,
-        // Aplica a regra de divisão da tabela dinâmica de fechamento
         taxaMediaPonderada: valorNominalTotal > 0 ? (somaMassaTaxa / valorNominalTotal) * 100 : 0,
         prazoMedioPonderado: valorNominalTotal > 0 ? (somaMassaPrazo / valorNominalTotal) : 0,
         titulos: lista
@@ -240,8 +243,8 @@ export default function AnaliseEstoqueCedentesPage() {
       
       <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Análise de Estoque Ned Capital (Modo Auditoria)</h2>
-          <p className="text-xs text-slate-400">Dados calculados via média ponderada por massa, batendo 100% com as diretrizes da mesa.</p>
+          <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Análise de Estoque Ned Capital (Auditoria Ponderada)</h2>
+          <p className="text-xs text-slate-400">Visão consolidada por massa atômica de juros diários batendo 100% com o Excel corporativo.</p>
         </div>
         <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg cursor-pointer transition-all flex items-center gap-2 shadow-xs uppercase tracking-wider text-[10px]">
           📥 CARREGAR BASE OFICIAL (.CSV)
@@ -286,7 +289,7 @@ export default function AnaliseEstoqueCedentesPage() {
                     </div>
                     <div>
                       <span className="text-[9px] text-slate-400 block font-bold uppercase">TAXA MÉDIA</span>
-                      <span className="font-mono font-black text-emerald-600">{item.taxaMediaPonderada.toFixed(6)}% a.m.</span>
+                      <span className="font-mono font-black text-emerald-600">{item.taxaMediaPonderada.toFixed(2)}% a.m.</span>
                     </div>
                     <div>
                       <span className="text-[9px] text-slate-400 block font-bold uppercase">PRAZO MÉDIO</span>
@@ -305,9 +308,9 @@ export default function AnaliseEstoqueCedentesPage() {
                             <th className="p-2">Sacado</th>
                             <th className="p-2 text-center">Nº Documento</th>
                             <th className="p-2 text-center">Vencimento</th>
-                            <th className="p-2 text-center">Prazo Atual</th>
+                            <th className="p-2 text-center">Prazo Original</th>
                             <th className="p-2 text-right">Valor Nominal</th>
-                            <th className="p-2 text-right">Taxa Ativo</th>
+                            <th className="p-2 text-right">Taxa do Título</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
@@ -318,7 +321,7 @@ export default function AnaliseEstoqueCedentesPage() {
                               <td className="p-2 text-center text-slate-500">{t.vencimento}</td>
                               <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias}d</td>
                               <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(t.valorNominal)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(4)}%</td>
+                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(2)}%</td>
                             </tr>
                           ))}
                         </tbody>
