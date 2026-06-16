@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function ComitePage() {
@@ -30,6 +30,15 @@ export default function ComitePage() {
   const [isMaster, setIsMaster] = useState(false);
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
+  // 🎯 Otimização: Função memorizada para evitar recriação de escopo e loops reativos
+  const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
+    if (!empresaNome) return;
+    const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
+    if (data) {
+      setVotosAoVivo(prev => ({ ...prev, [empresaNome]: data }));
+    }
+  }, []);
+
   const carregarComite = async () => {
     try {
       setCarregando(true);
@@ -54,9 +63,10 @@ export default function ComitePage() {
         });
         setAnalises(filtradas);
 
-        filtradas.forEach(item => {
-          carregarVotosIniciais(item.empresa_nome);
-        });
+        // Dispara a carga de votos inicial de forma limpa
+        for (const item of filtradas) {
+          await carregarVotosIniciais(item.empresa_nome);
+        }
       }
 
       const { data: dataAnalise } = await queryEsteira.order("data_envio", { ascending: false });
@@ -69,13 +79,7 @@ export default function ComitePage() {
     }
   };
 
-  const carregarVotosIniciais = async (empresaNome: string) => {
-    const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
-    if (data) {
-      setVotosAoVivo(prev => ({ ...prev, [empresaNome]: data }));
-    }
-  };
-
+  // 📡 1. CARGA INICIAL E REALTIME DE VOTOS (Livre de loops de render)
   useEffect(() => {
     carregarComite(); 
 
@@ -88,25 +92,30 @@ export default function ComitePage() {
       }
     } catch (e) { console.error(e); }
 
+    // O canal escuta as mudanças e atualiza com base no payload puro recebido, sem varrer o estado 'analises'
     const canalVotos = supabase
-      .channel("votos-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, () => {
-        analises.forEach(item => carregarVotosIniciais(item.empresa_nome));
+      .channel("votos-live-global")
+      .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, (payload: any) => {
+        const nomeEmp = payload.new?.empresa_nome || payload.old?.empresa_nome;
+        if (nomeEmp) {
+          carregarVotosIniciais(nomeEmp);
+        }
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(canalVotos);
     };
-  }, [analises.length]);
+  }, [carregarVotosIniciais]);
 
+  // 📡 2. REALTIME DO CHAT INTERNO DA EMPRESA EXPANDIDA
   useEffect(() => {
     if (!idEmpresaExpandida) return;
     const empresaAlvo = analises.find(a => a.id === idEmpresaExpandida);
     if (!empresaAlvo) return;
 
     const canalChat = supabase
-      .channel("chat-live")
+      .channel(`chat-live-${idEmpresaExpandida}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_comite", filter: `empresa_nome=eq.${empresaAlvo.empresa_nome}` }, (payload) => {
         setChatMsgs(prev => [...prev, payload.new]);
       })
@@ -115,7 +124,7 @@ export default function ComitePage() {
     return () => {
       supabase.removeChannel(canalChat);
     };
-  }, [idEmpresaExpandida]);
+  }, [idEmpresaExpandida, analises]);
 
   const obter_emails_notificacao = async (empresaNome: string) => {
     const emails = new Set<string>();
@@ -177,7 +186,7 @@ export default function ComitePage() {
       await carregarComite();
     } catch (err: any) {
       alert(`❌ Erro no painel Master: ${err.message}`);
-    } finally {
+    } fill-out {
       setCarregando(false);
     }
   };
@@ -362,10 +371,8 @@ export default function ComitePage() {
                 const painelAberto = idEmpresaExpandida === item.id;
                 const listaDeVotos = votosAoVivo[item.empresa_nome] || [];
                 
-                // 🎯 FIX DEFINITIVO: Trocado a <tr> de escopo fantasma por um Fragment nativo do React (<key={...}>)
                 return (
                   <tr key={item.id} style={{ display: "contents" }}>
-                    
                     {/* LINHA MASTER PRINCIPAL */}
                     <tr className="hover:bg-slate-50/50">
                       <td className="p-2.5 font-bold text-slate-900">{item.empresa_nome}</td>
@@ -388,13 +395,13 @@ export default function ComitePage() {
                       )}
                     </tr>
 
-                    {/* NÍVEL 2 INTERNO: COMPONENTE DE VOTAÇÃO EXECUTADO DE FORMA SEGURA */}
+                    {/* COMPONENTE INTERNO EXPANDIDO - SEGURO CONTRA LOOPS */}
                     {painelAberto && (
                       <tr>
                         <td colSpan={isMaster ? 6 : 5} className="bg-slate-50/50 p-4 border-l-4 border-blue-600">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white border border-slate-200 p-4 rounded-xl shadow-xs text-left">
                             
-                            {/* Bloco Esquerdo: Painel de Votos Ativo */}
+                            {/* Bloco Voto */}
                             <div className="space-y-3 border-r border-slate-100 pr-4">
                               <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">🗳️ Painel de Votação</span>
                               <div className="grid grid-cols-2 gap-2">
@@ -411,7 +418,7 @@ export default function ComitePage() {
                               </button>
                             </div>
 
-                            {/* Bloco Central: Votos Computados Ao Vivo */}
+                            {/* Bloco Histórico */}
                             <div className="space-y-2 border-r border-slate-100 pr-4 overflow-y-auto max-h-[220px]">
                               <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">📋 Votos Registrados (Ao Vivo)</span>
                               {listaDeVotos.length === 0 ? (
@@ -431,7 +438,7 @@ export default function ComitePage() {
                               )}
                             </div>
 
-                            {/* Bloco Direito: Chat e Discussão do Comitê */}
+                            {/* Bloco Chat */}
                             <div className="flex flex-col h-[220px]">
                               <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider mb-2">💬 Discussão e Alinhamentos</span>
                               <div className="flex-1 overflow-y-auto border border-slate-100 rounded p-2 space-y-2 bg-slate-50/30">
@@ -455,7 +462,6 @@ export default function ComitePage() {
                         </td>
                       </tr>
                     )}
-
                   </tr>
                 );
               })}
