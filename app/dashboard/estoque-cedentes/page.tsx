@@ -127,11 +127,9 @@ export default function AnaliseEstoqueCedentesPage() {
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
         const idxDoc = headers.indexOf("NUMERO_DOCUMENTO");
         const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO_AJUSTADA");
+        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");
         const idxNominal = headers.indexOf("VALOR_NOMINAL");
         const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
-        
-        // 🎯 CAPTURA O PRIMEIRO ÍNDICE DE PRAZO (O Prazo de Originação longo da esquerda)
-        const idxPrazoMestre = headers.indexOf("PRAZO");
 
         const payloadParaInsercao: any[] = [];
 
@@ -145,6 +143,20 @@ export default function AnaliseEstoqueCedentesPage() {
           return parseFloat(valStr) || 0;
         };
 
+        const calcularDiferencaDiasCorridos = (strInicio: string, strFim: string) => {
+          try {
+            if (!strInicio || !strFim) return 0;
+            const d1 = new Date(strInicio.split(" ")[0]);
+            const d2 = new Date(strFim.split(" ")[0]);
+            if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return 0;
+            
+            const diffTime = d2.getTime() - d1.getTime();
+            return Math.max(Math.ceil(diffTime / (1000 * 60 * 60 * 24)), 1);
+          } catch {
+            return 0;
+          }
+        };
+
         for (let i = startIdx + 1; i < lines.length; i++) {
           const linha = lines[i].trim();
           if (!linha) continue;
@@ -155,13 +167,13 @@ export default function AnaliseEstoqueCedentesPage() {
           const valorNominal = limparNumero(colunas[idxNominal]);
           const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
           
-          // Pega o prazo do escopo mestre longo da esquerda
-          const prazoDias = idxPrazoMestre !== -1 ? Math.max(parseInt(colunas[idxPrazoMestre]) || 1, 1) : 1;
+          // 🎯 ENGENHARIA REVERSA DO PRAZO CORRIDO (Evita a coluna de dias úteis do arquivo)
+          const prazoDias = calcularDiferencaDiasCorridos(colunas[idxAquisicao], colunas[idxVencimento]) || 1;
           
-          // 🎯 A FÓRMULA MATEMÁTICA REAL DO SEU CHEFE INJETADA NA UNIDADE DE MEMÓRIA:
+          // Fórmula mestre de juros compostos mensais (base 30 dias corridos)
           const taxaFinalCalculada = Math.pow(1 + (valorNominal - precoAquisicao) / (precoAquisicao || 1), 30 / prazoDias) - 1;
 
-          // Cálculo exato das massas de ponderação para a tabela dinâmica bater cravada
+          // Massas de balanceamento
           const colunaPrazoMassa = prazoDias * valorNominal;
           const colunaTaxaMassa = taxaFinalCalculada * valorNominal;
 
@@ -184,7 +196,7 @@ export default function AnaliseEstoqueCedentesPage() {
         
         if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso total! Estoque recalculado e ${payloadParaInsercao.length} registros sincronizados.`);
+        alert(`🏁 Perfeito! Prazos e taxas recalculados com sucesso sobre dias corridos: ${payloadParaInsercao.length} registros.`);
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
@@ -233,7 +245,7 @@ export default function AnaliseEstoqueCedentesPage() {
       <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Análise de Estoque Ned Capital (Auditoria Ponderada)</h2>
-          <p className="text-xs text-slate-400">Visão consolidada por massa atômica de juros diários batendo 100% com o Excel corporativo.</p>
+          <p className="text-xs text-slate-400">Visão consolidada por massa de prazo corrido batendo 100% com o Excel.</p>
         </div>
         <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg cursor-pointer transition-all flex items-center gap-2 shadow-xs uppercase tracking-wider text-[10px]">
           📥 CARREGAR BASE OFICIAL (.CSV)
@@ -297,7 +309,7 @@ export default function AnaliseEstoqueCedentesPage() {
                             <th className="p-2">Sacado</th>
                             <th className="p-2 text-center">Nº Documento</th>
                             <th className="p-2 text-center">Vencimento</th>
-                            <th className="p-2 text-center">Prazo Original</th>
+                            <th className="p-2 text-center">Prazo Corrido</th>
                             <th className="p-2 text-right">Valor Nominal</th>
                             <th className="p-2 text-right">Taxa do Título</th>
                           </tr>
@@ -308,7 +320,7 @@ export default function AnaliseEstoqueCedentesPage() {
                               <td className="p-2 font-bold text-slate-900 truncate max-w-[280px]">{t.sacado}</td>
                               <td className="p-2 text-center font-mono text-slate-400">{t.documento}</td>
                               <td className="p-2 text-center text-slate-500">{t.vencimento}</td>
-                              <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias}d</td>
+                              <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias}d corr.</td>
                               <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(t.valorNominal)}</td>
                               <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(2)}%</td>
                             </tr>
