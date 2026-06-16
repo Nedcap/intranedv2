@@ -51,6 +51,7 @@ export default function CarteiraDinamicaPage() {
   const [cedentesExpandidos, setCedentesExpandidos] = useState<Record<string, boolean>>({});
   const [subExpandidos, setSubExpandidos] = useState<Record<string, boolean>>({}); 
 
+  // Filtros Globais da barra superior que não conflitam com as sub-tabelas
   const [filtroSacado, setFiltroSacado] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
@@ -91,7 +92,6 @@ export default function CarteiraDinamicaPage() {
 
       let listaTitulos: Titulo[] = [];
       
-      // 🎯 NORMALIZAÇÃO DO HOJE: Zera as horas para cálculo limpo de dias inteiros
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
 
@@ -115,7 +115,6 @@ export default function CarteiraDinamicaPage() {
 
           const venc = String(r[3] || "");
           const dtVenc = parseDataBR(venc);
-          // Diferença em dias matematicamente redonda
           const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
@@ -169,7 +168,7 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🎯 KPI GLOBAL CALIBRADO: Previsão de fluxo futura corrigida sem ignorar dias
+  // 🎯 REATIVIDADE INSTANTÂNEA REPARADA: Responde na hora sem forçar render da sub-tabela
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
