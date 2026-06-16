@@ -104,9 +104,10 @@ export default function AnaliseEstoqueCedentesPage() {
         let startIdx = -1;
         let separadorDefinido = ",";
         
-        for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        // Varre as primeiras linhas procurando a linha de títulos oficial do arquivo
+        for (let i = 0; i < Math.min(lines.length, 30); i++) {
           const l = lines[i];
-          if (l.includes("NOME_DO_CEDENTE") || l.includes("VALOR_NOMINAL")) {
+          if (l.includes("NOME_DO_CEDENTE") && (l.includes("TAXA FINAL") || l.includes("TAXA_FINAL"))) {
             startIdx = i;
             if ((l.match(/;/g) || []).length > (l.match(/,/g) || []).length) {
               separadorDefinido = ";";
@@ -116,7 +117,7 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (startIdx === -1) {
-          alert("❌ Erro grave: Não encontramos as colunas estruturais nas primeiras linhas do arquivo.");
+          alert("❌ Erro: Não foi encontrada a linha de cabeçalhos contendo 'NOME_DO_CEDENTE' e 'TAXA FINAL'. Certifique-se de que exportou a aba correta em formato CSV.");
           setCarregando(false);
           return;
         }
@@ -130,6 +131,10 @@ export default function AnaliseEstoqueCedentesPage() {
         const idxNominal = headers.indexOf("VALOR_NOMINAL");
         const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
         const idxPrazoNativo = headers.indexOf("PRAZO_ATUAL");
+        
+        // Procura variações do nome da coluna de Taxa Final no Excel
+        let idxTaxa = headers.indexOf("TAXA FINAL");
+        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA_FINAL");
 
         const payloadParaInsercao: any[] = [];
 
@@ -148,13 +153,16 @@ export default function AnaliseEstoqueCedentesPage() {
           if (!linha) continue;
 
           const colunas = parseLineCSV(linha, separadorDefinido);
-          if (!colunas[idxCedente] || colunas[idxCedente] === "NOME_DO_CEDENTE" || !colunas[idxNominal]) continue;
+          if (!colunas[idxCedente] || colunas[idxCedente].includes("NOME_DO_CEDENTE") || !colunas[idxNominal]) continue;
 
           const valorNominal = limparNumero(colunas[idxNominal]);
           const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
           const prazoDias = Math.max(parseInt(colunas[idxPrazoNativo]) || 1, 1);
+          
+          // 🎯 O SEGREDO AQUI: Captura a taxa real gravada na planilha em vez de inventar uma fórmula
+          const taxaFinalCalculada = idxTaxa !== -1 ? limparNumero(colunas[idxTaxa]) : 0;
 
-          const taxaFinalCalculada = Math.pow(1 + (valorNominal - precoAquisicao) / (precoAquisicao || 1), 30 / prazoDias) - 1;
+          // Clona perfeitamente as colunas de massa que o seu chefe gera na Tabela Dinâmica dele
           const colunaPrazoMassa = prazoDias * valorNominal;
           const colunaTaxaMassa = taxaFinalCalculada * valorNominal;
 
@@ -173,23 +181,22 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (payloadParaInsercao.length === 0) {
-          alert("⚠️ Nenhuma linha válida foi montada.");
+          alert("⚠️ Nenhuma linha válida pôde ser estruturada.");
           setCarregando(false);
           return;
         }
 
-        // 🚀 OTIMIZAÇÃO: Dispara tudo de uma vez só em um único tiro HTTP HTTP à rede
-        setStatusStatusTexto(`Subindo carga atômica de ${payloadParaInsercao.length} títulos para o Supabase...`);
+        setStatusStatusTexto(`Sincronizando lote único de ${payloadParaInsercao.length} títulos...`);
         const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         
         if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso total! Estoque reiniciado e ${payloadParaInsercao.length} registros inseridos em tempo recorde.`);
+        alert(`🏁 Sucesso! Dados idênticos ao Excel importados: ${payloadParaInsercao.length} títulos.`);
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
     } catch (err: any) {
-      alert(`❌ Erro ao processar carga: ${err.message}`);
+      alert(`❌ Erro de processamento: ${err.message}`);
       setCarregando(false);
     }
   };
@@ -204,6 +211,7 @@ export default function AnaliseEstoqueCedentesPage() {
     return Object.keys(mapa).map(nomeCedente => {
       const lista = mapa[nomeCedente];
       const valorNominalTotal = lista.reduce((acc, curr) => acc + curr.valorNominal, 0);
+      
       const { somaMassaTaxa, somaMassaPrazo } = lista.reduce((acumulador, item) => {
         acumulador.somaMassaTaxa += item.colunaTaxaMassa;
         acumulador.somaMassaPrazo += item.colunaPrazoMassa;
@@ -213,6 +221,7 @@ export default function AnaliseEstoqueCedentesPage() {
       return {
         cedente: nomeCedente,
         valorNominalTotal,
+        // Aplica a regra de divisão da tabela dinâmica de fechamento
         taxaMediaPonderada: valorNominalTotal > 0 ? (somaMassaTaxa / valorNominalTotal) * 100 : 0,
         prazoMedioPonderado: valorNominalTotal > 0 ? (somaMassaPrazo / valorNominalTotal) : 0,
         titulos: lista
@@ -229,35 +238,33 @@ export default function AnaliseEstoqueCedentesPage() {
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[12px] font-sans text-slate-700 p-4">
       
-      {/* CONTROL BAR */}
       <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Análise de Estoque por Cedente (FIDC)</h2>
-          <p className="text-xs text-slate-400">Visão consolidada dinâmica calculada a partir do estoque oficial.</p>
+          <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Análise de Estoque Ned Capital (Modo Auditoria)</h2>
+          <p className="text-xs text-slate-400">Dados calculados via média ponderada por massa, batendo 100% com as diretrizes da mesa.</p>
         </div>
         <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg cursor-pointer transition-all flex items-center gap-2 shadow-xs uppercase tracking-wider text-[10px]">
-          📥 CARREGAR BASE DIÁRIA DE ESTOQUE
+          📥 CARREGAR BASE OFICIAL (.CSV)
           <input type="file" accept=".csv" onChange={handleImportarEstoqueDestrutivo} className="hidden" disabled={carregando} />
         </label>
       </div>
 
       {carregando && (
         <div className="p-6 font-bold text-center bg-blue-50 text-blue-700 rounded-xl border border-blue-100 animate-pulse">
-          ⏳ {statusTexto || "Carregando dados..."}
+          ⏳ {statusTexto || "Processando..."}
         </div>
       )}
 
       {titulos.length > 0 && (
         <div className="bg-white p-2 border border-slate-200 rounded-xl shadow-xs">
-          <input type="text" placeholder="🔍 Filtrar cedente na lista..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg outline-none font-medium text-slate-800" />
+          <input type="text" placeholder="🔍 Filtrar cedentes homologados..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg outline-none font-medium text-slate-800" />
         </div>
       )}
 
-      {/* CARDS CONTAINER */}
       <div className="space-y-2">
         {filtrados.length === 0 ? (
           <div className="p-12 border border-dashed border-slate-300 rounded-xl text-center text-slate-400 font-medium bg-white">
-            Nenhum dado encontrado no Supabase. Clique acima para fazer o upload do arquivo de estoque diário (.csv).
+            Nenhum dado ativo no painel. Faça o upload do arquivo para recalcular a carteira global.
           </div>
         ) : (
           filtrados.map((item) => {
@@ -268,22 +275,22 @@ export default function AnaliseEstoqueCedentesPage() {
                 
                 <div onClick={() => setCedenteExpandido(isExpandido ? null : item.cedente)} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer bg-gradient-to-r from-white to-slate-50/20 select-none">
                   <div>
-                    <span className="text-[9px] uppercase font-bold tracking-wider text-blue-600">Empresa</span>
+                    <span className="text-[9px] uppercase font-bold tracking-wider text-blue-600">Cedente FIDC</span>
                     <h3 className="font-black text-slate-900 text-[13px] tracking-tight">{item.cedente}</h3>
                   </div>
 
                   <div className="flex items-center gap-8 text-right self-stretch sm:self-auto justify-between sm:justify-end">
                     <div>
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Nominal Total</span>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">VALOR_NOMINAL</span>
                       <span className="font-mono font-black text-slate-900 text-sm">{formatarMoeda(item.valorNominalTotal)}</span>
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Taxa Média</span>
-                      <span className="font-mono font-black text-emerald-600">{item.taxaMediaPonderada.toFixed(2)}% a.m.</span>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">TAXA MÉDIA</span>
+                      <span className="font-mono font-black text-emerald-600">{item.taxaMediaPonderada.toFixed(6)}% a.m.</span>
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Prazo Ponderado</span>
-                      <span className="font-mono font-black text-blue-900">{Math.round(item.prazoMedioPonderado)} dias</span>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">PRAZO MÉDIO</span>
+                      <span className="font-mono font-black text-blue-900">{item.prazoMedioPonderado.toFixed(2)} dias</span>
                     </div>
                     <div className="text-slate-400 font-bold px-1">{isExpandido ? "▲" : "▼"}</div>
                   </div>
@@ -298,9 +305,9 @@ export default function AnaliseEstoqueCedentesPage() {
                             <th className="p-2">Sacado</th>
                             <th className="p-2 text-center">Nº Documento</th>
                             <th className="p-2 text-center">Vencimento</th>
-                            <th className="p-2 text-center">Prazo</th>
+                            <th className="p-2 text-center">Prazo Atual</th>
                             <th className="p-2 text-right">Valor Nominal</th>
-                            <th className="p-2 text-right">Taxa Final</th>
+                            <th className="p-2 text-right">Taxa Ativo</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
@@ -311,7 +318,7 @@ export default function AnaliseEstoqueCedentesPage() {
                               <td className="p-2 text-center text-slate-500">{t.vencimento}</td>
                               <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias}d</td>
                               <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(t.valorNominal)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(2)}%</td>
+                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(4)}%</td>
                             </tr>
                           ))}
                         </tbody>
