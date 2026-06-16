@@ -51,13 +51,27 @@ export default function CarteiraDinamicaPage() {
   const [cedentesExpandidos, setCedentesExpandidos] = useState<Record<string, boolean>>({});
   const [subExpandidos, setSubExpandidos] = useState<Record<string, boolean>>({}); 
 
-  // Filtros Globais da barra superior que não conflitam com as sub-tabelas
   const [filtroSacado, setFiltroSacado] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
   const [ordenacaoDirecaoSub, setOrdenacaoDirecaoSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS UTILIZANDO O MÉTODO SEGURO
+  // Helper dinâmico para ler os dados independente se o Sheets retornar Array ou Objeto
+  const obterValorCampo = (linha: any, chaves: string[], indice: number): string => {
+    if (!linha) return "";
+    // Se for um array puro
+    if (Array.isArray(linha)) {
+      return String(linha[indice] ?? "").trim();
+    }
+    // Se for um objeto estruturado pelo GViz, busca pelas chaves possíveis
+    for (const chave of chaves) {
+      if (linha[chave] !== undefined && linha[chave] !== null) {
+        return String(linha[chave]).trim();
+      }
+    }
+    return "";
+  };
+
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
@@ -82,13 +96,11 @@ export default function CarteiraDinamicaPage() {
         }
       }
 
+      // Puxa as tabelas brutas
       const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
       const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
 
       if (!valoresSec || !valoresFidc) throw new Error("Erro ao coletar dados das matrizes do Google Sheets.");
-
-      const linhasSec = [[], ...valoresSec];
-      const linhasFidc = [[], ...valoresFidc];
 
       let listaTitulos: Titulo[] = [];
       
@@ -104,59 +116,62 @@ export default function CarteiraDinamicaPage() {
         return d;
       };
 
-      // Processa Securitizadora
-      if (linhasSec.length > 1) {
-        for (let i = 1; i < linhasSec.length; i++) {
-          const r = linhasSec[i];
-          if (!r || !r[0]) continue;
+      // 🎯 PROCESSAMENTO TOLERANTE DA SECURITIZADORA (SEC)
+      valoresSec.forEach((r: any) => {
+        const cedenteNome = obterValorCampo(r, ["cedente", "nome cedente", "nome_cedente"], 0).toUpperCase();
+        if (!cedenteNome || cedenteNome === "CEDENTE") return; // Ignora cabeçalhos fantasmas
+        if (isComercial && !allowedCedentes.includes(cedenteNome)) return;
 
-          const cedenteNome = String(r[0]).trim().toUpperCase();
-          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
+        const sacado = obterValorCampo(r, ["sacado", "nome sacado", "nome_sacado"], 1).toUpperCase();
+        const numTitulo = obterValorCampo(r, ["numero", "nº título", "numero_titulo", "titulo"], 2) || "-";
+        const venc = obterValorCampo(r, ["vencimento", "data_vencimento", "data vencimento"], 3);
+        const valorFaceRaw = obterValorCampo(r, ["valor face", "valor_face", "face"], 4);
+        const valorAbertoRaw = obterValorCampo(r, ["valor aberto", "valor_aberto", "saldo aberto", "saldo"], 5);
+        const statusRaw = obterValorCampo(r, ["status", "situacao"], 6);
 
-          const venc = String(r[3] || "");
-          const dtVenc = parseDataBR(venc);
-          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+        const dtVenc = parseDataBR(venc);
+        const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
-          listaTitulos.push({
-            cedente: cedenteNome,
-            sacado: String(r[1]).trim().toUpperCase(),
-            numeroTitulo: String(r[2] || "-"),
-            vencimento: venc,
-            valorFace: parseFloat(r[4]) || 0,
-            valorAberto: parseFloat(r[5]) || 0,
-            status: String(r[6] || "").includes("Vencido") ? "Vencido" : "A Vencer",
-            origem: "SEC",
-            diasParaVencer: diffDias
-          });
-        }
-      }
+        listaTitulos.push({
+          cedente: cedenteNome,
+          sacado: sacado,
+          numeroTitulo: numTitulo,
+          vencimento: venc,
+          valorFace: parseFloat(valorFaceRaw.replace(/[R$\s.]/g, "").replace(",", ".")) || 0,
+          valorAberto: parseFloat(valorAbertoRaw.replace(/[R$\s.]/g, "").replace(",", ".")) || 0,
+          status: statusRaw.includes("Vencido") ? "Vencido" : "A Vencer",
+          origem: "SEC",
+          diasParaVencer: diffDias
+        });
+      });
 
-      // Processa FIDC
-      if (linhasFidc.length > 1) {
-        for (let i = 1; i < linhasFidc.length; i++) {
-          const r = linhasFidc[i];
-          if (!r || !r[0]) continue;
+      // 🎯 PROCESSAMENTO TOLERANTE DO FIDC
+      valoresFidc.forEach((r: any) => {
+        const cedenteNome = obterValorCampo(r, ["cedente", "nome cedente", "nome_cedente"], 0).toUpperCase();
+        if (!cedenteNome || cedenteNome === "CEDENTE") return;
+        if (isComercial && !allowedCedentes.includes(cedenteNome)) return;
 
-          const cedenteNome = String(r[0]).trim().toUpperCase();
-          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
+        const sacado = obterValorCampo(r, ["sacado", "nome sacado", "nome_sacado"], 1).toUpperCase();
+        const venc = obterValorCampo(r, ["vencimento", "data_vencimento", "data vencimento"], 2);
+        const valorFaceRaw = obterValorCampo(r, ["valor face", "valor_face", "face"], 3);
+        const valorAbertoRaw = obterValorCampo(r, ["valor aberto", "valor_aberto", "saldo aberto", "saldo"], 4);
+        const statusRaw = obterValorCampo(r, ["status", "situacao"], 5);
 
-          const venc = String(r[2] || "");
-          const dtVenc = parseDataBR(venc);
-          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+        const dtVenc = parseDataBR(venc);
+        const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
-          listaTitulos.push({
-            cedente: cedenteNome,
-            sacado: String(r[1]).trim().toUpperCase(),
-            numeroTitulo: "-",
-            vencimento: venc,
-            valorFace: parseFloat(r[3]) || 0,
-            valorAberto: parseFloat(r[4]) || 0,
-            status: String(r[5] || "").includes("Vencido") ? "Vencido" : "A Vencer",
-            origem: "FIDC",
-            diasParaVencer: diffDias
-          });
-        }
-      }
+        listaTitulos.push({
+          cedente: cedenteNome,
+          sacado: sacado,
+          numeroTitulo: "-",
+          vencimento: venc,
+          valorFace: parseFloat(valorFaceRaw.replace(/[R$\s.]/g, "").replace(",", ".")) || 0,
+          valorAberto: parseFloat(valorAbertoRaw.replace(/[R$\s.]/g, "").replace(",", ".")) || 0,
+          status: statusRaw.includes("Vencido") ? "Vencido" : "A Vencer",
+          origem: "FIDC",
+          diasParaVencer: diffDias
+        });
+      });
 
       setTitulosOriginais(listaTitulos);
     } catch (err: any) {
@@ -168,7 +183,6 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🎯 REATIVIDADE INSTANTÂNEA REPARADA: Responde na hora sem forçar render da sub-tabela
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
