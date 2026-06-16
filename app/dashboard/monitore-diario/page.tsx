@@ -28,7 +28,7 @@ export default function MonitoreDiarioPage() {
           }
         }
         
-        // 🎯 Busca logs diários e cruza com a tabela oficial de cadastros (onde injetamos os riscos na importação)
+        // 🎯 Busca logs diários e cruza com a tabela oficial de cadastros
         const [resHist, resCadastro] = await Promise.all([
           supabase.from("historico_consolidado").select("*").order("data_processamento", { ascending: false }),
           supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc")
@@ -36,9 +36,21 @@ export default function MonitoreDiarioPage() {
 
         if (resHist.data && resHist.data.length > 0) {
           const ultimaData = resHist.data[0].data_processamento;
-          let filtrados = resHist.data.filter(r => r.data_processamento === ultimaData && parseFloat(r.evolucao || 0) !== 0);
+          
+          // 🎯 Fix 1: Torna o filtro flexível para aceitar registros com evolução 0 se houver restritivos ou resumo de ocorrências
+          let filtrados = resHist.data.filter(r => {
+            if (r.data_processamento !== ultimaData) return false;
+            
+            const evo = parseFloat(r.evolucao || 0);
+            const temRestritivos = [
+              r.total_pefin, r.total_refin, r.total_protesto, 
+              r.total_acao_jud, r.total_div_vencida
+            ].some(val => parseFloat(val || 0) > 0);
 
-          // 🔐 Segurança de escopo: Se for comercial, blinda a listagem para exibir apenas as carteiras dele
+            return evo !== 0 || temRestritivos || (r.resumo_movimento && r.resumo_movimento.trim() !== "");
+          });
+
+          // 🔐 Segurança de escopo comercial
           if (isComercial) {
             filtrados = filtrados.filter(r => allowedCedentes.includes(simplificarNome(r.cedente)));
           }
@@ -46,10 +58,11 @@ export default function MonitoreDiarioPage() {
           setDados(filtrados.map(linha => {
             const match = resCadastro.data?.find(c => simplificarNome(c.cedente) === simplificarNome(linha.cedente));
             
-            // Soma o risco consolidado (Sec + FIDC) direto dos dados atualizados da Central de Importação V2
+            // Soma o risco consolidado (Sec + FIDC)
             const riscoConsolidado = match ? (parseFloat(match.risco_sec || 0) + parseFloat(match.risco_fidc || 0)) : 0;
             
-            return { ...linha, risco_aberto: riscoConsolidated };
+            // 🎯 Fix 2: Corrigida a variável de riscoConsolidated para riscoConsolidado prevenindo o ReferenceError
+            return { ...linha, risco_aberto: riscoConsolidado };
           }));
         }
       } catch (err) { 
@@ -92,28 +105,36 @@ export default function MonitoreDiarioPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-              {dados.map((item, idx) => {
-                const evo = parseFloat(item.evolucao || 0);
-                return (
-                  <tr key={idx} className="hover:bg-slate-50/50">
-                    <td className="p-2.5 text-center text-slate-400 font-normal whitespace-nowrap">{fD(item.data_processamento)}</td>
-                    <td className="p-2.5 font-mono text-slate-400 text-xs whitespace-nowrap">{item.cnpj_cliente}</td>
-                    <td className="p-2.5 font-bold text-slate-900 whitespace-nowrap">{item.cedente}</td>
-                    <td className="p-2.5 text-right font-bold text-blue-600 bg-blue-50/10 whitespace-nowrap">{fM(item.risco_aberto)}</td>
-                    <td className="p-2.5 text-right text-slate-400 whitespace-nowrap">{fM(item.saldo_anterior)}</td>
-                    <td className="p-2.5 text-right whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 font-bold px-1.5 py-0.5 rounded text-xs ${evo > 0 ? "text-red-600 bg-red-50" : "text-emerald-600 bg-emerald-50"}`}>
-                        {evo > 0 ? "▲" : "▼"} {fM(evo)}
-                      </span>
-                    </td>
-                    <td className="p-2.5 text-right font-bold text-slate-900 whitespace-nowrap">{fM(item.saldo_atual)}</td>
-                    <td className="p-2.5 text-slate-500 text-xs whitespace-pre-wrap break-words leading-relaxed">{item.resumo_movimento || "Estável"}</td>
-                    {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => (
-                      <td key={k} className={`p-2.5 text-right whitespace-nowrap ${parseFloat(item[k]) > 0 ? "text-red-500 font-bold bg-red-50/30" : "text-slate-400 font-normal"}`}>{fM(item[k])}</td>
-                    ))}
-                  </tr>
-                );
-              })}
+              {dados.length === 0 ? (
+                <tr>
+                  <td colSpan={13} className="text-center p-8 text-slate-400 font-bold">
+                    Nenhuma movimentação alarmante registrada na data de hoje.
+                  </td>
+                </tr>
+              ) : (
+                dados.map((item, idx) => {
+                  const evo = parseFloat(item.evolucao || 0);
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="p-2.5 text-center text-slate-400 font-normal whitespace-nowrap">{fD(item.data_processamento)}</td>
+                      <td className="p-2.5 font-mono text-slate-400 text-xs whitespace-nowrap">{item.cnpj_cliente}</td>
+                      <td className="p-2.5 font-bold text-slate-900 whitespace-nowrap">{item.cedente}</td>
+                      <td className="p-2.5 text-right font-bold text-blue-600 bg-blue-50/10 whitespace-nowrap">{fM(item.risco_aberto)}</td>
+                      <td className="p-2.5 text-right text-slate-400 whitespace-nowrap">{fM(item.saldo_anterior)}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1 font-bold px-1.5 py-0.5 rounded text-xs ${evo === 0 ? "text-slate-500 bg-slate-100" : evo > 0 ? "text-red-600 bg-red-50" : "text-emerald-600 bg-emerald-50"}`}>
+                          {evo === 0 ? "•" : evo > 0 ? "▲" : "▼"} {fM(evo)}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-right font-bold text-slate-900 whitespace-nowrap">{fM(item.saldo_atual)}</td>
+                      <td className="p-2.5 text-slate-500 text-xs whitespace-pre-wrap break-words leading-relaxed">{item.resumo_movimento || "Estável"}</td>
+                      {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => (
+                        <td key={k} className={`p-2.5 text-right whitespace-nowrap ${parseFloat(item[k]) > 0 ? "text-red-500 font-bold bg-red-50/30" : "text-slate-400 font-normal"}`}>{fM(item[k])}</td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
