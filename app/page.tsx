@@ -12,7 +12,6 @@ export default function LoginPage() {
   const [carregando, setCarregando] = useState(false);
 
   useEffect(() => {
-    // Se o usuário já tiver sessão ativa, joga direto para o painel principal
     const logado = localStorage.getItem("intraned_user");
     if (logado) router.push("/dashboard");
   }, [router]);
@@ -25,7 +24,7 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
-      // 🔍 BUSCA SEGURA: Filtra apenas pelo e-mail para evitar conflitos de RLS ou criptografia na query
+      // 🔍 Busca puxando o usuário pelo e-mail formatado
       const { data, error } = await supabase
         .from("usuarios")
         .select("*")
@@ -34,19 +33,23 @@ export default function LoginPage() {
 
       if (error) throw error;
 
-      // 🔐 VALIDAÇÃO EM MEMÓRIA: Compara os dados coletados com a senha digitada
-      if (!data || String(data.senha).trim() !== senha.trim()) {
+      // 🔐 Validação ultra-resiliente de senha (limpa espaços em branco e quebras de linha invisíveis)
+      const senhaBanco = data ? String(data.senha || data.senha_hash || "").trim() : "";
+      const senhaDigitada = senha.trim();
+
+      if (!data || senhaBanco !== senhaDigitada) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
         return;
       }
 
-      // Cria a sessão local com as permissões de rota ativas
+      // Salva a sessão localmente
       localStorage.setItem("intraned_user", JSON.stringify({
         id: data.id,
         nome: data.nome,
         email: data.email,
-        cargo: data.cargo,
-        permissoes: data.permissoes || []
+        cargo: data.cargo || data.perfil || "Colaborador",
+        perfil: data.perfil || data.cargo || "user",
+        permissoes: data.permissoes || data.abas_permitidas || []
       }));
 
       router.push("/dashboard");
@@ -62,19 +65,19 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
       <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        {/* 🎯 CABEÇALHO DO CARD COM TEXTO CENTRALIZADO E LOGO FLUTUANDO À ESQUERDA */}
-        <div className="flex flex-col items-center relative select-none">
-          <div className="relative w-full flex justify-center items-center h-8">
+        {/* 🎯 CABEÇALHO CORRIGIDO: LOGO APROXIMADA E TEXTO PERFEITAMENTE CENTRALIZADO */}
+        <div className="flex flex-col items-center select-none text-center">
+          <div className="relative w-fit mx-auto flex items-center h-8 pl-2">
             <img 
               src="/favicon.ico" 
               alt="Ned Capital" 
-              className="absolute left-12 h-8 w-auto object-contain shrink-0" 
+              className="absolute -left-9 h-8 w-auto object-contain shrink-0" 
             />
             <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
               Intra<span className="text-blue-500">Ned</span>
             </h1>
           </div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2 text-center w-full">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2.5 w-full">
             Controle & Gestão
           </p>
         </div>
@@ -117,7 +120,7 @@ export default function LoginPage() {
         <div className="text-center pt-2">
           <button 
             type="button"
-            onClick={() => alert("Entre em contato com o administrador do sistema para redefinir suas credenciais.")}
+            onClick={() => alert("Entre em contato com o administrador do sistema para verificar suas credenciais no Supabase.")}
             className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0"
           >
             Esqueceu sua senha? Recuperar acesso
