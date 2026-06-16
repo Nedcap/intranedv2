@@ -53,7 +53,7 @@ export default function AnaliseEstoqueCedentesPage() {
       }
     } catch (err: any) {
       console.error("Erro ao ler banco:", err);
-    } campaigners {
+    } finally {
       setCarregando(false);
       setStatusStatusTexto("");
     }
@@ -123,14 +123,13 @@ export default function AnaliseEstoqueCedentesPage() {
 
         const headers = parseLineCSV(lines[startIdx], separadorDefinido);
 
-        // Mapeamento dinâmico baseado nos nomes exatos informados do arquivo cru
         const idxCedente = headers.indexOf("NOME_DO_CEDENTE");
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
         const idxDoc = headers.indexOf("NUMERO_DOCUMENTO");
-        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");      // Equivalente à Coluna R
-        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");    // Equivalente à Coluna S
-        const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");// Equivalente à Coluna W
-        const idxNominal = headers.indexOf("VALOR_NOMINAL");            // Equivalente à Coluna Y
+        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");      
+        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");    
+        const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
+        const idxNominal = headers.indexOf("VALOR_NOMINAL");            
 
         const payloadParaInsercao: any[] = [];
 
@@ -145,7 +144,6 @@ export default function AnaliseEstoqueCedentesPage() {
           return parseFloat(s) || 0;
         };
 
-        // Algoritmo matemático puro sem risco de fuso horário do sistema/browser
         const obterPrazoCorridoAbsoluto = (txtInicio: string, txtFim: string) => {
           if (!txtInicio || !txtFim) return 1;
           const strI = txtInicio.trim().split(" ")[0];
@@ -179,8 +177,8 @@ export default function AnaliseEstoqueCedentesPage() {
           const prazoCorridoD3 = obterPrazoCorridoAbsoluto(colunas[idxAquisicao], colunas[idxVencimento]);
           
           // 📈 [Coluna C] TAXA FINAL = ((1 + (Y3 - W3) / W3) ^ (30 / D3)) - 1
-          const fatorRentabilidade = 1 + (valorNominal - precoAquisicao) / precoAquisicao;
-          const taxaFinalCalculadaC3 = Math.pow(fatorRentabilidade, 30 / prazoCorridoD3) - 1;
+          const fRentabilidade = 1 + (valorNominal - precoAquisicao) / precoAquisicao;
+          const taxaFinalCalculadaC3 = Math.pow(fRentabilidade, 30 / prazoCorridoD3) - 1;
 
           // 📐 [Coluna A] PRAZO MASSA = D3 * Y3
           const colunaPrazoMassaA3 = prazoCorridoD3 * valorNominal;
@@ -216,7 +214,6 @@ export default function AnaliseEstoqueCedentesPage() {
     }
   };
 
-  // 🏛️ Consolidação Estatística por Massa Ponderada Comercial (CEO / MESA ALFA)
   const carteiraCedentes = useMemo(() => {
     const mapa: Record<string, TituloEstoque[]> = {};
     titulos.forEach(t => {
@@ -226,18 +223,14 @@ export default function AnaliseEstoqueCedentesPage() {
 
     return Object.keys(mapa).map(nomeCedente => {
       const lista = mapa[nomeCedente];
-      
-      // Soma dos denominadores da carteira (Soma de todos os Valores Nominais do Cedente)
       const valorNominalTotal = lista.reduce((acc, curr) => acc + curr.valorNominal, 0);
       
-      // Acumulação dos numeradores das massas ponderadas
       const { somaMassaTaxa, somaMassaPrazo } = lista.reduce((acumulador, item) => {
         acumulador.somaMassaTaxa += item.colunaTaxaMassa;
         acumulador.somaMassaPrazo += item.colunaPrazoMassa;
         return acumulador;
       }, { somaMassaTaxa: 0, somaMassaPrazo: 0 });
 
-      // Aplicação final do modelo ponderado puro por lote do Cedente
       return {
         cedente: nomeCedente,
         valorNominalTotal,
@@ -245,7 +238,7 @@ export default function AnaliseEstoqueCedentesPage() {
         prazoMedioPonderado: valorNominalTotal > 0 ? (somaMassaPrazo / valorNominalTotal) : 0,
         titulos: lista
       };
-    }).sort((a, b) => b.valorNominalTotal - a.a.valorNominalTotal);
+    }).sort((a, b) => b.valorNominalTotal - a.valorNominalTotal);
   }, [titulos]);
 
   const filtrados = useMemo(() => {
