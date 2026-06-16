@@ -157,7 +157,8 @@ export default function ComitePage() {
     };
   }, [idEmpresaExpandida, analises]);
 
-  const obter_emails_notificacao = async (empresaNome: string) => {
+  // 🎯 RESTAURADA: Função que gerencia a coleta de e-mails para envio automático da ata
+  const obtener_emails_notificacao = async (empresaNome: string) => {
     const emails = new Set<string>();
     try {
       const { data: masters } = await supabase.from("usuarios").select("email").eq("cargo", "Master");
@@ -327,7 +328,6 @@ export default function ComitePage() {
     } finally { setCarregando(false); }
   };
 
-  // 🎯 ATIVAÇÃO DO MODO FOCO ULTRA: Limpa a tela inteira e maximiza o comitê
   const ativarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setEditandoEmpresaExpandida(empresa.id);
@@ -355,13 +355,13 @@ export default function ComitePage() {
     setNovaMsg("");
   };
 
-  // 🔮 RENDEREIZAÇÃO EXCLUSIVA DE TELA CHEIA (MODO COMITÊ ATIVO)
+  // 🔮 MODO COMITÊ TELA CHEIA ATIVO
   if (modoFocoComite && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
     const htmlPreview = htmlPreviewsInline[empresaFocoAtivo.id];
 
     return (
-      <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden animate-fade-in text-[13px]">
+      <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px]">
         {/* Cabeçalho de Comando Superior */}
         <div className="bg-slate-950 text-white p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
@@ -382,10 +382,10 @@ export default function ComitePage() {
           </div>
         </div>
 
-        {/* Corpo Dividido Lateralmente (Split Layout Completo da Viewport) */}
+        {/* Corpo Split Layout (Slides Ocupando 70% da Viewport Horizontal) */}
         <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
           
-          {/* LADO ESQUERDO: RELATÓRIO DO SLIDE COMPLETO (70% DE ESPAÇO) */}
+          {/* LADO ESQUERDO: RELATÓRIO DO SLIDE COMPLETO */}
           <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
             <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
               {htmlPreview ? (
@@ -399,10 +399,10 @@ export default function ComitePage() {
             </div>
           </div>
 
-          {/* LADO DIREITO: DASHBOARD DECISÓRIO (30% DE ESPAÇO) */}
+          {/* LADO DIREITO: DASHBOARD DECISÓRIO (Acompanhamento em tempo real) */}
           <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
             
-            {/* Bloco 1: Lançar Voto */}
+            {/* Bloco Voto */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md space-y-3 shrink-0 text-left">
               <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider">🗳️ Registrar Voto Oficial</span>
               <div className="grid grid-cols-2 gap-2">
@@ -423,12 +423,12 @@ export default function ComitePage() {
               </button>
             </div>
 
-            {/* Bloco 2: Histórico Computado */}
+            {/* Bloco Histórico de Votos */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
               <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">📋 Histórico de Pareceres</span>
               <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
                 {listaDeVotos.length === 0 ? (
-                  <p className="text-slate-500 italic text-xs py-8 text-center">Nenhum voto lançado mesa.</p>
+                  <p className="text-slate-500 italic text-xs py-8 text-center">Nenhum voto lançado em mesa.</p>
                 ) : (
                   listaDeVotos.map((v: any, idx: number) => (
                     <div key={idx} className="p-2.5 border border-slate-800 rounded-lg bg-slate-950/60 flex flex-col gap-1 text-xs">
@@ -443,7 +443,7 @@ export default function ComitePage() {
               </div>
             </div>
 
-            {/* Bloco 3: Chat de Debates */}
+            {/* Bloco Chat Mesa de Debates */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
               <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">💬 Mesa de Debates</span>
               <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg p-2 space-y-2 bg-slate-950/40">
@@ -469,7 +469,7 @@ export default function ComitePage() {
     );
   }
 
-  // 🏛️ RENDEREIZAÇÃO DA VISÃO PADRÃO DO INTRANED (QUANDO O FOCO ESTÁ INATIVO)
+  // 🏛️ RENDEREIZAÇÃO DA VISÃO PADRÃO (PAINEL GERAL DO INTRANED)
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-8 text-[13px]">
       {carregando && <div className="fixed inset-0 bg-white/40 z-50 flex items-center justify-center font-bold text-slate-500">Sincronizando esteira...</div>}
