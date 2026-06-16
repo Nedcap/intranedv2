@@ -54,15 +54,14 @@ export default function CarteiraDinamicaPage() {
   const [filtroSacado, setFiltroSacado] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
-  const [ordenacaoDirecaoSub, setOrdenacaoDirectionSub] = useState<"asc" | "desc">("asc");
+  const [ordenacaoDirecaoSub, setOrdenacaoDirecaoSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS UTILIZANDO O METODO SEGURO LIVRE DE CHAVES E COM SEGURANÇA DE PERFIL
+  // 📥 BUSCA DADOS UTILIZANDO O MÉTODO SEGURO
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
       setErro(null);
 
-      // 🔐 Validação de escopo de permissões do usuário logado
       const userStr = localStorage.getItem("intraned_user");
       let allowedCedentes: string[] = [];
       let isComercial = false;
@@ -82,7 +81,6 @@ export default function CarteiraDinamicaPage() {
         }
       }
 
-      // Puxa direto da integração estável GViz
       const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
       const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
 
@@ -93,29 +91,32 @@ export default function CarteiraDinamicaPage() {
 
       let listaTitulos: Titulo[] = [];
       
+      // 🎯 NORMALIZAÇÃO DO HOJE: Zera as horas para cálculo limpo de dias inteiros
       const hoje = new Date();
-      hoje.setHours(12, 0, 0, 0);
+      hoje.setHours(0, 0, 0, 0);
 
       const parseDataBR = (dStr: string) => {
         if (!dStr) return null;
         const p = String(dStr).split("/");
         if (p.length !== 3) return null;
-        return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+        const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+        d.setHours(0, 0, 0, 0);
+        return d;
       };
 
-      // Processa títulos da Securitizadora
+      // Processa Securitizadora
       if (linhasSec.length > 1) {
         for (let i = 1; i < linhasSec.length; i++) {
           const r = linhasSec[i];
           if (!r || !r[0]) continue;
 
           const cedenteNome = String(r[0]).trim().toUpperCase();
-          // Se for perfil comercial, barra a inserção se a carteira não for dele
           if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
 
           const venc = String(r[3] || "");
           const dtVenc = parseDataBR(venc);
-          const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+          // Diferença em dias matematicamente redonda
+          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
             cedente: cedenteNome,
@@ -131,19 +132,18 @@ export default function CarteiraDinamicaPage() {
         }
       }
 
-      // Processa títulos do FIDC
+      // Processa FIDC
       if (linhasFidc.length > 1) {
         for (let i = 1; i < linhasFidc.length; i++) {
           const r = linhasFidc[i];
           if (!r || !r[0]) continue;
 
           const cedenteNome = String(r[0]).trim().toUpperCase();
-          // Se for perfil comercial, barra a inserção se a carteira não for dele
           if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
 
           const venc = String(r[2] || "");
           const dtVenc = parseDataBR(venc);
-          const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
             cedente: cedenteNome,
@@ -169,6 +169,7 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
+  // 🎯 KPI GLOBAL CALIBRADO: Previsão de fluxo futura corrigida sem ignorar dias
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
@@ -220,9 +221,7 @@ export default function CarteiraDinamicaPage() {
       let valB = b[ordenacaoMaster] || 0;
 
       if (ordenacaoMaster === "nome") {
-        valA = a.nome;
-        valB = b.nome;
-        return direcaoMaster === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        return direcaoMaster === "asc" ? a.nome.localeCompare(b.nome) : b.nome.localeCompare(a.nome);
       }
 
       return direcaoMaster === "asc" ? valA - valB : valB - valA;
@@ -230,10 +229,11 @@ export default function CarteiraDinamicaPage() {
   }, [titulosOriginais, ordenacaoMaster, direcaoMaster]);
 
   const lidarOrdenacaoMaster = (coluna: string) => {
-    if (ordenacaoMaster === columnToKey(coluna)) {
+    const chave = columnToKey(coluna);
+    if (ordenacaoMaster === chave) {
       setDirecaoMaster(p => p === "asc" ? "desc" : "asc");
     } else {
-      setOrdenacaoMaster(columnToKey(coluna));
+      setOrdenacaoMaster(chave);
       setDirecaoMaster("desc"); 
     }
   };
@@ -253,30 +253,35 @@ export default function CarteiraDinamicaPage() {
   };
 
   const filtrarEOrdenarTitulos = (titulos: Titulo[]) => {
-    return titulos
-      .filter(t => {
-        const matchSacado = t.sacado.includes(filtroSacado.toUpperCase());
-        const matchStatus = filtroStatus === "" ? true : t.status === filtroStatus;
-        return matchSacado && matchStatus;
-      })
-      .sort((a, b) => {
-        let valA = a[ordenacaoColunaSub as keyof Titulo] || 0;
-        let valB = b[ordenacaoColunaSub as keyof Titulo] || 0;
+    let resultado = [...titulos];
 
-        if (ordenacaoColunaSub === "vencimento") {
-          const parseData = (dStr: string) => {
-            const p = String(dStr).split("/");
-            if (p.length !== 3) return 0;
-            return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0])).getTime();
-          };
-          valA = parseData(a.vencimento);
-          valB = parseData(b.vencimento);
-        }
+    if (filtroSacado.trim() !== "") {
+      const busca = filtroSacado.toUpperCase().trim();
+      resultado = resultado.filter(t => t.sacado.includes(busca));
+    }
 
-        if (valA < valB) return ordenacaoDirecaoSub === "asc" ? -1 : 1;
-        if (valA > valB) return ordenacaoDirecaoSub === "asc" ? 1 : -1;
-        return 0;
-      });
+    if (filtroStatus !== "") {
+      resultado = resultado.filter(t => t.status === filtroStatus);
+    }
+
+    return resultado.sort((a, b) => {
+      let valA = a[ordenacaoColunaSub as keyof Titulo] ?? 0;
+      let valB = b[ordenacaoColunaSub as keyof Titulo] ?? 0;
+
+      if (ordenacaoColunaSub === "vencimento") {
+        const parseData = (dStr: string) => {
+          const p = String(dStr).split("/");
+          if (p.length !== 3) return 0;
+          return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0])).getTime();
+        };
+        valA = parseData(a.vencimento);
+        valB = parseData(b.vencimento);
+      }
+
+      if (valA < valB) return ordenacaoDirecaoSub === "asc" ? -1 : 1;
+      if (valA > valB) return ordenacaoDirecaoSub === "asc" ? 1 : -1;
+      return 0;
+    });
   };
 
   const toggleCedente = (nome: string) => {
@@ -336,12 +341,12 @@ export default function CarteiraDinamicaPage() {
         </div>
       </div>
 
-      {/* MASTER DYNAMIC TABLE */}
+      {/* GLOBAL DYNAMIC TABLE */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+        <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-slate-800 border-b border-slate-900 text-white font-black uppercase text-[11px] tracking-wider select-none">
-              <th className="p-3 w-10 text-center">Abrir</th>
+            <tr className="bg-slate-800 border-b border-slate-900 text-white font-black uppercase text-[11px] tracking-wider select-none text-left">
+              <th className="p-3 w-12 text-center">Abrir</th>
               <th onClick={() => lidarOrdenacaoMaster("cedente")} className="p-3 w-[350px] cursor-pointer hover:bg-slate-700 transition-colors">Cedente / Origem {renderSetaOrdenacao("cedente")}</th>
               <th onClick={() => lidarOrdenacaoMaster("face")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors">Valor Face Global {renderSetaOrdenacao("face")}</th>
               <th onClick={() => lidarOrdenacaoMaster("aberto")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors">Saldo Aberto {renderSetaOrdenacao("aberto")}</th>
@@ -355,7 +360,7 @@ export default function CarteiraDinamicaPage() {
               return (
                 <tr key={cedente.nome} style={{ display: "contents" }}>
                   {/* LEVEL 1 ROW */}
-                  <tr className="bg-slate-50 font-bold text-slate-900 border-l-4 border-slate-700 hover:bg-slate-100/80 transition-colors">
+                  <tr className="bg-slate-50 font-bold text-slate-900 border-l-4 border-slate-700 hover:bg-slate-100/80 transition-colors text-left">
                     <td className="p-2.5 text-center">
                       <button onClick={() => toggleCedente(cedente.nome)} className="w-5 h-5 bg-slate-200 text-slate-800 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs">
                         {cedExpandido ? "−" : "+"}
@@ -368,13 +373,13 @@ export default function CarteiraDinamicaPage() {
                     <td className="p-2.5 text-right font-mono bg-emerald-50/40 text-emerald-700">{formatarMoeda(cedente.totalAVencer)}</td>
                   </tr>
 
-                  {/* LEVEL 2 ROW */}
+                  {/* LEVEL 2 ROWS */}
                   {cedExpandido && (
                     <tr style={{ display: "contents" }}>
                       {/* SECURITIZADORA SUB-ROW */}
                       {cedente.sec.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
-                          <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
+                          <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors text-left">
                             <td className="p-2 text-center">
                               <button onClick={() => toggleSub(`${cedente.nome}|||SEC`)} className="w-4 h-4 bg-blue-50 text-blue-800 rounded font-black flex items-center justify-center border border-blue-200 cursor-pointer text-[10px]">
                                 {subExpandidos[`${cedente.nome}|||SEC`] ? "−" : "+"}
@@ -389,7 +394,7 @@ export default function CarteiraDinamicaPage() {
 
                           {/* LEVEL 3 TABLE (SECURITIZADORA) */}
                           {subExpandidos[`${cedente.nome}|||SEC`] && (
-                            <tr>
+                            <tr key={`${cedente.nome}-sec-aberto`}>
                               <td colSpan={6} className="bg-slate-100/50 p-4">
                                 <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
                                   <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
@@ -402,7 +407,7 @@ export default function CarteiraDinamicaPage() {
                                     <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none">
                                       <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo Aberto</option>
                                     </select>
-                                    <button onClick={() => setOrdenacaoDirectionSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
+                                    <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
                                       {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
                                     </button>
                                   </div>
@@ -443,7 +448,7 @@ export default function CarteiraDinamicaPage() {
                       {/* FIDC SUB-ROW */}
                       {cedente.fidc.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
-                          <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
+                          <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors text-left">
                             <td className="p-2 text-center">
                               <button onClick={() => toggleSub(`${cedente.nome}|||FIDC`)} className="w-4 h-4 bg-purple-50 text-purple-800 rounded font-black flex items-center justify-center border border-purple-200 cursor-pointer text-[10px]">
                                 {subExpandidos[`${cedente.nome}|||FIDC`] ? "−" : "+"}
@@ -458,7 +463,7 @@ export default function CarteiraDinamicaPage() {
 
                           {/* LEVEL 3 TABLE (FIDC) */}
                           {subExpandidos[`${cedente.nome}|||FIDC`] && (
-                            <tr>
+                            <tr key={`${cedente.nome}-fidc-aberto`}>
                               <td colSpan={6} className="bg-slate-100/50 p-4">
                                 <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
                                   <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
@@ -471,7 +476,7 @@ export default function CarteiraDinamicaPage() {
                                     <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none">
                                       <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo Aberto</option>
                                     </select>
-                                    <button onClick={() => setOrdenacaoDirectionSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
+                                    <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
                                       {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
                                     </button>
                                   </div>
