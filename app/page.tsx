@@ -61,13 +61,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
       <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        {/* 🎯 CABEÇALHO DO CARD COM LOGO ALINHADA LADO A LADO NO LOGIN */}
-        <div className="flex flex-col items-center">
-          <div className="flex items-center gap-3 justify-center w-full select-none">
+        {/* 🎯 CABEÇALHO DO CARD COM TEXTO CENTRALIZADO E LOGO FLUTUANDO À ESQUERDA */}
+        <div className="flex flex-col items-center relative select-none">
+          <div className="relative w-full flex justify-center items-center h-8">
             <img 
               src="/favicon.ico" 
               alt="Ned Capital" 
-              className="h-8 w-auto object-contain shrink-0" 
+              className="absolute left-12 h-8 w-auto object-contain shrink-0" 
             />
             <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
               Intra<span className="text-blue-500">Ned</span>
