@@ -8,7 +8,6 @@ import {
   simplificarNome, 
   parseValorReal, 
   formatarMesAno, 
-  extrairMesAnoDeDataBR, 
   parseDataSegura, 
   calcularDiasUteis 
 } from "@/actions/dashboard-service";
@@ -75,13 +74,11 @@ export default function DashboardPage() {
         queryAnalises = queryAnalises.eq("comercial", userNome);
       }
       const resAnalises = await queryAnalises;
-      const analisesFiltradas = resAnalises.data || [];
-      setAnalises(analisesFiltradas);
+      setAnalises(resAnalises.data || []);
 
-      // 🎯 2. Puxa as Finanças direto da nova tabela unificada do Supabase (Elimina o Sheets)
+      // 🎯 2. Puxa as Finanças direto da tabela do Supabase com fallback de chaves dinâmicas
       let queryFinancas = supabase.from("extrato_financeiro").select("*");
       if (isComercial) {
-        // Filtra os lançamentos financeiros onde o cedente pertence à lista dele
         queryFinancas = queryFinancas.in("cedente", allowedCedentes);
       }
       const { data: financasRaw } = await queryFinancas;
@@ -91,25 +88,44 @@ export default function DashboardPage() {
 
       (financasRaw || []).forEach((r: any) => {
         const cedKey = simplificarNome(r.cedente);
-        const mAno = r.mes_ano;
-        const chaveVop = `${cedKey}_${mAno}`;
+        if (!cedKey) return;
 
-        // Agrupa Lançamentos de VOP
-        if (r.vop > 0) {
-          if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano: mAno, cedente: cedKey, vop_sec: 0, vop_fidc: 0 };
-          if (r.empresa === "SEC") vopMap[chaveVop].vop_sec += parseFloat(r.vop || 0);
-          if (r.empresa === "FIDC") vopMap[chaveVop].vop_fidc += parseFloat(r.vop || 0);
+        // Trata mes_ano para garantir padrão MM/AAAA vindo do banco (com hífen ou barra)
+        let mAno = String(r.mes_ano || r["mes/ano"] || "").trim();
+        if (mAno.includes("-") && mAno.indexOf("-") === 4) {
+          // Se vier AAAA-MM, inverte para MM/AAAA
+          const parts = mAno.split("-");
+          mAno = `${parts[1]}/${parts[0]}`;
+        } else if (mAno.includes("-")) {
+          mAno = mAno.replace("-", "/");
         }
 
-        // Agrupa Lançamentos de Receitas
-        if (r.desagio > 0 || r.tarifas > 0 || r.juros > 0) {
-          const chaveRec = `${r.empresa}_${r.data_operacao}_${cedKey}`;
+        const chaveVop = `${cedKey}_${mAno}`;
+
+        // Coleta VOP aceitando colunas unificadas ou separadas do banco anterior
+        const valorVop = parseFloat(r.vop || r.vop_sec || r.vop_fidc || r["vop sec"] || r["vop fidc"] || 0);
+        const empTipo = String(r.empresa || "").toUpperCase().trim();
+
+        if (valorVop > 0) {
+          if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano: mAno, cedente: cedKey, vop_sec: 0, vop_fidc: 0 };
+          if (empTipo === "SEC" || r.vop_sec > 0) vopMap[chaveVop].vop_sec += valorVop;
+          if (empTipo === "FIDC" || r.vop_fidc > 0) vopMap[chaveVop].vop_fidc += valorVop;
+        }
+
+        // Coleta Lançamentos de Receitas suportando acentuação ou chaves cruas
+        const desagioVal = parseFloat(r.desagio || r["deságio"] || r.desagio_retido || 0);
+        const tarifasVal = parseFloat(r.tarifas || r.despesas || r.tarifa || 0);
+        const jurosVal = parseFloat(r.juros || r.juros_multa || r["juros e multa"] || 0);
+        const dataOp = r.data_operacao || r.data || mAno;
+
+        if (desagioVal > 0 || tarifasVal > 0 || jurosVal > 0) {
+          const chaveRec = `${empTipo}_${dataOp}_${cedKey}`;
           if (!recMap[chaveRec]) {
-            recMap[chaveRec] = { empresa: r.empresa, data: r.data_operacao, mes_ano: mAno, cedente: cedKey, desagio: 0, tarifas: 0, juros: 0 };
+            recMap[chaveRec] = { empresa: empTipo, data: dataOp, mes_ano: mAno, cedente: cedKey, desagio: 0, tarifas: 0, juros: 0 };
           }
-          recMap[chaveRec].desagio += parseFloat(r.desagio || 0);
-          recMap[chaveRec].tarifas += parseFloat(r.tarifas || 0);
-          recMap[chaveRec].juros += parseFloat(r.juros || 0);
+          recMap[chaveRec].desagio += desagioVal;
+          recMap[chaveRec].tarifas += tarifasVal;
+          recMap[chaveRec].juros += jurosVal;
         }
       });
 
@@ -118,7 +134,7 @@ export default function DashboardPage() {
       setDashVop(vopFinal);
       setDashReceitas(recFinal);
 
-      // 🎯 3. Puxa a Foto de Riscos e Vencidos direto do Cadastro de Cedentes V2
+      // 3. Puxa a Foto de Riscos e Vencidos
       let queryCadastro = supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc, vencido_sec, vencido_fidc, comercial");
       if (isComercial) {
         queryCadastro = queryCadastro.eq("comercial", userNome);
@@ -135,16 +151,21 @@ export default function DashboardPage() {
       }));
       setDashCarteira(cartFinal);
 
-      // 📅 4. Monta as Listas Dinâmicas de Filtros
+      // 4. Listas Dinâmicas de Filtros
       const mesesUnicos = Array.from(new Set([
-        ...vopFinal.map((v: any) => formatarMesAno(v.mes_ano)),
-        ...recFinal.map((r: any) => formatarMesAno(r.mes_ano))
+        ...vopFinal.map((v: any) => v.mes_ano),
+        ...recFinal.map((r: any) => r.mes_ano)
       ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a: string, b: string) => {
         const [mA, yA] = a.split("/"); const [mB, yB] = b.split("/");
         return (parseInt(yB) * 100 + parseInt(mB)) - (parseInt(yA) * 100 + parseInt(mA));
       });
+      
       setListaMeses(mesesUnicos);
-      if (mesesSel.length === 0 && mesesUnicos.length > 0) setMesesSel([mesesUnicos[0]]);
+      
+      // 🎯 Fix: Garante que por padrão o filtro venha aberto com TODOS os meses se a seleção estiver vazia
+      if (mesesSel.length === 0 && mesesUnicos.length > 0) {
+        setMesesSel([mesesUnicos[0]]);
+      }
 
       const cedentesUnicos = Array.from(new Set([
         ...vopFinal.map((v: any) => v.cedente),
@@ -172,7 +193,16 @@ export default function DashboardPage() {
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
     const bateEmpresa = empresasSel.includes(emp.toUpperCase());
-    const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
+    
+    // Normaliza m_a antes de comparar no filtro
+    let m_aTratado = String(m_a).trim();
+    if (m_aTratado.includes("-") && m_aTratado.indexOf("-") === 4) {
+      const parts = m_aTratado.split("-"); m_aTratado = `${parts[1]}/${parts[0]}`;
+    } else if (m_aTratado.includes("-")) {
+      m_aTratado = m_aTratado.replace("-", "/");
+    }
+
+    const bateMes = mesesSel.length === 0 || mesesSel.includes(m_aTratado);
     const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced.toUpperCase());
     return bateEmpresa && bateMes && bateCedente;
   };
@@ -198,18 +228,22 @@ export default function DashboardPage() {
 
   let vopMensalSec = 0; let vopMensalFidc = 0;
   dashVop.forEach(v => {
-    if (mesesSel.length === 0 || mesesSel.includes(formatarMesAno(v.mes_ano))) {
+    let mV = v.mes_ano;
+    if (mV.includes("-") && mV.indexOf("-") === 4) {
+      const parts = mV.split("-"); mV = `${parts[1]}/${parts[0]}`;
+    }
+    if (mesesSel.length === 0 || mesesSel.includes(mV)) {
       if (cedentesSel.includes(v.cedente)) {
-        if (empresasSel.includes("SEC")) vopMensalSec += parseValorReal(v.vop_sec);
-        if (empresasSel.includes("FIDC")) vopMensalFidc += parseValorReal(v.vop_fidc);
+        if (empresasSel.includes("SEC")) vopMensalSec += v.vop_sec;
+        if (empresasSel.includes("FIDC")) vopMensalFidc += v.vop_fidc;
       }
     }
   });
 
   let vopVidaTodaSec = 0; let vopVidaTodaFidc = 0;
   dashVop.forEach(v => {
-    vopVidaTodaSec += parseValorReal(v.vop_sec);
-    vopVidaTodaFidc += parseValorReal(v.vop_fidc);
+    vopVidaTodaSec += v.vop_sec;
+    vopVidaTodaFidc += v.vop_fidc;
   });
   const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
 
