@@ -25,16 +25,17 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
+      // 🔍 BUSCA SEGURA: Filtra apenas pelo e-mail para evitar conflitos de RLS ou criptografia na query
       const { data, error } = await supabase
         .from("usuarios")
         .select("*")
         .eq("email", emailTratado)
-        .eq("senha", senha.trim())
         .maybeSingle();
 
       if (error) throw error;
 
-      if (!data) {
+      // 🔐 VALIDAÇÃO EM MEMÓRIA: Compara os dados coletados com a senha digitada
+      if (!data || String(data.senha).trim() !== senha.trim()) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
         return;
       }
