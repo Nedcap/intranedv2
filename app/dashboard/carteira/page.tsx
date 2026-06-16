@@ -2,6 +2,8 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
+import { carregarPlanilhaCarteiraGviz } from "@/actions/dashboard-service";
 
 // ============================================================================
 // 🧱 INTERFACES DE DADOS ORIGINAIS DA V1
@@ -58,40 +60,58 @@ export default function CarteiraDinamicaPage() {
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
   const [ordenacaoDirecaoSub, setOrdenacaoDirecaoSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS DIRETO DO GOOGLE SHEETS VIA MATRIZ PURA (ARRAY DE ARRAYS)
+  // 📥 BUSCA DADOS UTILIZANDO O MÉTODO SEGURO DE SERVIDOR (GVIZ SERVER ACTION)
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
       setErro(null);
 
-      const resSec = await fetch("/api/importacao?range=CARTEIRA_SEC!A:G");
-      const resFidc = await fetch("/api/importacao?range=CARTEIRA_FIDC!A:F");
+      // 🔐 Validação de permissões comercial nativa da V1
+      const userStr = localStorage.getItem("intraned_user");
+      let allowedCedentes: string[] = [];
+      let isComercial = false;
 
-      if (!resSec.ok || !resFidc.ok) throw new Error("Erro ao conectar com a API de importação.");
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        if (cargoUser === "comercial") {
+          isComercial = true;
+          const { data: vinculos } = await supabase
+            .from("cadastro_cedentes")
+            .select("cedente")
+            .eq("comercial", user.nome);
+          if (vinculos) {
+            allowedCedentes = vinculos.map((c: any) => String(c.cedente).trim().toUpperCase());
+          }
+        }
+      }
 
-      const jsonSec = await resSec.json();
-      const jsonFidc = await resFidc.json();
+      // 🚀 Chamada segura via Server Action (Elimina de vez o fetch bugado da API local)
+      const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
+      const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
 
-      const linhasSec = jsonSec.values || [];
-      const linhasFidc = jsonFidc.values || [];
+      if (!valoresSec || !valoresFidc) throw new Error("Erro ao coletar dados das matrizes do Google Sheets.");
+
+      // Remonta a matriz idêntica à lida pelo fetch antigo do Sheets para não quebrar os índices r[x]
+      const linhasSec = [[], ...valoresSec];
+      const linhasFidc = [[], ...valoresFidc];
 
       const listaTitulos: Titulo[] = [];
       
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
 
-      // 🎯 PARSER ULTRA-RESILIENTE: Intercepta e higieniza tanto strings "DD/MM/AAAA" quanto objetos "Date(AAAA,MM,DD)"
+      // 🎯 PARSER DE DATAS: Lê tanto "22/05/2026" quanto o objeto formatado "Date(2026,5,22)" do sheets
       const parseDataBR = (dStr: string) => {
         if (!dStr) return null;
         const stringLimpa = String(dStr).trim();
 
-        // Cenário A: Formato nativo de Objeto Google Sheets -> Date(2026,5,22)
         if (stringLimpa.includes("Date(")) {
-          const extrairModolo = stringLimpa.replace(/Date\(|\)/g, ""); // Remove o "Date(" e o ")"
-          const partes = extrairModolo.split(",");
+          const extrairModulo = stringLimpa.replace(/Date\(|\)/g, ""); 
+          const partes = extrairModulo.split(",");
           if (partes.length === 3) {
             const ano = parseInt(partes[0]);
-            const mes = parseInt(partes[1]); // O Sheets envia o mês baseado em index 0 correto na API estruturada
+            const mes = parseInt(partes[1]); 
             const dia = parseInt(partes[2]);
             const d = new Date(ano, mes, dia);
             d.setHours(0, 0, 0, 0);
@@ -99,7 +119,6 @@ export default function CarteiraDinamicaPage() {
           }
         }
 
-        // Cenário B: Formato de string tradicional -> 22/05/2026
         const p = stringLimpa.split("/");
         if (p.length === 3) {
           const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
@@ -110,28 +129,30 @@ export default function CarteiraDinamicaPage() {
         return null;
       };
 
-      // Helper para deixar a amostragem visual da data limpa e legível na tabela (Tira o "Date(2026,5,22)" feio)
       const formatarDataParaExibicao = (dStr: string) => {
         const dt = parseDataBR(dStr);
         if (!dt) return dStr;
         return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
       };
 
-      // Processa títulos da Securitizadora
+      // Processa títulos da Securitizadora por posições puras de array
       if (linhasSec.length > 1) {
         for (let i = 1; i < linhasSec.length; i++) {
           const r = linhasSec[i];
           if (!r || !r[0] || String(r[0]).trim().toUpperCase() === "CEDENTE") continue;
+
+          const cedenteNome = String(r[0]).trim().toUpperCase();
+          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
 
           const vencRaw = String(r[3] || "");
           const dtVenc = parseDataBR(vencRaw);
           const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
-            cedente: String(r[0]).trim().toUpperCase(),
+            cedente: cedenteNome,
             sacado: String(r[1]).trim().toUpperCase(),
             numeroTitulo: String(r[2] || "-"),
-            vencimento: formatarDataParaExibicao(vencRaw), // 🎯 Salva formatado bonitinho DD/MM/AAAA
+            vencimento: formatarDataParaExibicao(vencRaw),
             valorFace: parseFloat(r[4]) || 0,
             valorAberto: parseFloat(r[5]) || 0,
             status: String(r[6] || "").includes("Vencido") ? "Vencido" : "A Vencer",
@@ -141,21 +162,24 @@ export default function CarteiraDinamicaPage() {
         }
       }
 
-      // Processa títulos do FIDC
+      // Processa títulos do FIDC por posições puras de array
       if (linhasFidc.length > 1) {
         for (let i = 1; i < linhasFidc.length; i++) {
           const r = linhasFidc[i];
           if (!r || !r[0] || String(r[0]).trim().toUpperCase() === "CEDENTE") continue;
+
+          const cedenteNome = String(r[0]).trim().toUpperCase();
+          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
 
           const vencRaw = String(r[2] || "");
           const dtVenc = parseDataBR(vencRaw);
           const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
-            cedente: String(r[0]).trim().toUpperCase(),
+            cedente: cedenteNome,
             sacado: String(r[1]).trim().toUpperCase(),
             numeroTitulo: "-",
-            vencimento: formatarDataParaExibicao(vencRaw), // 🎯 Salva formatado bonitinho DD/MM/AAAA
+            vencimento: formatarDataParaExibicao(vencRaw),
             valorFace: parseFloat(r[3]) || 0,
             valorAberto: parseFloat(r[4]) || 0,
             status: String(r[5] || "").includes("Vencido") ? "Vencido" : "A Vencer",
@@ -175,7 +199,7 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🧮 CALCULO DINÂMICO DOS CARDZINHOS DO TOPO (Reatividade Instantânea Corrigida)
+  // 🧮 CARD DO TOPO: Previsão de recebimento calculando distâncias reais em dias
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
