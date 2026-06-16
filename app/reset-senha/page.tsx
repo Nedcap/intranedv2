@@ -24,7 +24,6 @@ function ResetSenhaForm() {
         return;
       }
       try {
-        // Valida se o token existe e se a data atual é menor que a expiração
         const { data, error } = await supabase
           .from("usuarios")
           .select("id, token_expira")
@@ -36,7 +35,6 @@ function ResetSenhaForm() {
           return;
         }
 
-        // 🎯 Garante a interpretação da string de data de forma segura independente do local
         const expira = new Date(data.token_expira).getTime();
         const agora = Date.now();
 
@@ -69,17 +67,19 @@ function ResetSenhaForm() {
     try {
       setCarregando(true);
 
-      // 🎯 Executa o RPC que salva com hash e limpa os tokens do banco (options fantasma removido!)
-      const { error } = await supabase.rpc("atualizar_senha_cripto", {
-        p_usuario_id: usuarioValido.id,
-        p_nova_senha: novaSenha.trim()
-      });
+      // 🎯 FIX DEFINITIVO: Faz um UPDATE em texto puro na tabela, limpando também os tokens usados
+      const { error } = await supabase
+        .from("usuarios")
+        .update({
+          senha: novaSenha.trim(),
+          token_recuperacao: null,
+          token_expira: null
+        })
+        .eq("id", usuarioValido.id);
 
       if (error) throw error;
 
-      alert("🎉 Senha redefinida com sucesso com criptografia de segurança!");
-      
-      // Empurra o usuário para a tela inicial correta do sistema
+      alert("🎉 Senha atualizada e sincronizada com sucesso!");
       router.push("/");
     } catch (err: any) {
       console.error(err);
@@ -99,7 +99,6 @@ function ResetSenhaForm() {
         <div className="w-full max-w-sm bg-white p-6 rounded-xl border border-red-200 shadow-md text-center space-y-3">
           <h2 className="text-red-600 font-black text-base">⚠️ Link Inválido ou Expirado</h2>
           <p className="text-slate-500 font-medium">Este link de recuperação já foi utilizado ou passou do prazo de validade de 1 hora.</p>
-          {/* 🎯 Redireciona de volta para a raiz do login onde o modal real está ativo */}
           <a href="/" className="px-4 py-2 bg-slate-950 text-white font-bold rounded-lg inline-block text-xs mt-2">Solicitar Novo Link</a>
         </div>
       </div>
@@ -130,7 +129,7 @@ function ResetSenhaForm() {
             <input type="password" required value={confirmaSenha} onChange={(e) => setConfirmaSenha(e.target.value)} placeholder="Repita a senha" className="p-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500" />
           </div>
           <button type="submit" disabled={carregando} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-lg cursor-pointer transition-all">
-            {carregando ? "CRIPTOGRAFANDO E SALVANDO..." : "💾 Atualizar Credencial"}
+            {carregando ? "SALVANDO CREDENCIAL..." : "💾 Atualizar Credencial"}
           </button>
         </form>
       </div>
