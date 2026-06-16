@@ -10,6 +10,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [carregando, setCarregando] = useState(false);
+  
+  // Estados para gerenciar a janela de recuperação de senha real
+  const [abrirAbasRecuperar, setAbrirAbasRecuperar] = useState(false);
+  const [emailRecuperar, setEmailRecuperar] = useState("");
+  const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false);
 
   useEffect(() => {
     const logado = localStorage.getItem("intraned_user");
@@ -24,7 +29,6 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
-      // 🔍 Busca exatamente como no seu arquivo original (Trazendo o dado bruto do e-mail)
       const { data, error } = await supabase
         .from("usuarios")
         .select("*")
@@ -33,7 +37,6 @@ export default function LoginPage() {
 
       if (error) throw error;
 
-      // 🔐 Validação de senha ultra-resiliente original
       const senhaBanco = data ? String(data.senha || data.senha_hash || "").trim() : "";
       const senhaDigitada = senha.trim();
 
@@ -42,7 +45,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Salva a sessão localmente mantendo os mapeamentos originais intactos
       localStorage.setItem("intraned_user", JSON.stringify({
         id: data.id,
         nome: data.nome,
@@ -61,11 +63,42 @@ export default function LoginPage() {
     }
   };
 
+  const dispararRecuperacaoDeSenha = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailRecuperar.trim()) return;
+
+    try {
+      setEnviandoRecuperacao(true);
+      
+      // Conecta diretamente na rota de API de recuperação interna que envia o Resend
+      const res = await fetch("/api/recuperar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailRecuperar.trim() }),
+      });
+
+      const resultado = await res.json();
+
+      if (!res.ok) {
+        throw new Error(resultado.error || "Falha ao processar solicitação");
+      }
+
+      alert("📧 Se o e-mail informado estiver cadastrado, as instruções de redefinição serão enviadas em instantes!");
+      setAbrirAbasRecuperar(false);
+      setEmailRecuperar("");
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ Erro no envio: ${err.message}. Garanta que as chaves de ambiente estão configuradas na Vercel.`);
+    } finally {
+      setEnviandoRecuperacao(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
       <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        {/* 🎯 CABEÇALHO AJUSTADO: TEXTO CENTRALIZADO E LOGO COLADA NO CANTO ESQUERDO DO TEXTO */}
+        {/* CABEÇALHO COM LOGO ALINHADA E TEXTO CENTRALIZADO */}
         <div className="flex flex-col items-center select-none text-center">
           <div className="relative w-fit mx-auto flex items-center h-8 pl-1">
             <img 
@@ -82,7 +115,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* FORMULÁRIO DE LOGIN */}
+        {/* FORMULÁRIO DE LOGIN DE ACESSO */}
         <form onSubmit={tratarLogin} className="space-y-4 pt-2">
           <div className="flex flex-col space-y-1">
             <label className="font-bold text-slate-700">E-mail:</label>
@@ -120,14 +153,47 @@ export default function LoginPage() {
         <div className="text-center pt-2">
           <button 
             type="button"
-            onClick={() => alert("Entre em contato com o administrador do sistema para verificar suas credenciais no Supabase.")}
-            className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0"
+            onClick={() => setAbrirAbasRecuperar(true)}
+            className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0 outline-none"
           >
             Esqueceu sua senha? Recuperar acesso
           </button>
         </div>
 
       </div>
+
+      {/* MODAL INTEGRADO DE RECUPERAÇÃO DE ACESSO REAL VIA RESEND API */}
+      {abrirAbasRecuperar && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-sm bg-white rounded-xl shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-slate-900 text-sm">🔒 Recuperar Acesso</h3>
+              <button type="button" onClick={() => setAbrirAbasRecuperar(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕</button>
+            </div>
+            <form onSubmit={dispararRecuperacaoDeSenha} className="space-y-4">
+              <div className="flex flex-col space-y-1">
+                <label className="font-bold text-slate-600 text-xs">Informe seu e-mail corporativo:</label>
+                <input 
+                  type="email"
+                  required
+                  placeholder="nome@nedcapital.com.br"
+                  value={emailRecuperar}
+                  onChange={(e) => setEmailRecuperar(e.target.value)}
+                  className="p-2 border border-slate-200 rounded-lg outline-none font-semibold text-xs focus:border-blue-500 bg-slate-50"
+                />
+              </div>
+              <button 
+                type="submit"
+                disabled={enviandoRecuperacao}
+                className="w-full p-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs tracking-tight transition-all disabled:opacity-50"
+              >
+                {enviandoRecuperacao ? "⏳ Solicitando Token..." : "Enviar E-mail de Recuperação"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
