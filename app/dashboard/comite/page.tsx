@@ -17,11 +17,11 @@ export default function ComitePage() {
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [novaMsg, setNovaMsg] = useState("");
-  const [diretoresBanco, setDiretoresBanco] = useState<string[]>([]);
 
-  const [membroVoto, setMembroVoto] = useState("");
+  // 🎯 Tipos de voto controlados pelo perfil logado
   const [opcaoVoto, setOpcaoVoto] = useState("");
   const [justificativaVoto, setJustificativaVoto] = useState("");
+  const [votoComoDecisao, setVotoComoDecisao] = useState(false); // Checkbox exclusivo para Master/Alyson
   const [enviandoVoto, setEnviandoVoto] = useState(false);
   
   const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
@@ -32,18 +32,6 @@ export default function ComitePage() {
 
   const [isMaster, setIsMaster] = useState(false);
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
-
-  const carregarDiretores = async () => {
-    try {
-      const { data } = await supabase
-        .from("usuarios")
-        .select("nome")
-        .ilike("cargo", "Diretor");
-      if (data) setDiretoresBanco(data.map(u => u.nome));
-    } catch (err) {
-      console.error("Erro ao buscar diretores:", err);
-    }
-  };
 
   const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
     if (!empresaNome) return;
@@ -115,15 +103,16 @@ export default function ComitePage() {
   };
 
   useEffect(() => {
-    carregarDiretores();
     carregarComite(); 
 
     try {
       const userStr = localStorage.getItem("intraned_user");
       if (userStr) {
         const parsed = JSON.parse(userStr);
-        setNomeUsuarioLogado(parsed.nome || "Comercial Ned");
-        if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") setIsMaster(true);
+        setNomeUsuarioLogado(parsed.nome || "Diretor Ned");
+        if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") {
+          setIsMaster(true);
+        }
       }
     } catch (e) { console.error(e); }
 
@@ -201,8 +190,7 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").update({ status: decisaoFinal }).eq("id", empresaItem.id);
       if (error) throw error;
 
-      // Master força decisão final -> Dispara e-mail obrigatoriamente
-      const emailsAlvo = await obter_emails_notificacao(e);
+      const emailsAlvo = await obtener_emails_notificacao(e);
       const corner = decisaoFinal === "Aprovado" ? "#059669" : "#ef4444";
       
       const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
@@ -225,25 +213,26 @@ export default function ComitePage() {
   };
 
   const processarVotoWeb = async (empresaItem: any) => {
-    if (!membroVoto || !opcaoVoto || !justificativaVoto) {
-      alert("Por favor, preencha todos os campos do voto.");
+    if (!opcaoVoto || !justificativaVoto) {
+      alert("Por favor, selecione o voto e preencha a justificativa.");
       return;
     }
     try {
       setEnviandoVoto(true);
       const e = empresaItem.empresa_nome;
       
-      // 1. Registra o voto de qualquer membro no banco de dados primeiro
+      // 🎯 Identifica a assinatura do voto baseado em quem está logado ou se marcou "Decisão"
+      const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
+
       await supabase.from("votos").insert({ 
         empresa_nome: e, 
-        membro_nome: membroVoto, 
+        membro_nome: autorDoVoto, 
         voto: opcaoVoto, 
         justificativa: justificativaVoto, 
-        email_enviado: membroVoto === "Decisão" // Só marca como enviado se for a decisão final
+        email_enviado: autorDoVoto === "Decisão"
       });
       
-      // 🎯 MODIFICAÇÃO DE REGRA: O e-mail de notificação de Ata SÓ dispara se quem votou for a "Decisão"
-      if (membroVoto === "Decisão") {
+      if (autorDoVoto === "Decisão") {
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
@@ -257,8 +246,9 @@ export default function ComitePage() {
         if (modoFocoComite) desativarModoLupaExecutiva();
       }
       
-      alert(membroVoto === "Decisão" ? "🏁 Comitê encerrado e Ata enviada!" : "🗳️ Voto consultivo registrado com sucesso!");
+      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata enviada!" : "🗳️ Seu voto foi computado ao vivo!");
       setJustificativaVoto(""); 
+      setVotoComoDecisao(false);
       await carregarVotosIniciais(e);
     } catch (err: any) { 
       alert(`❌ Erro ao computar voto: ${err.message}`);
@@ -329,7 +319,6 @@ export default function ComitePage() {
     } finally { setCarregando(false); }
   };
 
-  const idEmpresaExpandidaRef = idEmpresaExpandida;
   const ativarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setEditandoEmpresaExpandida(empresa.id);
@@ -404,24 +393,35 @@ export default function ComitePage() {
           {/* LADO DIREITO: DASHBOARD DECISÓRIO */}
           <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
             
-            {/* Bloco Voto */}
+            {/* Bloco Voto Autenticado */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md space-y-3 shrink-0 text-left">
-              <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider">🗳️ Registrar Voto Oficial</span>
-              <div className="grid grid-cols-2 gap-2">
-                <select value={membroVoto} onChange={(e) => setMembroVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer">
-                  <option value="">Diretor</option>
-                  {diretoresBanco.map((nomeDir) => (
-                    <option key={nomeDir} value={nomeDir}>{nomeDir}</option>
-                  ))}
-                  <option value="Decisão">⭐ Decisão</option>
-                </select>
-                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer">
-                  <option value="">Voto</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
-                </select>
+              <div className="flex justify-between items-center">
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">🗳️ Painel de Voto</span>
+                <span className="text-[11px] text-blue-400 font-bold bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900/50">
+                  👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
+                </span>
               </div>
-              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa técnica..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
+              
+              <div className="grid grid-cols-1 gap-2">
+                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer text-slate-200">
+                  <option value="">Selecione o seu Voto</option>
+                  <option value="Aprovado">🟢 Aprovado</option>
+                  <option value="Reprovado">🔴 Reprovado</option>
+                </select>
+
+                {/* 🎯 Gatilho Inteligente Alyson/Master: Se for master, habilita checkbox para assinar como Decisão Executiva */}
+                {isMaster && (
+                  <label className="flex items-center gap-2 p-1 text-slate-300 font-bold text-xs bg-slate-950/50 rounded border border-slate-800/80 cursor-pointer hover:bg-slate-950">
+                    <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-blue-600 rounded bg-slate-950 border-slate-800" />
+                    Assegurar este voto como a <span className="text-amber-400">Decisão Final</span>
+                  </label>
+                )}
+              </div>
+
+              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer do comitê..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
+              
               <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition-all cursor-pointer shadow-md">
-                {enviandoVoto ? "Computando Parecer..." : "Lançar Voto"}
+                {enviandoVoto ? "Computando Parecer..." : "Confirmar e Lançar Voto"}
               </button>
             </div>
 
@@ -510,8 +510,8 @@ export default function ComitePage() {
                   </td>
                   {isMaster && (
                     <td className="p-2.5 bg-slate-50 border-l border-slate-200 text-center space-x-2">
-                      <button onClick={() => forcarDecisaoMaster(item, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">✅ Aprovar</button>
-                      <button onClick={() => forcarDecisaoMaster(item, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black rounded text-[11px] uppercase cursor-pointer shadow-sm transition-all">⛔ Reprovar</button>
+                      <button onClick={() => forcarDecisaoMaster(item, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded uppercase tracking-wider transition-all">✅ Aprovar</button>
+                      <button onClick={() => forcarDecisaoMaster(item, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded uppercase tracking-wider transition-all">⛔ Reprovar</button>
                     </td>
                   )}
                 </tr>
