@@ -24,7 +24,7 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
-      // 🔍 Busca puxando o usuário pelo e-mail formatado
+      // 🔍 Busca exatamente como no seu arquivo original (Trazendo o dado bruto do e-mail)
       const { data, error } = await supabase
         .from("usuarios")
         .select("*")
@@ -33,7 +33,7 @@ export default function LoginPage() {
 
       if (error) throw error;
 
-      // 🔐 Validação ultra-resiliente de senha (limpa espaços em branco e quebras de linha invisíveis)
+      // 🔐 Validação de senha ultra-resiliente original
       const senhaBanco = data ? String(data.senha || data.senha_hash || "").trim() : "";
       const senhaDigitada = senha.trim();
 
@@ -42,7 +42,7 @@ export default function LoginPage() {
         return;
       }
 
-      // Salva a sessão localmente
+      // Salva a sessão localmente mantendo os mapeamentos originais intactos
       localStorage.setItem("intraned_user", JSON.stringify({
         id: data.id,
         nome: data.nome,
@@ -65,13 +65,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
       <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        {/* 🎯 CABEÇALHO CORRIGIDO: LOGO APROXIMADA E TEXTO PERFEITAMENTE CENTRALIZADO */}
+        {/* 🎯 CABEÇALHO AJUSTADO: TEXTO CENTRALIZADO E LOGO COLADA NO CANTO ESQUERDO DO TEXTO */}
         <div className="flex flex-col items-center select-none text-center">
-          <div className="relative w-fit mx-auto flex items-center h-8 pl-2">
+          <div className="relative w-fit mx-auto flex items-center h-8 pl-1">
             <img 
               src="/favicon.ico" 
               alt="Ned Capital" 
-              className="absolute -left-9 h-8 w-auto object-contain shrink-0" 
+              className="absolute -left-7 h-7 w-auto object-contain shrink-0" 
             />
             <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
               Intra<span className="text-blue-500">Ned</span>
