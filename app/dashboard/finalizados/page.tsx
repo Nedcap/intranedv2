@@ -49,6 +49,7 @@ export default function FinalizadosPage() {
   const [editDataRec, setEditDataRec] = useState("");
   const [editDataEnvio, setEditDataEnvio] = useState("");
 
+  const [busca, setBusca] = useState(""); // 🎯 Controla o input de busca textual
   const [mesesSel, setMesesSel] = useState<string[]>([]);
   const [cedentesSel, setCedentesSel] = useState<string[]>([]);
   const [termoBuscaCedente, setTermoBuscaCedente] = useState("");
@@ -98,7 +99,6 @@ export default function FinalizadosPage() {
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
-        // 🎯 Fix: Filtro tolerante e robusto. Se o status contiver termos de conclusão, o registro entra no histórico mesmo possuindo a palavra "comitê" no texto
         let filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase().trim();
           
@@ -126,6 +126,8 @@ export default function FinalizadosPage() {
           if (dRec) {
             mesRef = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
             mesesUnicos.add(mesRef);
+          } else {
+            mesesUnicos.add("S/D"); // Garante o fallback mapeado
           }
           if (dRec && dFim) {
             slaCalculado = calcularDiasUteis(dRec, dFim);
@@ -143,9 +145,10 @@ export default function FinalizadosPage() {
         setListaMeses(mesesOrdenados);
         setListaCedentes(Array.from(cedentesUnicos).sort());
         
-        // Exibe todas as movimentações históricas por padrão ao carregar
-        setMesesSel(prev => prev.length === 0 && mesesOrdenados.length > 0 ? mesesOrdenados : prev);
+        // Inicializa contendo todos os meses (inclusive S/D se houver) para evitar quebras
+        setMesesSel(mesesOrdenados);
         setHistorico(historicoMapeado);
+        setCedentesSel(Array.from(cedentesUnicos));
       }
     } catch (err) { 
       console.error(err); 
@@ -322,9 +325,17 @@ export default function FinalizadosPage() {
     return dt.toLocaleDateString("pt-BR");
   };
 
+  // 🎯 Fix: O filtro da tabela agora inclui a barra de busca por texto e ignora travas de dropdown se houver texto digitado
   const historicoFiltrado = historico.filter((item) => {
+    const nomeEmpresa = item.empresa_nome || "";
+    
+    // Se o usuário digitou algo na barra de busca por texto, ele ignora os filtros de caixinha para trazer o dado bruto
+    if (busca.trim() !== "") {
+      return nomeEmpresa.toLowerCase().includes(busca.toLowerCase());
+    }
+
     const bateMes = mesesSel.length === 0 || mesesSel.includes(item._mesRef);
-    const bateCed = cedentesSel.length === 0 || cedentesSel.includes(simplificarNome(item.empresa_nome));
+    const bateCed = cedentesSel.length === 0 || cedentesSel.includes(simplificarNome(nomeEmpresa));
     return bateMes && bateCed;
   });
 
@@ -418,6 +429,18 @@ export default function FinalizadosPage() {
           <span className="text-[11px] font-black text-blue-700 block uppercase tracking-wider">SLA Médio de Retorno</span>
           <div className="text-3xl font-black text-blue-700 mt-1.5">{mediaSLA} {parseFloat(mediaSLA) === 1 ? "dia" : "dias"}</div>
         </div>
+      </div>
+
+      {/* INPUT DE BUSCA TEXTUAL */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-slate-200 pb-2 pt-2">
+        <h2 className="text-sm font-bold text-slate-500 tracking-tight uppercase">📋 Registros Filtrados da Carteira</h2>
+        <input 
+          type="text" 
+          placeholder="🔎 Buscar empresa por digitação direta..." 
+          value={busca} 
+          onChange={(e) => setBusca(e.target.value)} 
+          className="p-1.5 border border-slate-200 rounded text-xs outline-none bg-white focus:border-blue-500 w-72 font-bold shadow-xs" 
+        />
       </div>
 
       {/* TABELA DE HISTORICO */}
