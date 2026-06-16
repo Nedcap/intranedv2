@@ -100,6 +100,32 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", clickFora);
   }, []);
 
+  // 📡 Interpretador de Planilhas Google nativo e veloz da V1 integrado à V2
+  const fetchGoogleSheet = async (sheetName: string) => {
+    try {
+      const sheetId = "1uJ_BysO5VW6DLxoDuoy2ZKzEtRBcptydAa87Ih8cRCw";
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+      const res = await fetch(url);
+      const text = await res.text();
+      const jsonString = text.substring(text.indexOf("({") + 1, text.lastIndexOf("})") + 1);
+      const jsonData = JSON.parse(jsonString);
+      const headers = jsonData.table.cols.map((c: any) => c?.label?.trim().toLowerCase() || "");
+      
+      return jsonData.table.rows.map((r: any) => {
+        const rowData: any = {};
+        r.c.forEach((cell: any, i: number) => {
+          if (headers[i]) {
+            rowData[headers[i]] = cell ? ((cell.f || cell.v) ?? null) : null;
+          }
+        });
+        return rowData;
+      });
+    } catch (error) {
+      console.error(`Erro ao buscar aba ${sheetName}:`, error);
+      return [];
+    }
+  };
+
   const carregarDashboardFiel = async () => {
     try {
       setCarregando(true);
@@ -120,7 +146,7 @@ export default function DashboardPage() {
         }
       }
 
-      // 1. Carrega Métricas do Comitê de Crédito
+      // 1. Carrega Métricas do Comitê de Crédito (Supa)
       let queryAnalises = supabase.from("analises").select("*");
       if (isComercial) {
         queryAnalises = queryAnalises.eq("comercial", userNome);
@@ -128,81 +154,79 @@ export default function DashboardPage() {
       const resAnalises = await queryAnalises;
       setAnalises(resAnalises.data || []);
 
-      // 2. Busca e Agrupa as Finanças (VOP e Receitas) do Banco de Dados V2
-      let queryFinancas = supabase.from("extrato_financeiro").select("*");
-      if (isComercial) {
-        queryFinancas = queryFinancas.in("cedente", allowedCedentes);
-      }
-      const { data: financasRaw } = await queryFinancas;
+      // 2. Coleta em lote os dados do Google Sheets preenchido
+      const [vopRaw, cartRaw, receitasRaw] = await Promise.all([
+        fetchGoogleSheet("LANCAMENTOS_VOP"),
+        fetchGoogleSheet("BASE_CARTEIRA"),
+        fetchGoogleSheet("RECEITAS")
+      ]);
 
+      // 3. Processamento das regras de cruzamento de VOP com Trava Comercial
       const vopMap: { [key: string]: any } = {};
-      const recMap: { [key: string]: any } = {};
-
-      (financasRaw || []).forEach((r: any) => {
-        const rawCedente = r.cedente || "";
-        const cedente = simplificarNome(rawCedente);
+      vopRaw.forEach((r: any) => {
+        const cedente = simplificarNome(r["cedente"]);
         if (!cedente) return;
+        
+        // Se for Comercial, ignora dados de cedentes de terceiros
+        if (isComercial && !allowedCedentes.includes(cedente)) return;
 
-        // Suporta as variações de nomes de colunas que vieram na unificação das tabelas
-        const mes_ano = String(r.mes_ano || r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
-        const emp = String(r.empresa || "").trim().toUpperCase();
-        const dataOp = String(r.data_operacao || r.data || r["mês/ano"] || r["mes/ano"] || "").trim();
-
-        // Agrupamento estrutural do VOP
-        const chaveVop = `${cedente}_${mes_ano}`;
-        if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano, cedente, vop_sec: 0, vop_fidc: 0 };
-        vopMap[chaveVop].vop_sec += parseValorReal(r.vop_sec || r["vop sec"] || (emp === "SEC" ? r.vop : 0));
-        vopMap[chaveVop].vop_fidc += parseValorReal(r.vop_fidc || r["vop fidc"] || (emp === "FIDC" ? r.vop : 0));
-
-        // Agrupamento estrutural das Receitas
-        if (dataOp) {
-          const chaveRec = `${emp}_${dataOp}_${cedente}`;
-          if (!recMap[chaveRec]) {
-            recMap[chaveRec] = { empresa: emp, data: dataOp, mes_ano: extrairMesAnoDeDataBR(dataOp) || mes_ano, cedente, desagio: 0, tarifas: 0, juros: 0 };
-          }
-          recMap[chaveRec].desagio += parseValorReal(r.desagio || r["deságio"] || r["deságio retido"] || 0);
-          recMap[chaveRec].tarifas += parseValorReal(r.tarifas || r.despesas || r["tarifas / despesas"] || 0);
-          recMap[chaveRec].juros += parseValorReal(r.juros || r["juros e multa"] || r["juros"] || r.encargos || 0);
-        }
+        const mes_ano = String(r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
+        const chave = `${cedente}_${mes_ano}`;
+        if (!vopMap[chave]) vopMap[chave] = { mes_ano, cedente, vop_sec: 0, vop_fidc: 0 };
+        vopMap[chave].vop_sec += parseValorReal(r["vop sec"]);
+        vopMap[chave].vop_fidc += parseValorReal(r["vop fidc"]);
       });
-
       const vopFinal = Object.values(vopMap);
-      const recFinal = Object.values(recMap);
       setDashVop(vopFinal);
-      setDashReceitas(recFinal);
 
-      // 3. Busca a Foto de Riscos e Títulos Vencidos Direto do Cadastro Oficial (Substitui a BASE_CARTEIRA)
-      let queryCadastro = supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc, vencido_sec, vencido_fidc, comercial");
-      if (isComercial) {
-        queryCadastro = queryCadastro.eq("comercial", userNome);
-      }
-      const { data: cadastroRaw } = await queryCadastro;
-
+      // 4. Processamento das regras de cruzamento de Carteira (Risco) com Trava Comercial
       const cartMap: { [key: string]: any } = {};
-      (cadastroRaw || []).forEach((c: any) => {
-        const cedente = simplificarNome(c.cedente);
+      cartRaw.forEach((r: any) => {
+        const cedente = simplificarNome(r["cedente"]);
         if (!cedente) return;
+
+        // Se for Comercial, ignora dados de risco de terceiros
+        if (isComercial && !allowedCedentes.includes(cedente)) return;
 
         if (!cartMap[cedente]) {
           cartMap[cedente] = { cedente, risco_consolidated: 0, risco_sec: 0, risco_fidc: 0, vencidos_securitizadora: 0, vencidos_fidc: 0 };
         }
-        
-        const rSec = parseValorReal(c.risco_sec);
-        const rFidc = parseValorReal(c.risco_fidc);
-        const vSec = parseValorReal(c.vencido_sec);
-        const vFidc = parseValorReal(c.vencido_fidc);
-
-        cartMap[cedente].risco_consolidated += (rSec + rFidc);
-        cartMap[cedente].risco_sec += rSec;
-        cartMap[cedente].risco_fidc += rFidc;
-        cartMap[cedente].vencidos_securitizadora += vSec;
-        cartMap[cedente].vencidos_fidc += vFidc;
+        cartMap[cedente].risco_consolidated += parseValorReal(r["risco total"] || r["risco consolidado"]);
+        cartMap[cedente].risco_sec += parseValorReal(r["risco sec"] || r["risco securitizadora"]);
+        cartMap[cedente].risco_fidc += parseValorReal(r["risco fidc"]);
+        cartMap[cedente].vencidos_securitizadora += parseValorReal(r["vencido sec"] || r["vencidos sec"]);
+        cartMap[cedente].vencidos_fidc += parseValorReal(r["vencido fidc"] || r["vencidos fidc"]);
       });
-      
       const cartFinal = Object.values(cartMap);
       setDashCarteira(cartFinal);
 
-      // 4. Criação Dinâmica dos Filtros Cruzados
+      // 5. Processamento das regras de cruzamento de Receitas com Trava Comercial
+      const recMap: { [key: string]: any } = {};
+      receitasRaw.forEach((r: any) => {
+        const emp = String(r["empresa"] || "").trim().toUpperCase();
+        const rawCedente = String(r["cedente"] || "").trim();
+        const dataOp = String(r["data"] || r["mês/ano"] || r["mes/ano"] || "").trim();
+        if (!rawCedente || !dataOp) return;
+
+        const cedente = simplificarNome(rawCedente);
+        // Se for Comercial, ignora receitas de terceiros
+        if (isComercial && !allowedCedentes.includes(cedente)) return;
+
+        const mes_ano = extrairMesAnoDeDataBR(dataOp);
+        const chave = `${emp}_${dataOp}_${cedente}`;
+
+        if (!recMap[chave]) {
+          recMap[chave] = { empresa: emp, data: dataOp, mes_ano, cedente, desagio: 0, tarifas: 0, juros: 0 };
+        }
+        
+        recMap[chave].desagio += parseValorReal(r["deságio"] || r["desagio"] || r["deságio retido"] || 0);
+        recMap[chave].tarifas += parseValorReal(r["tarifas"] || r["despesas"] || r["tarifas / despesas"] || 0);
+        recMap[chave].juros += parseValorReal(r["juros e multa"] || r["juros"] || r["encargos"] || 0); 
+      });
+      const recFinal = Object.values(recMap);
+      setDashReceitas(recFinal);
+
+      // 6. Montagem dos Meses e Cedentes Permitidos para Filtro na Tela
       const mesesUnicos = Array.from(new Set([
         ...vopFinal.map(v => formatarMesAno(v.mes_ano)),
         ...recFinal.map(r => formatarMesAno(r.mes_ano))
@@ -222,7 +246,7 @@ export default function DashboardPage() {
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
 
     } catch (err) {
-      console.error("Erro no processamento geral do Dashboard:", err);
+      console.error("Erro no processamento geral do Dashboard via Sheets:", err);
     } finally {
       setCarregando(false);
     }
@@ -230,15 +254,15 @@ export default function DashboardPage() {
 
   useEffect(() => { carregarDashboardFiel(); }, []);
 
-  const sincronizarBancoLocal = async () => {
+  const sincronizarGoogleSheets = async () => {
     setSincronizando(true);
     await carregarDashboardFiel();
     setSincronizando(false);
-    alert("🎉 Painel atualizado com sucesso direto da base de dados Supabase!");
+    alert("🔄 Sincronizado! Planilhas lidas em tempo real com mapeamento comercial ativo.");
   };
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
-    const bateEmpresa = empresasSel.includes(emp.toUpperCase());
+    const bateEmpresa = Pattern = empresasSel.includes(emp.toUpperCase());
     const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
     const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced.toUpperCase());
     return bateEmpresa && bateMes && bateCedente;
@@ -313,7 +337,7 @@ export default function DashboardPage() {
 
   const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
-  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Montando Estrutura de Filtros Multi-Seleção...</div>;
+  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Puxando dados vivos das planilhas...</div>;
 
   return (
     <div className="space-y-8 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans text-slate-800">
@@ -398,6 +422,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* CARDS METRICOS */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-1 text-center">Crédito e Cadastro</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -502,25 +527,3 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="flex justify-between items-center bg-slate-50 border border-slate-200 p-4 rounded-xl mt-8 shadow-xs">
-        <div className="flex items-center gap-3">
-          <span className="text-xl">📊</span>
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-slate-700">Painel Integrado Ned Capital</span>
-            <span className="text-[10px] font-bold text-slate-400">🔥 Filtros Cruzados Multi-Seleção e Receitas Integradas</span>
-          </div>
-        </div>
-        <button 
-          onClick={sincronizarBancoLocal} 
-          disabled={sincronizando}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs shadow-sm disabled:opacity-50"
-        >
-          {sincronizando ? "⏳ Consolidando..." : "🔄 Atualizar Dados do Supabase"}
-        </button>
-      </div>
-
-    </div>
-  );
-}
