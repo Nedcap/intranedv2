@@ -84,3 +84,22 @@ export const fetchGoogleSheet = async (sheetName: string) => {
     return [];
   }
 };
+
+export const carregarPlanilhaCarteiraGviz = async (sheetName: string) => {
+  try {
+    const sheetId = "1uJ_BysO5VW6DLxoDuoy2ZKzEtRBcptydAa87Ih8cRCw";
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+    const res = await fetch(url);
+    const text = await res.text();
+    const jsonString = text.substring(text.indexOf("({") + 1, text.lastIndexOf("})") + 1);
+    const jsonData = JSON.parse(jsonString);
+
+    // Mapeia as linhas dinamicamente para o formato de matriz [col1, col2, col3...] igual a API antiga esperava
+    return jsonData.table.rows.map((r: any) => {
+      return r.c.map((cell: any) => cell ? (cell.v ?? null) : null);
+    });
+  } catch (error) {
+    console.error(`Erro ao buscar aba ${sheetName} via GViz:`, error);
+    return [];
+  }
+};

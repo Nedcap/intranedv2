@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { carregarPlanilhaCarteiraGviz } from "@/actions/dashboard-service";
 
 // ============================================================================
 // 🧱 INTERFACES DE DADOS
@@ -15,7 +16,7 @@ interface Titulo {
   valorAberto: number;
   status: "Vencido" | "A Vencer";
   origem: "SEC" | "FIDC";
-  diasParaVencer: number; // ⏳ Guarda a distância exata até o vencimento
+  diasParaVencer: number; 
 }
 
 interface AgregacaoEmpresa {
@@ -41,39 +42,34 @@ export default function CarteiraDinamicaPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
-  // 🎛️ ESTADO DO SIMULADOR DE DIAS (CARD DINÂMICO)
-  const [diasProjecao, setDiasProjecao] = useState<number>(30); // Default: próximos 30 dias
+  const [diasProjecao, setDiasProjecao] = useState<number>(30); 
 
-  // 📊 ESTADOS DE ORDENAÇÃO DA TABELA MASTER (ESTILO EXCEL)
-  const [ordenacaoMaster, setOrdenacaoMaster] = useState<string>("nome"); // nome | totalFace | totalAberto | totalVencido | totalAVencer
+  const [ordenacaoMaster, setOrdenacaoMaster] = useState<string>("nome"); 
   const [direcaoMaster, setDirecaoMaster] = useState<"asc" | "desc">("asc");
 
-  // Estados de Expansão de Linhas
   const [cedentesExpandidos, setCedentesExpandidos] = useState<Record<string, boolean>>({});
   const [subExpandidos, setSubExpandidos] = useState<Record<string, boolean>>({}); 
 
-  // Estados dos Filtros das Sub-tabelas (Nível 3)
   const [filtroSacado, setFiltroSacado] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
   const [ordenacaoDirecaoSub, setOrdenacaoDirectionSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS DIRETO DO GOOGLE SHEETS VIA API
+  // 📥 BUSCA DADOS UTILIZANDO O METODO SEGURO LIVRE DE CHAVES
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
       setErro(null);
 
-      const resSec = await fetch("/api/importacao?range=CARTEIRA_SEC!A:G");
-      const resFidc = await fetch("/api/importacao?range=CARTEIRA_FIDC!A:F");
+      // Puxa direto da nova integração estável
+      const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
+      const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
 
-      if (!resSec.ok || !resFidc.ok) throw new Error("Erro ao conectar com a API de importação.");
+      if (!valoresSec || !valoresFidc) throw new Error("Erro ao coletar dados das matrizes do Google Sheets.");
 
-      const jsonSec = await resSec.json();
-      const jsonFidc = await resFidc.json();
-
-      const linhasSec = jsonSec.values || [];
-      const linhasFidc = jsonFidc.values || [];
+      // Adiciona uma linha em branco fake no index 0 para simular o comportamento da API antiga (linhasSec[0] era o cabeçalho)
+      const linhasSec = [[], ...valoresSec];
+      const linhasFidc = [[], ...valoresFidc];
 
       const listaTitulos: Titulo[] = [];
       
@@ -81,7 +77,8 @@ export default function CarteiraDinamicaPage() {
       hoje.setHours(12, 0, 0, 0);
 
       const parseDataBR = (dStr: string) => {
-        const p = dStr.split("/");
+        if (!dStr) return null;
+        const p = String(dStr).split("/");
         if (p.length !== 3) return null;
         return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
       };
@@ -90,9 +87,9 @@ export default function CarteiraDinamicaPage() {
       if (linhasSec.length > 1) {
         for (let i = 1; i < linhasSec.length; i++) {
           const r = linhasSec[i];
-          if (!r[0]) continue;
+          if (!r || !r[0]) continue;
 
-          const venc = String(r[3]);
+          const venc = String(r[3] || "");
           const dtVenc = parseDataBR(venc);
           const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
@@ -103,7 +100,7 @@ export default function CarteiraDinamicaPage() {
             vencimento: venc,
             valorFace: parseFloat(r[4]) || 0,
             valorAberto: parseFloat(r[5]) || 0,
-            status: String(r[6]).includes("Vencido") ? "Vencido" : "A Vencer",
+            status: String(r[6] || "").includes("Vencido") ? "Vencido" : "A Vencer",
             origem: "SEC",
             diasParaVencer: diffDias
           });
@@ -114,9 +111,9 @@ export default function CarteiraDinamicaPage() {
       if (linhasFidc.length > 1) {
         for (let i = 1; i < linhasFidc.length; i++) {
           const r = linhasFidc[i];
-          if (!r[0]) continue;
+          if (!r || !r[0]) continue;
 
-          const venc = String(r[2]);
+          const venc = String(r[2] || "");
           const dtVenc = parseDataBR(venc);
           const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
@@ -127,7 +124,7 @@ export default function CarteiraDinamicaPage() {
             vencimento: venc,
             valorFace: parseFloat(r[3]) || 0,
             valorAberto: parseFloat(r[4]) || 0,
-            status: String(r[5]).includes("Vencido") ? "Vencido" : "A Vencer",
+            status: String(r[5] || "").includes("Vencido") ? "Vencido" : "A Vencer",
             origem: "FIDC",
             diasParaVencer: diffDias
           });
@@ -136,7 +133,7 @@ export default function CarteiraDinamicaPage() {
 
       setTitulosOriginais(listaTitulos);
     } catch (err: any) {
-      setErro(err.message || "Erro desconhecido.");
+      setErro(err.message || "Erro desconhecido ao montar a esteira analítica.");
     } finally {
       setCarregando(false);
     }
@@ -144,7 +141,6 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🧮 CALCULO DINÂMICO DOS CARDZINHOS DO TOPO
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
@@ -160,7 +156,6 @@ export default function CarteiraDinamicaPage() {
     return { totalVencido, totalProjetadoAVencer };
   }, [titulosOriginais, diasProjecao]);
 
-  // 📊 MOTOR DA TABELA DINÂMICA COM ORDENAÇÃO DE COLUNA MASTER (ESTILO EXCEL)
   const carteiraAgregada = useMemo(() => {
     const agrupamento: Record<string, AgregacaoCedente> = {};
 
@@ -192,7 +187,6 @@ export default function CarteiraDinamicaPage() {
       }
     });
 
-    // Executa a ordenação dinâmica na tabela principal
     return Object.values(agrupamento).sort((a: any, b: any) => {
       let valA = a[ordenacaoMaster] || 0;
       let valB = b[ordenacaoMaster] || 0;
@@ -207,13 +201,12 @@ export default function CarteiraDinamicaPage() {
     });
   }, [titulosOriginais, ordenacaoMaster, direcaoMaster]);
 
-  // Alternador de Ordenação do Roteador Master
   const lidarOrdenacaoMaster = (coluna: string) => {
     if (ordenacaoMaster === columnToKey(coluna)) {
       setDirecaoMaster(p => p === "asc" ? "desc" : "asc");
     } else {
       setOrdenacaoMaster(columnToKey(coluna));
-      setDirecaoMaster("desc"); // Inicializa do maior para o menor para valores
+      setDirecaoMaster("desc"); 
     }
   };
 
@@ -244,7 +237,7 @@ export default function CarteiraDinamicaPage() {
 
         if (ordenacaoColunaSub === "vencimento") {
           const parseData = (dStr: string) => {
-            const p = dStr.split("/");
+            const p = String(dStr).split("/");
             if (p.length !== 3) return 0;
             return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0])).getTime();
           };
@@ -285,9 +278,8 @@ export default function CarteiraDinamicaPage() {
         </button>
       </div>
 
-      {/* 🔮 INTERFACE DOS CARDZINHOS INTERATIVOS DE STRESS DE PRAZO */}
+      {/* KPI CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card 1: Vencidos */}
         <div className="bg-white border-l-4 border-rose-600 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-center">
             <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Total Carteira Vencida (Hoje)</span>
@@ -297,7 +289,6 @@ export default function CarteiraDinamicaPage() {
           <span className="text-[10px] text-slate-400 font-medium mt-1">Soma de todos os títulos com vencimento anterior à data atual.</span>
         </div>
 
-        {/* Card 2: Simulador de Liquidez Futura (A Vencer) */}
         <div className="bg-white border-l-4 border-blue-600 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-center">
             <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
@@ -317,7 +308,7 @@ export default function CarteiraDinamicaPage() {
         </div>
       </div>
 
-      {/* 📊 TABELA MASTER DINÂMICA */}
+      {/* MASTER DYNAMIC TABLE */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -335,7 +326,7 @@ export default function CarteiraDinamicaPage() {
               const cedExpandido = !!cedentesExpandidos[cedente.nome];
               return (
                 <tr key={cedente.nome} style={{ display: "contents" }}>
-                  {/* NÍVEL 1: LINHA DO CEDENTE */}
+                  {/* LEVEL 1 ROW */}
                   <tr className="bg-slate-50 font-bold text-slate-900 border-l-4 border-slate-700 hover:bg-slate-100/80 transition-colors">
                     <td className="p-2.5 text-center">
                       <button onClick={() => toggleCedente(cedente.nome)} className="w-5 h-5 bg-slate-200 text-slate-800 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs">
@@ -349,10 +340,10 @@ export default function CarteiraDinamicaPage() {
                     <td className="p-2.5 text-right font-mono bg-emerald-50/40 text-emerald-700">{formatarMoeda(cedente.totalAVencer)}</td>
                   </tr>
 
-                  {/* NÍVEL 2 */}
+                  {/* LEVEL 2 ROW */}
                   {cedExpandido && (
                     <tr style={{ display: "contents" }}>
-                      {/* SECURITIZADORA */}
+                      {/* SECURITIZADORA SUB-ROW */}
                       {cedente.sec.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
                           <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
@@ -368,7 +359,7 @@ export default function CarteiraDinamicaPage() {
                             <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.sec.aVencer)}</td>
                           </tr>
 
-                          {/* NÍVEL 3: SECURITIZADORA */}
+                          {/* LEVEL 3 TABLE (SECURITIZADORA) */}
                           {subExpandidos[`${cedente.nome}|||SEC`] && (
                             <tr>
                               <td colSpan={6} className="bg-slate-100/50 p-4">
@@ -421,7 +412,7 @@ export default function CarteiraDinamicaPage() {
                         </tr>
                       )}
 
-                      {/* FIDC */}
+                      {/* FIDC SUB-ROW */}
                       {cedente.fidc.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
                           <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
@@ -437,7 +428,7 @@ export default function CarteiraDinamicaPage() {
                             <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.fidc.aVencer)}</td>
                           </tr>
 
-                          {/* NÍVEL 3: FIDC */}
+                          {/* LEVEL 3 TABLE (FIDC) */}
                           {subExpandidos[`${cedente.nome}|||FIDC`] && (
                             <tr>
                               <td colSpan={6} className="bg-slate-100/50 p-4">
