@@ -104,7 +104,6 @@ export default function AnaliseEstoqueCedentesPage() {
         let startIdx = -1;
         let separadorDefinido = ",";
         
-        // Procura a linha de cabeçalho contendo a coluna mestre NOME_DO_CEDENTE
         for (let i = 0; i < Math.min(lines.length, 50); i++) {
           const l = lines[i];
           if (l.includes("NOME_DO_CEDENTE")) {
@@ -131,15 +130,8 @@ export default function AnaliseEstoqueCedentesPage() {
         const idxNominal = headers.indexOf("VALOR_NOMINAL");
         const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
         
-        // Identifica dinamicamente a coluna de PRAZO (priorizando a do final)
-        let idxPrazoOriginal = headers.lastIndexOf("PRAZO");
-        if (idxPrazoOriginal === -1) idxPrazoOriginal = headers.indexOf("PRAZO");
-
-        // Identifica dinamicamente a coluna de TAXA (procurando variações do arquivo)
-        let idxTaxa = headers.indexOf("TAXA_DA_CESSAO");
-        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA FINAL");
-        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA_FINAL");
-        if (idxTaxa === -1) idxTaxa = headers.indexOf("TAXA_DO_ATIVO");
+        // 🎯 CAPTURA O PRIMEIRO ÍNDICE DE PRAZO (O Prazo de Originação longo da esquerda)
+        const idxPrazoMestre = headers.indexOf("PRAZO");
 
         const payloadParaInsercao: any[] = [];
 
@@ -163,10 +155,13 @@ export default function AnaliseEstoqueCedentesPage() {
           const valorNominal = limparNumero(colunas[idxNominal]);
           const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
           
-          const prazoDias = idxPrazoOriginal !== -1 ? Math.max(parseInt(colunas[idxPrazoOriginal]) || 1, 1) : 1;
-          const taxaFinalCalculada = idxTaxa !== -1 ? limparNumero(colunas[idxTaxa]) : 0;
+          // Pega o prazo do escopo mestre longo da esquerda
+          const prazoDias = idxPrazoMestre !== -1 ? Math.max(parseInt(colunas[idxPrazoMestre]) || 1, 1) : 1;
+          
+          // 🎯 A FÓRMULA MATEMÁTICA REAL DO SEU CHEFE INJETADA NA UNIDADE DE MEMÓRIA:
+          const taxaFinalCalculada = Math.pow(1 + (valorNominal - precoAquisicao) / (precoAquisicao || 1), 30 / prazoDias) - 1;
 
-          // Multiplicação das Massas Financeiras Ponderadas
+          // Cálculo exato das massas de ponderação para a tabela dinâmica bater cravada
           const colunaPrazoMassa = prazoDias * valorNominal;
           const colunaTaxaMassa = taxaFinalCalculada * valorNominal;
 
@@ -184,18 +179,12 @@ export default function AnaliseEstoqueCedentesPage() {
           });
         }
 
-        if (payloadParaInsercao.length === 0) {
-          alert("⚠️ Nenhuma linha de título válida foi processada.");
-          setCarregando(false);
-          return;
-        }
-
-        setStatusStatusTexto(`Injetando carga unificada de ${payloadParaInsercao.length} registros...`);
+        setStatusStatusTexto(`Subindo carga atômica de ${payloadParaInsercao.length} registros...`);
         const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         
         if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso! Foram importados ${payloadParaInsercao.length} títulos alinhados com a auditoria.`);
+        alert(`🏁 Sucesso total! Estoque recalculado e ${payloadParaInsercao.length} registros sincronizados.`);
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
