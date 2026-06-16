@@ -3,36 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-
-function calcularDiasUteis(dInicio: Date, dFim: Date) {
-  let count = 0;
-  const atual = new Date(dInicio.getTime());
-  atual.setHours(12, 0, 0, 0);
-  const fim = new Date(dFim.getTime());
-  fim.setHours(12, 0, 0, 0);
-  if (fim < atual) return 0;
-  while (atual < fim) {
-    atual.setDate(atual.getDate() + 1);
-    const diaSemana = atual.getDay();
-    if (diaSemana !== 0 && diaSemana !== 6) {
-      count++;
-    }
-  }
-  return count;
-}
-
-function parseDataSegura(dataStr: string) {
-  if (!dataStr) return null;
-  const apenasData = dataStr.trim().split("T")[0];
-  return new Date(`${apenasData}T12:00:00`);
-}
-
-function simplificarNome(nome: string): string {
-  if (!nome) return "";
-  let n = nome.trim().toUpperCase();
-  n = n.replace(/\b(LTDA|SA|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, "");
-  return n.replace(/\s+/g, " ").trim();
-}
+import { simplificarNome, parseDataSegura, calcularDiasUteis } from "@/actions/dashboard-service";
 
 export default function FinalizadosPage() {
   const [historico, setHistorico] = useState<any[]>([]);
@@ -75,29 +46,25 @@ export default function FinalizadosPage() {
       setCarregando(true);
       
       const userStr = localStorage.getItem("intraned_user");
-      let allowedCedentes: string[] = [];
-      let isComercial = false;
+      let query = supabase.from("analises").select("*");
 
       if (userStr) {
         const user = JSON.parse(userStr);
         const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        
+        // Isola o comercial na query nativa para performance máxima
         if (cargoUser === "comercial") {
-          isComercial = true;
-          const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-          if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
+          query = query.eq("comercial", user.nome);
         }
       }
 
-      const { data } = await supabase.from("analises").select("*").order("criado_em", { ascending: false });
+      const { data } = await query.order("criado_em", { ascending: false });
       if (data) {
-        let filtrado = data.filter(a => {
+        // Filtra para remover o que está aberto ou em comitê ativo
+        const filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase();
           return !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "";
         });
-
-        if (isComercial) {
-          filtrado = filtrado.filter(a => allowedCedentes.includes(simplificarNome(a.empresa_nome)));
-        }
 
         const mesesUnicos = new Set<string>();
         const cedentesUnicos = new Set<string>();
@@ -106,7 +73,8 @@ export default function FinalizadosPage() {
           let mesRef = "S/D";
           let slaCalculado = 0;
           const dRec = parseDataSegura(item.data_recebimento);
-          const dFim = parseDataSegura(item.created_em || item.criado_em || item.atualizado_em);
+          // 🎯 Fix: SLA calculado estritamente pela coluna oficial de criação da pauta
+          const dFim = parseDataSegura(item.criado_em);
 
           if (dRec) {
             mesRef = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
@@ -142,18 +110,18 @@ export default function FinalizadosPage() {
   const iniciarEdicao = (item: any) => {
     setLinhaEditando(item.id);
     const dtRec = item.data_recebimento ? item.data_recebimento.split('T')[0] : "";
-    const dtEnv = (item.criado_em || item.created_em || item.atualizado_em || "").split('T')[0];
+    const dtEnv = item.criado_em ? item.criado_em.split('T')[0] : "";
     setEditDataRec(dtRec);
     setEditDataEnvio(dtEnv);
   };
 
-  const salvarEdicao = async (id: string, itemOriginal: any) => {
+  const salvarEdicao = async (id: string) => {
     try {
       setSalvandoEdicao(true);
-      const payload: any = { data_recebimento: editDataRec ? `${editDataRec}T12:00:00` : null };
-      if (itemOriginal.criado_em !== undefined) payload.criado_em = editDataEnvio ? `${editDataEnvio}T12:00:00` : null;
-      else if (itemOriginal.created_em !== undefined) payload.created_em = editDataEnvio ? `${editDataEnvio}T12:00:00` : null;
-      else payload.atualizado_em = editDataEnvio ? `${editDataEnvio}T12:00:00` : null;
+      const payload: any = { 
+        data_recebimento: editDataRec ? `${editDataRec}T12:00:00` : null,
+        criado_em: editDataEnvio ? `${editDataEnvio}T12:00:00` : null
+      };
 
       const { error } = await supabase.from("analises").update(payload).eq("id", id);
       if (error) throw error;
@@ -204,11 +172,9 @@ export default function FinalizadosPage() {
     } catch (err) { console.error(err); }
   };
 
-  // 📥 MOTOR DE IMPRESSÃO NATIVA NÃO-DESTRUTIVA (Preserva 100% a sua análise original)
   const baixarPdfAnalise = async (item: any) => {
     setGerandoPdfId(item.id);
     try {
-      // 1. Busca os votos no Supabase e monta caixinhas de chat bonitas
       const { data: chat } = await supabase.from("chat_comite").select("*").eq("empresa_nome", item.empresa_nome).order("id", { ascending: true });
       
       let chatHtml = `<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px; width: 100%; max-height: 450px; overflow-y: hidden;">`;
@@ -226,7 +192,6 @@ export default function FinalizadosPage() {
       }
       chatHtml += `</div>`;
 
-      // 2. Lê o arquivo HTML original da apresentação de forma totalmente limpa
       let analiseHtmlText = "";
       if (item.caminho_local) {
         const urlLimpa = item.caminho_local.trim();
@@ -243,14 +208,12 @@ export default function FinalizadosPage() {
         }
       }
 
-      // 3. MÁGICA DE INJEÇÃO CIRÚRGICA NO DOM (Busca a palavra "Histórico do Comitê")
       const parser = new DOMParser();
       const doc = parser.parseFromString(analiseHtmlText, "text/html");
 
       const allElements = doc.body.querySelectorAll("*");
       for (const el of Array.from(allElements)) {
         if (el.textContent && el.textContent.trim().toLowerCase() === "histórico do comitê" && el.children.length === 0) {
-          // Achamos o título exato na sua apresentação! Vamos injetar os votos logo abaixo dele.
           let blockParent = el;
           while (blockParent && !['DIV', 'SECTION', 'TD', 'LI'].includes(blockParent.tagName)) {
              if(blockParent.parentElement) blockParent = blockParent.parentElement;
@@ -261,11 +224,10 @@ export default function FinalizadosPage() {
           } else {
             el.insertAdjacentHTML('afterend', chatHtml);
           }
-          break; // Injetou 1 vez, já para a busca para não duplicar.
+          break; 
         }
       }
 
-      // 4. Injeta APENAS o comando de formato Paisagem no topo
       const printCss = `
         <style>
           @page { size: landscape; margin: 0; }
@@ -280,7 +242,6 @@ export default function FinalizadosPage() {
       `;
       doc.head.insertAdjacentHTML("beforeend", printCss);
 
-      // 5. Abre a tela de impressão preservando a sua apresentação original INTOCADA!
       const blob = new Blob([doc.documentElement.outerHTML], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const printWindow = window.open(url, "_blank");
@@ -291,7 +252,6 @@ export default function FinalizadosPage() {
         return;
       }
 
-      // 1 segundo para carregar as fotos da empresa antes de abrir a aba de imprimir
       printWindow.onload = () => {
         setTimeout(() => {
           printWindow.print();
@@ -299,6 +259,7 @@ export default function FinalizadosPage() {
       };
 
     } catch (err) {
+      print;
       console.error(err);
       alert("❌ Erro ao organizar o Dossiê Executivo.");
     } finally {
@@ -448,7 +409,7 @@ export default function FinalizadosPage() {
                       {editando ? (
                         <input type="date" value={editDataEnvio} onChange={(e) => setEditDataEnvio(e.target.value)} className="p-1 border border-slate-300 rounded text-xs outline-none focus:border-blue-500 font-bold" />
                       ) : (
-                        formatarDataLocal(item.created_em || item.criado_em || item.atualizado_em)
+                        formatarDataLocal(item.criado_em)
                       )}
                     </td>
 
@@ -461,7 +422,7 @@ export default function FinalizadosPage() {
                     <td className="p-3 flex gap-1 justify-center flex-wrap">
                       {editando ? (
                         <>
-                          <button onClick={() => salvarEdicao(item.id, item)} disabled={salvandoEdicao} className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded shadow-sm text-[10px] transition-colors cursor-pointer disabled:opacity-50">
+                          <button onClick={() => salvarEdicao(item.id)} disabled={salvandoEdicao} className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded shadow-sm text-[10px] transition-colors cursor-pointer disabled:opacity-50">
                             {salvandoEdicao ? "⏳" : "💾 Salvar"}
                           </button>
                           <button onClick={() => setLinhaEditando(null)} disabled={salvandoEdicao} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded border text-[10px] transition-colors cursor-pointer">
@@ -486,7 +447,7 @@ export default function FinalizadosPage() {
                     </td>
                   </tr>
                 );
-              })
+              )
             )}
           </tbody>
         </table>

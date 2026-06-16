@@ -3,8 +3,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-// 🛡️ Caminho relativo saindo de 'app' e indo para 'lib'
 import { supabase } from "../lib/supabase"; 
+import { simplificarNome } from "@/actions/dashboard-service";
 
 interface Notificacao {
   id: string;
@@ -45,23 +45,57 @@ export default function NotificadorComite() {
   };
 
   useEffect(() => {
-    const canalComiteGlobal = supabase
-      .channel("comite-realtime-global")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "analises" }, (payload: any) => {
-        adicionarNotificacao("📋 Nova Análise", `A empresa ${payload.new.empresa_nome} chegou no comitê.`, "analise");
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "votos" }, (payload: any) => {
-        if (payload.new.membro_nome !== "Decisão") {
-          adicionarNotificacao("🗳️ Novo Voto", `${payload.new.membro_nome} votou em ${payload.new.empresa_nome}.`, "voto");
+    async function inicializarEscutaSegura() {
+      const userStr = localStorage.getItem("intraned_user");
+      let allowedCedentes: string[] = [];
+      let isComercial = false;
+      let userNome = "";
+
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        userNome = user.nome;
+        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        
+        if (cargoUser === "comercial") {
+          isComercial = true;
+          const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
+          if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
         }
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_comite" }, (payload: any) => {
-        adicionarNotificacao(`💬 Chat: ${payload.new.empresa_nome}`, `${payload.new.usuario}: "${payload.new.mensagem}"`, "chat");
-      })
-      .subscribe();
+      }
+
+      const canalComiteGlobal = supabase
+        .channel("comite-realtime-global")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "analises" }, (payload: any) => {
+          // 🔐 Filtro de escopo comercial ativo
+          if (isComercial && payload.new.comercial !== userNome) return;
+          adicionarNotificacao("📋 Nova Análise", `A empresa ${payload.new.empresa_nome} chegou no comitê.`, "analise");
+        })
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "votos" }, (payload: any) => {
+          // 🔐 Filtro de escopo comercial ativo
+          if (isComercial && !allowedCedentes.includes(simplificarNome(payload.new.empresa_nome))) return;
+          if (payload.new.membro_nome !== "Decisão") {
+            adicionarNotificacao("🗳️ Novo Voto", `${payload.new.membro_nome} votou em ${payload.new.empresa_nome}.`, "voto");
+          }
+        })
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_comite" }, (payload: any) => {
+          // 🔐 Filtro de escopo comercial ativo
+          if (isComercial && !allowedCedentes.includes(simplificarNome(payload.new.empresa_nome))) return;
+          adicionarNotificacao(`💬 Chat: ${payload.new.empresa_nome}`, `${payload.new.usuario}: "${payload.new.mensagem}"`, "chat");
+        })
+        .subscribe();
+
+      return canalComiteGlobal;
+    }
+
+    let canalAtivo: any = null;
+    inicializarEscutaSegura().then((channel) => {
+      canalAtivo = channel;
+    });
 
     return () => {
-      supabase.removeChannel(canalComiteGlobal);
+      if (canalAtivo) {
+        supabase.removeChannel(canalAtivo);
+      }
     };
   }, []);
 
@@ -103,7 +137,7 @@ export default function NotificadorComite() {
                 else if (n.tipo === "chat") { corBorda = "border-amber-500 bg-amber-50"; icone = "💬"; }
 
                 return (
-                  <div key={n.id} className={`p-3 rounded-xl border ${corBorda} ${n.lida ? 'opacity-60' : 'shadow-sm'}`}>
+                  <div key={n.id} className="p-3 rounded-xl border border-slate-200 shadow-sm bg-white">
                     <div className="flex gap-2 items-start">
                       <span className="text-lg">{icone}</span>
                       <div className="flex flex-col">
@@ -142,7 +176,7 @@ export default function NotificadorComite() {
         </svg>
 
         {naoLidas > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black w-6 h-6 flex items-center justify-center rounded-full border-2 border-white shadow-sm animate-bounce">
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black w-6 h-6 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
             {naoLidas}
           </span>
         )}

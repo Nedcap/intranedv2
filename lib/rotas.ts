@@ -22,5 +22,6 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true }
 ];
 
-// Função auxiliar para gerar as rotas automáticas do perfil Master
-export const obterRotasMaster = () => MAPA_DE_ROTAS.map(r => r.path);
+// 🎯 Fix: Agora a função respeita a flag de controle para permitir rotas ocultas ou em testes no futuro
+export const obterRotasMaster = () => 
+  MAPA_DE_ROTAS.filter(r => r.defaultMaster === true).map(r => r.path);

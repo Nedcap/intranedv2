@@ -1,26 +1,40 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
-const RESEND_API_KEY = "re_WmeXNjdd_97NXwjjkUJc5prK4KfNF3xvA";
-
 export async function POST(request: Request) {
   try {
+    // 🎯 Fix: Coleta a chave do Resend de forma segura direto do ambiente do servidor
+    const apiKey = process.env.RESEND_API_KEY;
+
+    if (!apiKey) {
+      console.error("❌ ERRO: A variável RESEND_API_KEY não foi configurada no servidor.");
+      return NextResponse.json({ error: "Configuração de servidor pendente." }, { status: 500 });
+    }
+
     const { email } = await request.json();
 
     if (!email) {
       return NextResponse.json({ error: "E-mail obrigatório" }, { status: 400 });
     }
 
+    const emailLimpo = email.trim().toLowerCase();
+
+    // Invoca a procedure no banco de dados
     const { data, error } = await supabase.rpc("iniciar_recuperacao_senha", {
-      p_email: email.trim()
+      p_email: emailLimpo
     });
 
+    // Segurança: se o e-mail não existir, retornamos 'enviado: true' para evitar varredura maliciosa de contas existentes
     if (error || !data || data.length === 0 || !data[0].encontrado) {
       return NextResponse.json({ enviado: true });
     }
 
     const { token_gerado, nome_usuario } = data[0];
-    const linkReset = `https://intraned.nedcapital.com.br/reset-senha?token=${token_gerado}`;
+
+    // 🎯 Fix: Detecta dinamicamente o domínio atual (localhost, link da vercel ou produção)
+    const host = request.headers.get("host") || "intraned.nedcapital.com.br";
+    const protocolo = host.includes("localhost") ? "http" : "https";
+    const linkReset = `${protocolo}://${host}/reset-senha?token=${token_gerado}`;
 
     const htmlEmail = `
       <html>
@@ -41,23 +55,29 @@ export async function POST(request: Request) {
       </html>
     `;
 
-    await fetch("https://api.resend.com/emails", {
+    const resEmail = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { 
-        "Authorization": `Bearer ${RESEND_API_KEY}`, 
+        "Authorization": `Bearer ${apiKey}`, 
         "Content-Type": "application/json" 
       },
       body: JSON.stringify({
         from: "Segurança Ned <sistema@nedcapital.com.br>",
-        to: [email.trim()],
+        to: [emailLimpo],
         subject: "🔐 Recuperação de Senha - Intraned",
         html: htmlEmail,
       }),
     });
 
+    if (!resEmail.ok) {
+      const logErro = await resEmail.json();
+      console.error("❌ Falha no envio através do Resend:", logErro);
+      throw new Error("Falha no provedor de e-mail externo");
+    }
+
     return NextResponse.json({ enviado: true });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 });
+  } catch (err: any) {
+    console.error("💥 Erro crítico na rota de recuperação:", err);
+    return NextResponse.json({ error: "Erro interno no servidor", details: err.message }, { status: 500 });
   }
 }

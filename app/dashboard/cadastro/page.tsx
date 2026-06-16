@@ -1,10 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function CadastroPage() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [cedentes, setCedentes] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -22,7 +22,6 @@ export default function CadastroPage() {
           const user = JSON.parse(userStr);
           const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
           
-          // Guarda a info do usuário na memória para o botão de "Nova Linha"
           setUsuarioAtual({ nome: user.nome, perfil: cargoUser });
 
           if (cargoUser === "comercial") {
@@ -31,7 +30,10 @@ export default function CadastroPage() {
         }
 
         const { data } = await query.order("cedente", { ascending: true });
-        if (data) setCedentes(data);
+        if (data) {
+          // Inicializa mapeando cada linha com uma flag de controle de modificação local
+          setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
+        }
       } catch (err) { 
         console.error(err); 
       } finally { 
@@ -41,17 +43,16 @@ export default function CadastroPage() {
     carregarCadastro();
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleInputChange = (index: number, campo: string, valor: any) => {
     const novos = [...cedentes]; 
-    novos[index][campo] = valor; 
+    novos[index][campo] = valor;
+    novos[index]["_isEditado"] = true; // Marca que a linha sofreu alteração local
     setCedentes(novos);
   };
 
-  // ➕ Função para adicionar uma nova linha em branco no topo da tabela
   const adicionarNovaLinha = () => {
     const novaLinha = {
-      cedente: "", // O usuário vai digitar
+      cedente: "", 
       limite: "",
       taxa: "",
       docs_ok: null,
@@ -62,9 +63,9 @@ export default function CadastroPage() {
       data_8: null,
       data_9: null,
       apto: null,
-      // Se for comercial, já trava o nome dele. Se for Master, deixa em branco pro Master preencher
       comercial: usuarioAtual?.perfil === "comercial" ? usuarioAtual.nome : "",
-      _isNovo: true // Flag interna para saber que é uma linha que acabou de nascer
+      _isNovo: true,
+      _isEditado: true
     };
     
     setCedentes([novaLinha, ...cedentes]);
@@ -74,7 +75,7 @@ export default function CadastroPage() {
     try {
       setSalvando(true);
       
-      // Validação básica antes de enviar pro banco
+      // Valida apenas as novas linhas inseridas
       const linhasInvalidas = cedentes.filter(c => c._isNovo && (!c.cedente || c.cedente.trim() === ""));
       if (linhasInvalidas.length > 0) {
         alert("⚠️ Preencha o nome do Cedente nas novas linhas antes de salvar!");
@@ -82,8 +83,17 @@ export default function CadastroPage() {
         return;
       }
 
-      for (const item of cedentes) {
-        const payload = {
+      // Performance: Filtra e envia APENAS o que foi criado ou modificado pelo usuário
+      const alvosEnvio = cedentes.filter(c => c._isEditado || c._isNovo);
+
+      if (alvosEnvio.length === 0) {
+        alert("💡 Nenhuma alteração pendente para salvar.");
+        setSalvando(false);
+        return;
+      }
+
+      for (const item of alvosEnvio) {
+        const payload: any = {
           cedente: item.cedente.trim().toUpperCase(), 
           limite: item.limite || "", 
           taxa: item.taxa || "", 
@@ -99,15 +109,21 @@ export default function CadastroPage() {
           atualizado_em: new Date().toISOString()
         };
 
-        await supabase.from("cadastro_cedentes").upsert(payload);
+        // Se a linha já tem ID vindo do banco, anexa no payload para fazer o update preciso da mesma linha
+        if (item.id) {
+          payload.id = item.id;
+        }
+
+        const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
+        if (error) throw error;
       }
       
-      // Limpa a flag "_isNovo" das linhas locais para elas virarem registros normais
-      setCedentes(cedentes.map(c => ({ ...c, _isNovo: false })));
-      
+      // Recarrega o estado local limpando os seletores de edição
+      setCedentes(cedentes.map(c => ({ ...c, _isNovo: false, _isEditado: false })));
       alert("🎉 Alterações salvas com sucesso!");
-    } catch { 
-      alert("❌ Erro ao salvar os dados no Supabase."); 
+    } catch (err: any) { 
+      console.error(err);
+      alert(`❌ Erro ao salvar os dados no Supabase: ${err.message}`); 
     } finally { 
       setSalvando(false); 
     }
@@ -120,7 +136,6 @@ export default function CadastroPage() {
       <div className="flex justify-between items-center border-b border-slate-200 pb-2">
         <h2 className="text-xl font-bold text-slate-800 tracking-tight">📇 Esteira de Cadastro</h2>
         <div className="flex gap-3">
-          {/* Botão de Adicionar Linha Manual */}
           <button 
             onClick={adicionarNovaLinha} 
             disabled={salvando} 
@@ -161,9 +176,7 @@ export default function CadastroPage() {
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
             {cedentes.map((item, index) => (
-              <tr key={item.cedente || `novo-${index}`} className={`hover:bg-slate-50/50 transition-colors ${item._isNovo ? "bg-blue-50/30" : ""}`}>
-                
-                {/* Nome do Cedente: Fixo se veio do banco, Editável se acabou de ser criado */}
+              <tr key={item.id || `novo-${index}`} className={`hover:bg-slate-50/50 transition-colors ${item._isNovo ? "bg-blue-50/30" : ""} ${item._isEditado && !item._isNovo ? "bg-amber-50/20" : ""}`}>
                 <td className="p-3 font-bold text-slate-900">
                   {item._isNovo ? (
                     <input 
@@ -179,7 +192,6 @@ export default function CadastroPage() {
                   )}
                 </td>
 
-                {/* Se quem tá editando for Master/BackOffice, ele pode digitar de qual comercial é esse cliente antigo */}
                 {usuarioAtual?.perfil !== "comercial" && (
                   <td className="p-2 text-center">
                      <input 

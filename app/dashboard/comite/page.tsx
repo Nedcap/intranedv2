@@ -26,13 +26,29 @@ export default function ComitePage() {
   const [novaDataEnvio, setNovaDataEnvio] = useState("");
 
   const [isMaster, setIsMaster] = useState(false);
+  const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
   const carregarComite = async () => {
     try {
       setCarregando(true);
       
-      // 1. Carrega Empresas em Comitê (Filtra status em aberto/análise)
-      const { data: dataComite } = await supabase.from("analises").select("*").order("criado_em", { ascending: false });
+      const userStr = localStorage.getItem("intraned_user");
+      let queryComite = supabase.from("analises").select("*");
+      let queryEsteira = supabase.from("em_analise").select("*");
+
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        
+        // Se for comercial, isola os dados para ele ver apenas o que é dele
+        if (cargoUser === "comercial") {
+          queryComite = queryComite.eq("comercial", user.nome);
+          queryEsteira = queryEsteira.eq("agente_nome", user.nome);
+        }
+      }
+      
+      // 1. Carrega Empresas em Comitê
+      const { data: dataComite } = await queryComite.order("criado_em", { ascending: false });
       if (dataComite) {
         setAnalises(dataComite.filter(a => {
           const st = (a.status || "").toLowerCase();
@@ -41,7 +57,7 @@ export default function ComitePage() {
       }
 
       // 2. Carrega Empresas em Esteira de Análise
-      const { data: dataAnalise } = await supabase.from("em_analise").select("*").order("data_envio", { ascending: false });
+      const { data: dataAnalise } = await queryEsteira.order("data_envio", { ascending: false });
       if (dataAnalise) {
         setEmpresasAnalise(dataAnalise);
       }
@@ -56,11 +72,11 @@ export default function ComitePage() {
   useEffect(() => { 
     carregarComite(); 
     
-    // Recupera o cargo do usuário logado
     try {
       const userStr = localStorage.getItem("intraned_user");
       if (userStr) {
         const parsed = JSON.parse(userStr);
+        setNomeUsuarioLogado(parsed.nome || "Comercial Ned");
         if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") {
           setIsMaster(true);
         }
@@ -68,7 +84,7 @@ export default function ComitePage() {
     } catch (e) { console.error("Erro ao ler sessão local", e); }
   }, []);
 
-  const obterEmailsNotificacao = async (empresaNome: string) => {
+  const obtener_emails_notificacao = async (empresaNome: string) => {
     const emails = new Set<string>();
     try {
       const { data: masters } = await supabase.from("usuarios").select("email").eq("cargo", "Master");
@@ -101,7 +117,6 @@ export default function ComitePage() {
     } catch (err) { console.error("Erro na API de e-mail:", err); }
   };
 
-  // 🚀 PAINEL MASTER MANUAL (A Trigger do Supabase resolve os inserts/deletes automaticamente)
   const forcarDecisaoMaster = async (empresaItem: any, decisaoFinal: "Aprovado" | "Reprovado") => {
     const conf = confirm(`⚠️ DECISÃO EXECUTIVA: Deseja mover a empresa ${empresaItem.empresa_nome} para ${decisaoFinal}?`);
     if (!conf) return;
@@ -110,11 +125,10 @@ export default function ComitePage() {
       setCarregando(true);
       const e = empresaItem.empresa_nome;
 
-      // Atualiza o status pelo ID único. A Trigger no banco faz o resto!
       const { error } = await supabase.from("analises").update({ status: decisaoFinal }).eq("id", empresaItem.id);
       if (error) throw error;
 
-      const emailsAlvo = await obterEmailsNotificacao(e);
+      const emailsAlvo = await obtener_emails_notificacao(e);
       const corner = decisaoFinal === "Aprovado" ? "#059669" : "#ef4444";
       
       const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
@@ -137,7 +151,6 @@ export default function ComitePage() {
     }
   };
 
-  // 🗳️ REGISTRO DE VOTO DO FLUXO NORMAL
   const processarVotoWeb = async () => {
     if (!membroVoto || !opcaoVoto || !justificativaVoto) {
       alert("Por favor, preencha todos os campos do voto.");
@@ -155,10 +168,9 @@ export default function ComitePage() {
         email_enviado: true 
       });
       
-      const emailsAlvo = await obterEmailsNotificacao(e);
+      const emailsAlvo = await obtener_emails_notificacao(e);
 
       if (membroVoto === "Decisão") {
-        // Altera o status buscando pelo ID numérico exato
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaSelecionada.id);
         if (error) throw error;
         
@@ -191,13 +203,13 @@ export default function ComitePage() {
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData?.session?.user;
 
-      const nomeDoAgente = user?.user_metadata?.nome || user?.email || "Comercial Ned";
+      const nomeDoAgente = user?.user_metadata?.nome || user?.email || nomeUsuarioLogado || "Comercial Ned";
       const dataFormatada = new Date().toISOString().split("T")[0];
 
       const { error } = await supabase.from("em_analise").insert({
         agente_comercial_id: user?.id || null,
         agente_nome: nomeDoAgente,
-        nome_empresa: nomeNovaEmpresa.trim(),
+        nome_empresa: nomeNovaEmpresa.trim().toUpperCase(), // 🎯 Trava preventiva de string limpa
         data_envio: dataFormatada
       });
 

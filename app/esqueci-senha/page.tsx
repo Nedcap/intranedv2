@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState } from "react";
@@ -15,25 +16,34 @@ export default function EsqueciSenhaPage() {
       setCarregando(true);
       setMensagem({ tipo: "", texto: "" });
 
-      // 🚀 Dispara a requisição para a nossa rota de API interna e segura do Next.js
+      // 🎯 Fix: Envia o e-mail padronizado em caixa baixa para evitar desencontro de strings no banco
+      const emailTratado = email.trim().toLowerCase();
+
       const res = await fetch("/api/recuperar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: emailTratado }),
       });
 
-      if (!res.ok) {
-        throw new Error("Erro na requisição da API");
+      const data = await res.json();
+
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || "Erro na requisição da API");
       }
 
       setMensagem({ 
         tipo: "sucesso", 
-        texto: "🎉 Se o e-mail existir no sistema, as instruções foram enviadas com sucesso!" 
+        texto: "🎉 Se o e-mail estiver ativo no ecossistema, as instruções de renovação foram disparadas!" 
       });
       setEmail("");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setMensagem({ tipo: "erro", texto: "❌ Falha ao processar a recuperação de senha." });
+      setMensagem({ 
+        tipo: "erro", 
+        texto: err.message === "Erro na requisição da API" 
+          ? "❌ Falha ao processar a recuperação de senha no servidor." 
+          : `❌ Erro: ${err.message}` 
+      });
     } finally {
       setCarregando(false);
     }

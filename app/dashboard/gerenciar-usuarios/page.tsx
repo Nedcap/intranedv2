@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { MAPA_DE_ROTAS, obterRotasMaster } from "@/lib/rotas"; // 🔄 Mantendo a conexão com a Central Única
+import { MAPA_DE_ROTAS, obterRotasMaster } from "@/lib/rotas"; 
 
 export default function GerenciarUsuariosPage() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
@@ -43,7 +43,13 @@ export default function GerenciarUsuariosPage() {
     setNome(user.nome);
     setEmail(user.email);
     setSenha(user.senha);
-    setCargo(user.cargo || "Comercial");
+    
+    // Normaliza para exibição na combo mantendo compatibilidade
+    const cargoSalvo = user.cargo || "Comercial";
+    if (cargoSalvo.toLowerCase() === "comercial") setCargo("Comercial");
+    elif (cargoSalvo.toLowerCase() === "operacional") setCargo("Operacional");
+    elif (cargoSalvo.toLowerCase() === "master") setCargo("Master");
+    else setCargo(cargoSalvo);
     
     if (Array.isArray(user.permissoes)) {
       setAbasPermitidas(user.permissoes);
@@ -76,12 +82,23 @@ export default function GerenciarUsuariosPage() {
     e.preventDefault();
     setSalvando(true);
 
+    const emailLimpo = email.trim().toLowerCase();
+    // 🎯 Fix: Força o cargo a ser salvo de forma padronizada correspondente ao resto da esteira
+    const cargoNormalizado = cargo === "Master" ? "Master" : cargo === "Operacional" ? "Operacional" : "Comercial";
+
+    // Validação preventiva de duplicidade local amigável (apenas para novos registros)
+    if (!idSelecionado && usuarios.some(u => u.email.toLowerCase() === emailLimpo)) {
+      alert("⚠️ Atenção: Já existe um colaborador registrado com este e-mail corporativo!");
+      setSalvando(false);
+      return;
+    }
+
     const dadosUsuario = {
-      nome,
-      email: email.trim(),
-      senha,
-      cargo,
-      permissoes: cargo === "Master" ? obterRotasMaster() : abasPermitidas
+      nome: nome.trim(),
+      email: emailLimpo,
+      senha: senha.trim(),
+      cargo: cargoNormalizado,
+      permissoes: cargoNormalizado === "Master" ? obterRotasMaster() : abasPermitidas
     };
 
     try {
@@ -150,15 +167,15 @@ export default function GerenciarUsuariosPage() {
                       </td>
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider ${
-                          user.cargo === "Master" ? "bg-purple-50 text-purple-700 border border-purple-200" :
-                          user.cargo === "Operacional" ? "bg-blue-50 text-blue-700 border border-blue-200" :
+                          String(user.cargo).toLowerCase() === "master" ? "bg-purple-50 text-purple-700 border border-purple-200" :
+                          String(user.cargo).toLowerCase() === "operacional" ? "bg-blue-50 text-blue-700 border border-blue-200" :
                           "bg-emerald-50 text-emerald-700 border border-emerald-200"
                         }`}>
                           {user.cargo || "Comercial"}
                         </span>
                       </td>
                       <td className="p-3 text-center text-xs text-slate-500 font-bold">
-                        {user.cargo === "Master" ? "Todas" : `${Array.isArray(user.permissoes) ? user.permissoes.length : 0} / ${MAPA_DE_ROTAS.length}`}
+                        {String(user.cargo).toLowerCase() === "master" ? "Todas" : `${Array.isArray(user.permissoes) ? user.permissoes.length : 0} / ${MAPA_DE_ROTAS.length}`}
                       </td>
                       <td className="p-3 text-right">
                         <button 
@@ -209,7 +226,6 @@ export default function GerenciarUsuariosPage() {
                 <select value={cargo} onChange={(e) => setCargo(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 font-bold text-xs outline-none cursor-pointer focus:border-blue-500">
                   <option value="Comercial">Comercial</option>
                   <option value="Operacional">Operacional</option>
-                  <option value="Diretor">Diretoria</option>
                   <option value="Master">Master</option>
                 </select>
               </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation"; 
 import { useEffect, useState } from "react";
 import { MAPA_DE_ROTAS } from "@/lib/rotas"; 
+import NotificadorComite from "@/app/notificador-comite"; // 🔔 Importa o componente de tempo real
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -29,12 +30,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, []);
 
-  // 🔥 FIX: Agora o layout verifica tanto 'perfil' quanto 'cargo', igual o resto do sistema!
   const perfilAtual = String(usuario?.perfil || usuario?.cargo || "user").toLowerCase();
   
   const linksPermitidos = MAPA_DE_ROTAS.filter((link) => {
     if (perfilAtual === "master") return true; 
-    return Array.isArray(usuario?.abas_permitidas) && usuario.abas_permitidas.includes(link.path);
+    
+    const rotasDoUsuario = usuario?.permissoes || usuario?.abas_permitidas;
+
+    if (Array.isArray(rotasDoUsuario)) {
+      return rotasDoUsuario.includes(link.path);
+    } else if (rotasDoUsuario && typeof rotasDoUsuario === "object") {
+      return rotasDoUsuario[link.path] === true;
+    }
+    
+    return false;
   });
 
   const handleSair = () => {
@@ -103,8 +112,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Logado como:</p>
             <p className="text-sm font-black text-white mt-0.5">{usuario?.nome || "Usuário"}</p>
-            {/* 🔥 FIX: Agora exibe o seu cargo real em vez de forçar a palavra "Colaborador" */}
-            <p className="text-xs text-blue-400 font-medium capitalize mt-0.5">{usuario?.perfil || usuario?.cargo || "Colaborador"}</p>
+            <p className="text-xs text-blue-400 font-medium capitalize mt-0.5">{usuario?.cargo || usuario?.perfil || "Colaborador"}</p>
           </div>
 
           <button 
@@ -135,8 +143,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+        {/* 🎯 Fix: Adicionado 'relative' e o componente de notificação em tempo real */}
+        <main className="flex-1 p-6 md:p-8 overflow-y-auto relative">
           {children}
+          <NotificadorComite />
         </main>
       </div>
 

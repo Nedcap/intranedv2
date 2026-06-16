@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation"; 
 import { supabase } from "@/lib/supabase"; 
 import { obterRotasMaster } from "@/lib/rotas"; 
-import "./globals.css"; // 🛡️ Garante o CSS ativo na raíz de cliente
+import "./globals.css"; 
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -20,9 +20,12 @@ export default function Login() {
     setLoading(true);
     setErro("");
 
+    // 🎯 Fix: Normaliza o e-mail para caixa baixa na entrada do fluxo
+    const emailTratado = email.trim().toLowerCase();
+
     try {
       const { data, error } = await supabase.rpc("verificar_login", {
-        p_email: email.trim(),
+        p_email: emailTratado,
         p_senha: senha.trim()
       });
 
@@ -31,10 +34,11 @@ export default function Login() {
       } else {
         const usuarioLogado = data[0];
 
+        // Busca as permissões usando a string tratada para não quebrar no .eq
         const { data: dadosColaborador } = await supabase
           .from("usuarios")
           .select("permissoes")
-          .eq("email", email.trim())
+          .eq("email", emailTratado)
           .maybeSingle();
 
         let abasFinais = [];
@@ -44,9 +48,12 @@ export default function Login() {
           abasFinais = dadosColaborador.permissoes;
         }
 
+        // 🎯 Fix: Salva as duas chaves no payload para blindar o DashboardLayout contra falhas de leitura
         const payloadSessao = {
           nome: usuarioLogado.nome,
           perfil: usuarioLogado.cargo || "Comercial",
+          cargo: usuarioLogado.cargo || "Comercial",
+          permissoes: abasFinais,
           abas_permitidas: abasFinais 
         };
 

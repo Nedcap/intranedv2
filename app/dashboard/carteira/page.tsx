@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
 import { carregarPlanilhaCarteiraGviz } from "@/actions/dashboard-service";
 
 // ============================================================================
@@ -55,23 +56,42 @@ export default function CarteiraDinamicaPage() {
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
   const [ordenacaoDirecaoSub, setOrdenacaoDirectionSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS UTILIZANDO O METODO SEGURO LIVRE DE CHAVES
+  // 📥 BUSCA DADOS UTILIZANDO O METODO SEGURO LIVRE DE CHAVES E COM SEGURANÇA DE PERFIL
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
       setErro(null);
 
-      // Puxa direto da nova integração estável
+      // 🔐 Validação de escopo de permissões do usuário logado
+      const userStr = localStorage.getItem("intraned_user");
+      let allowedCedentes: string[] = [];
+      let isComercial = false;
+
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        if (cargoUser === "comercial") {
+          isComercial = true;
+          const { data: vinculos } = await supabase
+            .from("cadastro_cedentes")
+            .select("cedente")
+            .eq("comercial", user.nome);
+          if (vinculos) {
+            allowedCedentes = vinculos.map((c: any) => String(c.cedente).trim().toUpperCase());
+          }
+        }
+      }
+
+      // Puxa direto da integração estável GViz
       const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
       const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
 
       if (!valoresSec || !valoresFidc) throw new Error("Erro ao coletar dados das matrizes do Google Sheets.");
 
-      // Adiciona uma linha em branco fake no index 0 para simular o comportamento da API antiga (linhasSec[0] era o cabeçalho)
       const linhasSec = [[], ...valoresSec];
       const linhasFidc = [[], ...valoresFidc];
 
-      const listaTitulos: Titulo[] = [];
+      let listaTitulos: Titulo[] = [];
       
       const hoje = new Date();
       hoje.setHours(12, 0, 0, 0);
@@ -89,12 +109,16 @@ export default function CarteiraDinamicaPage() {
           const r = linhasSec[i];
           if (!r || !r[0]) continue;
 
+          const cedenteNome = String(r[0]).trim().toUpperCase();
+          // Se for perfil comercial, barra a inserção se a carteira não for dele
+          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
+
           const venc = String(r[3] || "");
           const dtVenc = parseDataBR(venc);
           const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
-            cedente: String(r[0]).trim().toUpperCase(),
+            cedente: cedenteNome,
             sacado: String(r[1]).trim().toUpperCase(),
             numeroTitulo: String(r[2] || "-"),
             vencimento: venc,
@@ -113,12 +137,16 @@ export default function CarteiraDinamicaPage() {
           const r = linhasFidc[i];
           if (!r || !r[0]) continue;
 
+          const cedenteNome = String(r[0]).trim().toUpperCase();
+          // Se for perfil comercial, barra a inserção se a carteira não for dele
+          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
+
           const venc = String(r[2] || "");
           const dtVenc = parseDataBR(venc);
           const diffDias = dtVenc ? Math.ceil((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
           listaTitulos.push({
-            cedente: String(r[0]).trim().toUpperCase(),
+            cedente: cedenteNome,
             sacado: String(r[1]).trim().toUpperCase(),
             numeroTitulo: "-",
             vencimento: venc,

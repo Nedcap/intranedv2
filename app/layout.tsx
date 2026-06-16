@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import "./globals.css"; // 🛡️ OBRIGATÓRIO: Injeta o Tailwind no ecossistema inteiro
+import "./globals.css"; 
 import { Inter } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -15,7 +15,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR">
+    // 🎯 Fix: suppressHydrationWarning evita quebras e logs de erro causados por extensões de navegadores
+    <html lang="pt-BR" suppressHydrationWarning>
       <body className={inter.className}>{children}</body>
     </html>
   );

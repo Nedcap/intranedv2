@@ -10,8 +10,7 @@ import {
   formatarMesAno, 
   extrairMesAnoDeDataBR, 
   parseDataSegura, 
-  calcularDiasUteis, 
-  fetchGoogleSheet 
+  calcularDiasUteis 
 } from "@/actions/dashboard-service";
 
 export default function DashboardPage() {
@@ -57,9 +56,11 @@ export default function DashboardPage() {
       const userStr = localStorage.getItem("intraned_user");
       let allowedCedentes: string[] = [];
       let isComercial = false;
+      let userNome = "";
 
       if (userStr) {
         const user = JSON.parse(userStr);
+        userNome = user.nome;
         const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
         if (cargoUser === "comercial") {
           isComercial = true;
@@ -68,77 +69,77 @@ export default function DashboardPage() {
         }
       }
 
-      const resAnalises = await supabase.from("analises").select("*");
-      let analisesFiltradas = resAnalises.data || [];
+      // 1. Carrega Métricas do Comitê de Crédito
+      let queryAnalises = supabase.from("analises").select("*");
       if (isComercial) {
-        analisesFiltradas = analisesFiltradas.filter((a: any) => allowedCedentes.includes(simplificarNome(a.empresa_nome)));
+        queryAnalises = queryAnalises.eq("comercial", userNome);
       }
+      const resAnalises = await queryAnalises;
+      const analisesFiltradas = resAnalises.data || [];
       setAnalises(analisesFiltradas);
 
-      const [vopRaw, cartRaw, receitasRaw] = await Promise.all([
-        fetchGoogleSheet("LANCAMENTOS_VOP"),
-        fetchGoogleSheet("BASE_CARTEIRA"),
-        fetchGoogleSheet("RECEITAS")
-      ]);
+      // 🎯 2. Puxa as Finanças direto da nova tabela unificada do Supabase (Elimina o Sheets)
+      let queryFinancas = supabase.from("extrato_financeiro").select("*");
+      if (isComercial) {
+        // Filtra os lançamentos financeiros onde o cedente pertence à lista dele
+        queryFinancas = queryFinancas.in("cedente", allowedCedentes);
+      }
+      const { data: financasRaw } = await queryFinancas;
 
       const vopMap: { [key: string]: any } = {};
-      vopRaw.forEach((r: any) => {
-        const cedente = simplificarNome(r["cedente"]);
-        if (!cedente) return;
-        const mes_ano = String(r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
-        const chave = `${cedente}_${mes_ano}`;
-        if (!vopMap[chave]) vopMap[chave] = { mes_ano, cedente, vop_sec: 0, vop_fidc: 0 };
-        vopMap[chave].vop_sec += parseValorReal(r["vop sec"]);
-        vopMap[chave].vop_fidc += parseValorReal(r["vop fidc"]);
-      });
-      let vopFinal = Object.values(vopMap);
-      if (isComercial) vopFinal = vopFinal.filter((v: any) => allowedCedentes.includes(v.cedente));
-      setDashVop(vopFinal);
-
-      const cartMap: { [key: string]: any } = {};
-      cartRaw.forEach((r: any) => {
-        const cedente = simplificarNome(r["cedente"]);
-        if (!cedente) return;
-        if (!cartMap[cedente]) {
-          cartMap[cedente] = { cedente, risco_consolidated: 0, risco_sec: 0, risco_fidc: 0, vencidos_securitizadora: 0, vencidos_fidc: 0 };
-        }
-        cartMap[cedente].risco_consolidated += parseValorReal(r["risco total"] || r["risco consolidado"]);
-        cartMap[cedente].risco_sec += parseValorReal(r["risco sec"] || r["risco securitizadora"]);
-        cartMap[cedente].risco_fidc += parseValorReal(r["risco fidc"]);
-        cartMap[cedente].vencidos_securitizadora += parseValorReal(r["vencido sec"] || r["vencidos sec"]);
-        cartMap[cedente].vencidos_fidc += parseValorReal(r["vencido fidc"] || r["vencidos fidc"]);
-      });
-      let cartFinal = Object.values(cartMap);
-      if (isComercial) cartFinal = cartFinal.filter((c: any) => allowedCedentes.includes(c.cedente));
-      setDashCarteira(cartFinal);
-
       const recMap: { [key: string]: any } = {};
-      receitasRaw.forEach((r: any) => {
-        const emp = String(r["empresa"] || "").trim().toUpperCase();
-        const rawCedente = String(r["cedente"] || "").trim();
-        const dataOp = String(r["data"] || r["mês/ano"] || r["mes/ano"] || "").trim();
-        if (!rawCedente || !dataOp) return;
 
-        const cedente = simplificarNome(rawCedente);
-        const mes_ano = extrairMesAnoDeDataBR(dataOp);
-        const chave = `${emp}_${dataOp}_${cedente}`;
+      (financasRaw || []).forEach((r: any) => {
+        const cedKey = simplificarNome(r.cedente);
+        const mAno = r.mes_ano;
+        const chaveVop = `${cedKey}_${mAno}`;
 
-        if (!recMap[chave]) {
-          recMap[chave] = { empresa: emp, data: dataOp, mes_ano, cedente, desagio: 0, tarifas: 0, juros: 0 };
+        // Agrupa Lançamentos de VOP
+        if (r.vop > 0) {
+          if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano: mAno, cedente: cedKey, vop_sec: 0, vop_fidc: 0 };
+          if (r.empresa === "SEC") vopMap[chaveVop].vop_sec += parseFloat(r.vop || 0);
+          if (r.empresa === "FIDC") vopMap[chaveVop].vop_fidc += parseFloat(r.vop || 0);
         }
-        
-        recMap[chave].desagio += parseValorReal(r["deságio"] || r["desagio"] || r["deságio retido"] || 0);
-        recMap[chave].tarifas += parseValorReal(r["tarifas"] || r["despesas"] || r["tarifas / despesas"] || 0);
-        recMap[chave].juros += parseValorReal(r["juros e multa"] || r["juros"] || r["encargos"] || 0); 
+
+        // Agrupa Lançamentos de Receitas
+        if (r.desagio > 0 || r.tarifas > 0 || r.juros > 0) {
+          const chaveRec = `${r.empresa}_${r.data_operacao}_${cedKey}`;
+          if (!recMap[chaveRec]) {
+            recMap[chaveRec] = { empresa: r.empresa, data: r.data_operacao, mes_ano: mAno, cedente: cedKey, desagio: 0, tarifas: 0, juros: 0 };
+          }
+          recMap[chaveRec].desagio += parseFloat(r.desagio || 0);
+          recMap[chaveRec].tarifas += parseFloat(r.tarifas || 0);
+          recMap[chaveRec].juros += parseFloat(r.juros || 0);
+        }
       });
-      let recFinal = Object.values(recMap);
-      if (isComercial) recFinal = recFinal.filter((r: any) => allowedCedentes.includes(r.cedente));
+
+      const vopFinal = Object.values(vopMap);
+      const recFinal = Object.values(recMap);
+      setDashVop(vopFinal);
       setDashReceitas(recFinal);
 
+      // 🎯 3. Puxa a Foto de Riscos e Vencidos direto do Cadastro de Cedentes V2
+      let queryCadastro = supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc, vencido_sec, vencido_fidc, comercial");
+      if (isComercial) {
+        queryCadastro = queryCadastro.eq("comercial", userNome);
+      }
+      const { data: cadastroRaw } = await queryCadastro;
+
+      const cartFinal = (cadastroRaw || []).map((c: any) => ({
+        cedente: simplificarNome(c.cedente),
+        risco_consolidated: (parseFloat(c.risco_sec || 0) + parseFloat(c.risco_fidc || 0)),
+        risco_sec: parseFloat(c.risco_sec || 0),
+        risco_fidc: parseFloat(c.risco_fidc || 0),
+        vencidos_securitizadora: parseFloat(c.vencido_sec || 0),
+        vencidos_fidc: parseFloat(c.vencido_fidc || 0)
+      }));
+      setDashCarteira(cartFinal);
+
+      // 📅 4. Monta as Listas Dinâmicas de Filtros
       const mesesUnicos = Array.from(new Set([
-        ...vopFinal.map(v => formatarMesAno(v.mes_ano)),
-        ...recFinal.map(r => formatarMesAno(r.mes_ano))
-      ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a, b) => {
+        ...vopFinal.map((v: any) => formatarMesAno(v.mes_ano)),
+        ...recFinal.map((r: any) => formatarMesAno(r.mes_ano))
+      ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a: string, b: string) => {
         const [mA, yA] = a.split("/"); const [mB, yB] = b.split("/");
         return (parseInt(yB) * 100 + parseInt(mB)) - (parseInt(yA) * 100 + parseInt(mA));
       });
@@ -146,15 +147,15 @@ export default function DashboardPage() {
       if (mesesSel.length === 0 && mesesUnicos.length > 0) setMesesSel([mesesUnicos[0]]);
 
       const cedentesUnicos = Array.from(new Set([
-        ...vopFinal.map(v => v.cedente),
-        ...cartFinal.map(c => c.cedente),
-        ...recFinal.map(r => r.cedente)
+        ...vopFinal.map((v: any) => v.cedente),
+        ...cartFinal.map((c: any) => c.cedente),
+        ...recFinal.map((r: any) => r.cedente)
       ].filter(Boolean))).sort();
       setListaCedentes(cedentesUnicos);
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
 
     } catch (err) {
-      console.error("Erro no processamento geral:", err);
+      console.error("Erro no processamento geral do Dashboard:", err);
     } finally {
       setCarregando(false);
     }
@@ -162,11 +163,11 @@ export default function DashboardPage() {
 
   useEffect(() => { carregarDashboardFiel(); }, []);
 
-  const sincronizarGoogleSheets = async () => {
+  const sincronizarBancoLocal = async () => {
     setSincronizando(true);
     await carregarDashboardFiel();
     setSincronizando(false);
-    alert("🎉 Sincronizado! Dados consolidados multifiltro lidos com sucesso.");
+    alert("🎉 Sincronizado! Dados vivos e consolidados consultados direto do Supabase.");
   };
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
@@ -188,7 +189,7 @@ export default function DashboardPage() {
       if (bateMes) {
         if ((a.status || "").toLowerCase() === "aprovado") aprovadosMes++;
         if (["reprovado", "recusado"].includes((a.status || "").toLowerCase())) recusadosMes++;
-        const dFim = parseDataSegura(a.criado_em || a.atualizado_em);
+        const dFim = parseDataSegura(a.criado_em);
         if (dFim) { somaDias += calcularDiasUteis(dRec, dFim); qtdSla++; }
       }
     }
@@ -445,11 +446,11 @@ export default function DashboardPage() {
           </div>
         </div>
         <button 
-          onClick={sincronizarGoogleSheets} 
+          onClick={sincronizarBancoLocal} 
           disabled={sincronizando}
           className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs shadow-sm disabled:opacity-50"
         >
-          {sincronizando ? "⏳ Consolidando..." : "🔄 Atualizar Dados da Planilha"}
+          {sincronizando ? "⏳ Consolidando..." : "🔄 Atualizar Dados do Supabase"}
         </button>
       </div>
 

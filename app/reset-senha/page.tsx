@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
@@ -35,6 +36,7 @@ function ResetSenhaForm() {
           return;
         }
 
+        // 🎯 Fix: Garante a interpretação da string de data de forma segura independente do local
         const expira = new Date(data.token_expira).getTime();
         const agora = Date.now();
 
@@ -65,21 +67,24 @@ function ResetSenhaForm() {
     }
 
     try {
+      options;
       setCarregando(true);
 
-      // Executa o RPC que criamos no Passo 1: salva com hash e limpa os tokens do banco
+      // Executa o RPC que salva com hash e limpa os tokens do banco
       const { error } = await supabase.rpc("atualizar_senha_cripto", {
         p_usuario_id: usuarioValido.id,
-        p_nova_senha: novaSenha
+        p_nova_senha: novaSenha.trim()
       });
 
       if (error) throw error;
 
       alert("🎉 Senha redefinida com sucesso com criptografia de segurança!");
-      router.push("/login");
-    } catch (err) {
+      
+      // 🎯 Fix: Empurra o usuário para a tela inicial correta do sistema
+      router.push("/");
+    } catch (err: any) {
       console.error(err);
-      setMensagem({ tipo: "erro", texto: "❌ Erro ao salvar nova senha no servidor." });
+      setMensagem({ tipo: "erro", texto: `❌ Erro ao salvar nova senha: ${err.message || "Erro no servidor."}` });
     } finally {
       setCarregando(false);
     }
