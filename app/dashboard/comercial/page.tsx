@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface VisitaRow {
@@ -54,7 +54,6 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 🎯 FIX 1: LEITURA LINEAR ROBUSTA CONTRA BUG DE LINHA ÚNICA
   const handleImportarCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -66,7 +65,6 @@ export default function ControleComercialVisitasPage() {
         const text = event.target?.result as string;
         if (!text) return;
 
-        // Quebra as linhas tratando variações de \r\n e \n do Windows/Mac
         const lines = text.split(/\r?\n/);
         let startIdx = 0;
         
@@ -107,6 +105,9 @@ export default function ControleComercialVisitasPage() {
         const listaNovasVisitas: VisitaRow[] = [];
         const sdrsEncontrados = new Set<string>();
 
+        // Timestamp único para garantir imutabilidade das chaves no render
+        const importBatchId = Date.now();
+
         for (let i = startIdx + 1; i < lines.length; i++) {
           const linhaLimpa = lines[i].trim();
           if (!linhaLimpa) continue;
@@ -128,7 +129,8 @@ export default function ControleComercialVisitasPage() {
           }
 
           listaNovasVisitas.push({
-            id: `lead-${i}-${Date.now()}`,
+            // 🎯 ID Absoluto e Linear para evitar Call Stack Overflow
+            id: `row-${i}-${importBatchId}`,
             nome: colunas[idxNome],
             empresa: colunas[idxEmpresa] || "",
             responsavelSDR: sdrNome,
@@ -162,7 +164,6 @@ export default function ControleComercialVisitasPage() {
     reader.readAsText(file, "UTF-8");
   };
 
-  // 🎯 FIX 2: INTEGRAÇÃO COM A ESTEIRA DE ENTRADA (EM ANÁLISE)
   const moverLeadParaEsteiraAnalise = async (lead: VisitaRow) => {
     const confirmar = confirm(`🔍 Deseja enviar a empresa "${lead.nome}" diretamente para a lista de Análises Pendentes?`);
     if (!confirmar) return;
@@ -171,7 +172,6 @@ export default function ControleComercialVisitasPage() {
       setEnviandoLeadId(lead.id);
       const dataFormatada = new Date().toISOString().split("T")[0];
 
-      // Insere na tabela 'em_analise' igual ao formulário manual
       const { error } = await supabase.from("em_analise").insert({
         agente_nome: lead.responsavelSDR || "Comercial Ned",
         nome_empresa: lead.nome.trim().toUpperCase(),
@@ -181,7 +181,6 @@ export default function ControleComercialVisitasPage() {
 
       if (error) throw error;
 
-      // Altera o status local do lead para evitar duplicidade de envio
       const atualizadas = visitas.map(v => v.id === lead.id ? { ...v, statusComissaoComite: "Enviado p/ Análise" as any } : v);
       persistirDados(atualizadas);
       
@@ -207,15 +206,21 @@ export default function ControleComercialVisitasPage() {
     persistirDados(visitas, novasConfigs);
   };
 
-  const listasSDRsUnicos = Object.keys(configsSDR).sort();
-  const visitasFiltradas = visitas.filter(v => {
-    const bateSdr = !filtroSDR || v.responsavelSDR === filtroSDR;
-    const bateComite = !filtroStatusComite || v.statusComissaoComite === filtroStatusComite;
-    const bateTexto = !buscaTexto || v.nome.toLowerCase().includes(buscaTexto.toLowerCase());
-    return bateSdr && bateComite && bateTexto;
-  });
+  // 🎯 MEMORIZAÇÃO FIEL DAS LISTAS CONTRA LOOPS INFINITOS DE RENDER
+  const listasSDRsUnicos = useMemo(() => {
+    return Object.keys(configsSDR).sort();
+  }, [configsSDR]);
 
-  const kpisGlobais = (() => {
+  const visitasFiltradas = useMemo(() => {
+    return visitas.filter(v => {
+      const bateSdr = !filtroSDR || v.responsavelSDR === filtroSDR;
+      const bateComite = !filtroStatusComite || v.statusComissaoComite === filtroStatusComite;
+      const bateTexto = !buscaTexto || v.nome.toLowerCase().includes(buscaTexto.toLowerCase());
+      return bateSdr && bateComite && bateTexto;
+    });
+  }, [visitas, filtroSDR, filtroStatusComite, buscaTexto]);
+
+  const kpisGlobais = useMemo(() => {
     let totalAgendamentosGanhos = 0;
     let totalComiteGanhos = 0;
     let totalPendenteAnalise = 0;
@@ -228,7 +233,7 @@ export default function ControleComercialVisitasPage() {
     });
 
     return { totalAgendamentosGanhos, totalComiteGanhos, totalPendenteAnalise };
-  })();
+  }, [visitasFiltradas, configsSDR]);
 
   const formatarMoeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -310,7 +315,7 @@ export default function ControleComercialVisitasPage() {
             <input type="text" placeholder="Filtrar por nome do lead..." value={buscaTexto} onChange={(e) => setBuscaTexto(e.target.value)} className="p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 w-64 font-medium" />
             <select value={filtroSDR} onChange={(e) => setFiltroSDR(e.target.value)} className="p-2 border border-slate-300 rounded-lg text-xs font-bold outline-none bg-white">
               <option value="">SDR (Todos)</option>
-              {listasSDRsUnicos.map(n => <option key={nomeNovaEmpresa} value={n}>{n}</option>)}
+              {listasSDRsUnicos.map(n => <option key={n} value={n}>{n}</option>)}
             </select>
             <select value={filtroStatusComite} onChange={(e) => setFiltroStatusComite(e.target.value)} className="p-2 border border-slate-300 rounded-lg text-xs font-bold outline-none bg-white">
               <option value="">Status Comitê (Todos)</option>
@@ -318,6 +323,7 @@ export default function ControleComercialVisitasPage() {
               <option value="Aprovado">🟢 Aprovado</option>
               <option value="Reprovado">🔴 Reprovado / Perda</option>
               <option value="Enviado p/ Análise">🚀 Enviado p/ Análise</option>
+              <option value="Pago">🏁 Confirmado Pago</option>
             </select>
           </div>
 
@@ -370,6 +376,8 @@ export default function ControleComercialVisitasPage() {
                             ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
                             : v.statusComissaoComite === "Reprovado" 
                             ? "bg-rose-100 text-rose-700 border-rose-200" 
+                            : v.statusComissaoComite === "Enviado p/ Análise"
+                            ? "bg-purple-100 text-blue-800 border-purple-200"
                             : "bg-amber-100 text-amber-700 border-amber-200"
                         }`}>
                           <option value="Em Análise">⏳ Em Análise</option>
