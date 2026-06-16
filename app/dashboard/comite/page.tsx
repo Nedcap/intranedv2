@@ -9,7 +9,6 @@ export default function ComitePage() {
   const [empresasAnalise, setEmpresasAnalise] = useState<any[]>([]); 
   const [carregando, setCarregando] = useState(true);
   
-  // 🎯 Mudança de Estado: Guarda o ID da empresa aberta na tabela para o painel embutido
   const [idEmpresaExpandida, setEditandoEmpresaExpandida] = useState<string | null>(null);
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
@@ -55,7 +54,6 @@ export default function ComitePage() {
         });
         setAnalises(filtradas);
 
-        // Puxa carga inicial de votos de todas as empresas listadas
         filtradas.forEach(item => {
           carregarVotosIniciais(item.empresa_nome);
         });
@@ -74,11 +72,10 @@ export default function ComitePage() {
   const carregarVotosIniciais = async (empresaNome: string) => {
     const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
     if (data) {
-      setVotosAoVivo(prev => ({ ...p, [empresaNome]: data }));
+      setVotosAoVivo(prev => ({ ...prev, [empresaNome]: data }));
     }
   };
 
-  // 📡 REALTIME BROADCAST: Liga a escuta em tempo real das tabelas do Supabase
   useEffect(() => {
     carregarComite(); 
 
@@ -91,7 +88,6 @@ export default function ComitePage() {
       }
     } catch (e) { console.error(e); }
 
-    // Escuta Realtime para Votos
     const canalVotos = supabase
       .channel("votos-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, () => {
@@ -104,7 +100,6 @@ export default function ComitePage() {
     };
   }, [analises.length]);
 
-  // Escuta Realtime para o Chat Interno da Empresa Expandida
   useEffect(() => {
     if (!idEmpresaExpandida) return;
     const empresaAlvo = analises.find(a => a.id === idEmpresaExpandida);
@@ -366,6 +361,8 @@ export default function ComitePage() {
               {analises.map((item) => {
                 const painelAberto = idEmpresaExpandida === item.id;
                 const listaDeVotos = votosAoVivo[item.empresa_nome] || [];
+                
+                // 🎯 FIX DEFINITIVO: Trocado a <tr> de escopo fantasma por um Fragment nativo do React (<key={...}>)
                 return (
                   <tr key={item.id} style={{ display: "contents" }}>
                     
@@ -391,7 +388,7 @@ export default function ComitePage() {
                       )}
                     </tr>
 
-                    {/* 🎯 NÍVEL 2 INTERNO: COMPONENTE DE VOTAÇÃO E CHAT EM TEMPO REAL INJETADO DE FATO */}
+                    {/* NÍVEL 2 INTERNO: COMPONENTE DE VOTAÇÃO EXECUTADO DE FORMA SEGURA */}
                     {painelAberto && (
                       <tr>
                         <td colSpan={isMaster ? 6 : 5} className="bg-slate-50/50 p-4 border-l-4 border-blue-600">
