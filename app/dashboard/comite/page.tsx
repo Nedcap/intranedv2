@@ -17,11 +17,12 @@ export default function ComitePage() {
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [novaMsg, setNovaMsg] = useState("");
+  const [diretoresBanco, setDiretoresBanco] = useState<string[]>([]);
 
-  // 🎯 Tipos de voto controlados pelo perfil logado
+  // Perfis de voto controlados pelo perfil logado
   const [opcaoVoto, setOpcaoVoto] = useState("");
   const [justificativaVoto, setJustificativaVoto] = useState("");
-  const [votoComoDecisao, setVotoComoDecisao] = useState(false); // Checkbox exclusivo para Master/Alyson
+  const [votoComoDecisao, setVotoComoDecisao] = useState(false); 
   const [enviandoVoto, setEnviandoVoto] = useState(false);
   
   const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
@@ -31,7 +32,20 @@ export default function ComitePage() {
   const [novaDataEnvio, setNovaDataEnvio] = useState("");
 
   const [isMaster, setIsMaster] = useState(false);
+  const [isDiretor, setIsDiretor] = useState(false); // 🎯 Novo Estado: Controle de interface para diretores
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
+
+  const carregarDiretores = async () => {
+    try {
+      const { data } = await supabase
+        .from("usuarios")
+        .select("nome")
+        .ilike("cargo", "Diretor");
+      if (data) setDiretoresBanco(data.map(u => u.nome));
+    } catch (err) {
+      console.error("Erro ao buscar diretores:", err);
+    }
+  };
 
   const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
     if (!empresaNome) return;
@@ -103,15 +117,22 @@ export default function ComitePage() {
   };
 
   useEffect(() => {
+    carregarDiretores();
     carregarComite(); 
 
     try {
       const userStr = localStorage.getItem("intraned_user");
       if (userStr) {
         const parsed = JSON.parse(userStr);
-        setNomeUsuarioLogado(parsed.nome || "Diretor Ned");
-        if (String(parsed.perfil || parsed.cargo).toLowerCase() === "master") {
+        setNomeUsuarioLogado(parsed.nome || "Membro Ned");
+        
+        const cargoLimpo = String(parsed.perfil || parsed.cargo || "").toLowerCase().trim();
+        
+        if (cargoLimpo === "master") {
           setIsMaster(true);
+        }
+        if (cargoLimpo === "diretor") {
+          setIsDiretor(true);
         }
       }
     } catch (e) { console.error(e); }
@@ -213,15 +234,21 @@ export default function ComitePage() {
   };
 
   const processarVotoWeb = async (empresaItem: any) => {
+    // 🎯 TRAVA REAL DE ESCOPO COMERCIAL / OPERACIONAL: Se o usuário logado não for Master e não for Diretor, aborta imediatamente
+    if (!isMaster && !isDiretor) {
+      alert("🚫 ACESSO NEGADO: Apenas usuários com perfil ou cargo de 'Diretor' ou 'Master' podem assinar pareceres e registrar votos no comitê de crédito.");
+      return;
+    }
+
     if (!opcaoVoto || !justificativaVoto) {
-      alert("Por favor, selecione o voto e preencha a justificativa.");
+      alert("Por favor, selecione o seu voto e preencha o parecer/justificativa.");
       return;
     }
     try {
       setEnviandoVoto(true);
       const e = empresaItem.empresa_nome;
       
-      // 🎯 Identifica a assinatura do voto baseado em quem está logado ou se marcou "Decisão"
+      // Define a assinatura do voto baseado no login ou checkbox Master
       const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
 
       await supabase.from("votos").insert({ 
@@ -236,7 +263,7 @@ export default function ComitePage() {
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
-        const emailsAlvo = await obter_emails_notificacao(e);
+        const emailsAlvo = await obtener_emails_notificacao(e);
         const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
         const corAta = opcaoVoto === "Aprovado" ? "#059669" : "#ef4444";
         const linesAta = (todosVotos || []).map(v => `<tr><td style='border:1px solid #ddd;padding:8px;'><b>${v.membro_nome}</b></td><td style='border:1px solid #ddd;padding:8px;'>${v.voto}</td><td style='border:1px solid #ddd;padding:8px;'>${v.justificativa}</td></tr>`).join("");
@@ -246,7 +273,7 @@ export default function ComitePage() {
         if (modoFocoComite) desativarModoLupaExecutiva();
       }
       
-      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata enviada!" : "🗳️ Seu voto foi computado ao vivo!");
+      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata enviada!" : "🗳️ Seu voto foi computado com sucesso!");
       setJustificativaVoto(""); 
       setVotoComoDecisao(false);
       await carregarVotosIniciais(e);
@@ -393,7 +420,7 @@ export default function ComitePage() {
           {/* LADO DIREITO: DASHBOARD DECISÓRIO */}
           <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
             
-            {/* Bloco Voto Autenticado */}
+            {/* Bloco Voto Autenticado e Travado */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md space-y-3 shrink-0 text-left">
               <div className="flex justify-between items-center">
                 <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">🗳️ Painel de Voto</span>
@@ -402,27 +429,33 @@ export default function ComitePage() {
                 </span>
               </div>
               
-              <div className="grid grid-cols-1 gap-2">
-                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer text-slate-200">
-                  <option value="">Selecione o seu Voto</option>
-                  <option value="Aprovado">🟢 Aprovado</option>
-                  <option value="Reprovado">🔴 Reprovado</option>
-                </select>
+              {/* Oculta as opções de voto para quem não tem escopo comercial de comitê */}
+              {(!isMaster && !isDiretor) ? (
+                <div className="p-3 bg-red-950/30 text-red-400 font-bold text-xs rounded border border-red-900/50 leading-relaxed">
+                  🔒 Seu perfil atual ({nomeUsuarioLogado}) está mapeado como consulta/operacional. Voto bloqueado.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2">
+                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer">
+                    <option value="">Selecione o seu Voto</option>
+                    <option value="Aprovado">🟢 Aprovado</option>
+                    <option value="Reprovado">🔴 Reprovado</option>
+                  </select>
 
-                {/* 🎯 Gatilho Inteligente Alyson/Master: Se for master, habilita checkbox para assinar como Decisão Executiva */}
-                {isMaster && (
-                  <label className="flex items-center gap-2 p-1 text-slate-300 font-bold text-xs bg-slate-950/50 rounded border border-slate-800/80 cursor-pointer hover:bg-slate-950">
-                    <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-blue-600 rounded bg-slate-950 border-slate-800" />
-                    Assegurar este voto como a <span className="text-amber-400">Decisão Final</span>
-                  </label>
-                )}
-              </div>
+                  {isMaster && (
+                    <label className="flex items-center gap-2 p-1 text-slate-300 font-bold text-xs bg-slate-950/50 rounded border border-slate-800/80 cursor-pointer hover:bg-slate-950 select-none">
+                      <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-blue-600 rounded bg-slate-950 border-slate-800" />
+                      Assegurar este voto como a <span className="text-amber-400">Decisão Final</span>
+                    </label>
+                  )}
 
-              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer do comitê..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
-              
-              <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition-all cursor-pointer shadow-md">
-                {enviandoVoto ? "Computando Parecer..." : "Confirmar e Lançar Voto"}
-              </button>
+                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer técnico do comitê..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
+                  
+                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition-all cursor-pointer shadow-md">
+                    {enviandoVoto ? "Computando Parecer..." : "Confirmar e Lançar Voto"}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Bloco Histórico de Votos */}
