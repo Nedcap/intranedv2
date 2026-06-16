@@ -4,13 +4,65 @@
 
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { 
-  simplificarNome, 
-  parseValorReal, 
-  formatarMesAno, 
-  parseDataSegura, 
-  calcularDiasUteis 
-} from "@/actions/dashboard-service";
+
+function simplificarNome(nome: string): string {
+  if (!nome) return "";
+  let n = nome.trim().toUpperCase();
+  n = n.replace(/\b(LTDA|SA|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, "");
+  return n.replace(/\s+/g, " ").trim();
+}
+
+function parseValorReal(valor: any): number {
+  if (!valor) return 0;
+  if (typeof valor === "number") return valor;
+  const str = String(valor).replace(/[R$\s]/g, "").trim();
+  if (str.includes(",")) return parseFloat(str.replace(/\./g, "").replace(",", ".")) || 0;
+  return parseFloat(str) || 0;
+}
+
+function formatarMesAno(str: string) {
+  if (!str) return "";
+  const partes = str.split("/");
+  if (partes.length === 2) {
+    return `${partes[0].padStart(2, "0")}/${partes[1]}`;
+  }
+  return str;
+}
+
+function extrairMesAnoDeDataBR(dataStr: string): string {
+  if (!dataStr) return "";
+  const partes = dataStr.split("/");
+  if (partes.length === 3) {
+    return `${partes[1].padStart(2, "0")}/${partes[2]}`;
+  }
+  if (partes.length === 2) {
+    return `${partes[0].padStart(2, "0")}/${partes[1]}`;
+  }
+  return dataStr;
+}
+
+function parseDataSegura(dataStr: string) {
+  if (!dataStr) return null;
+  const apenasData = dataStr.trim().split("T")[0];
+  return new Date(`${apenasData}T12:00:00`);
+}
+
+function calcularDiasUteis(dInicio: Date, dFim: Date) {
+  let count = 0;
+  const atual = new Date(dInicio.getTime());
+  atual.setHours(12, 0, 0, 0);
+  const fim = new Date(dFim.getTime());
+  fim.setHours(12, 0, 0, 0);
+  if (fim < atual) return 0;
+  while (atual < fim) {
+    atual.setDate(atual.getDate() + 1);
+    const diaSemana = atual.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) {
+      count++;
+    }
+  }
+  return count;
+}
 
 export default function DashboardPage() {
   const [analises, setAnalises] = useState<any[]>([]);
@@ -76,7 +128,7 @@ export default function DashboardPage() {
       const resAnalises = await queryAnalises;
       setAnalises(resAnalises.data || []);
 
-      // 🎯 2. Puxa as Finanças direto da tabela do Supabase com fallback de chaves dinâmicas
+      // 2. Busca e Agrupa as Finanças (VOP e Receitas) do Banco de Dados V2
       let queryFinancas = supabase.from("extrato_financeiro").select("*");
       if (isComercial) {
         queryFinancas = queryFinancas.in("cedente", allowedCedentes);
@@ -87,45 +139,30 @@ export default function DashboardPage() {
       const recMap: { [key: string]: any } = {};
 
       (financasRaw || []).forEach((r: any) => {
-        const cedKey = simplificarNome(r.cedente);
-        if (!cedKey) return;
+        const rawCedente = r.cedente || "";
+        const cedente = simplificarNome(rawCedente);
+        if (!cedente) return;
 
-        // Trata mes_ano para garantir padrão MM/AAAA vindo do banco (com hífen ou barra)
-        let mAno = String(r.mes_ano || r["mes/ano"] || "").trim();
-        if (mAno.includes("-") && mAno.indexOf("-") === 4) {
-          // Se vier AAAA-MM, inverte para MM/AAAA
-          const parts = mAno.split("-");
-          mAno = `${parts[1]}/${parts[0]}`;
-        } else if (mAno.includes("-")) {
-          mAno = mAno.replace("-", "/");
-        }
+        // Suporta as variações de nomes de colunas que vieram na unificação das tabelas
+        const mes_ano = String(r.mes_ano || r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
+        const emp = String(r.empresa || "").trim().toUpperCase();
+        const dataOp = String(r.data_operacao || r.data || r["mês/ano"] || r["mes/ano"] || "").trim();
 
-        const chaveVop = `${cedKey}_${mAno}`;
+        // Agrupamento estrutural do VOP
+        const chaveVop = `${cedente}_${mes_ano}`;
+        if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano, cedente, vop_sec: 0, vop_fidc: 0 };
+        vopMap[chaveVop].vop_sec += parseValorReal(r.vop_sec || r["vop sec"] || (emp === "SEC" ? r.vop : 0));
+        vopMap[chaveVop].vop_fidc += parseValorReal(r.vop_fidc || r["vop fidc"] || (emp === "FIDC" ? r.vop : 0));
 
-        // Coleta VOP aceitando colunas unificadas ou separadas do banco anterior
-        const valorVop = parseFloat(r.vop || r.vop_sec || r.vop_fidc || r["vop sec"] || r["vop fidc"] || 0);
-        const empTipo = String(r.empresa || "").toUpperCase().trim();
-
-        if (valorVop > 0) {
-          if (!vopMap[chaveVop]) vopMap[chaveVop] = { mes_ano: mAno, cedente: cedKey, vop_sec: 0, vop_fidc: 0 };
-          if (empTipo === "SEC" || r.vop_sec > 0) vopMap[chaveVop].vop_sec += valorVop;
-          if (empTipo === "FIDC" || r.vop_fidc > 0) vopMap[chaveVop].vop_fidc += valorVop;
-        }
-
-        // Coleta Lançamentos de Receitas suportando acentuação ou chaves cruas
-        const desagioVal = parseFloat(r.desagio || r["deságio"] || r.desagio_retido || 0);
-        const tarifasVal = parseFloat(r.tarifas || r.despesas || r.tarifa || 0);
-        const jurosVal = parseFloat(r.juros || r.juros_multa || r["juros e multa"] || 0);
-        const dataOp = r.data_operacao || r.data || mAno;
-
-        if (desagioVal > 0 || tarifasVal > 0 || jurosVal > 0) {
-          const chaveRec = `${empTipo}_${dataOp}_${cedKey}`;
+        // Agrupamento estrutural das Receitas
+        if (dataOp) {
+          const chaveRec = `${emp}_${dataOp}_${cedente}`;
           if (!recMap[chaveRec]) {
-            recMap[chaveRec] = { empresa: empTipo, data: dataOp, mes_ano: mAno, cedente: cedKey, desagio: 0, tarifas: 0, juros: 0 };
+            recMap[chaveRec] = { empresa: emp, data: dataOp, mes_ano: extrairMesAnoDeDataBR(dataOp) || mes_ano, cedente, desagio: 0, tarifas: 0, juros: 0 };
           }
-          recMap[chaveRec].desagio += desagioVal;
-          recMap[chaveRec].tarifas += tarifasVal;
-          recMap[chaveRec].juros += jurosVal;
+          recMap[chaveRec].desagio += parseValorReal(r.desagio || r["deságio"] || r["deságio retido"] || 0);
+          recMap[chaveRec].tarifas += parseValorReal(r.tarifas || r.despesas || r["tarifas / despesas"] || 0);
+          recMap[chaveRec].juros += parseValorReal(r.juros || r["juros e multa"] || r["juros"] || r.encargos || 0);
         }
       });
 
@@ -134,43 +171,52 @@ export default function DashboardPage() {
       setDashVop(vopFinal);
       setDashReceitas(recFinal);
 
-      // 3. Puxa a Foto de Riscos e Vencidos
+      // 3. Busca a Foto de Riscos e Títulos Vencidos Direto do Cadastro Oficial (Substitui a BASE_CARTEIRA)
       let queryCadastro = supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc, vencido_sec, vencido_fidc, comercial");
       if (isComercial) {
         queryCadastro = queryCadastro.eq("comercial", userNome);
       }
       const { data: cadastroRaw } = await queryCadastro;
 
-      const cartFinal = (cadastroRaw || []).map((c: any) => ({
-        cedente: simplificarNome(c.cedente),
-        risco_consolidated: (parseFloat(c.risco_sec || 0) + parseFloat(c.risco_fidc || 0)),
-        risco_sec: parseFloat(c.risco_sec || 0),
-        risco_fidc: parseFloat(c.risco_fidc || 0),
-        vencidos_securitizadora: parseFloat(c.vencido_sec || 0),
-        vencidos_fidc: parseFloat(c.vencido_fidc || 0)
-      }));
+      const cartMap: { [key: string]: any } = {};
+      (cadastroRaw || []).forEach((c: any) => {
+        const cedente = simplificarNome(c.cedente);
+        if (!cedente) return;
+
+        if (!cartMap[cedente]) {
+          cartMap[cedente] = { cedente, risco_consolidated: 0, risco_sec: 0, risco_fidc: 0, vencidos_securitizadora: 0, vencidos_fidc: 0 };
+        }
+        
+        const rSec = parseValorReal(c.risco_sec);
+        const rFidc = parseValorReal(c.risco_fidc);
+        const vSec = parseValorReal(c.vencido_sec);
+        const vFidc = parseValorReal(c.vencido_fidc);
+
+        cartMap[cedente].risco_consolidated += (rSec + rFidc);
+        cartMap[cedente].risco_sec += rSec;
+        cartMap[cedente].risco_fidc += rFidc;
+        cartMap[cedente].vencidos_securitizadora += vSec;
+        cartMap[cedente].vencidos_fidc += vFidc;
+      });
+      
+      const cartFinal = Object.values(cartMap);
       setDashCarteira(cartFinal);
 
-      // 4. Listas Dinâmicas de Filtros
+      // 4. Criação Dinâmica dos Filtros Cruzados
       const mesesUnicos = Array.from(new Set([
-        ...vopFinal.map((v: any) => v.mes_ano),
-        ...recFinal.map((r: any) => r.mes_ano)
-      ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a: string, b: string) => {
+        ...vopFinal.map(v => formatarMesAno(v.mes_ano)),
+        ...recFinal.map(r => formatarMesAno(r.mes_ano))
+      ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a, b) => {
         const [mA, yA] = a.split("/"); const [mB, yB] = b.split("/");
         return (parseInt(yB) * 100 + parseInt(mB)) - (parseInt(yA) * 100 + parseInt(mA));
       });
-      
       setListaMeses(mesesUnicos);
-      
-      // 🎯 Fix: Garante que por padrão o filtro venha aberto com TODOS os meses se a seleção estiver vazia
-      if (mesesSel.length === 0 && mesesUnicos.length > 0) {
-        setMesesSel([mesesUnicos[0]]);
-      }
+      if (mesesSel.length === 0 && mesesUnicos.length > 0) setMesesSel([mesesUnicos[0]]);
 
       const cedentesUnicos = Array.from(new Set([
-        ...vopFinal.map((v: any) => v.cedente),
-        ...cartFinal.map((c: any) => c.cedente),
-        ...recFinal.map((r: any) => r.cedente)
+        ...vopFinal.map(v => v.cedente),
+        ...cartFinal.map(c => c.cedente),
+        ...recFinal.map(r => r.cedente)
       ].filter(Boolean))).sort();
       setListaCedentes(cedentesUnicos);
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
@@ -188,21 +234,12 @@ export default function DashboardPage() {
     setSincronizando(true);
     await carregarDashboardFiel();
     setSincronizando(false);
-    alert("🎉 Sincronizado! Dados vivos e consolidados consultados direto do Supabase.");
+    alert("🎉 Painel atualizado com sucesso direto da base de dados Supabase!");
   };
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
     const bateEmpresa = empresasSel.includes(emp.toUpperCase());
-    
-    // Normaliza m_a antes de comparar no filtro
-    let m_aTratado = String(m_a).trim();
-    if (m_aTratado.includes("-") && m_aTratado.indexOf("-") === 4) {
-      const parts = m_aTratado.split("-"); m_aTratado = `${parts[1]}/${parts[0]}`;
-    } else if (m_aTratado.includes("-")) {
-      m_aTratado = m_aTratado.replace("-", "/");
-    }
-
-    const bateMes = mesesSel.length === 0 || mesesSel.includes(m_aTratado);
+    const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
     const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced.toUpperCase());
     return bateEmpresa && bateMes && bateCedente;
   };
@@ -219,7 +256,7 @@ export default function DashboardPage() {
       if (bateMes) {
         if ((a.status || "").toLowerCase() === "aprovado") aprovadosMes++;
         if (["reprovado", "recusado"].includes((a.status || "").toLowerCase())) recusadosMes++;
-        const dFim = parseDataSegura(a.criado_em);
+        const dFim = parseDataSegura(a.criado_em || a.atualizado_em);
         if (dFim) { somaDias += calcularDiasUteis(dRec, dFim); qtdSla++; }
       }
     }
@@ -228,22 +265,18 @@ export default function DashboardPage() {
 
   let vopMensalSec = 0; let vopMensalFidc = 0;
   dashVop.forEach(v => {
-    let mV = v.mes_ano;
-    if (mV.includes("-") && mV.indexOf("-") === 4) {
-      const parts = mV.split("-"); mV = `${parts[1]}/${parts[0]}`;
-    }
-    if (mesesSel.length === 0 || mesesSel.includes(mV)) {
+    if (mesesSel.length === 0 || mesesSel.includes(formatarMesAno(v.mes_ano))) {
       if (cedentesSel.includes(v.cedente)) {
-        if (empresasSel.includes("SEC")) vopMensalSec += v.vop_sec;
-        if (empresasSel.includes("FIDC")) vopMensalFidc += v.vop_fidc;
+        if (empresasSel.includes("SEC")) vopMensalSec += parseValorReal(v.vop_sec);
+        if (empresasSel.includes("FIDC")) vopMensalFidc += parseValorReal(v.vop_fidc);
       }
     }
   });
 
   let vopVidaTodaSec = 0; let vopVidaTodaFidc = 0;
   dashVop.forEach(v => {
-    vopVidaTodaSec += v.vop_sec;
-    vopVidaTodaFidc += v.vop_fidc;
+    vopVidaTodaSec += parseValorReal(v.vop_sec);
+    vopVidaTodaFidc += parseValorReal(v.vop_fidc);
   });
   const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
 
