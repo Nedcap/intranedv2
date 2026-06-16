@@ -25,7 +25,6 @@ export default function AnaliseEstoqueCedentesPage() {
   const [cedenteExpandido, setCedenteExpandido] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
 
-  // Carrega os dados sincronizados do banco para toda a mesa de crédito
   const buscarEstoqueDoBanco = async () => {
     try {
       setCarregando(true);
@@ -64,7 +63,6 @@ export default function AnaliseEstoqueCedentesPage() {
     buscarEstoqueDoBanco();
   }, []);
 
-  // Upload Destrutivo Clean: Apaga a base antiga e injeta a nova computando as 4 colunas
   const handleImportarEstoqueDestrutivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -75,7 +73,6 @@ export default function AnaliseEstoqueCedentesPage() {
     setCarregando(true);
     try {
       setStatusStatusTexto("Limpando registros do estoque anterior...");
-      // Deleta tudo de forma segura
       await supabase.from("estoque_fidc").delete().neq("cedente", "");
 
       setStatusStatusTexto("Lendo arquivo local...");
@@ -84,20 +81,18 @@ export default function AnaliseEstoqueCedentesPage() {
         const text = event.target?.result as string;
         if (!text) return;
 
+        // Suporta quebras de linha padrão Windows e Linux
         const lines = text.split(/\r?\n/);
-        let startIdx = 0;
-
-        if (lines[0] && lines[0].includes("sep=")) startIdx = 1;
-        while (startIdx < lines.length && !lines[startIdx].trim()) startIdx++;
-
-        const parseLineCSV = (linhaTexto: string) => {
+        
+        // 🛠️ FUNÇÃO INTELIGENTE DE PARSER DE CSV (Suporta vírgula e ponto-e-vírgula)
+        const parseLineCSV = (linhaTexto: string, separador: string = ",") => {
           const colunas = [];
           let dentroDeAspas = false;
           let celulaAcumulada = "";
           for (let i = 0; i < linhaTexto.length; i++) {
             const char = linhaTexto[i];
             if (char === '"') dentroDeAspas = !dentroDeAspas;
-            else if (char === ',' && !dentroDeAspas) {
+            else if (char === separador && !dentroDeAspas) {
               colunas.push(celulaAcumulada.trim().replace(/^"|"$/g, ""));
               celulaAcumulada = "";
             } else {
@@ -108,7 +103,30 @@ export default function AnaliseEstoqueCedentesPage() {
           return colunas;
         };
 
-        const headers = parseLineCSV(lines[startIdx]);
+        // 🔍 DETECTOR DINÂMICO DE CABEÇALHO E SEPARADOR
+        let startIdx = -1;
+        let separadorDefinido = ",";
+        
+        for (let i = 0; i < Math.min(lines.length, 20); i++) {
+          const l = lines[i];
+          if (l.includes("NOME_DO_CEDENTE") || l.includes("VALOR_NOMINAL")) {
+            startIdx = i;
+            // Se tiver mais ';' do que ',', muda o separador padrão
+            if ((l.match(/;/g) || []).length > (l.match(/,/g) || []).length) {
+              separadorDefinido = ";";
+            }
+            break;
+          }
+        }
+
+        if (startIdx === -1) {
+          alert("❌ Erro grave: Não encontramos as colunas estruturais (NOME_DO_CEDENTE ou VALOR_NOMINAL) nas primeiras 20 linhas do arquivo.");
+          setCarregando(false);
+          return;
+        }
+
+        const headers = parseLineCSV(lines[startIdx], separadorDefinido);
+        console.log("Cabeçalhos identificados na linha " + startIdx + ":", headers);
 
         const idxCedente = headers.indexOf("NOME_DO_CEDENTE");
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
@@ -120,15 +138,27 @@ export default function AnaliseEstoqueCedentesPage() {
 
         const payloadParaInsercao: any[] = [];
 
+        // Trata a conversão de strings numéricas sujas (ponto, vírgula, etc)
+        const limparNumero = (valStr: string) => {
+          if (!valStr) return 0;
+          // Se vier no formato brasileiro 1.250,50 vira 1250.50
+          if (valStr.includes(",") && valStr.includes(".")) {
+            valStr = valStr.replace(/\./g, "").replace(",", ".");
+          } else if (valStr.includes(",")) {
+            valStr = valStr.replace(",", ".");
+          }
+          return parseFloat(valStr) || 0;
+        };
+
         for (let i = startIdx + 1; i < lines.length; i++) {
           const linha = lines[i].trim();
           if (!linha) continue;
 
-          const colunas = parseLineCSV(linha);
-          if (!colunas[idxCedente] || !colunas[idxNominal]) continue;
+          const colunas = parseLineCSV(linha, separadorDefinido);
+          if (!colunas[idxCedente] || colunas[idxCedente] === "NOME_DO_CEDENTE" || !colunas[idxNominal]) continue;
 
-          const valorNominal = parseFloat(colunas[idxNominal]) || 0;
-          const precoAquisicao = parseFloat(colunas[idxPrecoAquisicao]) || valorNominal;
+          const valorNominal = limparNumero(colunas[idxNominal]);
+          const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
           const prazoDias = Math.max(parseInt(colunas[idxPrazoNativo]) || 1, 1);
 
           // Formulação matemática das 4 colunas em memória
@@ -150,11 +180,18 @@ export default function AnaliseEstoqueCedentesPage() {
           });
         }
 
+        if (payloadParaInsercao.length === 0) {
+          alert("⚠️ Nenhuma linha válida foi montada. Verifique se os dados estão abaixo da linha do cabeçalho.");
+          setCarregando(false);
+          return;
+        }
+
         setStatusStatusTexto(`Injetando ${payloadParaInsercao.length} títulos no Supabase...`);
-        const batchSize = 400;
+        const batchSize = 300;
         for (let k = 0; k < payloadParaInsercao.length; k += batchSize) {
           const chunk = payloadParaInsercao.slice(k, k + batchSize);
-          await supabase.from("estoque_fidc").insert(chunk);
+          const { error: insertError } = await supabase.from("estoque_fidc").insert(chunk);
+          if (insertError) throw insertError;
         }
 
         alert(`🏁 Sucesso! Base sincronizada globalmente com ${payloadParaInsercao.length} registros.`);
@@ -167,7 +204,6 @@ export default function AnaliseEstoqueCedentesPage() {
     }
   };
 
-  // Compila a visão dinâmica agrupada por cedente
   const carteiraCedentes = useMemo(() => {
     const mapa: Record<string, TituloEstoque[]> = {};
     titulos.forEach(t => {
@@ -231,7 +267,7 @@ export default function AnaliseEstoqueCedentesPage() {
       <div className="space-y-2">
         {filtrados.length === 0 ? (
           <div className="p-12 border border-dashed border-slate-300 rounded-xl text-center text-slate-400 font-medium bg-white">
-            Nenhum dado encontrado. Faça o upload do arquivo de estoque para alimentar a mesa.
+            Nenhum dado encontrado no Supabase. Clique acima para fazer o upload do arquivo de estoque diário (.csv).
           </div>
         ) : (
           filtrados.map((item) => {
