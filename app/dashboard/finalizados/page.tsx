@@ -40,12 +40,15 @@ export default function FinalizadosPage() {
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null);
   
-  // 🎛️ CONTROLES DE FOCO EXECUTIVO IGUAL AO COMITÊ
+  // 🎛️ CONTROLES DE FOCO EXECUTIVO
   const [modoFocoConsulta, setModoFocoComite] = useState(false);
   const [empresaFocoAtivo, setEmpresaFocoAtivo] = useState<any>(null);
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
+  
+  // 🎯 FIX DEFINITIVO: Declarando o estado que o pre-render do Next.js cobrou no build
+  const [avisoCopia, setAvisoCopia] = useState(false);
 
   const [linhaEditando, setLinhaEditando] = useState<string | null>(null);
   const [editDataRec, setEditDataRec] = useState("");
@@ -173,7 +176,6 @@ export default function FinalizadosPage() {
         setHistorico(historicoMapeado);
         setCedentesSel(Array.from(cedentesUnicos));
 
-        // Pré-carrega mídias locais e votos das finalizadas para uso imediato inline
         historicoMapeado.forEach(item => {
           carregarVotosIniciais(item.empresa_nome);
           if (item.caminho_local) baixarHtmlInline(item.id, item.caminho_local);
@@ -216,7 +218,6 @@ export default function FinalizadosPage() {
     }
   };
 
-  // 🎯 MODO CONSULTA ULTRA: Abre os slides gigantes e trava os painéis na direita
   const ativarModoConsultaFoco = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setModoFocoComite(true);
@@ -351,7 +352,7 @@ export default function FinalizadosPage() {
     else setCedentesSel(Array.from(new Set([...cedentesSel, ...cedentesFiltradosPelaBusca])));
   };
 
-  // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO (IGUAL AO COMITÊ)
+  // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO
   if (modoFocoConsulta && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
     const htmlPreview = htmlPreviewsInline[empresaFocoAtivo.id];
@@ -362,7 +363,7 @@ export default function FinalizadosPage() {
         {/* Cabeçalho de Comando Superior */}
         <div className="bg-slate-950 text-white p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-base font-black tracking-tight text-emerald-400">🗂️ CONSULTA DE HISTÓRICO EN CERRADO:</span>
+            <span className="text-base font-black tracking-tight text-emerald-400">🗂 ... CONSULTA DE HISTÓRICO:</span>
             <h2 className="text-base font-black uppercase text-white tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
             <span className={`text-xs border font-bold px-2 py-0.5 rounded uppercase ${
               (empresaFocoAtivo.status || "").toLowerCase().includes("aprovado") ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-rose-500/10 text-rose-400 border-rose-500/30"
@@ -382,7 +383,7 @@ export default function FinalizadosPage() {
           </div>
         </div>
 
-        {/* Corpo Split Layout (Slides na esquerda 70%, Histórico congelado na direita 30%) */}
+        {/* Corpo Split Layout */}
         <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
           
           {/* LADO ESQUERDO: RELATÓRIO COMPLETO */}
@@ -422,7 +423,7 @@ export default function FinalizadosPage() {
               </div>
             </div>
 
-            {/* Bloco 2: Histórico de Conversas da Mesa de Debates */}
+            {/* Bloco 2: Histórico de Conversas */}
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
               <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">💬 Notas e Alinhamentos Finais</span>
               <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg p-2 space-y-2 bg-slate-950/40">
@@ -444,10 +445,10 @@ export default function FinalizadosPage() {
     );
   }
 
-  // 🏛️ INTERFACE 2: VISÃO PADRÃO (HISTÓRICO DA CARTEIRA FINALIZADA)
+  // 🏛 ... INTERFACE 2: VISÃO PADRÃO
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans">
-      {avisoCopia && <div className="fixed top-4 right-4 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-xl z-50 font-bold">🗂️ Caminho local copiado!</div>}
+      {avisoCopia && <div className="fixed top-4 right-4 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-xl z-50 font-bold">🗂 ... Caminho local copiado!</div>}
       
       {/* SEÇÃO DE FILTROS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -597,7 +598,6 @@ export default function FinalizadosPage() {
                       ) : (
                         <>
                           <button onClick={() => iniciarEdicao(item)} className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded border border-amber-200 text-[10px] transition-colors cursor-pointer" title="Editar Datas">✏️ Datas</button>
-                          {/* 🎯 DISPARA O MODO FOCO IGUAL AO DO COMITÊ SÓ QUE CONGELADO PARA CONSULTA */}
                           <button onClick={() => modoConsultaFocoAtivarModo(item)} className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded text-[10px] transition-colors cursor-pointer shadow-xs">🏛️ Consultar</button>
                           <button 
                             onClick={() => baixarPdfAnalise(item)} 
@@ -619,7 +619,6 @@ export default function FinalizadosPage() {
     </div>
   );
 
-  // Função interna para encapsular a ativação sem re-declarar loops
   function modoConsultaFocoAtivarModo(item: any) {
     ativarModoConsultaFoco(item);
   }
