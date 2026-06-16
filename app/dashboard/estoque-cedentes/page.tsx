@@ -11,11 +11,10 @@ interface TituloEstoque {
   documento: string;
   vencimento: string;
   valorNominal: number;
-  precoAquisicao: number;
-  prazoDias: number;
+  prazoDiasNativo: number;
+  taxaNativa: number;
   colunaPrazoMassa: number;
   colunaTaxaMassa: number;
-  taxaFinalCalculada: number;
 }
 
 export default function AnaliseEstoqueCedentesPage() {
@@ -43,11 +42,10 @@ export default function AnaliseEstoqueCedentesPage() {
           documento: d.documento,
           vencimento: d.vencimento,
           valorNominal: Number(d.valor_nominal),
-          precoAquisicao: Number(d.preco_aquisicao),
-          prazoDias: Number(d.prazo_dias),
-          colunaPrazoMassa: Number(d.coluna_prazo_massa),
-          colunaTaxaMassa: Number(d.coluna_taxa_massa),
-          taxaFinalCalculada: Number(d.taxa_final_calculada)
+          prazoDiasNativo: Number(d.prazo_dias_nativo || d.prazo_dias || 0),
+          taxaNativa: Number(d.taxa_nativa || d.taxa_final_calculada || 0),
+          colunaPrazoMassa: Number(d.coluna_prazo_massa || 0),
+          colunaTaxaMassa: Number(d.coluna_taxa_massa || 0)
         }));
         setTitulos(mapeados);
       }
@@ -67,15 +65,15 @@ export default function AnaliseEstoqueCedentesPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const confirmar = confirm("⚠️ ATENÇÃO: Deseja expurgar a base de estoque diária antiga e rodar o recálculo ponderado oficial?");
+    const confirmar = confirm("⚠️ ATENÇÃO: Confirmar carga de dados baseada nas colunas nativas deslocadas do relatório cru?");
     if (!confirmar) return;
 
     setCarregando(true);
     try {
-      setStatusStatusTexto("Limpando registros do estoque anterior...");
+      setStatusStatusTexto("Limpando registros antigos...");
       await supabase.from("estoque_fidc").delete().neq("cedente", "");
 
-      setStatusStatusTexto("Lendo arquivo local...");
+      setStatusStatusTexto("Processando arquivo original...");
       const reader = new FileReader();
       reader.onload = async (event) => {
         const text = event.target?.result as string;
@@ -116,20 +114,23 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (startIdx === -1) {
-          alert("❌ Erro: Não foi encontrada a linha de cabeçalhos com 'NOME_DO_CEDENTE'.");
+          alert("❌ Erro: Não foi encontrada a linha de cabeçalho com os campos padrão.");
           setCarregando(false);
           return;
         }
 
         const headers = parseLineCSV(lines[startIdx], separadorDefinido);
 
+        // Mapeamento direto das colunas originais do FIDC (Deslocamento de 4 colunas corrigido)
         const idxCedente = headers.indexOf("NOME_DO_CEDENTE");
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
         const idxDoc = headers.indexOf("NUMERO_DOCUMENTO");
-        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");      
-        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");    
-        const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
-        const idxNominal = headers.indexOf("VALOR_NOMINAL");            
+        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");
+        const idxNominal = headers.indexOf("VALOR_NOMINAL");
+        
+        // Buscando as colunas nativas de Prazo e Taxa do relatório
+        const idxPrazoNativo = headers.indexOf("PRAZO"); 
+        const idxTaxaNativa = headers.indexOf("TAXA_DA_CESSAO") !== -1 ? headers.indexOf("TAXA_DA_CESSAO") : headers.indexOf("TAXA_DO_ATIVO");
 
         const payloadParaInsercao: any[] = [];
 
@@ -144,23 +145,6 @@ export default function AnaliseEstoqueCedentesPage() {
           return parseFloat(s) || 0;
         };
 
-        const obterPrazoCorridoAbsoluto = (txtInicio: string, txtFim: string) => {
-          if (!txtInicio || !txtFim) return 1;
-          const strI = txtInicio.trim().split(" ")[0];
-          const strF = txtFim.trim().split(" ")[0];
-          
-          const pI = strI.split("-");
-          const pF = strF.split("-");
-          
-          if (pI.length < 3 || pF.length < 3) return 1;
-          
-          const timeI = Date.UTC(parseInt(pI[0], 10), parseInt(pI[1], 10) - 1, parseInt(pI[2], 10));
-          const timeF = Date.UTC(parseInt(pF[0], 10), parseInt(pF[1], 10) - 1, parseInt(pF[2], 10));
-          
-          const diff = timeF - timeI;
-          return Math.max(Math.round(diff / (1000 * 60 * 60 * 24)), 1);
-        };
-
         for (let i = startIdx + 1; i < lines.length; i++) {
           const linha = lines[i].trim();
           if (!linha) continue;
@@ -169,22 +153,15 @@ export default function AnaliseEstoqueCedentesPage() {
           if (!colunas[idxCedente] || colunas[idxCedente].includes("NOME_DO_CEDENTE") || !colunas[idxNominal]) continue;
 
           const valorNominal = limparNumero(colunas[idxNominal]);
-          const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]);
+          if (valorNominal <= 0) continue;
 
-          if (valorNominal <= 0 || precoAquisicao <= 0) continue;
-          
-          // 📊 [Coluna D] PRAZO = S3 - R3
-          const prazoCorridoD3 = obterPrazoCorridoAbsoluto(colunas[idxAquisicao], colunas[idxVencimento]);
-          
-          // 📈 [Coluna C] TAXA FINAL = ((1 + (Y3 - W3) / W3) ^ (30 / D3)) - 1
-          const fRentabilidade = 1 + (valorNominal - precoAquisicao) / precoAquisicao;
-          const taxaFinalCalculadaC3 = Math.pow(fRentabilidade, 30 / prazoCorridoD3) - 1;
+          // Captura direta dos valores nativos do relatório do FIDC
+          const prazoDiasNativo = parseInt(colunas[idxPrazoNativo], 10) || 1;
+          const taxaNativa = limparNumero(colunas[idxTaxaNativa]);
 
-          // 📐 [Coluna A] PRAZO MASSA = D3 * Y3
-          const colunaPrazoMassaA3 = prazoCorridoD3 * valorNominal;
-
-          // 📉 [Coluna B] TAXA MASSA = C3 * Y3
-          const colunaTaxaMassaB3 = taxaFinalCalculadaC3 * valorNominal;
+          // Gerando as colunas de Massa Ponderada Pura (Valor Nominal como Peso)
+          const colunaPrazoMassa = prazoDiasNativo * valorNominal;
+          const colunaTaxaMassa = taxaNativa * valorNominal;
 
           payloadParaInsercao.push({
             cedente: colunas[idxCedente].toUpperCase().trim(),
@@ -192,24 +169,23 @@ export default function AnaliseEstoqueCedentesPage() {
             documento: colunas[idxDoc] || "-",
             vencimento: colunas[idxVencimento] || "-",
             valor_nominal: valorNominal,
-            preco_aquisicao: precoAquisicao,
-            prazo_dias: prazoCorridoD3,
-            coluna_prazo_massa: colunaPrazoMassaA3,
-            coluna_taxa_massa: colunaTaxaMassaB3,
-            taxa_final_calculada: taxaFinalCalculadaC3
+            prazo_dias_nativo: prazoDiasNativo,
+            taxa_nativa: taxaNativa,
+            coluna_prazo_massa: colunaPrazoMassa,
+            coluna_taxa_massa: colunaTaxaMassa
           });
         }
 
-        setStatusStatusTexto(`Subindo lote atômico de ${payloadParaInsercao.length} títulos...`);
+        setStatusStatusTexto(`Salvando ${payloadParaInsercao.length} registros estruturados...`);
         const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso! Carteira importada sob metodologia de Massa Ponderada: ${payloadParaInsercao.length} registros ativos.`);
+        alert("🏁 Base importada e indexada com sucesso!");
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
     } catch (err: any) {
-      alert(`❌ Falha operacional: ${err.message}`);
+      alert(`❌ Erro na operação: ${err.message}`);
       setCarregando(false);
     }
   };
@@ -317,9 +293,9 @@ export default function AnaliseEstoqueCedentesPage() {
                             <th className="p-2">Sacado</th>
                             <th className="p-2 text-center">Nº Documento</th>
                             <th className="p-2 text-center">Vencimento</th>
-                            <th className="p-2 text-center">Prazo Corrido (D3)</th>
-                            <th className="p-2 text-right">Valor Nominal (Y3)</th>
-                            <th className="p-2 text-right">Taxa Individual (C3)</th>
+                            <th className="p-2 text-center">Prazo Nativo</th>
+                            <th className="p-2 text-right">Valor Nominal</th>
+                            <th className="p-2 text-right">Taxa Nativa</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
@@ -328,9 +304,9 @@ export default function AnaliseEstoqueCedentesPage() {
                               <td className="p-2 font-bold text-slate-900 truncate max-w-[280px]">{t.sacado}</td>
                               <td className="p-2 text-center font-mono text-slate-400">{t.documento}</td>
                               <td className="p-2 text-center text-slate-500">{t.vencimento}</td>
-                              <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias} dias</td>
+                              <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDiasNativo} dias</td>
                               <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(t.valorNominal)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(6)}%</td>
+                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaNativa * 100).toFixed(6)}%</td>
                             </tr>
                           ))}
                         </tbody>
