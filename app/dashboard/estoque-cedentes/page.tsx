@@ -81,10 +81,8 @@ export default function AnaliseEstoqueCedentesPage() {
         const text = event.target?.result as string;
         if (!text) return;
 
-        // Suporta quebras de linha padrão Windows e Linux
         const lines = text.split(/\r?\n/);
         
-        // 🛠️ FUNÇÃO INTELIGENTE DE PARSER DE CSV (Suporta vírgula e ponto-e-vírgula)
         const parseLineCSV = (linhaTexto: string, separador: string = ",") => {
           const colunas = [];
           let dentroDeAspas = false;
@@ -103,7 +101,6 @@ export default function AnaliseEstoqueCedentesPage() {
           return colunas;
         };
 
-        // 🔍 DETECTOR DINÂMICO DE CABEÇALHO E SEPARADOR
         let startIdx = -1;
         let separadorDefinido = ",";
         
@@ -111,7 +108,6 @@ export default function AnaliseEstoqueCedentesPage() {
           const l = lines[i];
           if (l.includes("NOME_DO_CEDENTE") || l.includes("VALOR_NOMINAL")) {
             startIdx = i;
-            // Se tiver mais ';' do que ',', muda o separador padrão
             if ((l.match(/;/g) || []).length > (l.match(/,/g) || []).length) {
               separadorDefinido = ";";
             }
@@ -120,13 +116,12 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (startIdx === -1) {
-          alert("❌ Erro grave: Não encontramos as colunas estruturais (NOME_DO_CEDENTE ou VALOR_NOMINAL) nas primeiras 20 linhas do arquivo.");
+          alert("❌ Erro grave: Não encontramos as colunas estruturais nas primeiras linhas do arquivo.");
           setCarregando(false);
           return;
         }
 
         const headers = parseLineCSV(lines[startIdx], separadorDefinido);
-        console.log("Cabeçalhos identificados na linha " + startIdx + ":", headers);
 
         const idxCedente = headers.indexOf("NOME_DO_CEDENTE");
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
@@ -138,10 +133,8 @@ export default function AnaliseEstoqueCedentesPage() {
 
         const payloadParaInsercao: any[] = [];
 
-        // Trata a conversão de strings numéricas sujas (ponto, vírgula, etc)
         const limparNumero = (valStr: string) => {
           if (!valStr) return 0;
-          // Se vier no formato brasileiro 1.250,50 vira 1250.50
           if (valStr.includes(",") && valStr.includes(".")) {
             valStr = valStr.replace(/\./g, "").replace(",", ".");
           } else if (valStr.includes(",")) {
@@ -161,7 +154,6 @@ export default function AnaliseEstoqueCedentesPage() {
           const precoAquisicao = limparNumero(colunas[idxPrecoAquisicao]) || valorNominal;
           const prazoDias = Math.max(parseInt(colunas[idxPrazoNativo]) || 1, 1);
 
-          // Formulação matemática das 4 colunas em memória
           const taxaFinalCalculada = Math.pow(1 + (valorNominal - precoAquisicao) / (precoAquisicao || 1), 30 / prazoDias) - 1;
           const colunaPrazoMassa = prazoDias * valorNominal;
           const colunaTaxaMassa = taxaFinalCalculada * valorNominal;
@@ -181,20 +173,18 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         if (payloadParaInsercao.length === 0) {
-          alert("⚠️ Nenhuma linha válida foi montada. Verifique se os dados estão abaixo da linha do cabeçalho.");
+          alert("⚠️ Nenhuma linha válida foi montada.");
           setCarregando(false);
           return;
         }
 
-        setStatusStatusTexto(`Injetando ${payloadParaInsercao.length} títulos no Supabase...`);
-        const batchSize = 300;
-        for (let k = 0; k < payloadParaInsercao.length; k += batchSize) {
-          const chunk = payloadParaInsercao.slice(k, k + batchSize);
-          const { error: insertError } = await supabase.from("estoque_fidc").insert(chunk);
-          if (insertError) throw insertError;
-        }
+        // 🚀 OTIMIZAÇÃO: Dispara tudo de uma vez só em um único tiro HTTP HTTP à rede
+        setStatusStatusTexto(`Subindo carga atômica de ${payloadParaInsercao.length} títulos para o Supabase...`);
+        const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
+        
+        if (insertError) throw insertError;
 
-        alert(`🏁 Sucesso! Base sincronizada globalmente com ${payloadParaInsercao.length} registros.`);
+        alert(`🏁 Sucesso total! Estoque reiniciado e ${payloadParaInsercao.length} registros inseridos em tempo recorde.`);
         await buscarEstoqueDoBanco();
       };
       reader.readAsText(file, "UTF-8");
@@ -300,7 +290,7 @@ export default function AnaliseEstoqueCedentesPage() {
                 </div>
 
                 {isExpandido && (
-                  <div className="border-t border-slate-100 bg-slate-50/50 p-4 animate-fadeIn">
+                  <div className="border-t border-slate-100 bg-slate-50/50 p-4">
                     <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
                       <table className="w-full text-left border-collapse">
                         <thead>
