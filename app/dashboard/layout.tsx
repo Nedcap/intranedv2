@@ -71,12 +71,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-6">
           <div className="mb-8 flex justify-between items-center">
             
-            {/* 🎯 LOGO DA NED DESTACADA COM CONTORNO E BRILHO SUAVE */}
+            {/* 🎯 LOGO DA NED COM FILTRO DE SILHUETA (BACKLIGHT NEON BRANCO) */}
             <div className="flex items-center gap-3 select-none">
               <img 
                 src="/favicon.ico" 
                 alt="Ned Capital" 
-                className="h-8 w-auto object-contain shrink-0 rounded-md p-[1px] border border-white/20 bg-slate-800/40 shadow-[0_0_8px_rgba(255,255,255,0.15)] filter brightness-110"
+                className="h-8 w-auto object-contain shrink-0 filter brightness-125 saturate-150 drop-shadow-[0_0_4px_rgba(255,255,255,0.75)]"
               />
               <div className="flex flex-col justify-center">
                 <h1 className="text-xl font-black text-white tracking-tight leading-none">
