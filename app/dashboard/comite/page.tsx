@@ -421,7 +421,7 @@ export default function ComitePage() {
               </div>
               <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa técnica..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
               <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition-all cursor-pointer shadow-md">
-                {enviandoVoto ? "Computando Parecer..." : "Lançar Voto Executivo"}
+                {enviandoVoto ? "Computando Parecer..." : "Lançar Voto"}
               </button>
             </div>
 
