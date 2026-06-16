@@ -90,7 +90,6 @@ export default function FinalizadosPage() {
         }
       }
 
-      // 🎯 Consulta focada na tabela oficial analises
       let query = supabase.from("analises").select("*");
       if (isComercial) {
         query = query.eq("comercial", userNome);
@@ -99,9 +98,15 @@ export default function FinalizadosPage() {
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
-        // Filtra os status finalizados de forma tolerante à caixa alta/baixa
+        // 🎯 Fix: Filtro tolerante e robusto. Se o status contiver termos de conclusão, o registro entra no histórico mesmo possuindo a palavra "comitê" no texto
         let filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase().trim();
+          
+          const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
+          if (statusFinaisConfirmados.some(s => st.includes(s))) {
+            return true;
+          }
+
           return st !== "aberta" && !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "";
         });
 
@@ -116,7 +121,7 @@ export default function FinalizadosPage() {
           let mesRef = "S/D";
           let slaCalculado = 0;
           const dRec = parseDataSegura(item.data_recebimento);
-          const dFim = parseDataSegura(item.criado_em); // Mapeado para o seu schema
+          const dFim = parseDataSegura(item.criado_em);
 
           if (dRec) {
             mesRef = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
@@ -138,7 +143,7 @@ export default function FinalizadosPage() {
         setListaMeses(mesesOrdenados);
         setListaCedentes(Array.from(cedentesUnicos).sort());
         
-        // Abre trazendo todos os meses por padrão para evitar cards zerados por filtros
+        // Exibe todas as movimentações históricas por padrão ao carregar
         setMesesSel(prev => prev.length === 0 && mesesOrdenados.length > 0 ? mesesOrdenados : prev);
         setHistorico(historicoMapeado);
       }
@@ -243,7 +248,7 @@ export default function FinalizadosPage() {
           try {
             const res = await fetch(urlLimpa);
             analiseHtmlText = await res.text();
-          } catch { /* CORS Fallback */ }
+          } catch { /* Fallback */ }
         } else {
           const partes = urlLimpa.split(/[\\/]/);
           const nomeArquivo = partes[partes.length - 1].trim();
@@ -325,8 +330,8 @@ export default function FinalizadosPage() {
 
   const somaDias = historicoFiltrado.reduce((acc, curr) => acc + curr._sla, 0);
   const mediaSLA = historicoFiltrado.length > 0 ? (somaDias / historicoFiltrado.length).toFixed(1) : "0.0";
-  const aprovados = historicoFiltrado.filter(i => (i.status || "").toLowerCase() === "aprovado").length;
-  const recusados = historicoFiltrado.filter(i => ["reprovado", "recusado"].includes((i.status || "").toLowerCase())).length;
+  const aprovados = historicoFiltrado.filter(i => (i.status || "").toLowerCase().includes("aprovado")).length;
+  const recusados = historicoFiltrado.filter(i => ["reprovado", "recusado", "rejeitado"].some(s => (i.status || "").toLowerCase().includes(s))).length;
 
   const cedentesFiltradosPelaBusca = listaCedentes.filter(ced => ced.toLowerCase().includes(termoBuscaCedente.toLowerCase()));
   const todosFiltradosAtivos = cedentesFiltradosPelaBusca.length > 0 && cedentesFiltradosPelaBusca.every(c => cedentesSel.includes(c));
@@ -415,7 +420,7 @@ export default function FinalizadosPage() {
         </div>
       </div>
 
-      {/* TABELA DE DADOS INTEGRADA */}
+      {/* TABELA DE HISTORICO */}
       <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-x-auto mt-2">
         <table className="w-full text-left border-collapse text-[13px] min-w-[1000px]">
           <thead>
@@ -433,7 +438,8 @@ export default function FinalizadosPage() {
               <tr><td colSpan={6} className="text-center p-8 text-slate-400 font-bold">Nenhum registro encontrado para estes filtros.</td></tr>
             ) : (
               historicoFiltrado.map((item) => {
-                const eAprovado = (item.status || "").toLowerCase() === "aprovado";
+                const statusStr = (item.status || "").toLowerCase();
+                const eAprovado = statusStr.includes("aprovado") || statusStr.includes("finalizado");
                 const editando = linhaEditando === item.id;
                 const isGerando = gerandoPdfId === item.id;
 
@@ -475,7 +481,6 @@ export default function FinalizadosPage() {
                         </>
                       ) : (
                         <>
-                          {/* 🎯 BOTÕES ORIGINAIS RESTAURADOS COMPLETAMENTE */}
                           <button onClick={() => iniciarEdicao(item)} className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded border border-amber-200 text-[10px] transition-colors cursor-pointer" title="Editar Datas">✏️ Editar</button>
                           <button onClick={() => tratarAberturaAnalise(item.caminho_local)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded border text-[10px] transition-colors cursor-pointer">📄 Análise</button>
                           <button onClick={() => abrirHistoricoChat(item)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-[10px] transition-colors cursor-pointer shadow-xs">💬 Chat</button>
@@ -497,7 +502,7 @@ export default function FinalizadosPage() {
         </table>
       </div>
 
-      {/* 📥 MODAL DO VISUALIZADOR DE APRESENTAÇÃO HTML EM TELA CHEIA */}
+      {/* VISUALIZADOR DE APRESENTAÇÃO HTML */}
       {conteudoHtmlPreview && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50">
           <div className="w-screen h-screen bg-white flex flex-col overflow-hidden fixed inset-0">
@@ -512,7 +517,7 @@ export default function FinalizadosPage() {
         </div>
       )}
 
-      {/* 📜 MODAL DA ATA DO CHAT E OPINIÕES DO COMITÊ */}
+      {/* MODAL HISTORICO DA ATA / CHAT */}
       {empresaSelecionada && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden max-h-[70vh]">
