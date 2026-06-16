@@ -14,6 +14,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Controle Comercial", path: "/dashboard/comercial", icone: "🎯", categoria: "Operações", defaultMaster: true },
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Carteira", path: "/dashboard/carteira", icone: "📊", categoria: "Crédito", defaultMaster: true },
+  { nome: "Estoque Cedentes", path: "/dashboard/estoque-cedentes", icone: "💼", categoria: "Crédito", defaultMaster: true }
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Operações", defaultMaster: true },
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Administração", defaultMaster: true },
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Administração", defaultMaster: true },
