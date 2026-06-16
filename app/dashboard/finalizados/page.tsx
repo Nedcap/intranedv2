@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 function calcularDiasUteis(dInicio: Date, dFim: Date) {
@@ -40,21 +40,23 @@ export default function FinalizadosPage() {
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null);
   
-  const [empresaSelecionada, setEmpresaSelecionada] = useState<any>(null);
+  // 🎛️ CONTROLES DE FOCO EXECUTIVO IGUAL AO COMITÊ
+  const [modoFocoConsulta, setModoFocoComite] = useState(false);
+  const [empresaFocoAtivo, setEmpresaFocoAtivo] = useState<any>(null);
+  const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
-  const [avisoCopia, setAvisoCopia] = useState(false);
-  const [conteudoHtmlPreview, setConteudoHtmlPreview] = useState<string | null>(null);
+  const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
 
   const [linhaEditando, setLinhaEditando] = useState<string | null>(null);
   const [editDataRec, setEditDataRec] = useState("");
   const [editDataEnvio, setEditDataEnvio] = useState("");
 
-  const [busca, setBusca] = useState(""); // 🎯 Controla o input de busca textual
+  const [busca, setBusca] = useState(""); 
   const [mesesSel, setMesesSel] = useState<string[]>([]);
-  const [cedentesSel, setCedentesSel] = useState<string[]>([]);
   const [termoBuscaCedente, setTermoBuscaCedente] = useState("");
   const [listaMeses, setListaMeses] = useState<string[]>([]);
   const [listaCedentes, setListaCedentes] = useState<string[]>([]);
+  const [cedentesSel, setCedentesSel] = useState<string[]>([]);
 
   const [openMes, setOpenMes] = useState(false);
   const [openCedente, setOpenCedente] = useState(false);
@@ -71,10 +73,38 @@ export default function FinalizadosPage() {
     return () => document.removeEventListener("mousedown", clickFora);
   }, []);
 
+  const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
+    if (!empresaNome) return;
+    const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
+    if (data) {
+      setVotosAoVivo(prev => ({ ...prev, [empresaNome]: data }));
+    }
+  }, []);
+
+  const baixarHtmlInline = async (id: string, caminho: string) => {
+    const urlLimpa = caminho.trim();
+    if (urlLimpa.startsWith("http")) { 
+      try {
+        const res = await fetch(urlLimpa);
+        const text = await res.text();
+        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+      } catch { /* fallback */ }
+      return;
+    }
+    const partes = urlLimpa.split(/[\\/]/);
+    const nomeArquivo = partes[partes.length - 1].trim();
+    try {
+      const { data } = await supabase.storage.from("analises").download(nomeArquivo);
+      if (data) {
+        const text = await data.text();
+        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+      }
+    } catch (err) { console.error(err); }
+  };
+
   const carregarHistorico = async () => {
     try {
       setCarregando(true);
-      
       const userStr = localStorage.getItem("intraned_user");
       let allowedCedentes: string[] = [];
       let isComercial = false;
@@ -101,13 +131,8 @@ export default function FinalizadosPage() {
       if (data) {
         let filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase().trim();
-          
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
-          if (statusFinaisConfirmados.some(s => st.includes(s))) {
-            return true;
-          }
-
-          return st !== "aberta" && !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "";
+          return statusFinaisConfirmados.some(s => st.includes(s)) || (st !== "aberta" && !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "");
         });
 
         if (isComercial) {
@@ -127,7 +152,7 @@ export default function FinalizadosPage() {
             mesRef = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
             mesesUnicos.add(mesRef);
           } else {
-            mesesUnicos.add("S/D"); // Garante o fallback mapeado
+            mesesUnicos.add("S/D");
           }
           if (dRec && dFim) {
             slaCalculado = calcularDiasUteis(dRec, dFim);
@@ -144,11 +169,15 @@ export default function FinalizadosPage() {
         
         setListaMeses(mesesOrdenados);
         setListaCedentes(Array.from(cedentesUnicos).sort());
-        
-        // Inicializa contendo todos os meses (inclusive S/D se houver) para evitar quebras
         setMesesSel(mesesOrdenados);
         setHistorico(historicoMapeado);
         setCedentesSel(Array.from(cedentesUnicos));
+
+        // Pré-carrega mídias locais e votos das finalizadas para uso imediato inline
+        historicoMapeado.forEach(item => {
+          carregarVotosIniciais(item.empresa_nome);
+          if (item.caminho_local) baixarHtmlInline(item.id, item.caminho_local);
+        });
       }
     } catch (err) { 
       console.error(err); 
@@ -187,41 +216,18 @@ export default function FinalizadosPage() {
     }
   };
 
-  const abrirHistoricoChat = async (empresa: any) => {
-    setEmpresaSelecionada(empresa);
+  // 🎯 MODO CONSULTA ULTRA: Abre os slides gigantes e trava os painéis na direita
+  const ativarModoConsultaFoco = async (empresa: any) => {
+    setEmpresaFocoAtivo(empresa);
+    setModoFocoComite(true);
     const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
     if (data) setChatMsgs(data);
   };
 
-  const tratarAberturaAnalise = async (caminho: string) => {
-    if (!caminho) return alert("Esta análise não possui relatório anexado.");
-    const urlLimpa = caminho.trim();
-    if (urlLimpa.startsWith("http")) { 
-      try {
-        const res = await fetch(urlLimpa);
-        const htmlText = await res.text();
-        setConteudoHtmlPreview(htmlText);
-        return;
-      } catch {
-        window.open(urlLimpa, "_blank");
-        return;
-      }
-    }
-    const partes = urlLimpa.split(/[\\/]/);
-    const nomeArquivo = partes[partes.length - 1].trim();
-    try {
-      const { data, error } = await supabase.storage.from("analises").download(nomeArquivo);
-      if (error) {
-        navigator.clipboard.writeText(urlLimpa); 
-        setAvisoCopia(true);
-        setTimeout(() => setAvisoCopia(false), 4000);
-        return;
-      }
-      if (data) {
-        const htmlText = await data.text();
-        setConteudoHtmlPreview(htmlText);
-      }
-    } catch (err) { console.error(err); }
+  const desativarModoConsultaFoco = () => {
+    setModoFocoComite(false);
+    setEmpresaFocoAtivo(null);
+    setChatMsgs([]);
   };
 
   const baixarPdfAnalise = async (item: any) => {
@@ -316,8 +322,6 @@ export default function FinalizadosPage() {
     }
   };
 
-  const fecharVisualizador = () => setConteudoHtmlPreview(null);
-  
   const formatarDataLocal = (dataStr: string) => {
     if (!dataStr) return "-";
     const limpa = dataStr.trim();
@@ -325,15 +329,11 @@ export default function FinalizadosPage() {
     return dt.toLocaleDateString("pt-BR");
   };
 
-  // 🎯 Fix: O filtro da tabela agora inclui a barra de busca por texto e ignora travas de dropdown se houver texto digitado
   const historicoFiltrado = historico.filter((item) => {
     const nomeEmpresa = item.empresa_nome || "";
-    
-    // Se o usuário digitou algo na barra de busca por texto, ele ignora os filtros de caixinha para trazer o dado bruto
     if (busca.trim() !== "") {
       return nomeEmpresa.toLowerCase().includes(busca.toLowerCase());
     }
-
     const bateMes = mesesSel.length === 0 || mesesSel.includes(item._mesRef);
     const bateCed = cedentesSel.length === 0 || cedentesSel.includes(simplificarNome(nomeEmpresa));
     return bateMes && bateCed;
@@ -351,8 +351,100 @@ export default function FinalizadosPage() {
     else setCedentesSel(Array.from(new Set([...cedentesSel, ...cedentesFiltradosPelaBusca])));
   };
 
-  if (carregando && historico.length === 0) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Carregando histórico e processando métricas...</div>;
+  // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO (IGUAL AO COMITÊ)
+  if (modoFocoConsulta && empresaFocoAtivo) {
+    const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
+    const htmlPreview = htmlPreviewsInline[empresaFocoAtivo.id];
+    const isGerando = gerandoPdfId === empresaFocoAtivo.id;
 
+    return (
+      <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px]">
+        {/* Cabeçalho de Comando Superior */}
+        <div className="bg-slate-950 text-white p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-base font-black tracking-tight text-emerald-400">🗂️ CONSULTA DE HISTÓRICO EN CERRADO:</span>
+            <h2 className="text-base font-black uppercase text-white tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
+            <span className={`text-xs border font-bold px-2 py-0.5 rounded uppercase ${
+              (empresaFocoAtivo.status || "").toLowerCase().includes("aprovado") ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+            }`}>{empresaFocoAtivo.status || "Finalizado"}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => baixarPdfAnalise(empresaFocoAtivo)} 
+              disabled={isGerando}
+              className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-black text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5 uppercase tracking-wider"
+            >
+              {isGerando ? "⏳ Extraindo..." : "🖨️ Imprimir Dossiê"}
+            </button>
+            <button onClick={desativarModoConsultaFoco} className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wider">
+              ✕ Fechar Dossiê
+            </button>
+          </div>
+        </div>
+
+        {/* Corpo Split Layout (Slides na esquerda 70%, Histórico congelado na direita 30%) */}
+        <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
+          
+          {/* LADO ESQUERDO: RELATÓRIO COMPLETO */}
+          <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
+            <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
+              {htmlPreview ? (
+                <iframe srcDoc={htmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-500 italic text-sm gap-2">
+                  <span className="animate-spin text-xl">⏳</span>
+                  Carregando relatório técnico arquivado...
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* LADO DIREITO: HISTÓRICO DE PARECERES E ATAS CONGELADAS */}
+          <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
+            
+            {/* Bloco 1: Histórico de Votos Imutável */}
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">📋 Pareceres Registrados na Época</span>
+              <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                {listaDeVotos.length === 0 ? (
+                  <p className="text-slate-500 italic text-xs py-8 text-center">Nenhum voto lançado em comitê para esta empresa.</p>
+                ) : (
+                  listaDeVotos.map((v: any, idx: number) => (
+                    <div key={idx} className="p-2.5 border border-slate-800 rounded-lg bg-slate-950/60 flex flex-col gap-1 text-xs">
+                      <div className="flex justify-between items-center font-bold">
+                        <span className="text-slate-200">{v.membro_nome}</span>
+                        <span className={`px-2 py-0.5 rounded text-[9px] uppercase font-black ${v.voto === "Aprovado" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}>{v.voto}</span>
+                      </div>
+                      <span className="text-slate-400 italic font-medium">"{v.justificativa}"</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Bloco 2: Histórico de Conversas da Mesa de Debates */}
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">💬 Notas e Alinhamentos Finais</span>
+              <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg p-2 space-y-2 bg-slate-950/40">
+                {chatMsgs.length === 0 ? (
+                  <p className="text-center text-slate-600 py-10 text-xs italic">Nenhum comentário registrado em atas.</p>
+                ) : (
+                  chatMsgs.map((m: any) => (
+                    <div key={m.id} className="bg-slate-950 p-2 rounded-lg border border-slate-800/60 text-xs">
+                      <span className="font-bold text-blue-400">{m.usuario}</span>: <span className="text-slate-300 font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 🏛️ INTERFACE 2: VISÃO PADRÃO (HISTÓRICO DA CARTEIRA FINALIZADA)
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans">
       {avisoCopia && <div className="fixed top-4 right-4 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-xl z-50 font-bold">🗂️ Caminho local copiado!</div>}
@@ -443,7 +535,7 @@ export default function FinalizadosPage() {
         />
       </div>
 
-      {/* TABELA DE HISTORICO */}
+      {/* TABELA DE HISTÓRICO GERAL */}
       <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-x-auto mt-2">
         <table className="w-full text-left border-collapse text-[13px] min-w-[1000px]">
           <thead>
@@ -504,15 +596,15 @@ export default function FinalizadosPage() {
                         </>
                       ) : (
                         <>
-                          <button onClick={() => iniciarEdicao(item)} className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded border border-amber-200 text-[10px] transition-colors cursor-pointer" title="Editar Datas">✏️ Editar</button>
-                          <button onClick={() => tratarAberturaAnalise(item.caminho_local)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded border text-[10px] transition-colors cursor-pointer">📄 Análise</button>
-                          <button onClick={() => abrirHistoricoChat(item)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-[10px] transition-colors cursor-pointer shadow-xs">💬 Chat</button>
+                          <button onClick={() => iniciarEdicao(item)} className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded border border-amber-200 text-[10px] transition-colors cursor-pointer" title="Editar Datas">✏️ Datas</button>
+                          {/* 🎯 DISPARA O MODO FOCO IGUAL AO DO COMITÊ SÓ QUE CONGELADO PARA CONSULTA */}
+                          <button onClick={() => modoConsultaFocoAtivarModo(item)} className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded text-[10px] transition-colors cursor-pointer shadow-xs">🏛️ Consultar</button>
                           <button 
                             onClick={() => baixarPdfAnalise(item)} 
                             disabled={isGerando}
                             className="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded text-[10px] transition-colors cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1"
                           >
-                            {isGerando ? "⏳ Extraindo..." : "📥 Dossiê"}
+                            {isGerando ? "⏳..." : "📥 Dossiê"}
                           </button>
                         </>
                       )}
@@ -524,45 +616,11 @@ export default function FinalizadosPage() {
           </tbody>
         </table>
       </div>
-
-      {/* VISUALIZADOR DE APRESENTAÇÃO HTML */}
-      {conteudoHtmlPreview && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50">
-          <div className="w-screen h-screen bg-white flex flex-col overflow-hidden fixed inset-0">
-            <div className="flex justify-between items-center bg-slate-800 text-white p-3 shrink-0 shadow-md">
-              <h3 className="font-bold text-sm">📄 Visualizador de Apresentações Ned Capital</h3>
-              <button onClick={fecharVisualizador} className="bg-red-600 hover:bg-red-700 text-white font-black text-xs px-3 py-1 rounded transition-all cursor-pointer">✕ Fechar Tela Cheia</button>
-            </div>
-            <div className="flex-1 bg-white min-h-0">
-              <iframe srcDoc={conteudoHtmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL HISTORICO DA ATA / CHAT */}
-      {empresaSelecionada && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden max-h-[70vh]">
-            <div className="flex justify-between items-center bg-slate-50 border-b border-slate-200 p-3 shrink-0">
-              <h3 className="font-bold text-slate-800 text-sm truncate max-w-[320px]">📜 Ata: {empresaSelecionada.empresa_nome}</h3>
-              <button onClick={() => setEmpresaSelecionada(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base px-2 cursor-pointer">✕</button>
-            </div>
-            <div className="flex-1 bg-white p-3 overflow-y-auto text-xs space-y-2 min-h-[180px]">
-              <span className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Registro de Opiniões:</span>
-              {chatMsgs.length === 0 ? (
-                <p className="text-center text-slate-400 py-6">Nenhum registro encontrado.</p>
-              ) : (
-                chatMsgs.map(m => (
-                  <div key={m.id} className="bg-slate-50 p-2 rounded border border-slate-100 text-xs">
-                    <span className="font-bold text-slate-900">{m.usuario}</span>: <span className="text-slate-600 font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
+
+  // Função interna para encapsular a ativação sem re-declarar loops
+  function modoConsultaFocoAtivarModo(item: any) {
+    ativarModoConsultaFoco(item);
+  }
 }

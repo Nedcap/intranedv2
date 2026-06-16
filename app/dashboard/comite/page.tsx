@@ -157,8 +157,7 @@ export default function ComitePage() {
     };
   }, [idEmpresaExpandida, analises]);
 
-  // 🎯 RESTAURADA: Função que gerencia a coleta de e-mails para envio automático da ata
-  const obtener_emails_notificacao = async (empresaNome: string) => {
+  const obter_emails_notificacao = async (empresaNome: string) => {
     const emails = new Set<string>();
     try {
       const { data: masters } = await supabase.from("usuarios").select("email").eq("cargo", "Master");
@@ -202,7 +201,8 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").update({ status: decisaoFinal }).eq("id", empresaItem.id);
       if (error) throw error;
 
-      const emailsAlvo = await obtener_emails_notificacao(e);
+      // Master força decisão final -> Dispara e-mail obrigatoriamente
+      const emailsAlvo = await obter_emails_notificacao(e);
       const corner = decisaoFinal === "Aprovado" ? "#059669" : "#ef4444";
       
       const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
@@ -219,7 +219,7 @@ export default function ComitePage() {
       await carregarComite();
     } catch (err: any) {
       alert(`❌ Erro no painel Master: ${err.message}`);
-    } finally {
+    } finally { 
       setCarregando(false);
     }
   };
@@ -233,20 +233,21 @@ export default function ComitePage() {
       setEnviandoVoto(true);
       const e = empresaItem.empresa_nome;
       
+      // 1. Registra o voto de qualquer membro no banco de dados primeiro
       await supabase.from("votos").insert({ 
         empresa_nome: e, 
         membro_nome: membroVoto, 
         voto: opcaoVoto, 
         justificativa: justificativaVoto, 
-        email_enviado: true 
+        email_enviado: membroVoto === "Decisão" // Só marca como enviado se for a decisão final
       });
       
-      const emailsAlvo = await obtener_emails_notificacao(e);
-
+      // 🎯 MODIFICAÇÃO DE REGRA: O e-mail de notificação de Ata SÓ dispara se quem votou for a "Decisão"
       if (membroVoto === "Decisão") {
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
+        const emailsAlvo = await obter_emails_notificacao(e);
         const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
         const corAta = opcaoVoto === "Aprovado" ? "#059669" : "#ef4444";
         const linesAta = (todosVotos || []).map(v => `<tr><td style='border:1px solid #ddd;padding:8px;'><b>${v.membro_nome}</b></td><td style='border:1px solid #ddd;padding:8px;'>${v.voto}</td><td style='border:1px solid #ddd;padding:8px;'>${v.justificativa}</td></tr>`).join("");
@@ -256,7 +257,7 @@ export default function ComitePage() {
         if (modoFocoComite) desativarModoLupaExecutiva();
       }
       
-      alert("🗳️ Voto computado com sucesso!");
+      alert(membroVoto === "Decisão" ? "🏁 Comitê encerrado e Ata enviada!" : "🗳️ Voto consultivo registrado com sucesso!");
       setJustificativaVoto(""); 
       await carregarVotosIniciais(e);
     } catch (err: any) { 
@@ -328,6 +329,7 @@ export default function ComitePage() {
     } finally { setCarregando(false); }
   };
 
+  const idEmpresaExpandidaRef = idEmpresaExpandida;
   const ativarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setEditandoEmpresaExpandida(empresa.id);
@@ -382,7 +384,7 @@ export default function ComitePage() {
           </div>
         </div>
 
-        {/* Corpo Split Layout (Slides Ocupando 70% da Viewport Horizontal) */}
+        {/* Corpo Split Layout */}
         <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
           
           {/* LADO ESQUERDO: RELATÓRIO DO SLIDE COMPLETO */}
@@ -399,7 +401,7 @@ export default function ComitePage() {
             </div>
           </div>
 
-          {/* LADO DIREITO: DASHBOARD DECISÓRIO (Acompanhamento em tempo real) */}
+          {/* LADO DIREITO: DASHBOARD DECISÓRIO */}
           <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
             
             {/* Bloco Voto */}
