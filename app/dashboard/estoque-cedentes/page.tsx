@@ -24,6 +24,7 @@ export default function AnaliseEstoqueCedentesPage() {
   const [statusTexto, setStatusStatusTexto] = useState("");
   const [cedenteExpandido, setCedenteExpandido] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
+  const [ordenacao, setOrdenacao] = useState("nominal_desc"); // Padrão: Maior Valor
 
   const buscarEstoqueDoBanco = async () => {
     try {
@@ -126,10 +127,10 @@ export default function AnaliseEstoqueCedentesPage() {
         const idxCedente = headers.indexOf("NOME_DO_CEDENTE");
         const idxSacado = headers.indexOf("NOME_DO_SACADO");
         const idxDoc = headers.indexOf("NUMERO_DOCUMENTO");
-        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");      // R
-        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");    // S
-        const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");// W
-        const idxNominal = headers.indexOf("VALOR_NOMINAL");            // Y
+        const idxAquisicao = headers.indexOf("DATA_DE_AQUISICAO");      
+        const idxVencimento = headers.indexOf("DATA_DE_VENCIMENTO");    
+        const idxPrecoAquisicao = headers.indexOf("PRECO_DE_AQUISICAO");
+        const idxNominal = headers.indexOf("VALOR_NOMINAL");            
 
         const payloadParaInsercao: any[] = [];
 
@@ -149,7 +150,6 @@ export default function AnaliseEstoqueCedentesPage() {
           const strI = txtInicio.trim().split(" ")[0];
           const strF = txtFim.trim().split(" ")[0];
           
-          // Suporta formatos ISO (YYYY-MM-DD) ou BR (DD/MM/YYYY)
           const pI = strI.includes("-") ? strI.split("-") : strI.split("/");
           const pF = strF.includes("-") ? strF.split("-") : strF.split("/");
           
@@ -180,17 +180,11 @@ export default function AnaliseEstoqueCedentesPage() {
 
           if (valorNominal <= 0 || precoAquisicao <= 0) continue;
           
-          // 📊 D3 = S3 - R3 (Prazo Corrido)
           const prazoCorridoD3 = obterPrazoCorridoAbsoluto(colunas[idxAquisicao], colunas[idxVencimento]);
-          
-          // 📈 C3 = ((1 + (Y3 - W3) / W3) ^ (30 / D3)) - 1 (Taxa Mensal)
           const fRentabilidade = 1 + (valorNominal - precoAquisicao) / precoAquisicao;
           const taxaFinalCalculadaC3 = Math.pow(fRentabilidade, 30 / prazoCorridoD3) - 1;
 
-          // 📐 A3 = D3 * Y3 (Massa de Prazo)
           const colunaPrazoMassaA3 = prazoCorridoD3 * valorNominal;
-
-          // 📉 B3 = C3 * Y3 (Massa de Taxa)
           const colunaTaxaMassaB3 = taxaFinalCalculadaC3 * valorNominal;
 
           payloadParaInsercao.push({
@@ -207,7 +201,6 @@ export default function AnaliseEstoqueCedentesPage() {
           });
         }
 
-        // 🚀 OTIMIZAÇÃO EXTRA: Envia a matriz completa em um único tiro HTTP à rede
         setStatusStatusTexto(`Injetando carga unificada de ${payloadParaInsercao.length} registros no banco...`);
         const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         
@@ -222,6 +215,20 @@ export default function AnaliseEstoqueCedentesPage() {
       setCarregando(false);
     }
   };
+
+  // 📈 BLOCOS DE CARD E AGREGAÇÃO DA CARTEIRA TOTAL
+  const totaisGerais = useMemo(() => {
+    if (titulos.length === 0) return { nominal: 0, taxaMed: 0, prazoMed: 0 };
+    const nominalTotal = titulos.reduce((acc, curr) => acc + curr.valorNominal, 0);
+    const somaMassaTaxa = titulos.reduce((acc, curr) => acc + curr.colunaTaxaMassa, 0);
+    const somaMassaPrazo = titulos.reduce((acc, curr) => acc + curr.colunaPrazoMassa, 0);
+
+    return {
+      nominal: nominalTotal,
+      taxaMed: nominalTotal > 0 ? (somaMassaTaxa / nominalTotal) * 100 : 0,
+      prazoMed: nominalTotal > 0 ? (somaMassaPrazo / nominalTotal) : 0
+    };
+  }, [titulos]);
 
   const carteiraCedentes = useMemo(() => {
     const mapa: Record<string, TituloEstoque[]> = {};
@@ -247,19 +254,33 @@ export default function AnaliseEstoqueCedentesPage() {
         prazoMedioPonderado: valorNominalTotal > 0 ? (somaMassaPrazo / valorNominalTotal) : 0,
         titulos: lista
       };
-    }).sort((a, b) => b.valorNominalTotal - a.valorNominalTotal);
+    });
   }, [titulos]);
 
-  const filtrados = useMemo(() => {
-    return carteiraCedentes.filter(c => c.cedente.toLowerCase().includes(busca.toLowerCase()));
-  }, [carteiraCedentes, busca]);
+  // 🔍 FILTRO E SISTEMA DE ORDENAÇÃO DINÂMICA
+  const filtradosEDecorados = useMemo(() => {
+    const filtrados = carteiraCedentes.filter(c => 
+      c.cedente.toLowerCase().includes(busca.toLowerCase())
+    );
+
+    return filtrados.sort((a, b) => {
+      if (ordenacao === "nominal_desc") return b.valorNominalTotal - a.valorNominalTotal;
+      if (ordenacao === "nominal_asc") return a.valorNominalTotal - b.valorNominalTotal;
+      if (ordenacao === "taxa_desc") return b.taxaMediaPonderada - a.taxaMediaPonderada;
+      if (ordenacao === "taxa_asc") return a.taxaMediaPonderada - b.taxaMediaPonderada;
+      if (ordenacao === "prazo_desc") return b.prazoMedioPonderado - a.prazoMedioPonderado;
+      if (ordenacao === "prazo_asc") return a.prazoMedioPonderado - b.prazoMedioPonderado;
+      return 0;
+    });
+  }, [carteiraCedentes, busca, ordenacao]);
 
   const formatarMoeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[12px] font-sans text-slate-700 p-4">
       
-      <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* HEADER PRINCIPAL */}
+      <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Auditoria Gerencial de Estoque FIDC</h2>
           <p className="text-xs text-slate-400">Consolidação de Massa Ponderada Absoluta com base no Valor Nominal.</p>
@@ -270,31 +291,84 @@ export default function AnaliseEstoqueCedentesPage() {
         </label>
       </div>
 
+      {/* 📊 CARDS DE RESUMO OPERACIONAL (MESA DE CESSÃO) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Estoque Nominal Total</span>
+          <div className="text-xl font-mono font-black text-slate-900 mt-1">
+            {formatarMoeda(totaisGerais.nominal)}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">Soma absoluta de todos os ativos integrados.</p>
+        </div>
+
+        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
+          <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider">Taxa Média Ponderada Global</span>
+          <div className="text-xl font-mono font-black text-emerald-600 mt-1">
+            {totaisGerais.taxaMed.toFixed(4)}% <span className="text-xs font-sans font-normal text-slate-400">a.m.</span>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">Massa de taxa dividida pelo peso do valor nominal.</p>
+        </div>
+
+        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
+          <span className="text-[9px] font-black text-blue-700 uppercase tracking-wider">Prazo Médio Global</span>
+          <div className="text-xl font-mono font-black text-blue-700 mt-1">
+            {totaisGerais.prazoMed.toFixed(2)} <span className="text-xs font-sans font-normal text-slate-400">dias</span>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">Prazo ponderado real decorrido no estoque.</p>
+        </div>
+      </div>
+
+      {/* LOADING */}
       {carregando && (
         <div className="p-6 font-bold text-center bg-amber-50 text-amber-800 rounded-xl border border-amber-200 animate-pulse">
-          ⏳ {statusTexto || "Calculando Matriz Ponderada..."}
+          ⏳ {statusTexto || "Processando Matriz Dinâmica..."}
         </div>
       )}
 
+      {/* 🔍 FILTROS E CONTRÔLES DE ORDENAÇÃO */}
       {titulos.length > 0 && (
-        <div className="bg-white p-2 border border-slate-200 rounded-xl shadow-xs">
-          <input type="text" placeholder="🔍 Buscar carteira de cedente homologado..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg outline-none font-medium text-slate-800" />
+        <div className="bg-white p-3 border border-slate-200 rounded-xl shadow-2xs flex flex-col md:flex-row gap-3 items-center">
+          <div className="w-full md:flex-1">
+            <input 
+              type="text" 
+              placeholder="🔍 Buscar por nome do cedente homologado..." 
+              value={busca} 
+              onChange={(e) => setBusca(e.target.value)} 
+              className="w-full p-2 border border-slate-200 rounded-lg outline-none font-medium text-slate-800 bg-slate-50/50 focus:bg-white focus:border-slate-400 transition-all" 
+            />
+          </div>
+          <div className="w-full md:w-auto flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Ordenar:</span>
+            <select 
+              value={ordenacao} 
+              onChange={(e) => setOrdenacao(e.target.value)}
+              className="p-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-700 outline-none cursor-pointer text-[11px]"
+            >
+              <option value="nominal_desc">Maior Valor Nominal</option>
+              <option value="nominal_asc">Menor Valor Nominal</option>
+              <option value="taxa_desc">Maior Taxa Média</option>
+              <option value="taxa_asc">Menor Taxa Média</option>
+              <option value="prazo_desc">Maior Prazo Médio</option>
+              <option value="prazo_asc">Menor Prazo Médio</option>
+            </select>
+          </div>
         </div>
       )}
 
+      {/* LISTA GERENCIAL DE CEDENTES */}
       <div className="space-y-2">
-        {filtrados.length === 0 ? (
+        {filtradosEDecorados.length === 0 ? (
           <div className="p-12 border border-dashed border-slate-300 rounded-xl text-center text-slate-400 font-medium bg-white">
             Nenhum dado ativo no painel. Insira a base crua diária para consolidar as ponderações.
           </div>
         ) : (
-          filtrados.map((item) => {
+          filtradosEDecorados.map((item) => {
             const isExpandido = cedenteExpandido === item.cedente;
 
             return (
               <div key={item.cedente} className={`bg-white border transition-all rounded-xl shadow-2xs overflow-hidden ${isExpandido ? "border-slate-900 ring-1 ring-slate-900/10" : "border-slate-200 hover:border-slate-300"}`}>
                 
-                <div onClick={() => setCedenteExpandido(isExpandido ? null : item.cedente)} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer bg-gradient-to-r from-white to-slate-50/20 select-none">
+                <div onClick={() => setCedenteExpandido(isExpandido ? null : item.cedente)} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer bg-gradient-to-r from-white to-slate-50/10 select-none">
                   <div>
                     <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Cedente Parceiro</span>
                     <h3 className="font-black text-slate-900 text-[13px] tracking-tight">{item.cedente}</h3>
