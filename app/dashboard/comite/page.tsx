@@ -30,7 +30,7 @@ export default function ComitePage() {
   const [isMaster, setIsMaster] = useState(false);
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
-  // 🎯 Otimização: Função memorizada para evitar recriação de escopo e loops reativos
+  // Memoriza a função para evitar recriações de escopo e loops infinitos
   const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
     if (!empresaNome) return;
     const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
@@ -63,7 +63,7 @@ export default function ComitePage() {
         });
         setAnalises(filtradas);
 
-        // Dispara a carga de votos inicial de forma limpa
+        // Dispara a carga de votos inicial de forma síncrona
         for (const item of filtradas) {
           await carregarVotosIniciais(item.empresa_nome);
         }
@@ -79,7 +79,7 @@ export default function ComitePage() {
     }
   };
 
-  // 📡 1. CARGA INICIAL E REALTIME DE VOTOS (Livre de loops de render)
+  // 📡 REALTIME GLOBAL DE VOTOS (Otimizado por payload)
   useEffect(() => {
     carregarComite(); 
 
@@ -92,7 +92,6 @@ export default function ComitePage() {
       }
     } catch (e) { console.error(e); }
 
-    // O canal escuta as mudanças e atualiza com base no payload puro recebido, sem varrer o estado 'analises'
     const canalVotos = supabase
       .channel("votos-live-global")
       .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, (payload: any) => {
@@ -108,7 +107,7 @@ export default function ComitePage() {
     };
   }, [carregarVotosIniciais]);
 
-  // 📡 2. REALTIME DO CHAT INTERNO DA EMPRESA EXPANDIDA
+  // 📡 REALTIME DO CHAT COMENTÁRIOS DA EMPRESA EXPANDIDA
   useEffect(() => {
     if (!idEmpresaExpandida) return;
     const empresaAlvo = analises.find(a => a.id === idEmpresaExpandida);
@@ -186,7 +185,7 @@ export default function ComitePage() {
       await carregarComite();
     } catch (err: any) {
       alert(`❌ Erro no painel Master: ${err.message}`);
-    } fill-out {
+    } finally { // 🎯 CORRIGIDO: Turbopack passa liso sem fill-out fantasma
       setCarregando(false);
     }
   };
@@ -395,7 +394,7 @@ export default function ComitePage() {
                       )}
                     </tr>
 
-                    {/* COMPONENTE INTERNO EXPANDIDO - SEGURO CONTRA LOOPS */}
+                    {/* COMPONENTE INTERNO EXPANDIDO - REATIVO E ESTÁVEL */}
                     {painelAberto && (
                       <tr>
                         <td colSpan={isMaster ? 6 : 5} className="bg-slate-50/50 p-4 border-l-4 border-blue-600">
