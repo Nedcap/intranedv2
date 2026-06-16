@@ -14,15 +14,18 @@ export default function ComitePage() {
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [novaMsg, setNovaMsg] = useState("");
   
+  // 🎯 Novo Estado: Armazena a lista de diretores vindos do banco de dados
+  const [diretoresBanco, setDiretoresBanco] = useState<string[]>([]);
+
   const [membroVoto, setMembroVoto] = useState("");
   const [opcaoVoto, setOpcaoVoto] = useState("");
   const [justificativaVoto, setJustificativaVoto] = useState("");
   const [enviandoVoto, setEnviandoVoto] = useState(false);
-  const [avisoCopia, setAvisoCopia] = useState(false);
   
-  const [conteudoHtmlPreview, setConteudoHtmlPreview] = useState<string | null>(null);
+  // Guardará o HTML de preview indexado por ID de análise para exibir inline
+  const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
+
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
-  
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [pendenciaTexto, setPendenciaTexto] = useState("");
   const [novaDataEnvio, setNovaDataEnvio] = useState("");
@@ -30,7 +33,21 @@ export default function ComitePage() {
   const [isMaster, setIsMaster] = useState(false);
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
-  // Memoriza a função para evitar recriações de escopo e loops infinitos
+  // Busca os diretores cadastrados no banco de dados para alimentar o Dropdown
+  const carregarDiretores = async () => {
+    try {
+      const { data } = await supabase
+        .from("usuarios")
+        .select("nome")
+        .ilike("cargo", "Diretor");
+      if (data) {
+        setDiretoresBanco(data.map(u => u.nome));
+      }
+    } catch (err) {
+      console.error("Erro ao buscar diretores:", err);
+    }
+  };
+
   const carregarVotosIniciais = useCallback(async (empresaNome: string) => {
     if (!empresaNome) return;
     const { data } = await supabase.from("votos").select("*").eq("empresa_nome", empresaNome);
@@ -63,9 +80,10 @@ export default function ComitePage() {
         });
         setAnalises(filtradas);
 
-        // Dispara a carga de votos inicial de forma síncrona
         for (const item of filtradas) {
           await carregarVotosIniciais(item.empresa_nome);
+          // Pré-carrega o HTML inline se o caminho existir
+          if (item.caminho_local) baixarHtmlInline(item.id, item.caminho_local);
         }
       }
 
@@ -79,8 +97,29 @@ export default function ComitePage() {
     }
   };
 
-  // 📡 REALTIME GLOBAL DE VOTOS (Otimizado por payload)
+  const baixarHtmlInline = async (id: string, caminho: string) => {
+    const urlLimpa = caminho.trim();
+    if (urlLimpa.startsWith("http")) { 
+      try {
+        const res = await fetch(urlLimpa);
+        const text = await res.text();
+        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+      } catch { /* fallback window open interno */ }
+      return;
+    }
+    const partes = urlLimpa.split(/[\\/]/);
+    const nomeArquivo = partes[partes.length - 1].trim();
+    try {
+      const { data } = await supabase.storage.from("analises").download(nomeArquivo);
+      if (data) {
+        const text = await data.text();
+        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+      }
+    } catch (err) { console.error(err); }
+  };
+
   useEffect(() => {
+    carregarDiretores();
     carregarComite(); 
 
     try {
@@ -96,9 +135,7 @@ export default function ComitePage() {
       .channel("votos-live-global")
       .on("postgres_changes", { event: "*", schema: "public", table: "votos" }, (payload: any) => {
         const nomeEmp = payload.new?.empresa_nome || payload.old?.empresa_nome;
-        if (nomeEmp) {
-          carregarVotosIniciais(nomeEmp);
-        }
+        if (nomeEmp) carregarVotosIniciais(nomeEmp);
       })
       .subscribe();
 
@@ -107,7 +144,6 @@ export default function ComitePage() {
     };
   }, [carregarVotosIniciais]);
 
-  // 📡 REALTIME DO CHAT COMENTÁRIOS DA EMPRESA EXPANDIDA
   useEffect(() => {
     if (!idEmpresaExpandida) return;
     const empresaAlvo = analises.find(a => a.id === idEmpresaExpandida);
@@ -185,7 +221,7 @@ export default function ComitePage() {
       await carregarComite();
     } catch (err: any) {
       alert(`❌ Erro no painel Master: ${err.message}`);
-    } finally { // 🎯 CORRIGIDO: Turbopack passa liso sem fill-out fantasma
+    } finally {
       setCarregando(false);
     }
   };
@@ -315,34 +351,6 @@ export default function ComitePage() {
     setNovaMsg("");
   };
 
-  const tratarAberturaAnalise = async (caminho: string) => {
-    if (!caminho) return alert("Esta análise ainda não possui relatório gerado.");
-    const urlLimpa = caminho.trim();
-    if (urlLimpa.startsWith("http")) { 
-      try {
-        const res = await fetch(urlLimpa);
-        const htmlText = await res.text();
-        setConteudoHtmlPreview(htmlText);
-        return;
-      } catch {
-        window.open(urlLimpa, "_blank");
-        return;
-      }
-    }
-    const partes = urlLimpa.split(/[\\/]/);
-    const nomeArquivo = partes[partes.length - 1].trim();
-    try {
-      const { data, error } = await supabase.storage.from("analises").download(nomeArquivo);
-      if (error) {
-        navigator.clipboard.writeText(urlLimpa); 
-        setAvisoCopia(true);
-        setTimeout(() => setAvisoCopia(false), 4000);
-        return;
-      }
-      if (data) setConteudoHtmlPreview(await data.text());
-    } catch (err) { console.error(err); }
-  };
-
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-8 text-[13px]">
       {carregando && <div className="fixed inset-0 bg-white/40 z-50 flex items-center justify-center font-bold text-slate-500">Sincronizando esteira...</div>}
@@ -369,6 +377,7 @@ export default function ComitePage() {
               {analises.map((item) => {
                 const painelAberto = idEmpresaExpandida === item.id;
                 const listaDeVotos = votosAoVivo[item.empresa_nome] || [];
+                const htmlPreview = htmlPreviewsInline[item.id];
                 
                 return (
                   <tr key={item.id} style={{ display: "contents" }}>
@@ -380,10 +389,9 @@ export default function ComitePage() {
                       <td className="p-2.5 text-center">
                         <span className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-md uppercase">{item.status || "Em análise"}</span>
                       </td>
-                      <td className="p-2.5 flex gap-2 justify-center">
-                        <button onClick={() => tratarAberturaAnalise(item.caminho_local)} className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded border border-slate-200 text-xs cursor-pointer transition-colors">📄 Análise</button>
-                        <button onClick={() => alternarPainelInterno(item)} className={`px-2.5 py-0.5 font-bold rounded text-xs cursor-pointer transition-colors ${painelAberto ? "bg-slate-800 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>
-                          {painelAberto ? "✕ Fechar" : "💬 Votar / Chat"}
+                      <td className="p-2.5 text-center">
+                        <button onClick={() => alternarPainelInterno(item)} className={`px-4 py-1 font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors ${painelAberto ? "bg-slate-800 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>
+                          {painelAberto ? "✕ Fechar Painel" : "💬 Abrir Análise e Votação"}
                         </button>
                       </td>
                       {isMaster && (
@@ -394,69 +402,95 @@ export default function ComitePage() {
                       )}
                     </tr>
 
-                    {/* COMPONENTE INTERNO EXPANDIDO - REATIVO E ESTÁVEL */}
+                    {/* 🎯 UNIFICAÇÃO TOTAL INLINE: Análise + Votação lado a lado na mesma tela */}
                     {painelAberto && (
                       <tr>
-                        <td colSpan={isMaster ? 6 : 5} className="bg-slate-50/50 p-4 border-l-4 border-blue-600">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white border border-slate-200 p-4 rounded-xl shadow-xs text-left">
+                        <td colSpan={isMaster ? 6 : 5} className="bg-slate-100/50 p-4 border-l-4 border-blue-600">
+                          <div className="flex flex-col space-y-4">
                             
-                            {/* Bloco Voto */}
-                            <div className="space-y-3 border-r border-slate-100 pr-4">
-                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">🗳️ Painel de Votação</span>
-                              <div className="grid grid-cols-2 gap-2">
-                                <select value={membroVoto} onChange={(e) => setMembroVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
-                                  <option value="">Membro</option><option value="Diego">Diego</option><option value="Alyson">Alyson</option><option value="Decisão">Decisão</option>
-                                </select>
-                                <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
-                                  <option value="">Voto</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
-                                </select>
+                            {/* Bloco Superior: O Relatório Iframe da Apresentação */}
+                            <div className="w-full bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col h-[500px]">
+                              <div className="bg-slate-800 text-white p-2 text-xs font-bold flex justify-between items-center select-none">
+                                <span>📄 Relatório de Apresentação Ativo</span>
+                                <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded">Modo de Consulta Síncrona</span>
                               </div>
-                              <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Parecer técnico ou justificativa..." className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-medium outline-none h-14 resize-none" />
-                              <button onClick={() => processarVotoWeb(item)} disabled={enviandoVoto} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2 rounded transition-all cursor-pointer">
-                                {enviandoVoto ? "Computando..." : "Registrar Voto Oficial"}
-                              </button>
-                            </div>
-
-                            {/* Bloco Histórico */}
-                            <div className="space-y-2 border-r border-slate-100 pr-4 overflow-y-auto max-h-[220px]">
-                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">📋 Votos Registrados (Ao Vivo)</span>
-                              {listaDeVotos.length === 0 ? (
-                                <p className="text-slate-400 italic text-xs py-4 text-center">Nenhum voto computado.</p>
-                              ) : (
-                                <div className="space-y-1.5">
-                                  {listaDeVotos.map((v: any, idx: number) => (
-                                    <div key={idx} className="p-2 border border-slate-100 rounded bg-slate-50/50 flex flex-col gap-0.5 text-xs">
-                                      <div className="flex justify-between items-center font-bold">
-                                        <span className="text-slate-800">{v.membro_nome}</span>
-                                        <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-black ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{v.voto}</span>
-                                      </div>
-                                      <span className="text-slate-500 italic font-medium">"{v.justificativa}"</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Bloco Chat */}
-                            <div className="flex flex-col h-[220px]">
-                              <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider mb-2">💬 Discussão e Alinhamentos</span>
-                              <div className="flex-1 overflow-y-auto border border-slate-100 rounded p-2 space-y-2 bg-slate-50/30">
-                                {chatMsgs.length === 0 ? (
-                                  <p className="text-center text-slate-400 py-8 text-xs">Nenhum comentário na mesa.</p>
+                              <div className="flex-1 bg-slate-50">
+                                {htmlPreview ? (
+                                  <iframe srcDoc={htmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
                                 ) : (
-                                  chatMsgs.map((m: any) => (
-                                    <div key={m.id} className="bg-white p-2 rounded border border-slate-100 shadow-2xs text-xs">
-                                      <span className="font-bold text-blue-600">{m.usuario}</span>: <span className="text-slate-700 font-medium">{m.mensagem}</span>
-                                    </div>
-                                  ))
+                                  <div className="w-full h-full flex items-center justify-center text-slate-400 italic text-xs">
+                                    Nenhum relatório HTML anexado ou carregando...
+                                  </div>
                                 )}
                               </div>
-                              <div className="flex gap-2 mt-2 shrink-0">
-                                <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(item.empresa_nome)} placeholder="Mensagem..." className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs outline-none focus:border-blue-500 font-semibold text-slate-800" />
-                                <button onClick={() => enviarMensagemChat(item.empresa_nome)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 rounded cursor-pointer transition-all">Mandar</button>
-                              </div>
                             </div>
 
+                            {/* Bloco Inferior: Controle de Votos Tripartido */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
+                              
+                              {/* Painel Esquerdo: Cadastro do Voto */}
+                              <div className="space-y-3 border-r border-slate-100 pr-4">
+                                <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">Votar nesta análise</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {/* 🎯 FILTRO DE DIRETORES DO BANCO DE DADOS ATIVO AQUI */}
+                                  <select value={membroVoto} onChange={(e) => setMembroVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
+                                    <option value="">Diretor</option>
+                                    {diretoresBanco.map((nomeDir) => (
+                                      <option key={nomeDir} value={nomeDir}>{nomeDir}</option>
+                                    ))}
+                                    <option value="Decisão">⭐ Decisão</option>
+                                  </select>
+                                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold outline-none cursor-pointer">
+                                    <option value="">Voto</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
+                                  </select>
+                                </div>
+                                <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer do comitê..." className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-medium outline-none h-14 resize-none" />
+                                <button onClick={() => processarVotoWeb(item)} disabled={enviandoVoto} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2 rounded transition-all cursor-pointer">
+                                  {enviandoVoto ? "Computando..." : "Registrar Voto Oficial"}
+                                </button>
+                              </div>
+
+                              {/* Painel Central: Histórico de Votos Realtime */}
+                              <div className="space-y-2 border-r border-slate-100 pr-4 overflow-y-auto max-h-[170px]">
+                                <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider">Votos Registrados</span>
+                                {listaDeVotos.length === 0 ? (
+                                  <p className="text-slate-400 italic text-xs py-4 text-center">Nenhum parecer computado.</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {listaDeVotos.map((v: any, idx: number) => (
+                                      <div key={idx} className="p-2 border border-slate-100 rounded bg-slate-50/50 flex flex-col gap-0.5 text-xs">
+                                        <div className="flex justify-between items-center font-bold">
+                                          <span className="text-slate-800">{v.membro_nome}</span>
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-black ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{v.voto}</span>
+                                        </div>
+                                        <span className="text-slate-500 italic font-medium">"{v.justificativa}"</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Painel Direito: Discussão Interna */}
+                              <div className="flex flex-col h-[170px]">
+                                <span className="text-[11px] font-black text-slate-500 uppercase block tracking-wider mb-1">Mesa de Debates</span>
+                                <div className="flex-1 overflow-y-auto border border-slate-100 rounded p-2 space-y-2 bg-slate-50/30">
+                                  {chatMsgs.length === 0 ? (
+                                    <p className="text-center text-slate-400 py-6 text-xs">Nenhum comentário.</p>
+                                  ) : (
+                                    chatMsgs.map((m: any) => (
+                                      <div key={m.id} className="bg-white p-2 rounded border border-slate-100 text-xs">
+                                        <span className="font-bold text-blue-600">{m.usuario}</span>: <span className="text-slate-700 font-medium">{m.mensagem}</span>
+                                      </div>
+                                  ))
+                                )}
+                                </div>
+                                <div className="flex gap-2 mt-2 shrink-0">
+                                  <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(item.empresa_nome)} placeholder="Mensagem..." className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs outline-none focus:border-blue-500 font-semibold" />
+                                  <button onClick={() => enviarMensagemChat(item.empresa_nome)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 rounded cursor-pointer transition-all">Mandar</button>
+                                </div>
+                              </div>
+
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -540,21 +574,6 @@ export default function ComitePage() {
           </table>
         </div>
       </div>
-
-      {/* MODAL PREVIEW HTML */}
-      {conteudoHtmlPreview && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50">
-          <div className="w-screen h-screen bg-white flex flex-col overflow-hidden fixed inset-0">
-            <div className="flex justify-between items-center bg-slate-800 text-white p-3 shrink-0 shadow-md">
-              <h3 className="font-bold text-sm">📄 Visualizador de Apresentações Ned Capital</h3>
-              <button onClick={() => setConteudoHtmlPreview(null)} className="bg-red-600 hover:bg-red-700 text-white font-black text-xs px-3 py-1 rounded transition-all cursor-pointer">✕ Fechar Tela Cheia</button>
-            </div>
-            <div className="flex-1 bg-white min-h-0">
-              <iframe srcDoc={conteudoHtmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
