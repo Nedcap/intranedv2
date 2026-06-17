@@ -49,11 +49,10 @@ export default function NedHubPage() {
           setLeads(dbLeads.map((l: any) => ({
             id: l.id,
             cnpj: l.cnpj,
-            // 🎯 CORREÇÃO: Mapeamento flexível para aceitar variações de caixa do banco (CamelCase ou minúsculo)
             razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
             nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
             telefone: l.telefone || "",
-            estagio: l.estagio || "sem_contato",
+            estagio: l.estagio || l.estágio || "sem_contato",
             funilId: l.funilId || l.funilid || l.funil_id || "vendas",
             dadosCustomizados: l.campos_customizados || {}
           })));
@@ -154,21 +153,23 @@ export default function NedHubPage() {
 
   // Montagem dinâmica das colunas conforme o pipeline selecionado
   const colunasVisíveis = useMemo(() => {
-    const filtrados = leads.filter(l => l.funilId === funilAtivo);
+    // 🔍 DEBUG: Pegamos todos os leads para forçar a exibição na primeira coluna
+    const filtrados = leads;
+    
     if (funilAtivo === "vendas") {
       return [
-        { id: "sem_contato", nome: "🚫 Sem Contato", cards: filtrados.filter(l => l.estagio === "sem_contato") },
-        { id: "telefone_inexistente", nome: "📞 Tel. Inexistente", cards: filtrados.filter(l => l.estagio === "telefone_inexistente") },
-        { id: "em_fluxo", nome: "🔄 Em Fluxo", cards: filtrados.filter(l => l.estagio === "em_fluxo") },
-        { id: "apresentacao_enviada", nome: "✉️ Apresentação", cards: filtrados.filter(l => l.estagio === "apresentacao_enviada") },
-        { id: "interessados", nome: "🔥 Interessados", cards: filtrados.filter(l => l.estagio === "interessados") },
+        { id: "sem_contato", nome: "🚫 Sem Contato (DEBUG TOTAL)", cards: filtrados },
+        { id: "telefone_inexistente", nome: "📞 Tel. Inexistente", cards: [] },
+        { id: "em_fluxo", nome: "🔄 Em Fluxo", cards: [] },
+        { id: "apresentacao_enviada", nome: "✉️ Apresentação", cards: [] },
+        { id: "interessados", nome: "🔥 Interessados", cards: [] },
       ];
     } else {
       return [
-        { id: "visita_agendada", nome: "📅 Visita Agendada", cards: filtrados.filter(l => l.estagio === "visita_agendada") },
-        { id: "em_analise_mesa", nome: "⚖️ Mesa de Risco", cards: filtrados.filter(l => l.estagio === "em_analise_mesa") },
-        { id: "convertida_aprovada", nome: "💰 Convertida (Comissão)", cards: filtrados.filter(l => l.estagio === "convertida_aprovada") },
-        { id: "nao_convertida", nome: "❌ Não Convertida", cards: filtrados.filter(l => l.estagio === "nao_convertida") },
+        { id: "visita_agendada", nome: "📅 Visita Agendada (DEBUG TOTAL)", cards: filtrados },
+        { id: "em_analise_mesa", nome: "⚖️ Mesa de Risco", cards: [] },
+        { id: "convertida_aprovada", nome: "💰 Convertida (Comissão)", cards: [] },
+        { id: "nao_convertida", nome: "❌ Não Convertida", cards: [] },
       ];
     }
   }, [leads, funilAtivo]);
@@ -184,7 +185,6 @@ export default function NedHubPage() {
             <p className="text-xs text-slate-400">Originação integrada à base local do Bot de Prospecção.</p>
           </div>
           
-          {/* SWITCHER DE FUNIL DO RD STATION */}
           <select 
             value={funilAtivo} 
             onChange={(e) => setFunilAtivo(e.target.value as any)}
@@ -280,7 +280,13 @@ export default function NedHubPage() {
 
 function CardLead({ lead, onMover }: { lead: Lead; onMover: (id: string, dir: "proximo" | "voltar") => void }) {
   return (
-    <div className="bg-white p-3 border border-slate-200 rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 group">
+    <div className="bg-white p-3 border border-red-300 bg-red-50/5 rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 group">
+      {/* 🛠️ TARJA DE DIAGNÓSTICO */}
+      <div className="bg-slate-900 text-amber-400 p-1 rounded font-mono text-[9px] mb-1">
+        <div>Estágio vindo do Supa: "{lead.estagio}"</div>
+        <div>Funil vindo do Supa: "{lead.funilId}"</div>
+      </div>
+
       <div>
         <span className="text-[8px] font-mono font-bold text-slate-400 tracking-wider block">CNPJ: {lead.cnpj}</span>
         <h4 className="font-black text-slate-900 tracking-tight leading-tight uppercase truncate group-hover:text-blue-600 transition-colors">{lead.razaoSocial}</h4>
@@ -290,14 +296,6 @@ function CardLead({ lead, onMover }: { lead: Lead; onMover: (id: string, dir: "p
         <p>👤 <span className="font-medium text-slate-700">{lead.nomeContato || "-"}</span></p>
         <p>📞 <span className="font-mono text-slate-600">{lead.telefone || "-"}</span></p>
       </div>
-
-      {Object.keys(lead.dadosCustomizados).length > 0 && (
-        <div className="bg-slate-50/50 p-1.5 rounded-lg space-y-0.5 text-[8px] font-mono border border-slate-100 text-slate-600">
-          {Object.entries(lead.dadosCustomizados).slice(0, 3).map(([k, v]: any) => (
-            <div key={k} className="truncate"><span className="text-slate-400 font-bold">{k}:</span> {v}</div>
-          ))}
-        </div>
-      )}
 
       <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 gap-2">
         <button onClick={() => onMover(lead.id, "voltar")} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-bold transition-colors">◀</button>
