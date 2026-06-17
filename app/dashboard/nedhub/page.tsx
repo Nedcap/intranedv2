@@ -50,7 +50,7 @@ export default function NedHubPage() {
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  // Banco de Janelas Livres (Sincronizado via localStorage ou tabela simples para persistir internamente)
+  // Banco de Janelas Livres para o Comercial
   const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({
     "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00"],
     "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30"],
@@ -78,7 +78,7 @@ export default function NedHubPage() {
   const [templateSelecionado, setTemplateSelecionado] = useState("");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
 
-  // Persistência simples das janelas internas do comercial para testes imediatos
+  // Persistência das janelas internas do comercial
   useEffect(() => {
     const localSlots = localStorage.getItem("nedhub_slots_comercial");
     if (localSlots) setHorariosDisponiveisGerentes(JSON.parse(localSlots));
@@ -130,7 +130,11 @@ export default function NedHubPage() {
           responsavel_id: l.responsavel_id
         })));
       }
-    } catch (err: any) { console.error(err.message); } finally { setCarregando(false); }
+    } catch (err: any) { 
+      console.error(err.message); 
+    } finally { 
+      setCarregando(false); 
+    }
   };
 
   useEffect(() => { 
@@ -239,7 +243,11 @@ export default function NedHubPage() {
       if (error) throw error;
       setLeadExpandido(null);
       await sincronizarBaseNedHub();
-    } catch (err: any) { alert(err.message); } finally { Red-screen-fix -> setCarregando(false); }
+    } catch (err: any) { 
+      alert(err.message); 
+    } finally { 
+      setCarregando(false); 
+    }
   };
 
   const agendarHorarioGerentePeloSdr = async (dataHora: string) => {
@@ -349,7 +357,7 @@ export default function NedHubPage() {
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
-      {/* HEADER */}
+      {/* HEADER DE GESTÃO DA DIRETORIA */}
       <div className="flex bg-slate-900 text-white p-2.5 rounded-xl justify-between items-center text-[10px] font-mono">
         <div className="flex items-center gap-3">
           <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BANCO):</span>
@@ -362,6 +370,7 @@ export default function NedHubPage() {
       </div>
 
       {abaAtivaConfig === "auditoria_direcao" ? (
+        /* PAINEL DE GESTÃO E AUDITORIA COMPLETO */
         <div className="flex-1 bg-white border border-slate-200 rounded-xl p-5 space-y-4 overflow-y-auto">
           <h3 className="font-black uppercase text-slate-900 text-xs">📊 Auditoria e Produtividade dos SDRs</h3>
           <div className="grid grid-cols-3 gap-4 font-mono">
@@ -386,6 +395,7 @@ export default function NedHubPage() {
           </table>
         </div>
       ) : (
+        /* GRID KANBAN ORIGINAL */
         <>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
             <div className="flex items-center gap-4">
@@ -425,7 +435,7 @@ export default function NedHubPage() {
         </>
       )}
 
-      {/* GAVETA DE EDIÇÃO */}
+      {/* 🔍 GAVETA COMPLETA RESTAURADA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200">
@@ -458,7 +468,7 @@ export default function NedHubPage() {
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
               
-              {/* AREA INTELIGENCIA DA RECEITA */}
+              {/* AREA PRETA INTELIGENCIA - TRAVADA SE FOR SDR */}
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Informações Corporativas (Receita Federal)</h3>
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
@@ -514,7 +524,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Compromissos */}
+              {/* Lembretes e Tarefas */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Compromissos e Alertas de Retorno</h3>
                 <div className="grid grid-cols-3 gap-2 items-end">
@@ -576,13 +586,12 @@ export default function NedHubPage() {
             </div>
             <div className="bg-slate-50 p-3 rounded-xl space-y-3">
               <div>
-                <label className="block text-[9px] uppercase font-bold text-slate-500 mb-1">Visualizar Agenda Livre de:</label>
+                <label className="block value-[9px] uppercase font-bold text-slate-500 mb-1">Visualizar Agenda Livre de:</label>
                 <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2 border bg-white rounded-lg font-bold text-slate-800 outline-none text-[10px]">
                   {GERENTES_COMERCIAIS.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                 </select>
               </div>
 
-              {/* O COMERCIAL ALIMENTA OS HORÁRIOS AQUI SE NÃO FOR SDR */}
               {userRole !== "SDR" && (
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
                   <span className="block text-[8px] font-black uppercase text-emerald-600">➕ Comercial: Liberar nova janela de horário</span>
@@ -605,7 +614,7 @@ export default function NedHubPage() {
                     <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Nenhum horário comercial disponível.</p>
                   ) : (
                     horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.map((horario, index) => (
-                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-blue-50 hover:bg-blue-600 border border-blue-200 text-blue-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
+                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 text-emerald-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
                         📅 {horario}
                       </button>
                     ))
@@ -660,7 +669,6 @@ export default function NedHubPage() {
   );
 }
 
-// 🔑 CARD ATUALIZADO: Mostra as informações capturadas pela Receita Federal
 function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCalendario }: { lead: Lead; corColuna: string; userRole: string; onExpandir: (l: Lead) => void; onExcluir: (id: string, name: string) => void; onAbrirCalendario: (l: Lead) => void }) {
   const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
   const hojeStr = new Date().toISOString().split("T")[0];
@@ -693,7 +701,6 @@ function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCal
         🗓️ Agendar com Comercial
       </button>
 
-      {/* 🛠️ AQUI EXIBE OS DADOS DA RECEITA AUTOMATICAMENTE NO CARD */}
       <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-1 border border-slate-100 font-medium">
         <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "Não informado"}</span></p>
         {lead.dadosCustomizados?.ramo && (
