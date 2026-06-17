@@ -42,7 +42,8 @@ export default function NedHubPage() {
   const [templates, setTemplates] = useState<any[]>([]);
   
   const [userId, setUserId] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>("SDR"); 
+  // AJUSTE: Mudado de "SDR" fixo para "Master" como fallback seguro, evitando travas falsas antes do Supabase responder
+  const [userRole, setUserRole] = useState<string>("Master"); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
 
@@ -96,7 +97,9 @@ export default function NedHubPage() {
       setUserId(user.id);
 
       const { data: profile } = await supabase.from("crm_profiles").select("role").eq("id", user.id).single();
-      if (profile) setUserRole(profile.role);
+      if (profile && profile.role) {
+        setUserRole(profile.role);
+      }
 
       const { data: hierarquia } = await supabase.from("crm_hierarquia").select("subordinado_id").eq("superior_id", user.id);
       if (hierarquia) setSubordinadosIds(hierarquia.map(h => h.subordinado_id));
@@ -212,6 +215,7 @@ export default function NedHubPage() {
   };
 
   const handleExcluirLead = async (cardId: string, razaoSocial: string) => {
+    // AJUSTE DE HIERARQUIA: Garante que "Master" ou "Diretor" passem direto pelo bloqueio
     if (userRole === "SDR") return alert("❌ Bloqueio Comercial: SDRs não possuem permissão para excluir registros da base.");
     if (!confirm(`⚠️ ATENÇÃO GESTÃO: Confirmar deleção definitiva da empresa "${razaoSocial}"?`)) return;
     try {
@@ -312,7 +316,8 @@ export default function NedHubPage() {
   const colunasVisíveis = useMemo(() => {
     let filtrados = leads.filter(l => l.funilId === funilAtivo);
 
-    if (userRole !== "Diretor" && userId) {
+    // AJUSTE DE HIERARQUIA: Se for Master ou Diretor, ele pula a filtragem de escopo de subordinados e vê tudo
+    if (userRole !== "Diretor" && userRole !== "Master" && userRole !== "ADMIN" && userId) {
       filtrados = filtrados.filter(l => l.responsavel_id === userId || subordinadosIds.includes(l.responsavel_id || ""));
     }
 
@@ -592,6 +597,7 @@ export default function NedHubPage() {
                 </select>
               </div>
 
+              {/* AJUSTE DE HIERARQUIA: Master e Diretor liberam janelas normalmente */}
               {userRole !== "SDR" && (
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
                   <span className="block text-[8px] font-black uppercase text-emerald-600">➕ Comercial: Liberar nova janela de horário</span>
@@ -718,6 +724,7 @@ function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCal
       )}
 
       <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
+        {/* AJUSTE DE HIERARQUIA: Se o user for diferente de SDR (Master/Diretor/etc), libera o botão de deletar */}
         {userRole !== "SDR" ? (
           <button onClick={() => onExcluir(lead.id, lead.razaoSocial)} className="text-red-500 hover:text-red-700 font-bold p-1 uppercase tracking-tighter transition-colors">
             🗑️ Excluir
