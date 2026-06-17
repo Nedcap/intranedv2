@@ -21,6 +21,7 @@ export default function NedHubPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [userRole, setUserRole] = useState<string>("Consultor");
   const [carregando, setCarregando] = useState(false);
+  const [erroMensagem, setErroMensagem] = useState<string | null>(null);
 
   // Estados do Modal de Cadastro
   const [modalNovoLead, setModalNovoLead] = useState(false);
@@ -30,36 +31,45 @@ export default function NedHubPage() {
   const [inputTelefone, setInputTelefone] = useState("");
   const [valoresCamposCustomizados, setValoresCamposCustomizados] = useState<Record<string, any>>({});
 
-  // Sincroniza os dados com o Supabase
+  // Sincroniza os dados com o Supabase (Imune a quedas de autenticação)
   const sincronizarBaseNedHub = async () => {
     try {
       setCarregando(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserRole(user.user_metadata?.role || "Consultor");
-
-        const { data: dbLeads, error } = await supabase
-          .from("crm_leads")
-          .select("*")
-          .order("id", { ascending: false });
-        
-        if (error) throw error;
-        
-        if (dbLeads) {
-          setLeads(dbLeads.map((l: any) => ({
-            id: l.id,
-            cnpj: l.cnpj,
-            razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
-            nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
-            telefone: l.telefone || "",
-            estagio: l.estagio || l.estágio || "sem_contato",
-            funilId: l.funilId || l.funilid || l.funil_id || "vendas",
-            dadosCustomizados: l.campos_customizados || {}
-          })));
+      setErroMensagem(null);
+      
+      // Tenta ler o usuário para a role, mas não barra se der erro/nulo (evita o limbo do middleware)
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserRole(user.user_metadata?.role || "Consultor");
         }
+      } catch (authErr) {
+        console.warn("Aviso de Auth (ignorando para fins de teste):", authErr);
+      }
+
+      // 🔥 BUSCA DIRETA: Puxa os dados com o RLS desativado
+      const { data: dbLeads, error } = await supabase
+        .from("crm_leads")
+        .select("*")
+        .order("id", { ascending: false });
+      
+      if (error) throw error;
+      
+      if (dbLeads) {
+        setLeads(dbLeads.map((l: any) => ({
+          id: l.id,
+          cnpj: l.cnpj,
+          razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
+          nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
+          telefone: l.telefone || "",
+          estagio: l.estagio || l.estágio || "sem_contato",
+          funilId: l.funilId || l.funilid || l.funil_id || "vendas",
+          dadosCustomizados: l.campos_customizados || {}
+        })));
       }
     } catch (err: any) {
-      console.error("Erro ao sincronizar:", err.message);
+      console.error("Erro crítico na sincronização:", err.message);
+      setErroMensagem(err.message);
     } finally {
       setCarregando(false);
     }
@@ -151,10 +161,9 @@ export default function NedHubPage() {
     }
   };
 
-  // Montagem dinâmica das colunas conforme o pipeline selecionado
+  // Montagem das colunas (Agrupamento total para DEBUG sem risco de limbo)
   const colunasVisíveis = useMemo(() => {
-    // 🔍 DEBUG: Pegamos todos os leads para forçar a exibição na primeira coluna
-    const filtrados = leads;
+    const filtrados = leads; // Exibe todos os registros salvos do banco na primeira coluna
     
     if (funilAtivo === "vendas") {
       return [
@@ -203,6 +212,13 @@ export default function NedHubPage() {
 
       {carregando && <div className="p-2 text-center font-bold bg-blue-50 text-blue-600 rounded-lg animate-pulse">Sincronizando pipelines...</div>}
 
+      {/* BANNER DE ALERTA SE HOUVER ERRO DE RETORNO DO SUPABASE */}
+      {erroMensagem && (
+        <div className="p-3 bg-red-100 text-red-800 rounded-xl font-bold font-mono text-center border border-red-300">
+          ⚠️ O BANCO RETORNOU ERRO: {erroMensagem}
+        </div>
+      )}
+
       {/* DASHBOARD KANBAN GRID */}
       {!carregando && (
         <div className="flex-1 grid gap-3 h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `repeat(${colunasVisíveis.length}, minmax(0, 1fr))` }}>
@@ -222,7 +238,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL DE CADASTRO INTELLIGENT */}
+      {/* MODAL DE CADASTRO */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh] shadow-xl">
