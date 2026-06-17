@@ -13,6 +13,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [usuario, setUsuario] = useState<any>(null);
   const [menuAberto, setMenuAberto] = useState(true);
 
+  // 📂 Estado para controlar quais categorias do submenu estão abertas/expandidas
+  const [submenusAbertos, setSubmenusAbertos] = useState<Record<string, boolean>>({
+    "Operações": true,
+    "Crédito": false,
+    "Administração": false,
+  });
+
   useEffect(() => {
     try {
       const userStr = localStorage.getItem("intraned_user");
@@ -30,8 +37,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, []);
 
+  // 🔄 Deixa a categoria do link atual aberta de forma automática ao carregar a página
+  useEffect(() => {
+    const rotaAtiva = MAPA_DE_ROTAS.find(r => r.path === pathname);
+    if (rotaAtiva) {
+      setSubmenusAbertos(prev => ({
+        ...prev,
+        [rotaAtiva.categoria]: true
+      }));
+    }
+  }, [pathname]);
+
   const perfilAtual = String(usuario?.perfil || usuario?.cargo || "user").toLowerCase();
   
+  // Filtro de permissões nativo mantido intacto
   const linksPermitidos = MAPA_DE_ROTAS.filter((link) => {
     if (perfilAtual === "master") return true; 
     
@@ -45,6 +64,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     
     return false;
   });
+
+  // 📦 Agrupa os links permitidos por categoria para montar os submenus
+  const rotasAgrupadas = {
+    "Operações": linksPermitidos.filter(l => l.categoria === "Operações"),
+    "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
+    "Administração": linksPermitidos.filter(l => l.categoria === "Administração"),
+  };
+
+  // Alternador de sanfona (abre uma e mantém as outras como o usuário decidir)
+  const toggleSubmenu = (categoria: string) => {
+    setSubmenusAbertos(prev => ({
+      ...prev,
+      [categoria]: !prev[categoria]
+    }));
+  };
 
   const handleSair = () => {
     localStorage.removeItem("intraned_user"); 
@@ -68,10 +102,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           menuAberto ? "translate-x-0" : "-translate-x-full lg:-ml-64"
         }`}
       >
-        <div className="p-6">
-          <div className="mb-8 flex justify-between items-center">
+        <div className="p-4 flex flex-col h-full min-h-0">
+          <div className="mb-6 flex justify-between items-center px-2 pt-2">
             
-            {/* 🎯 LOGO DA NED COM FILTRO DE SILHUETA (BACKLIGHT NEON BRANCO) */}
+            {/* 🎯 LOGO DA NED COM FILTRO DE SILHUETA */}
             <div className="flex items-center gap-3 select-none">
               <img 
                 src="/favicon.ico" 
@@ -96,37 +130,74 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </div>
 
-          <nav className="space-y-1 overflow-y-auto max-h-[calc(100vh-220px)] pr-1">
-            {linksPermitidos.map((link) => {
-              const ativo = pathname === link.path;
+          {/* 🧭 CATEGORIAS EM SUBMENU DROP-DOWN RETRÁTIL */}
+          <nav className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+            {Object.entries(rotasAgrupadas).map(([categoria, links]) => {
+              // Se o usuário não tiver permissão para nenhuma rota dessa categoria, ela nem aparece
+              if (links.length === 0) return null;
+
+              const estaAberto = submenusAbertos[categoria];
+              const contemLinkAtivo = links.some(l => l.path === pathname);
+
               return (
-                <Link
-                  key={link.path}
-                  href={link.path}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold transition-all cursor-pointer ${
-                    ativo
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
-                      : "hover:bg-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  <span className="text-base">{link.icone}</span>
-                  {link.nome}
-                </Link>
+                <div key={categoria} className="space-y-1">
+                  {/* Botão de Disparo do Menu Pai */}
+                  <button
+                    onClick={() => toggleSubmenu(categoria)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all select-none ${
+                      contemLinkAtivo 
+                        ? "text-blue-400 bg-slate-800/40" 
+                        : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{categoria === "Operações" ? "📦" : categoria === "Crédito" ? "⚖️" : "⚙️"}</span>
+                      <span>{categoria}</span>
+                    </div>
+                    <span className="text-[10px] font-mono opacity-60">
+                      {estaAberto ? "▼" : "▶"}
+                    </span>
+                  </button>
+
+                  {/* Links Filhos (O Submenu de fato) */}
+                  {estaAberto && (
+                    <div className="pl-4 border-l border-slate-800 space-y-0.5 mt-1 transition-all">
+                      {links.map((link) => {
+                        const ativo = pathname === link.path;
+                        return (
+                          <Link
+                            key={link.path}
+                            href={link.path}
+                            className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-[12px] font-bold transition-all cursor-pointer ${
+                              ativo
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                            }`}
+                          >
+                            <span className="text-sm shrink-0">{link.icone}</span>
+                            <span className="truncate">{link.nome}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </nav>
         </div>
 
-        <div className="p-6 border-t border-slate-800 bg-slate-950/40 space-y-4">
+        {/* FOOTER PERFIL LOGADO */}
+        <div className="p-4 border-t border-slate-800 bg-slate-950/40 space-y-3">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Logado como:</p>
-            <p className="text-sm font-black text-white mt-0.5">{usuario?.nome || "Usuário"}</p>
-            <p className="text-xs text-blue-400 font-medium capitalize mt-0.5">{usuario?.cargo || usuario?.perfil || "Colaborador"}</p>
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Logado como:</p>
+            <p className="text-xs font-black text-white mt-0.5 truncate">{usuario?.nome || "Usuário"}</p>
+            <p className="text-[10px] text-blue-400 font-medium capitalize mt-0.5 truncate">{usuario?.cargo || usuario?.perfil || "Colaborador"}</p>
           </div>
 
           <button 
             onClick={handleSair}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-800 hover:bg-rose-950 hover:text-rose-200 text-slate-300 rounded-lg text-xs font-bold transition-all cursor-pointer border border-slate-700/50 hover:border-rose-900"
+            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-rose-950 hover:text-rose-200 text-slate-300 rounded-lg text-[10px] font-bold transition-all cursor-pointer border border-slate-700/50 hover:border-rose-900"
           >
             🚪 Sair do Sistema
           </button>
