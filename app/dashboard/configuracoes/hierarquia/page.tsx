@@ -9,7 +9,7 @@ interface UsuarioSistema {
   nome: string;
   email: string;
   cargo: string;
-  permissoes: string[]; // Usaremos o array que já existe para guardar o líder!
+  permissoes: Record<string, any>; // JSONB real do banco
 }
 
 export default function GerenciarHierarquiaPage() {
@@ -23,7 +23,7 @@ export default function GerenciarHierarquiaPage() {
     try {
       setCarregando(true);
       
-      // Busca os colaboradores reais diretamente da sua tabela ativa 'usuarios'
+      // Busca os colaboradores lendo EXATAMENTE as colunas que existem na tabela 'usuarios'
       const { data: dbUsuarios, error: errUsuarios } = await supabase
         .from("usuarios")
         .select("id, nome, email, cargo, permissoes")
@@ -31,11 +31,11 @@ export default function GerenciarHierarquiaPage() {
 
       if (errUsuarios) throw errUsuarios;
       
-      // Garante que permissões seja um array válido para evitarmos erros
       if (dbUsuarios) {
+        // Garante que permissões seja sempre um objeto JSON válido (como no seu DDL)
         const mapeados = dbUsuarios.map(u => ({
           ...u,
-          permissoes: Array.isArray(u.permissoes) ? u.permissoes : []
+          permissoes: typeof u.permissoes === 'object' && u.permissoes !== null ? u.permissoes : {}
         }));
         setUsuariosSistema(mapeados);
       }
@@ -50,22 +50,25 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosHierarquia();
   }, []);
 
-  // Grava o vínculo de forma ninja usando a coluna permissoes da tabela usuarios
+  // Grava o vínculo injetando "lider_id" no objeto jsonb de permissoes
   const handleAlternarEquipeSubordinado = async (subordinado: UsuarioSistema, jaPertence: boolean) => {
     if (!liderSelecionadoId) return;
 
     try {
       setCarregando(true);
 
-      // Limpa qualquer tag de líder anterior que esse subordinado tenha
-      let novasPermissoes = subordinado.permissoes.filter(p => !p.startsWith("lider:"));
+      // Copia o objeto JSON de permissões existente (para não apagar os acessos das rotas)
+      const novasPermissoes = { ...subordinado.permissoes };
 
-      // Se a caixinha foi marcada (jaPertence era falso), adicionamos a tag do novo líder
+      // Se a caixinha foi marcada (jaPertence era falso), cravamos o ID do novo líder
       if (!jaPertence) {
-        novasPermissoes.push(`lider:${liderSelecionadoId}`);
+        novasPermissoes.lider_id = liderSelecionadoId;
+      } else {
+        // Se desmarcou, removemos a chave lider_id do JSON
+        delete novasPermissoes.lider_id;
       }
 
-      // Atualizamos a tabela 'usuarios' usando a coluna que já existe! Sucesso garantido.
+      // Atualizamos a tabela 'usuarios'
       const { error } = await supabase
         .from("usuarios")
         .update({ permissoes: novasPermissoes })
@@ -91,9 +94,9 @@ export default function GerenciarHierarquiaPage() {
   return (
     <div className="p-6 space-y-6 font-sans text-slate-700 bg-white min-h-screen text-[12px]">
       
-      {/* HEADER EXCLUSIVO */}
+      {/* HEADER */}
       <div className="border-b border-slate-200 pb-3">
-        <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">👥 Central de Alçadas e Controle de Equipes (NedHub)</h1>
+        <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">👥 Central de Alçadas e Controle de Equipes</h1>
         <p className="text-xs text-slate-400">Monte a estrutura de subordinação do time. Os usuários marcados abaixo farão parte da carteira do líder selecionado.</p>
       </div>
 
@@ -140,8 +143,8 @@ export default function GerenciarHierarquiaPage() {
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white font-sans text-slate-700 font-medium">
               {listaMembrosDisponiveis.map((colaborador, index) => {
-                // Checa se o colaborador possui a tag secreta do líder atual
-                const pertenceAoLider = colaborador.permissoes.includes(`lider:${liderSelecionadoId}`);
+                // Checa se o JSON de permissões deste usuário possui a chave lider_id apontando para o líder do topo
+                const pertenceAoLider = colaborador.permissoes?.lider_id === liderSelecionadoId;
 
                 return (
                   <tr key={colaborador.id} className={`hover:bg-slate-50/60 transition-colors ${pertenceAoLider ? 'bg-blue-50/30 font-bold' : ''}`}>
