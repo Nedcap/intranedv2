@@ -42,12 +42,13 @@ export default function NedHubPage() {
   const [templates, setTemplates] = useState<any[]>([]);
   
   const [userId, setUserId] = useState<string | null>(null);
-  // AJUSTE: Mudado de "SDR" fixo para "Master" como fallback seguro, evitando travas falsas antes do Supabase responder
-  const [userRole, setUserRole] = useState<string>("Master"); 
+  
+  // CORREÇÃO: Inicializa vazio para não dar privilégio Master falso antes da resposta do banco
+  const [userRole, setUserRole] = useState<string>(""); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
 
-  const [carregando, setCarregando] = useState(false);
+  const [carregando, setCarregando] = useState(true); // Iniciando como true para o loading inicial
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
@@ -90,27 +91,43 @@ export default function NedHubPage() {
     localStorage.setItem("nedhub_slots_comercial", JSON.stringify(novosSlots));
   };
 
+  // CORREÇÃO: Função de carregar perfil reajustada para garantir a queda na role correta
   const carregarSessaoEPerfilReal = async () => {
     try {
+      setCarregando(true);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setCarregando(false);
+        return;
+      }
       setUserId(user.id);
 
-      const { data: profile } = await supabase.from("crm_profiles").select("role").eq("id", user.id).single();
+      const { data: profile, error } = await supabase
+        .from("crm_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (error) throw error;
+
       if (profile && profile.role) {
         setUserRole(profile.role);
+      } else {
+        setUserRole("SDR"); // Fallback seguro caso o perfil exista mas esteja sem role
       }
 
       const { data: hierarquia } = await supabase.from("crm_hierarquia").select("subordinado_id").eq("superior_id", user.id);
       if (hierarquia) setSubordinadosIds(hierarquia.map(h => h.subordinado_id));
     } catch (e) {
       console.error("Erro ao carregar sessão real de hierarquia", e);
+      setUserRole("SDR"); // Se falhar a requisição, joga para a role mais restrita por segurança (SDR)
+    } finally {
+      setCarregando(false);
     }
   };
 
   const sincronizarBaseNedHub = async () => {
     try {
-      setCarregando(true);
       const { data: dbLeads, error } = await supabase.from("crm_leads").select("*").order("criado_em", { ascending: false });
       const { data: dbTemplates } = await supabase.from("crm_email_templates").select("*");
       
@@ -135,14 +152,16 @@ export default function NedHubPage() {
       }
     } catch (err: any) { 
       console.error(err.message); 
-    } finally { 
-      setCarregando(false); 
     }
   };
 
+  // Carrega a sessão e depois sincroniza os leads
   useEffect(() => { 
-    carregarSessaoEPerfilReal();
-    sincronizarBaseNedHub(); 
+    const inicializar = async () => {
+      await carregarSessaoEPerfilReal();
+      await sincronizarBaseNedHub();
+    };
+    inicializar();
   }, []);
 
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
@@ -215,7 +234,6 @@ export default function NedHubPage() {
   };
 
   const handleExcluirLead = async (cardId: string, razaoSocial: string) => {
-    // AJUSTE DE HIERARQUIA: Garante que "Master" ou "Diretor" passem direto pelo bloqueio
     if (userRole === "SDR") return alert("❌ Bloqueio Comercial: SDRs não possuem permissão para excluir registros da base.");
     if (!confirm(`⚠️ ATENÇÃO GESTÃO: Confirmar deleção definitiva da empresa "${razaoSocial}"?`)) return;
     try {
@@ -316,7 +334,6 @@ export default function NedHubPage() {
   const colunasVisíveis = useMemo(() => {
     let filtrados = leads.filter(l => l.funilId === funilAtivo);
 
-    // AJUSTE DE HIERARQUIA: Se for Master ou Diretor, ele pula a filtragem de escopo de subordinados e vê tudo
     if (userRole !== "Diretor" && userRole !== "Master" && userRole !== "ADMIN" && userId) {
       filtrados = filtrados.filter(l => l.responsavel_id === userId || subordinadosIds.includes(l.responsavel_id || ""));
     }
@@ -359,6 +376,15 @@ export default function NedHubPage() {
     return { totais, atrasadas, incompletos };
   }, [leads]);
 
+  // Tela de carregamento simples para evitar renderizar a UI com dados errados antes do Supabase responder
+  if (carregando && !userRole) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white font-mono text-xs">
+        <span>🤖 Sincronizando credenciais e nível de acesso...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
@@ -366,7 +392,7 @@ export default function NedHubPage() {
       <div className="flex bg-slate-900 text-white p-2.5 rounded-xl justify-between items-center text-[10px] font-mono">
         <div className="flex items-center gap-3">
           <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BANCO):</span>
-          <span className="bg-slate-800 px-2 py-0.5 rounded text-white font-bold uppercase">{userRole}</span>
+          <span className="bg-slate-800 px-2 py-0.5 rounded text-white font-bold uppercase">{userRole || "Carregando..."}</span>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setAbaAtivaConfig("kanban")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'kanban' ? 'bg-blue-600' : 'bg-slate-800'}`}>📋 Workspace Kanban</button>
@@ -440,7 +466,7 @@ export default function NedHubPage() {
         </>
       )}
 
-      {/* 🔍 GAVETA COMPLETA RESTAURADA */}
+      {/* 🔍 GAVETA COMPLETA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200">
@@ -597,7 +623,6 @@ export default function NedHubPage() {
                 </select>
               </div>
 
-              {/* AJUSTE DE HIERARQUIA: Master e Diretor liberam janelas normalmente */}
               {userRole !== "SDR" && (
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
                   <span className="block text-[8px] font-black uppercase text-emerald-600">➕ Comercial: Liberar nova janela de horário</span>
@@ -724,7 +749,6 @@ function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCal
       )}
 
       <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
-        {/* AJUSTE DE HIERARQUIA: Se o user for diferente de SDR (Master/Diretor/etc), libera o botão de deletar */}
         {userRole !== "SDR" ? (
           <button onClick={() => onExcluir(lead.id, lead.razaoSocial)} className="text-red-500 hover:text-red-700 font-bold p-1 uppercase tracking-tighter transition-colors">
             🗑️ Excluir
