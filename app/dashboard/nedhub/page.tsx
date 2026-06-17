@@ -49,11 +49,12 @@ export default function NedHubPage() {
           setLeads(dbLeads.map((l: any) => ({
             id: l.id,
             cnpj: l.cnpj,
-            razaoSocial: l.razaoSocial,
-            nomeContato: l.nomeContato,
-            telefone: l.telefone,
-            estagio: l.estagio,
-            funilId: l.funilId || "vendas",
+            // 🎯 CORREÇÃO: Mapeamento flexível para aceitar variações de caixa do banco (CamelCase ou minúsculo)
+            razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
+            nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
+            telefone: l.telefone || "",
+            estagio: l.estagio || "sem_contato",
+            funilId: l.funilId || l.funilid || l.funil_id || "vendas",
             dadosCustomizados: l.campos_customizados || {}
           })));
         }
