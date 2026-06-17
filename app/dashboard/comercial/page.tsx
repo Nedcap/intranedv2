@@ -47,15 +47,18 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA DIRETO DA TABELA crm_leads (Visitas + Finalizados)
+  // 2. BUSCA AUTOMÁTICA DIRETO DA TABELA crm_leads (Mapeando com strings reais do banco)
   const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
       const { data, error } = await supabase
         .from("crm_leads") 
         .select("*")
-        // Filtra os estágios baseados no seu pipeline do CRM (Ajuste as strings se necessário)
-        .in("estagio", ["Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"]);
+        // 🔥 Ajustado para incluir as strings reais com underlines e minúsculas geradas pelo sistema
+        .in("estagio", [
+          "visita_agendada", "visita_realizada", "visita_efetuada", "finalizado", "ganhou", "perdido",
+          "Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"
+        ]);
 
       if (error) throw error;
 
@@ -63,16 +66,17 @@ export default function ControleComercialVisitasPage() {
         const sdrsEncontrados = new Set<string>();
         
         const dadosMapeados: VisitaRow[] = data.map((item: any) => {
-          const sdrNome = item.responsavel_nome || "Sem SDR Mapeado";
+          // Fallback seguro caso o nome amarrado não exista direto
+          const sdrNome = item.responsavel_nome || item.responsavel_id || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
           // Lógica inicial baseada na etapa do CRM
           let statusComiteInicial: any = "Em Análise";
           const estagioLower = item.estagio?.toLowerCase() || "";
 
-          if (estagioLower === "perdido") {
+          if (estagioLower === "perdido" || estagioLower === "nao_convertida") {
             statusComiteInicial = "Reprovado";
-          } else if (estagioLower === "ganhou" || estagioLower === "finalizado") {
+          } else if (estagioLower === "ganhou" || estagioLower === "finalizado" || estagioLower === "convertida_aprovada") {
             statusComiteInicial = "Aprovado";
           }
 
@@ -82,7 +86,7 @@ export default function ControleComercialVisitasPage() {
 
           return {
             id: item.id.toString(),
-            nome: item.razaoSocial || item.nomeContato || "Empresa sem Nome",
+            nome: item.razaoSocial || item.razaosocial || item.nomeContato || "Empresa sem Nome",
             responsavelSDR: sdrNome,
             etapa: item.estagio || "",
             email: item.email || "",
@@ -117,7 +121,6 @@ export default function ControleComercialVisitasPage() {
   // 3. PERSISTÊNCIA REVERSA: Salva os status dentro do objeto jsonb (campos_customizados) do crm_leads
   const mudarStatusAgendamento = async (id: string, novoStatus: "Pendente" | "Pago") => {
     try {
-      const leadAtual = visitas.find(v => v.id === id);
       const { data: currentLead } = await supabase.from("crm_leads").select("campos_customizados").eq("id", id).single();
       
       const novosCampos = {
@@ -149,9 +152,9 @@ export default function ControleComercialVisitasPage() {
 
       const updatePayload: any = { campos_customizados: novosCampos };
       
-      // Se aprovou a comissão, atualiza automaticamente o estágio do lead para "Ganhou" ou "Finalizado"
+      // Se aprovou a comissão, atualiza automaticamente o estágio do lead mantendo consistência do padrão do banco
       if (novoStatus === "Aprovado") {
-        updatePayload.estagio = "Ganhou";
+        updatePayload.estagio = "convertida_aprovada";
       }
 
       const { error } = await supabase
@@ -164,14 +167,14 @@ export default function ControleComercialVisitasPage() {
       setVisitas(prev => prev.map(v => v.id === id ? { 
         ...v, 
         statusComissaoComite: novoStatus,
-        etapa: novoStatus === "Aprovado" ? "Ganhou" : v.etapa 
+        etapa: novoStatus === "Aprovado" ? "convertida_aprovada" : v.etapa 
       } : v));
     } catch (err: any) {
       alert(`❌ Erro ao atualizar comitê: ${err.message}`);
     }
   };
 
-  // 4. ENVIA PARA A TABELA DE ANALISES (Substituindo a antiga em_analise)
+  // 4. ENVIA PARA A TABELA DE ANALISES
   const moverLeadParaEsteiraAnalise = async (lead: VisitaRow) => {
     const confirmar = confirm(`🔍 Deseja enviar a empresa "${lead.nome}" diretamente para a lista de Análises Pendentes?`);
     if (!confirmar) return;
@@ -179,7 +182,6 @@ export default function ControleComercialVisitasPage() {
     try {
       setEnviandoLeadId(lead.id);
 
-      // Insere na tabela 'analises' baseado nas colunas reais do seu mapa
       const { error } = await supabase.from("analises").insert({
         empresa_nome: lead.nome.trim().toUpperCase(),
         comercial: lead.responsavelSDR || "Comercial Ned",
@@ -189,9 +191,7 @@ export default function ControleComercialVisitasPage() {
 
       if (error) throw error;
 
-      // Sincroniza o crm_leads avisando que foi enviado
       await mudarStatusComite(lead.id, "Enviado p/ Análise");
-
       alert("🚀 Sucesso! Empresa integrada na tabela de Análises.");
     } catch (err: any) {
       alert(`❌ Erro de Integração: ${err.message}`);
@@ -235,7 +235,7 @@ export default function ControleComercialVisitasPage() {
   const formatarMoeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[12px] font-sans text-slate-700">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[12px] font-sans text-slate-700 p-4">
       
       {/* HEADER BAR */}
       <div className="border-b border-slate-200 pb-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -247,7 +247,7 @@ export default function ControleComercialVisitasPage() {
           <button 
             onClick={buscarCardsComercial} 
             disabled={carregando}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black rounded-lg shadow-sm border border-blue-700 cursor-pointer transition-all flex items-center gap-2"
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black rounded-lg shadow-sm border border-blue-700 cursor-pointer transition-all flex items-center gap-2 text-[11px]"
           >
             {carregando ? "🔄 Sincronizando..." : "🔄 Sincronizar Nedhub"}
           </button>
@@ -260,7 +260,7 @@ export default function ControleComercialVisitasPage() {
         <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2">
           <div className="text-2xl">🗂️</div>
           <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial encontrado</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads estão nos estágios corretos no CRM.</p>
+          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads foram movidos para "Visita Agendada" no painel principal.</p>
         </div>
       ) : (
         <>
@@ -272,7 +272,7 @@ export default function ControleComercialVisitasPage() {
                 const cfg = configsSDR[nome] || { nome, valorAgendamento: 50, valorComite: 80 };
                 return (
                   <div key={nome} className="bg-slate-50 p-2 border border-slate-200 rounded-lg flex items-center gap-3">
-                    <span className="font-black text-slate-800 px-1 truncate max-w-[120px]">{nome}</span>
+                    <span className="font-black text-slate-800 px-1 truncate max-w-[120px] uppercase">{nome.substring(0, 15)}</span>
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-slate-400 font-bold">Agendamento:</span>
                       <input type="number" value={cfg.valorAgendamento} onChange={(e) => atualizarValorComissaoSDR(nome, "valorAgendamento", parseFloat(e.target.value) || 0)} className="w-12 p-0.5 text-center bg-white border border-slate-200 rounded font-bold" />
@@ -333,11 +333,11 @@ export default function ControleComercialVisitasPage() {
                   <th className="p-3">SDR Responsável</th>
                   <th className="p-3 text-center">Estágio Atual</th>
                   <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
-                  <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê / Finalizados</th>
+                  <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê</th>
                   <th className="p-3 text-center">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
+              <tbody className="divide-y divide-slate-100 font-medium text-[11px]">
                 {visitasFiltradas.map((v) => {
                   const cfg = configsSDR[v.responsavelSDR] || { valorAgendamento: 50, valorComite: 80 };
                   const estaEnviando = enviandoLeadId === v.id;
@@ -346,23 +346,19 @@ export default function ControleComercialVisitasPage() {
                   return (
                     <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-3">
-                        <div className="font-bold text-slate-900 truncate max-w-[240px]">{v.nome}</div>
-                        <span className="text-[10px] text-slate-400 font-normal truncate block">{v.email || v.telefone || "Sem contatos"}</span>
+                        <div className="font-bold text-slate-900 truncate max-w-[240px] uppercase">{v.nome}</div>
+                        <span className="text-[10px] text-slate-400 font-normal truncate block font-mono">{v.email || v.telefone || "Sem contatos"}</span>
                       </td>
-                      <td className="p-3 text-slate-500 font-bold">{v.responsavelSDR}</td>
+                      <td className="p-3 text-slate-500 font-bold uppercase truncate max-w-[150px]">{v.responsavelSDR}</td>
                       <td className="p-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          v.etapa.toLowerCase().includes("finalizado") || v.etapa.toLowerCase().includes("ganhou") 
-                            ? "bg-emerald-100 text-emerald-800" 
-                            : "bg-slate-100 text-slate-700"
-                        }`}>
-                          {v.etapa}
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800">
+                          {v.etapa.replace("_", " ")}
                         </span>
                       </td>
                       
                       {/* GATILHO 1 */}
                       <td className="p-3 bg-blue-50/10 text-center space-y-1">
-                        <div className="font-black text-blue-900">{formatarMoeda(cfg.valorAgendamento)}</div>
+                        <div className="font-black text-blue-900 font-mono">{formatarMoeda(cfg.valorAgendamento)}</div>
                         <select value={v.statusComissaoAgendamento} onChange={(e) => mudarStatusAgendamento(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none ${
                           v.statusComissaoAgendamento === "Pago" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-blue-100 text-blue-700 border-blue-200"
                         }`}>
@@ -373,7 +369,7 @@ export default function ControleComercialVisitasPage() {
 
                       {/* GATILHO 2 */}
                       <td className="p-3 bg-slate-50/50 text-center space-y-1">
-                        <div className="font-black text-slate-700">
+                        <div className="font-black text-slate-700 font-mono">
                           {v.statusComissaoComite === "Reprovado" ? formatarMoeda(0) : formatarMoeda(cfg.valorComite)}
                         </div>
                         <select value={v.statusComissaoComite} onChange={(e) => mudarStatusComite(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none ${
