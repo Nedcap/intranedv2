@@ -4,11 +4,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
-interface Perfil {
+interface UsuarioSistema {
   id: string;
   nome: string;
   email: string;
-  role: string;
+  cargo: string;
 }
 
 interface RelacaoHierarquia {
@@ -19,34 +19,43 @@ interface RelacaoHierarquia {
 }
 
 export default function GerenciarHierarquiaPage() {
-  const [perfis, setPerfis] = useState<Perfil[]>([]);
+  // 🔥 AGORA CONECTADO À SUA TABELA REAL DE USUÁRIOS DO SISTEMA
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
   const [vinculos, setVinculos] = useState<RelacaoHierarquia[]>([]);
   const [carregando, setCarregando] = useState(false);
   
-  // 🎯 O coração do print: O Supervisor selecionado no topo para gerenciar sua cascata
-  const [supervisorSelecionadoId, setSupervisorSelecionadoAgenda] = useState<string>("");
+  // O Supervisor/Gestor selecionado no topo para gerenciar sua cascata de subordinados
+  const [supervisorSelecionadoId, setSupervisorSelecionadoId] = useState<string>("");
 
   const carregarDadosConfig = async () => {
     try {
       setCarregando(true);
-      const { data: dbPerfis, error: errPerfis } = await supabase.from("crm_profiles").select("*").order("nome");
-      const { data: dbVinculos, error: errVinculos } = await supabase.from("crm_hierarquia").select("*");
+      
+      // 🎯 BUSCA REAL: Puxando da tabela 'usuarios' que você usa na central de acessos
+      const { data: dbUsuarios, error: errUsuarios } = await supabase
+        .from("usuarios")
+        .select("id, nome, email, cargo")
+        .order("nome", { ascending: true });
 
-      if (errPerfis) throw errPerfis;
+      const { data: dbVinculos, error: errVinculos } = await supabase
+        .from("crm_hierarquia")
+        .select("*");
+
+      if (errUsuarios) throw errUsuarios;
       if (errVinculos) throw errVinculos;
 
-      if (dbPerfis) setPerfis(dbPerfis);
+      if (dbUsuarios) setUsuariosSistema(dbUsuarios);
       if (dbVinculos) {
         setVinculos(dbVinculos.map((v: any) => ({
           subordinado_id: v.subordinado_id,
           superior_id: v.superior_id,
-          // Lê os booleanos das caixinhas direto do jsonb ou colunas nativas se houver
+          // Lê os parâmetros dinâmicos de permissão e comissão da cascata
           recebe_comissao: v.recebe_comissao ?? v.campos_customizados?.recebe_comissao ?? false,
           pode_visualizar: v.pode_visualizar ?? v.campos_customizados?.pode_visualizar ?? true,
         })));
       }
     } catch (err: any) {
-      alert(`Erro ao carregar matriz: ${err.message}`);
+      alert(`Erro ao carregar estrutura de usuários: ${err.message}`);
     } finally {
       setCarregando(false);
     }
@@ -56,19 +65,18 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosConfig();
   }, []);
 
-  // ⚡ SALVA OU ATUALIZA A CAIXINHA DE SELEÇÃO EM TEMPO REAL NO BANCO
+  // Salva, remove ou atualiza os checkboxes da tabela de subordinação em tempo real no banco
   const handleAlternarCaixinhaSubordinado = async (subordinadoId: string, campo: "vincular" | "recebe_comissao" | "pode_visualizar", valorAtual: boolean) => {
     if (!supervisorSelecionadoId) return;
 
     try {
       setCarregando(true);
-      
       const vinculoExistente = vinculos.find(v => v.subordinado_id === subordinadoId && v.superior_id === supervisorSelecionadoId);
 
       if (campo === "vincular") {
         if (!valorAtual) {
-          // Se marcou a caixinha principal (Inserir na cascata deste supervisor)
-          await supabase.from("crm_hierarquia").delete().eq("subordinado_id", subordinadoId); // Limpa liderança antiga
+          // Se marcou o agente: limpa relações antigas desse subordinado e crava o novo líder
+          await supabase.from("crm_hierarquia").delete().eq("subordinado_id", subordinadoId);
           await supabase.from("crm_hierarquia").insert([{
             subordinado_id: subordinadoId,
             superior_id: supervisorSelecionadoId,
@@ -76,11 +84,11 @@ export default function GerenciarHierarquiaPage() {
             recebe_comissao: false
           }]);
         } else {
-          // Se desmarcou (Remover da cascata dele)
+          // Se desmarcou o agente: remove ele da cascata desse líder
           await supabase.from("crm_hierarquia").delete().eq("subordinado_id", subordinadoId).eq("superior_id", supervisorSelecionadoId);
         }
       } else {
-        // Se alterou as sub-caixinhas ("Recebe Comissão" ou "Pode Visualizar")
+        // Se mudou "Recebe Comissão" ou "Pode Visualizar"
         if (vinculoExistente) {
           const payloadUpdate: any = {};
           if (campo === "recebe_comissao") payloadUpdate.recebe_comissao = !valorAtual;
@@ -95,85 +103,84 @@ export default function GerenciarHierarquiaPage() {
 
       await carregarDadosConfig();
     } catch (err: any) {
-      alert(`Erro ao atualizar matriz: ${err.message}`);
+      alert(`Erro ao atualizar cascata no banco: ${err.message}`);
     } finally {
       setCarregando(false);
     }
   };
 
-  // Filtra a lista de candidatos que podem ser subordinados (não faz sentido o supervisor ser subordinado de si mesmo)
-  const listaCandidatosSubordinados = useMemo(() => {
-    return perfis.filter(p => p.id !== supervisorSelecionadoId);
-  }, [perfis, supervisorSelecionadoId]);
+  // Garante que o usuário selecionado como superior não apareça listado abaixo para se auto-vincular
+  const listaAgentesCandidatos = useMemo(() => {
+    return usuariosSistema.filter(u => u.id !== supervisorSelecionadoId);
+  }, [usuariosSistema, supervisorSelecionadoId]);
 
   return (
     <div className="p-6 space-y-6 font-sans text-slate-700 bg-white min-h-screen text-[12px]">
       
-      {/* HEADER IDÊNTICO À ESTRUTURA DO SEU CRM */}
+      {/* HEADER DA PÁGINA COM A NOMENCLATURA DO CRM */}
       <div className="border-b border-slate-200 pb-3">
         <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">🏠 Página Inicial / Agente/Supervisor (FBC060)</h1>
-        <p className="text-xs text-slate-400">Vincule a cascata de operadores. Quem estiver marcado abaixo herda as travas e envia relatórios para o supervisor do topo.</p>
+        <p className="text-xs text-slate-400">Monte a estrutura em cascata utilizando a base de usuários do sistema. Defina alçadas de visualização de contratos e comissionamento.</p>
       </div>
 
-      {/* 🎯 SEÇÃO SUPERIOR DE FILTRO - REPLICANDO IGUAL AO PRINT image_38a2bb.png */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-center font-mono">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-slate-600 uppercase text-[10px]">Supervisor 🔍</span>
+      {/* SEÇÃO SUPERIOR DE FILTRO POR SUPERVISOR (image_389ae5.png) */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4 font-mono">
+        <div className="flex items-center gap-3 w-full sm:max-w-xl">
+          <span className="font-bold text-slate-600 uppercase text-[10px] whitespace-nowrap">Supervisor 🔍</span>
           <select 
             value={supervisorSelecionadoId} 
-            onChange={(e) => setSupervisorSelecionadoAgenda(e.target.value)}
-            className="flex-1 p-2 bg-white border border-slate-300 rounded-lg text-[11px] font-black uppercase text-slate-800 outline-none focus:border-blue-500 shadow-2xs"
+            onChange={(e) => setSupervisorSelecionadoId(e.target.value)}
+            className="w-full p-2 bg-white border border-slate-300 rounded-lg text-[11px] font-black uppercase text-slate-800 outline-none focus:border-blue-500 shadow-2xs"
           >
-            <option value="">-- Selecione o Gestor / Supervisor Comercial --</option>
-            {perfis.filter(p => p.role !== "SDR").map(p => (
-              <option key={p.id} value={p.id}>{p.nome} ({p.role})</option>
+            <option value="">-- SELECONE O GESTOR / SUPERVISOR COMERCIAL --</option>
+            {usuariosSistema.map(user => (
+              <option key={user.id} value={user.id}>{user.nome} ({user.cargo || "Comercial"})</option>
             ))}
           </select>
         </div>
         
-        <div className="text-right">
-          <button onClick={carregarDadosConfig} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-sm transition-all">
+        <div>
+          <button onClick={carregarDadosConfig} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-sm transition-all">
             Buscar Cascata
           </button>
         </div>
       </div>
 
       {carregando && (
-        <div className="p-2 text-center bg-amber-50 text-amber-700 font-bold font-mono rounded-lg animate-pulse">
-          ⏳ Gravando parâmetros e atualizando regras de visibilidade cascata...
+        <div className="p-2 text-center bg-amber-50 text-amber-700 font-bold font-mono rounded-lg animate-pulse text-[11px]">
+          ⏳ Atualizando e salvando permissões na tabela crm_hierarquia...
         </div>
       )}
 
-      {/* 📊 A TABELA DE MATRIZ DE CHECKBOXES - IGUAL AO DA IMAGEM image_38a2bb.png */}
+      {/* MATRIZ COMPLETA DE VÍNCULOS POR CHECKBOX (image_38a2bb.png) */}
       {supervisorSelecionadoId ? (
         <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
           <table className="w-full text-left border-collapse font-mono text-[11px]">
             <thead>
-              <tr className="bg-amber-100/70 text-slate-800 font-black uppercase text-[10px] border-b border-slate-200">
-                <th className="p-3 w-20">Cód. Agente</th>
-                <th className="p-3">Agente / Subordinado</th>
-                <th className="p-3 text-center w-40">Pertence à Cascata?</th>
-                <th className="p-3 text-center w-40">Recebe Comissão</th>
-                <th className="p-3 text-center w-40">Pode Visualizar tudo</th>
+              <tr className="bg-slate-100 text-slate-700 font-black uppercase text-[10px] border-b border-slate-200">
+                <th className="p-3 w-24 text-center">Cód. Agente</th>
+                <th className="p-3">Agente / Operador Cadastrado</th>
+                <th className="p-3 text-center w-44">Pertence à Cascata?</th>
+                <th className="p-3 text-center w-44">Recebe Comissão</th>
+                <th className="p-3 text-center w-44">Pode Visualizar</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white font-sans text-slate-700 font-medium">
-              {listaCandidatosSubordinados.map((agente, index) => {
-                // Verifica o estado real do vínculo deste par de usuários
+              {listaAgentesCandidatos.map((agente, index) => {
                 const r = vinculos.find(v => v.subordinado_id === agente.id && v.superior_id === supervisorSelecionadoId);
                 const pertenceAoSupervisor = !!r;
 
                 return (
                   <tr key={agente.id} className={`hover:bg-slate-50/60 transition-colors ${pertenceAoSupervisor ? 'bg-blue-50/20 font-bold' : ''}`}>
-                    {/* Código fictício sequencial baseado na ordenação igual ao do print */}
+                    {/* Código sequencial incremental correspondente ao print */}
                     <td className="p-3 font-mono text-slate-400 text-center">{index + 1}</td>
                     
                     <td className="p-3">
                       <div className="text-slate-900 uppercase font-black text-[11px]">{agente.nome}</div>
-                      <div className="text-[10px] font-mono text-slate-400 normal-case">{agente.email} | Nível: {agente.role}</div>
+                      <div className="text-[10px] font-mono text-slate-400 normal-case">{agente.email} | Nível: {agente.cargo || "Comercial"}</div>
                     </td>
 
-                    {/* Caixinha 1: Se o usuário está associado a este supervisor */}
+                    {/* Checkbox Principal: Se o operador responde a este supervisor */}
                     <td className="p-3 text-center">
                       <input 
                         type="checkbox" 
@@ -183,7 +190,7 @@ export default function GerenciarHierarquiaPage() {
                       />
                     </td>
 
-                    {/* Caixinha 2: Recebe Comissão (Padrão do print: SIM/NAO visual ou checkbox) */}
+                    {/* Checkbox Secundário: Comissão (SIM/NÃO) */}
                     <td className="p-3 text-center font-mono text-[10px]">
                       <input 
                         type="checkbox" 
@@ -197,7 +204,7 @@ export default function GerenciarHierarquiaPage() {
                       </span>
                     </td>
 
-                    {/* Caixinha 3: Pode Visualizar tudo (Padrão do print) */}
+                    {/* Checkbox Terciário: Pode Visualizar (SIM/NÃO) */}
                     <td className="p-3 text-center font-mono text-[10px]">
                       <input 
                         type="checkbox" 
@@ -217,8 +224,8 @@ export default function GerenciarHierarquiaPage() {
           </table>
         </div>
       ) : (
-        <div className="p-12 border border-dashed border-slate-300 bg-slate-50 text-slate-400 text-center rounded-2xl">
-          👉 Escolha um **Supervisor** no seletor de busca do topo para abrir a matriz de vinculação por caixas.
+        <div className="p-12 border border-dashed border-slate-300 bg-slate-50 text-slate-400 text-center rounded-2xl font-medium">
+          💡 Escolha um **Supervisor** cadastrado no seletor de buscas acima para abrir a tabela de vinculação por caixas.
         </div>
       )}
 
