@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface Colaborador {
@@ -9,20 +9,19 @@ interface Colaborador {
   nome: string;
   email: string;
   role: "Master" | "Gestor" | "SDR" | "Comite" | "Diretoria";
-  superior_nome?: string;
   superior_id?: string;
+  superior_nome?: string;
 }
 
 export default function GerenciarHierarquiaPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [carregando, setCarregando] = useState(false);
   
-  // Modais e Estados de Edição/Criação
+  // Estado para modais e formulários
   const [modalAberto, setModalAberto] = useState(false);
   const [modoEdicao, setModoEdicao] = useState(false);
   const [idSelecionado, setIdSelecionado] = useState<string | null>(null);
   
-  // Campos do Formulário
   const [inputNome, setInputNome] = useState("");
   const [inputEmail, setInputEmail] = useState("");
   const [inputRole, setInputRole] = useState<any>("SDR");
@@ -32,7 +31,6 @@ export default function GerenciarHierarquiaPage() {
     try {
       setCarregando(true);
       
-      // Puxa perfis e os vínculos da árvore
       const { data: perfis, error: errPerfis } = await supabase.from("crm_profiles").select("*");
       const { data: vinculos } = await supabase.from("crm_hierarquia").select("*");
 
@@ -63,7 +61,28 @@ export default function GerenciarHierarquiaPage() {
 
   useEffect(() => { carregarHierarquiaGlobal(); }, []);
 
-  // 📝 SALVAR (CRIAÇÃO OU ATUALIZAÇÃO MANUAL)
+  // Alterar líder direto via clique rápido na caixinha da árvore
+  const handleMudarLiderDireto = async (subordinadoId: string, novoSuperiorId: string) => {
+    try {
+      setCarregando(true);
+      // Remove vínculo antigo
+      await supabase.from("crm_hierarquia").delete().eq("subordinado_id", subordinadoId);
+      
+      // Se não escolheu "nenhum", insere o novo vínculo
+      if (novoSuperiorId && novoSuperiorId !== "nenhum") {
+        await supabase.from("crm_hierarquia").insert([{
+          subordinado_id: subordinadoId,
+          superior_id: novoSuperiorId
+        }]);
+      }
+      await carregarHierarquiaGlobal();
+    } catch (err: any) {
+      alert(`Erro ao mudar liderança: ${err.message}`);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
   const handleSalvarHierarquia = async () => {
     if (!inputNome || !inputEmail) return alert("Nome e E-mail são obrigatórios.");
     
@@ -72,14 +91,12 @@ export default function GerenciarHierarquiaPage() {
       let targetId = idSelecionado;
 
       if (modoEdicao && targetId) {
-        // 1. Atualiza dados do Perfil existente
         await supabase.from("crm_profiles").update({
           nome: inputNome,
           email: inputEmail,
           role: inputRole
         }).eq("id", targetId);
       } else {
-        // 2. Criação Manual (Gera um UUID randômico para uso no CRM interno)
         targetId = crypto.randomUUID();
         const { error } = await supabase.from("crm_profiles").insert([{
           id: targetId,
@@ -90,7 +107,6 @@ export default function GerenciarHierarquiaPage() {
         if (error) throw error;
       }
 
-      // 3. Atualiza vínculo na árvore (Deleta relação antiga e cria a nova se houver superior selecionado)
       await supabase.from("crm_hierarquia").delete().eq("subordinado_id", targetId);
       
       if (inputSuperior && inputSuperior !== "nenhum") {
@@ -100,7 +116,7 @@ export default function GerenciarHierarquiaPage() {
         }]);
       }
 
-      alert(modoEdicao ? "Colaborador atualizado!" : "Novo colaborador inserido com sucesso!");
+      alert(modoEdicao ? "Colaborador atualizado!" : "Novo colaborador inserido!");
       fecharModal();
       await carregarHierarquiaGlobal();
     } catch (err: any) {
@@ -110,12 +126,10 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🗑️ DELETAR COLABORADOR DA ÁRVORE
   const handleDeletarColaborador = async (id: string) => {
-    if (!confirm("Tem certeza que deseja remover este operador do CRM? Isso romperá os fluxos hierárquicos vinculados a ele.")) return;
+    if (!confirm("Tem certeza que deseja remover este operador? Isso romperá os fluxos hierárquicos dele.")) return;
     try {
       setCarregando(true);
-      // Remove da tabela de hierarquia e de perfis (cascade limpa dependências diretas)
       await supabase.from("crm_hierarquia").delete().or(`subordinado_id.eq.${id},superior_id.eq.${id}`);
       const { error } = await supabase.from("crm_profiles").delete().eq("id", id);
       if (error) throw error;
@@ -129,95 +143,117 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
+  // Estrutura a árvore computada em tempo de execução para renderização recursiva
+  const colaboradoresPorLider = useMemo(() => {
+    const topos = colaboradores.filter(c => !c.superior_id);
+    const subordinados = colaboradores.filter(c => c.superior_id);
+    return { topos, subordinados };
+  }, [colaboradores]);
+
   const abrirModalParaCriacao = () => {
-    setModoEdicao(false);
-    setIdSelecionado(null);
-    setInputNome("");
-    setInputEmail("");
-    setInputRole("SDR");
-    setInputSuperior("nenhum");
-    setModalAberto(true);
+    setModoEdicao(false); setIdSelecionado(null); setInputNome(""); setInputEmail(""); setInputRole("SDR"); setInputSuperior("nenhum"); setModalAberto(true);
   };
 
   const abrirModalParaEdicao = (col: Colaborador) => {
-    setModoEdicao(true);
-    setIdSelecionado(col.id);
-    setInputNome(col.nome);
-    setInputEmail(col.email);
-    setInputRole(col.role);
-    setInputSuperior(col.superior_id || "nenhum");
-    setModalAberto(true);
+    setModoEdicao(true); setIdSelecionado(col.id); setInputNome(col.nome); setInputEmail(col.email); setInputRole(col.role); setInputSuperior(col.superior_id || "nenhum"); setModalAberto(true);
   };
 
-  const fecharModal = () => {
-    setModalAberto(false);
-    setIdSelecionado(null);
-  };
+  const fecharModal = () => { setModalAberto(false); setIdSelecionado(null); };
+
+  // Componente interno recursivo para desenhar os nós da árvore
+  function NoDaArvore({ membro }: { membro: Colaborador }) {
+    const filhos = colaboradoresPorLider.subordinados.filter(c => c.superior_id === membro.id);
+
+    return (
+      <div className="flex flex-col items-center mt-4">
+        {/* Caixinha do Usuário */}
+        <div className="bg-slate-50 border border-slate-200 shadow-xs rounded-xl p-3.5 w-64 text-center hover:border-blue-500 transition-all relative">
+          <div className="absolute top-2 right-2 flex gap-1">
+            <button onClick={() => abrirModalParaEdicao(membro)} className="text-slate-400 hover:text-blue-600 text-[10px]" title="Editar cadastro">✏️</button>
+            <button onClick={() => handleDeletarColaborador(membro.id)} className="text-slate-400 hover:text-red-600 text-[10px]" title="Excluir">🗑️</button>
+          </div>
+
+          <h3 className="font-bold text-slate-900 uppercase text-[11px] truncate pr-8">{membro.nome}</h3>
+          <p className="text-[9px] text-slate-400 font-mono truncate mb-1.5">{membro.email}</p>
+          
+          <span className={`inline-block px-2 py-0.5 rounded text-[8px] font-black uppercase mb-3 ${
+            membro.role === 'Master' ? 'bg-red-100 text-red-700' : 
+            membro.role === 'Gestor' ? 'bg-blue-100 text-blue-700' : 
+            membro.role === 'Comite' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'
+          }`}>
+            {membro.role}
+          </span>
+
+          {/* Seletor rápido de Vínculo Hierárquico direto na caixinha */}
+          <div className="mt-2 pt-2 border-t border-slate-200/60 text-left">
+            <label className="block text-[8px] uppercase font-bold text-slate-400 mb-0.5">Reporta diretamente a:</label>
+            <select 
+              value={membro.superior_id || "nenhum"} 
+              onChange={(e) => handleMudarLiderDireto(membro.id, e.target.value)}
+              className="w-full bg-white border border-slate-200 rounded p-1 text-[9px] font-bold text-slate-700 outline-none"
+            >
+              <option value="nenhum">Ninguém (Topo da Árvore)</option>
+              {colaboradores.filter(c => c.id !== membro.id).map(c => (
+                <option key={c.id} value={c.id}>{c.nome} ({c.role})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Linha conectora vertical estrutural */}
+        {filhos.length > 0 && <div className="w-0.5 h-6 bg-slate-300 my-1"></div>}
+
+        {/* Renderização dos filhos ramificados lateralmente */}
+        {filhos.length > 0 && (
+          <div className="flex gap-4 border-t border-slate-300 pt-4 px-2 relative">
+            {filhos.map(filho => (
+              <NoDaArvore key={filho.id} membro={filho} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 font-sans text-slate-700 bg-white min-h-screen">
       
-      {/* HEADER DA PÁGINA COM BOTÃO ADICIONAR */}
+      {/* HEADER DA PÁGINA */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900 uppercase">🌳 Organograma e Árvore de Hierarquias (CRM Global)</h1>
-          <p className="text-xs text-slate-400">Gerencie operadores da esteira de crédito, altere atribuições ou adicione novos colaboradores de forma manual.</p>
+          <h1 className="text-xl font-black text-slate-900 uppercase">🌳 Construtor Visual de Organograma e Hierarquias</h1>
+          <p className="text-xs text-slate-400">Gerencie a árvore de visibilidade do CRM mudando o reporte direto diretamente nas caixinhas.</p>
         </div>
         <button 
           onClick={abrirModalParaCriacao}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase text-[10px] tracking-wider shadow-md transition-all cursor-pointer"
         >
-          ➕ Novo Operador / Colaborador
+          ➕ Adicionar Novo Colaborador
         </button>
       </div>
 
-      {carregando && <div className="p-2 text-center bg-blue-50 text-blue-600 rounded-lg animate-pulse font-bold text-[11px]">Processando alterações e carregando árvore...</div>}
+      {carregando && (
+        <div className="p-2 text-center bg-blue-50 text-blue-600 rounded-lg animate-pulse font-bold text-[11px]">
+          Sincronizando novas chaves e atualizando organograma...
+        </div>
+      )}
 
-      {/* TABELA DE CONFIGURAÇÃO DA ÁRVORE */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-        <table className="w-full text-left border-collapse text-[11px]">
-          <thead>
-            <tr className="bg-slate-900 text-white font-black uppercase text-[9px] tracking-wider">
-              <th className="p-3">Colaborador / Operador</th>
-              <th className="p-3">E-mail Corporativo</th>
-              <th className="p-3">Cargo na Esteira</th>
-              <th className="p-3">Superior Direto (Líder)</th>
-              <th className="p-3 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {colaboradores.map(col => (
-              <tr key={col.id} className="hover:bg-slate-50 transition-colors font-medium">
-                <td className="p-3 font-bold text-slate-900 uppercase">{col.nome}</td>
-                <td className="p-3 font-mono text-slate-500">{col.email}</td>
-                <td className="p-3">
-                  <span className={`px-2 py-1 rounded-md text-[9px] font-black uppercase ${col.role === 'Master' ? 'bg-red-100 text-red-700' : col.role === 'Gestor' ? 'bg-blue-100 text-blue-700' : col.role === 'Comite' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {col.role}
-                  </span>
-                </td>
-                <td className="p-3 text-slate-600 font-bold uppercase">👉 {col.superior_nome}</td>
-                <td className="p-3 text-center flex items-center justify-center gap-1.5">
-                  <button 
-                    onClick={() => abrirModalParaEdicao(col)} 
-                    className="px-2 py-1 bg-slate-800 text-white font-black uppercase text-[9px] rounded hover:bg-blue-600 transition-colors"
-                  >
-                    ✏️ Editar
-                  </button>
-                  <button 
-                    onClick={() => handleDeletarColaborador(col.id)} 
-                    className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-black uppercase text-[9px] rounded border border-red-200 transition-colors"
-                    title="Remover operador"
-                  >
-                    🗑️ Excluir
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* WORKSPACE DO ORGANOGRAMA VISUAL */}
+      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-6 overflow-x-auto min-h-[500px] flex justify-start items-start content-start">
+        <div className="flex gap-10 items-start mx-auto">
+          {colaboradoresPorLider.topos.length === 0 && !carregando ? (
+            <div className="text-center text-slate-400 italic text-[11px] py-12 w-full">
+              Nenhum colaborador cadastrado como topo da árvore. Adicione um ou altere o líder de alguém.
+            </div>
+          ) : (
+            colaboradoresPorLider.topos.map(topo => (
+              <NoDaArvore key={topo.id} membro={topo} />
+            ))
+          )}
+        </div>
       </div>
 
-      {/* 🔮 MODAL UNIFICADO: CADASTRO E EDIÇÃO DE OPERADORES */}
+      {/* 🔮 MODAL UNIFICADO: CADASTRO E EDIÇÃO */}
       {modalAberto && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-white p-5 rounded-xl border border-slate-200 max-w-md w-full space-y-4 shadow-xl">
@@ -228,7 +264,7 @@ export default function GerenciarHierarquiaPage() {
             <div className="space-y-3 text-[11px]">
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome Completo:</label>
-                <input type="text" value={inputNome} onChange={e => setInputNome(e.target.value)} placeholder="Ex: Luiz Comercial" className="w-full p-2 border bg-white rounded-lg outline-none font-bold text-slate-800 uppercase" />
+                <input type="text" value={inputNome} onChange={e => setInputNome(e.target.value)} placeholder="Ex: LUIZ COMERCIAl" className="w-full p-2 border bg-white rounded-lg outline-none font-bold text-slate-800 uppercase" />
               </div>
 
               <div>
@@ -248,9 +284,9 @@ export default function GerenciarHierarquiaPage() {
               </div>
 
               <div>
-                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Líder / Reporte Direto:</label>
+                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Líder / Reporte Direto Inicial:</label>
                 <select value={inputSuperior} onChange={e => setInputSuperior(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800">
-                  <option value="nenhum">Sem líder direto (Responde direto ao Master)</option>
+                  <option value="nenhum">Sem líder direto (Topo da Árvore)</option>
                   {colaboradores.filter(c => c.id !== idSelecionado).map(c => (
                     <option key={c.id} value={c.id}>{c.nome} ({c.role})</option>
                   ))}
