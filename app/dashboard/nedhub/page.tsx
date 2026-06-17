@@ -86,7 +86,7 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA INTEGRADA DIRETO NO BOT LOCAL (SQLITE)
+  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE) - SEM POPUP TRAVANDO TELA
   const consultarDadosCnpjNoRoboLocal = async () => {
     const cnpjLimpo = inputCnpj.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return alert("Digite um CNPJ válido com 14 dígitos numéricos.");
@@ -100,12 +100,8 @@ export default function NedHubPage() {
           setInputRazao(dadosBot.razaoSocial.toUpperCase());
           if (dadosBot.telefone) setInputTelefone(dadosBot.telefone);
           if (dadosBot.contato) setInputContato(dadosBot.contato);
-          alert("⚡ Empresa localizada no banco do Robô e carregada com sucesso!");
-        } else {
-          alert("ℹ️ CNPJ não localizado no SQLite. Digite os dados manualmente.");
+          // ⚡ Removido o alert estático por usabilidade de fluxo contínuo!
         }
-      } else {
-        alert("⚠️ API do Robô local não retornou registros. Verifique se o Bot está rodando.");
       }
     } catch (err) {
       alert("❌ Erro de conexão: A API local (http://localhost:5000) está offline.");
@@ -140,6 +136,20 @@ export default function NedHubPage() {
   const atualizarEstagioNoBanco = async (cardId: string, novoEstagio: string) => {
     await supabase.from("crm_leads").update({ estagio: novoEstagio }).eq("id", cardId);
     await sincronizarBaseNedHub();
+  };
+
+  const handleExcluirLead = async (cardId: string, razaoSocial: string) => {
+    if (!confirm(`⚠️ ATENÇÃO: Deseja mesmo deletar permanentemente a empresa "${razaoSocial}" do NedHub? Esta ação não pode ser desfeita.`)) return;
+    try {
+      setCarregando(true);
+      const { error } = await supabase.from("crm_leads").delete().eq("id", cardId);
+      if (error) throw error;
+      await sincronizarBaseNedHub();
+    } catch (err: any) {
+      alert(`Erro ao excluir lead: ${err.message}`);
+    } finally {
+      setCarregando(false);
+    }
   };
 
   const salvarDadosGaveta = async (leadAtualizado: Lead) => {
@@ -276,7 +286,7 @@ export default function NedHubPage() {
                 </div>
                 <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
                   {col.cards.map((lead: any) => (
-                    <CardLead key={lead.id} lead={lead} corColuna={corAtual} onExpandir={setLeadExpandido} />
+                    <CardLead key={lead.id} lead={lead} corColuna={corAtual} onExpandir={setLeadExpandido} onExcluir={handleExcluirLead} />
                   ))}
                 </div>
               </div>
@@ -434,14 +444,13 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🔮 MODAL NOVO LEAD RESTAURADO COMPLETO (COM BUSCA NO ROBÔ SQLITE) */}
+      {/* MODAL NOVO LEAD */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
             <h3 className="font-black uppercase text-slate-900 text-[11px] border-b pb-1">🚀 Iniciar Nova Originação Comercial</h3>
             
             <div className="space-y-3 text-[11px]">
-              {/* CNPJ + BOTÃO INTEGRADO DO ROBÔ */}
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">CNPJ da Empresa:</label>
                 <div className="flex gap-2">
@@ -449,7 +458,13 @@ export default function NedHubPage() {
                     type="text" 
                     placeholder="Somente números (14 dígitos)" 
                     value={inputCnpj} 
-                    onChange={e => setInputCnpj(e.target.value)} 
+                    onChange={e => {
+                      setInputCnpj(e.target.value);
+                      if(e.target.value.replace(/\D/g, "").length === 14) {
+                        // Gatilho rápido se digitar ou colar direto os 14 dígitos
+                        setTimeout(() => consultarDadosCnpjNoRoboLocal(), 100);
+                      }
+                    }} 
                     className="flex-1 p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" 
                   />
                   <button 
@@ -458,12 +473,11 @@ export default function NedHubPage() {
                     disabled={buscandoRobo}
                     className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[9px] rounded-lg transition-all disabled:opacity-40"
                   >
-                    {buscandoRobo ? "⏳ Buscando..." : "🔍 Buscar no Robô"}
+                    {buscandoRobo ? "⏳..." : "🔍 Puxar Robô"}
                   </button>
                 </div>
               </div>
 
-              {/* DEMAIS CAMPOS FORMULÁRIO */}
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social (Nome Oficial):</label>
                 <input 
@@ -498,7 +512,6 @@ export default function NedHubPage() {
               </div>
             </div>
 
-            {/* AÇÕES DO MODAL */}
             <div className="flex justify-end gap-2 text-[10px] pt-2 border-t">
               <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase">Sair</button>
               <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-lg uppercase shadow-md">Salvar Lead</button>
@@ -511,7 +524,7 @@ export default function NedHubPage() {
   );
 }
 
-function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: string; onExpandir: (l: Lead) => void }) {
+function CardLead({ lead, corColuna, onExpandir, onExcluir }: { lead: Lead; corColuna: string; onExpandir: (l: Lead) => void; onExcluir: (id: string, name: string) => void }) {
   const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
   const hojeStr = new Date().toISOString().split("T")[0];
   const possuiRetornoUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
@@ -524,7 +537,7 @@ function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: stri
       style={{ borderLeft: `4px solid ${corColuna}` }}
     >
       {possuiRetornoUrgente && (
-        <span className="absolute top-2 right-14 bg-amber-600 text-white text-[7px] px-1.5 py-0.5 font-black uppercase rounded animate-bounce">
+        <span className="absolute top-2 right-2 bg-amber-600 text-white text-[7px] px-1.5 py-0.5 font-black uppercase rounded animate-bounce">
           ⚠️ Retorno Hoje!
         </span>
       )}
@@ -534,9 +547,6 @@ function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: stri
           <span className="text-[8px] font-mono text-slate-400 block font-bold">CNPJ: {lead.cnpj}</span>
           <h4 className="font-black text-slate-900 tracking-tight leading-tight uppercase truncate">{lead.razaoSocial}</h4>
         </div>
-        <button onClick={() => onExpandir(lead)} className="p-1 bg-slate-900 text-white hover:bg-blue-600 rounded-md text-[8px] font-black uppercase transition-all shadow-2xs">
-          ⚙️ Abrir
-        </button>
       </div>
 
       <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-0.5 border border-slate-100 font-medium">
@@ -549,6 +559,16 @@ function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: stri
           ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas
         </div>
       )}
+
+      {/* FOOTER DE AÇÕES RÁPIDAS NO CARD */}
+      <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
+        <button onClick={() => onExcluir(lead.id, lead.razaoSocial)} className="text-red-500 hover:text-red-700 font-bold p-1 uppercase tracking-tighter transition-colors">
+          🗑️ Excluir
+        </button>
+        <button onClick={() => onExpandir(lead)} className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white font-black uppercase rounded text-[8px] transition-all shadow-3xs">
+          ⚙️ Abrir
+        </button>
+      </div>
     </div>
   );
 }
