@@ -31,7 +31,6 @@ interface Lead {
   responsavel_id?: string;
 }
 
-// Mapeamento dos Gerentes para o Calendário exclusivo
 const GERENTES_COMERCIAIS = [
   { id: "gerente_1", nome: "Gerente Comercial 1" },
   { id: "gerente_2", nome: "Gerente Comercial 2" },
@@ -42,9 +41,8 @@ export default function NedHubPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   
-  // 🔐 DADOS REAIS DE HIERARQUIA E USUÁRIO LOGADO DO SUPABASE
   const [userId, setUserId] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>("SDR"); // Padrão seguro, atualizado via banco
+  const [userRole, setUserRole] = useState<string>("SDR"); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
 
@@ -52,7 +50,7 @@ export default function NedHubPage() {
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  // Banco de Janelas Livres para o Comercial
+  // Banco de Janelas Livres (Sincronizado via localStorage ou tabela simples para persistir internamente)
   const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({
     "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00"],
     "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30"],
@@ -64,37 +62,42 @@ export default function NedHubPage() {
     em_analise_mesa: "#eab308", convertida_aprovada: "#10b981", nao_convertida: "#64748b",
   });
 
-  // Modais e Gavetas
   const [modalNovoLead, setModalNovoLead] = useState(false);
   const [leadExpandido, setLeadExpandido] = useState<Lead | null>(null);
   const [modalCalendarioPopup, setModalCalendarioPopup] = useState<{ aberto: boolean; lead: Lead | null }>({ aberto: false, lead: null });
 
-  // Form de Cadastro
   const [inputCnpj, setInputCnpj] = useState("");
   const [inputRazao, setInputRazao] = useState("");
   const [inputContato, setInputContato] = useState("");
   const [inputTelefone, setInputTelefone] = useState("");
   const [dadosAutomotivosBot, setDadosAutomotivosBot] = useState<Record<string, any>>({});
 
-  // Form Interno Gaveta
   const [novoTelefone, setNovoTelefone] = useState("");
   const [novaTarefaTitulo, setNovaTarefaTitulo] = useState("");
   const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
 
-  // 🔌 CARREGA PERFIL E ESTRUTURA DE HIERARQUIA REAL DO BANCO
+  // Persistência simples das janelas internas do comercial para testes imediatos
+  useEffect(() => {
+    const localSlots = localStorage.getItem("nedhub_slots_comercial");
+    if (localSlots) setHorariosDisponiveisGerentes(JSON.parse(localSlots));
+  }, []);
+
+  const salvarSlotsNoLocal = (novosSlots: Record<string, string[]>) => {
+    setHorariosDisponiveisGerentes(novosSlots);
+    localStorage.setItem("nedhub_slots_comercial", JSON.stringify(novosSlots));
+  };
+
   const carregarSessaoEPerfilReal = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
 
-      // Busca Role Real na crm_profiles
       const { data: profile } = await supabase.from("crm_profiles").select("role").eq("id", user.id).single();
       if (profile) setUserRole(profile.role);
 
-      // Busca Subordinados se houver na crm_hierarquia
       const { data: hierarquia } = await supabase.from("crm_hierarquia").select("subordinado_id").eq("superior_id", user.id);
       if (hierarquia) setSubordinadosIds(hierarquia.map(h => h.subordinado_id));
     } catch (e) {
@@ -135,7 +138,6 @@ export default function NedHubPage() {
     sincronizarBaseNedHub(); 
   }, []);
 
-  // 🤖 AUTO-BUSCA NO BANCO/ROBÔ NO MOMENTO DO CADASTRO DO CNPJ
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
     const cnpjLimpo = targetCnpj.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return;
@@ -193,7 +195,6 @@ export default function NedHubPage() {
     } catch (err: any) { alert(err.message); }
   };
 
-  // Corrigindo as funções Drag-And-Drop para evitar o ReferenceError no Prerender
   const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
   
   const handleOnDrop = (e: React.DragEvent, estagioDestino: string) => {
@@ -238,10 +239,9 @@ export default function NedHubPage() {
       if (error) throw error;
       setLeadExpandido(null);
       await sincronizarBaseNedHub();
-    } catch (err: any) { alert(err.message); } finally { setCarregando(false); }
+    } catch (err: any) { alert(err.message); } finally { Red-screen-fix -> setCarregando(false); }
   };
 
-  // 🔥 MARCAR REUNIÃO: Atualiza o banco e chaveia o funil ativo para impedir sumiço (Limbo fix)
   const agendarHorarioGerentePeloSdr = async (dataHora: string) => {
     if (!modalCalendarioPopup.lead) return;
     const leadAlvo = modalCalendarioPopup.lead;
@@ -258,10 +258,11 @@ export default function NedHubPage() {
 
     const tarefasAtualizadas = [...(leadAlvo.tarefas || []), novaAgendaTarefa];
     
-    setHorariosDisponiveisGerentes(prev => ({
-      ...prev,
-      [gerenteSelecionadoAgenda]: prev[gerenteSelecionadoAgenda].filter(h => h !== dataHora)
-    }));
+    const slotsFiltrados = {
+      ...horariosDisponiveisGerentes,
+      [gerenteSelecionadoAgenda]: horariosDisponiveisGerentes[gerenteSelecionadoAgenda].filter(h => h !== dataHora)
+    };
+    salvarSlotsNoLocal(slotsFiltrados);
 
     await supabase.from("crm_leads").update({ 
       tarefas: tarefasAtualizadas, 
@@ -270,7 +271,7 @@ export default function NedHubPage() {
     }).eq("id", leadAlvo.id);
 
     setModalCalendarioPopup({ aberto: false, lead: null });
-    setFunilAtivo("pos_venda"); // Move a tela para que o SDR veja o card na hora!
+    setFunilAtivo("pos_venda"); 
     await sincronizarBaseNedHub();
     alert("📅 Reunião fixada e card movido com sucesso para 'Visita Agendada' no Funil Comercial.");
   };
@@ -300,12 +301,9 @@ export default function NedHubPage() {
     } catch (e) { alert("Erro ao contactar API."); }
   };
 
-  // 🛡️ FILTRO DE VISUALIZAÇÃO HIERÁRQUICA COM BASE NO SEU PERFIL DO BANCO
   const colunasVisíveis = useMemo(() => {
-    // Filtra por pipeline ativo (Vendas ou Pós-venda)
     let filtrados = leads.filter(l => l.funilId === funilAtivo);
 
-    // Se não for diretor, aplica a regra de subordinação (Enxerga apenas os seus leads ou de subordinados)
     if (userRole !== "Diretor" && userId) {
       filtrados = filtrados.filter(l => l.responsavel_id === userId || subordinadosIds.includes(l.responsavel_id || ""));
     }
@@ -351,7 +349,7 @@ export default function NedHubPage() {
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
-      {/* HEADER DE GESTÃO DA DIRETORIA */}
+      {/* HEADER */}
       <div className="flex bg-slate-900 text-white p-2.5 rounded-xl justify-between items-center text-[10px] font-mono">
         <div className="flex items-center gap-3">
           <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BANCO):</span>
@@ -364,13 +362,12 @@ export default function NedHubPage() {
       </div>
 
       {abaAtivaConfig === "auditoria_direcao" ? (
-        /* PAINEL DE GESTÃO E AUDITORIA COMPLETO */
         <div className="flex-1 bg-white border border-slate-200 rounded-xl p-5 space-y-4 overflow-y-auto">
-          <h3 className="font-black uppercase text-slate-900 text-xs">📊 Auditoria e Produtividade dos SDRs (Visão Direção)</h3>
+          <h3 className="font-black uppercase text-slate-900 text-xs">📊 Auditoria e Produtividade dos SDRs</h3>
           <div className="grid grid-cols-3 gap-4 font-mono">
             <div className="p-3 bg-slate-50 border rounded-xl"><span className="text-slate-400 block text-[9px] uppercase">Lembretes Totais</span><span className="text-xl font-bold">{metricasAuditoria.totais}</span></div>
-            <div className="p-3 bg-red-50 border border-red-100 rounded-xl"><span className="text-red-500 block text-[9px] uppercase">🚨 Lembretes Atrasados/Esquecidos</span><span className="text-xl font-bold text-red-600">{metricasAuditoria.atrasadas}</span></div>
-            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl"><span className="text-amber-600 block text-[9px] uppercase">⚠️ Faltando Dados Importados da Receita</span><span className="text-xl font-bold text-amber-700">{metricasAuditoria.incompletos}</span></div>
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl"><span className="text-red-500 block text-[9px] uppercase">🚨 Lembretes Atrasados</span><span className="text-xl font-bold text-red-600">{metricasAuditoria.atrasadas}</span></div>
+            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl"><span className="text-amber-600 block text-[9px] uppercase">⚠️ Sem Dados da Receita</span><span className="text-xl font-bold text-amber-700">{metricasAuditoria.incompletos}</span></div>
           </div>
           <table className="w-full text-left border-collapse text-[10px] font-mono">
             <thead className="bg-slate-100 uppercase text-[9px]">
@@ -389,7 +386,6 @@ export default function NedHubPage() {
           </table>
         </div>
       ) : (
-        /* GRID KANBAN ORIGINAL */
         <>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
             <div className="flex items-center gap-4">
@@ -429,7 +425,7 @@ export default function NedHubPage() {
         </>
       )}
 
-      {/* 🔍 GAVETA COMPLETA RESTAURADA COM TODOS OS CAMPOS E EMAIL */}
+      {/* GAVETA DE EDIÇÃO */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200">
@@ -462,7 +458,7 @@ export default function NedHubPage() {
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
               
-              {/* AREA PRETA INTELIGENCIA - TRAVADA SE FOR SDR */}
+              {/* AREA INTELIGENCIA DA RECEITA */}
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Informações Corporativas (Receita Federal)</h3>
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
@@ -471,7 +467,6 @@ export default function NedHubPage() {
                   <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade:</span><span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Não Sincronizado"}</span></div>
                   <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Endereço Completo:</span><span className="text-slate-300 font-bold block text-[10px]">{leadExpandido.dadosCustomizados?.endereco || "Aguardando bot..."}</span></div>
                 </div>
-                {userRole === "SDR" && <p className="text-[8px] text-slate-400 italic">🔒 Travado para SDR. Edições apenas via diretoria.</p>}
               </div>
 
               {/* Contatos */}
@@ -504,7 +499,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* DISPARO DE EMAIL RESTAURADO */}
+              {/* Templates */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
                 <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Templates de Comunicação</h3>
                 <div className="space-y-2">
@@ -519,13 +514,13 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* CRIAR LEMBRETES E TAREFAS RESTAURADO */}
+              {/* Compromissos */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Compromissos e Alertas de Retorno</h3>
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div className="col-span-1.5">
                     <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Ação Comercial</label>
-                    <input type="text" value={novaTarefaTitulo} onChange={e => setNovaTarefaTitulo(e.target.value)} placeholder="Ex: Retornar ligação da diretoria" className="w-full p-2 border bg-white rounded-lg outline-none" />
+                    <input type="text" value={novaTarefaTitulo} onChange={e => setNovaTarefaTitulo(e.target.value)} placeholder="Ex: Retornar ligação" className="w-full p-2 border bg-white rounded-lg outline-none" />
                   </div>
                   <div>
                     <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Data</label>
@@ -568,14 +563,14 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* POPUP DE CALENDÁRIO COMERCIAL EXCLUSIVO */}
+      {/* POPUP DE CALENDÁRIO INTERNO */}
       {modalCalendarioPopup.aberto && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-5 max-w-lg w-full space-y-4 border border-slate-200 shadow-2xl">
             <div className="flex justify-between items-center border-b pb-2">
               <div>
                 <h3 className="font-black text-slate-900 uppercase text-[11px]">🗓️ Central de Horários do Comercial</h3>
-                <p className="text-slate-400 text-[9px]">SDR escolhe a janela vazia para agendar e mover de pipeline.</p>
+                <p className="text-slate-400 text-[9px]">O SDR escolhe as janelas cadastradas pelo próprio Comercial.</p>
               </div>
               <button onClick={() => setModalCalendarioPopup({ aberto: false, lead: null })} className="text-lg font-black hover:text-red-500">✕</button>
             </div>
@@ -587,18 +582,19 @@ export default function NedHubPage() {
                 </select>
               </div>
 
-              {/* Gerente ou Diretor alimentam seus próprios horários */}
+              {/* O COMERCIAL ALIMENTA OS HORÁRIOS AQUI SE NÃO FOR SDR */}
               {userRole !== "SDR" && (
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
-                  <span className="block text-[8px] font-black uppercase text-amber-600">➕ Inserir Disponibilidade Comercial</span>
+                  <span className="block text-[8px] font-black uppercase text-emerald-600">➕ Comercial: Liberar nova janela de horário</span>
                   <div className="flex gap-2">
                     <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-1.5 border rounded text-[10px] bg-slate-50 font-mono outline-none flex-1" />
                     <button onClick={() => {
                       if(!novoHorarioDisponivel) return;
                       const formatada = novoHorarioDisponivel.replace("T", " ");
-                      setHorariosDisponiveisGerentes(prev => ({ ...prev, [gerenteSelecionadoAgenda]: [...(prev[gerenteSelecionadoAgenda] || []), formatada].sort() }));
+                      const atualizados = { ...horariosDisponiveisGerentes, [gerenteSelecionadoAgenda]: [...(horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []), formatada].sort() };
+                      salvarSlotsNoLocal(atualizados);
                       setNovoHorarioDisponivel("");
-                    }} className="px-3 py-1 bg-slate-900 text-white font-bold rounded text-[9px] uppercase">Cadastrar</button>
+                    }} className="px-3 py-1 bg-emerald-600 text-white font-bold rounded text-[9px] uppercase">Disponibilizar</button>
                   </div>
                 </div>
               )}
@@ -606,10 +602,10 @@ export default function NedHubPage() {
               <div>
                 <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1">
                   {horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.length === 0 ? (
-                    <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Sem horários comerciais disponíveis.</p>
+                    <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Nenhum horário comercial disponível.</p>
                   ) : (
                     horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.map((horario, index) => (
-                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 text-emerald-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
+                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-blue-50 hover:bg-blue-600 border border-blue-200 text-blue-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
                         📅 {horario}
                       </button>
                     ))
@@ -621,7 +617,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL NOVO LEAD COM AUTO-BUSCA INTELIGENTE */}
+      {/* MODAL NOVO LEAD */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
@@ -664,6 +660,7 @@ export default function NedHubPage() {
   );
 }
 
+// 🔑 CARD ATUALIZADO: Mostra as informações capturadas pela Receita Federal
 function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCalendario }: { lead: Lead; corColuna: string; userRole: string; onExpandir: (l: Lead) => void; onExcluir: (id: string, name: string) => void; onAbrirCalendario: (l: Lead) => void }) {
   const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
   const hojeStr = new Date().toISOString().split("T")[0];
@@ -696,9 +693,15 @@ function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCal
         🗓️ Agendar com Comercial
       </button>
 
-      <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-0.5 border border-slate-100 font-medium">
-        <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "-"}</span></p>
-        <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
+      {/* 🛠️ AQUI EXIBE OS DADOS DA RECEITA AUTOMATICAMENTE NO CARD */}
+      <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-1 border border-slate-100 font-medium">
+        <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "Não informado"}</span></p>
+        {lead.dadosCustomizados?.ramo && (
+          <p className="text-slate-600 font-mono text-[9px] uppercase truncate">⚙️ {lead.dadosCustomizados.ramo}</p>
+        )}
+        {lead.dadosCustomizados?.cidade && (
+          <p className="text-slate-400 font-mono text-[8px] uppercase">📍 {lead.dadosCustomizados.cidade} / {lead.dadosCustomizados.uf}</p>
+        )}
       </div>
 
       {lead.tarefas?.filter(t => !t.concluida).length > 0 && (
