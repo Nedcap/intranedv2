@@ -76,7 +76,7 @@ export default function NedHubPage() {
           email: l.email || "",
           estagio: l.estagio || l.estágio || "sem_contato",
           funilId: l.funilId || l.funilid || l.funil_id || "vendas",
-          dadosCustomizados: l.campos_customizados || {},
+          dadosCustomizados: l.campos_customizados || l.camposCustomizados || {},
           anotacoes: l.anotacoes || "",
           tarefas: l.tarefas || []
         })));
@@ -86,7 +86,7 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE) - RETORNO FLEXÍVEL MAPEADO
+  // 🤖 BUSCA NO BOT LOCAL COM MAPEAMENTO FLEXÍVEL
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj?: string, isUpdateInDrawer = false) => {
     const cnpjAlvo = targetCnpj || inputCnpj;
     const cnpjLimpo = cnpjAlvo.replace(/\D/g, "");
@@ -97,15 +97,12 @@ export default function NedHubPage() {
       const res = await fetch(`http://localhost:5000/api/prospeccao?cnpj=${cnpjLimpo}`);
       if (res.ok) {
         const dadosBot = await res.json();
-        
-        // Desestrutura caso a resposta venha aninhada em 'data' ou 'lead'
         const dados = dadosBot.data || dadosBot.lead || dadosBot;
 
         if (dados && (dados.razaoSocial || dados.razao_social || dados.nome)) {
           const razaoMapeada = (dados.razaoSocial || dados.razao_social || dados.nome || "").toUpperCase();
           
           if (isUpdateInDrawer && leadExpandido) {
-            // Mapeia variações comuns do Robo (Português/Inglês, Snake/Camel)
             const ramoMapeado = dados.ramo || dados.atividade_principal || dados.atividade || dados.cnae_fiscal_descricao || "";
             const cnaeMapeado = dados.cnae || dados.cnae_fiscal || dados.cnae_principal || "";
             const enderecoMapeado = dados.logradouro || dados.endereco || dados.logradouro_empresa || "";
@@ -113,22 +110,25 @@ export default function NedHubPage() {
             const cidadeMapeado = dados.municipio || dados.cidade || dados.localidade || "";
             const ufMapeada = dados.uf || dados.estado || "";
 
-            setLeadExpandido({
-              ...leadExpandido,
-              razaoSocial: razaoMapeada,
-              dadosCustomizados: {
-                ...(leadExpandido.dadosCustomizados || {}),
-                ramo: ramoMapeado,
-                cnae: cnaeMapeado,
-                endereco: enderecoMapeado,
-                bairro: bairroMapeado,
-                cidade: cidadeMapeado,
-                uf: ufMapeada
-              }
+            // Mescla de forma explícita para não perder chaves antigas do JSONB
+            setLeadExpandido(prev => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                razaoSocial: razaoMapeada,
+                dadosCustomizados: {
+                  ...(prev.dadosCustomizados || {}),
+                  ramo: ramoMapeado,
+                  cnae: cnaeMapeado,
+                  endereco: enderecoMapeado,
+                  bairro: bairroMapeado,
+                  cidade: cidadeMapeado,
+                  uf: ufMapeada
+                }
+              };
             });
-            alert("⚡ Dados da Receita sincronizados na gaveta! Não esqueça de clicar em 'Salvar Todo o Contrato' no rodapé.");
+            alert("⚡ Dados da Receita carregados na tela! Clique agora no botão preto '💾 Salvar Todo o Contrato' para gravar no banco.");
           } else {
-            // Fluxo do modal principal
             setInputRazao(razaoMapeada);
             if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
             if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
@@ -188,24 +188,41 @@ export default function NedHubPage() {
     }
   };
 
+  // 🛠️ FUNÇÃO DE SALVAMENTO REPARADA E BLINDADA
   const salvarDadosGaveta = async (leadAtualizado: Lead) => {
     try {
-      const { error } = await supabase.from("crm_leads").update({
-        razaoSocial: leadAtualizado.razaoSocial,
-        nomeContato: leadAtualizado.nomeContato,
-        email: leadAtualizado.email,
-        telefones: leadAtualizado.telefones,
-        anotacoes: leadAtualizado.anotacoes,
-        tarefas: leadAtualizado.tarefas,
-        funilId: leadAtualizado.funilId,
-        estagio: leadAtualizado.estagio,
-        campos_customizados: leadAtualizado.dadosCustomizados // Grava estruturado no JSONB do Supabase
-      }).eq("id", leadAtualizado.id);
+      setCarregando(true);
+      
+      // Criamos explicitamente o objeto JSON que vai pro banco para garantir integridade
+      const pacoteCamposCustomizados = {
+        ...(leadAtualizado.dadosCustomizados || {})
+      };
+
+      const { error } = await supabase
+        .from("crm_leads")
+        .update({
+          razaoSocial: leadAtualizado.razaoSocial,
+          nomeContato: leadAtualizado.nomeContato,
+          email: leadAtualizado.email,
+          telefones: leadAtualizado.telefones,
+          anotacoes: leadAtualizado.anotacoes,
+          tarefas: leadAtualizado.tarefas,
+          funilId: leadAtualizado.funilId,
+          estagio: leadAtualizado.estagio,
+          campos_customizados: pacoteCamposCustomizados // Garante o nome correto mapeado do supa sql map.md
+        })
+        .eq("id", leadAtualizado.id);
 
       if (error) throw error;
+      
       setLeadExpandido(null);
       await sincronizarBaseNedHub();
-    } catch (err: any) { alert(err.message); }
+      alert("✅ Contrato e Dados da Receita gravados com sucesso no banco de dados!");
+    } catch (err: any) { 
+      alert(`Erro ao salvar no Supabase: ${err.message}`); 
+    } finally {
+      setCarregando(false);
+    }
   };
 
   // Funções Drag and Drop
@@ -268,7 +285,6 @@ export default function NedHubPage() {
     const corpoFormatado = tmpl.corpo.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
 
     try {
-      setCarregando(true);
       const res = await fetch("/api/comercial/enviar-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -279,7 +295,7 @@ export default function NedHubPage() {
       alert("🚀 E-mail enviado via API Resend com sucesso!");
     } catch (err: any) {
       alert(`Erro no disparo Resend: ${err.message}`);
-    } finally { setCarregando(false); }
+    }
   };
 
   return (
@@ -301,29 +317,27 @@ export default function NedHubPage() {
       </div>
 
       {/* GRID KANBAN */}
-      {!carregando && (
-        <div className="flex-1 grid gap-3 h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `repeat(${colunasVisíveis.length}, minmax(0, 1fr))` }}>
-          {colunasVisíveis.map(col => {
-            const colorCurrent = coresColunas[col.id] || "#cbd5e1";
-            return (
-              <div key={col.id} onDragOver={handleOnDragOver} onDrop={(e) => handleOnDrop(e, col.id)} className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full">
-                <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${colorCurrent}` }}>
-                  <span>{col.nome}</span>
-                  <div className="flex items-center gap-1.5">
-                    <input type="color" value={colorCurrent} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
-                    <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
-                  </div>
-                </div>
-                <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
-                  {col.cards.map((lead: any) => (
-                    <CardLead key={lead.id} lead={lead} corColuna={colorCurrent} onExpandir={setLeadExpandido} onExcluir={handleExcluirLead} />
-                  ))}
+      <div className="flex-1 grid gap-3 h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `repeat(${colunasVisíveis.length}, minmax(0, 1fr))` }}>
+        {colunasVisíveis.map(col => {
+          const colorCurrent = coresColunas[col.id] || "#cbd5e1";
+          return (
+            <div key={col.id} onDragOver={handleOnDragOver} onDrop={(e) => handleOnDrop(e, col.id)} className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full">
+              <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${colorCurrent}` }}>
+                <span>{col.nome}</span>
+                <div className="flex items-center gap-1.5">
+                  <input type="color" value={colorCurrent} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
+                  <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
+                {col.cards.map((lead: any) => (
+                  <CardLead key={lead.id} lead={lead} corColuna={colorCurrent} onExpandir={setLeadExpandido} onExcluir={handleExcluirLead} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* 🔍 GAVETA EXPANDIDA */}
       {leadExpandido && (
@@ -415,7 +429,7 @@ export default function NedHubPage() {
                 <div>
                   <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones / WhatsApps</label>
                   <div className="flex flex-wrap gap-1.5 mb-2">
-                    {leadExpandido.telefones.map((tel, idx) => (
+                    {leadExpandido.telefones?.map((tel, idx) => (
                       <div key={idx} className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold">
                         <span>{tel}</span>
                         <a href={`https://web.whatsapp.com/send?phone=55${tel.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" title="Chamar no WhatsApp" className="text-emerald-600 hover:text-emerald-700">💬</a>
@@ -430,7 +444,7 @@ export default function NedHubPage() {
                     <input type="text" value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)} placeholder="DDD + Número (ex: 41999999999)" className="p-2 border rounded-lg bg-white flex-1 font-mono outline-none" />
                     <button onClick={() => {
                       if (!novoTelefone) return;
-                      setLeadExpandido({ ...leadExpandido,  telefones: [...leadExpandido.telefones, novoTelefone] });
+                      setLeadExpandido({ ...leadExpandido,  telefones: [...(leadExpandido.telefones || []), novoTelefone] });
                       setNovoTelefone("");
                     }} className="px-3 bg-slate-800 text-white font-black uppercase text-[9px] rounded-lg">+ Add Tel</button>
                   </div>
@@ -472,13 +486,13 @@ export default function NedHubPage() {
                   <button onClick={() => {
                     if (!novaTarefaTitulo || !novaTarefaData) return alert("Preencha o título e a data da tarefa.");
                     const task: Tarefa = { id: Math.random().toString(), titulo: novaTarefaTitulo, data: novaTarefaData, concluida: false };
-                    setLeadExpandido({ ...leadExpandido, tarefas: [...leadExpandido.tarefas, task] });
+                    setLeadExpandido({ ...leadExpandido, tarefas: [...(leadExpandido.tarefas || []), task] });
                     setNovaTarefaTitulo(""); setNovaTarefaData("");
                   }} className="w-full p-2 bg-amber-600 hover:bg-amber-700 text-white font-black uppercase text-[9px] h-9 rounded-lg shadow-xs">Agendar</button>
                 </div>
 
                 <div className="space-y-1.5 max-h-[150px] overflow-y-auto pt-2">
-                  {leadExpandido.tarefas.map(t => (
+                  {leadExpandido.tarefas?.map(t => (
                     <div key={t.id} className={`flex justify-between items-center p-2 rounded-lg border font-mono text-[10px] ${t.concluida ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-amber-200 text-slate-800 font-bold'}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" checked={t.concluida} onChange={(e) => {
@@ -496,15 +510,6 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Seção 4: Agendas */}
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200/60 space-y-2">
-                <h3 className="font-black text-blue-900 uppercase text-[10px] tracking-wider border-b border-blue-200 pb-1">🗓️ Sincronizar Agenda Externa (Criar Compromisso)</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&details=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`} target="_blank" rel="noreferrer" className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700">📅 Lançar no Google Calendar</a>
-                  <a href={`https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&body=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`} target="_blank" rel="noreferrer" className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700">📧 Lançar no Outlook Calendar</a>
-                </div>
-              </div>
-
               <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Observações Gerais e Histórico de Negociações</label>
                 <textarea rows={3} value={leadExpandido.anotacoes || ""} onChange={(e) => setLeadExpandido({ ...leadExpandido, anotacoes: e.target.value })} placeholder="Digite anotações livres sobre o cliente aqui..." className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500 bg-amber-50/10 text-slate-800" />
@@ -513,7 +518,7 @@ export default function NedHubPage() {
 
             <div className="p-3 bg-slate-100 border-t flex justify-end gap-2">
               <button onClick={() => setLeadExpandido(null)} className="px-4 py-2 bg-slate-300 text-slate-700 font-bold rounded-lg uppercase">Cancelar</button>
-              <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-900 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Todo o Contrato</button>
+              <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-950 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Todo o Contrato</button>
             </div>
           </div>
         </div>
@@ -601,21 +606,15 @@ export default function NedHubPage() {
 function CardLead({ lead, corColuna, onExpandir, onExcluir }: { lead: Lead; corColuna: string; onExpandir: (l: Lead) => void; onExcluir: (id: string, name: string) => void }) {
   const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
   const hojeStr = new Date().toISOString().split("T")[0];
-  const possuiRetornoUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
+  const possuiRetornoUrgente = lead.tarefas?.some(t => !t.concluida && t.data <= hojeStr);
 
   return (
     <div 
       draggable
       onDragStart={(e) => handleOnDragStart(e, lead.id)}
-      className={`bg-white p-3 border rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing relative ${possuiRetornoUrgente ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-400 ring-offset-1 animate-pulse-slow' : 'border-slate-200'}`}
+      className={`bg-white p-3 border rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing relative ${possuiRetornoUrgente ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-400 ring-offset-1' : 'border-slate-200'}`}
       style={{ borderLeft: `4px solid ${corColuna}` }}
     >
-      {possuiRetornoUrgente && (
-        <span className="absolute top-2 right-2 bg-amber-600 text-white text-[7px] px-1.5 py-0.5 font-black uppercase rounded animate-bounce">
-          ⚠️ Retorno Hoje!
-        </span>
-      )}
-
       <div className="flex justify-between items-start gap-2">
         <div className="overflow-hidden flex-1">
           <span className="text-[8px] font-mono text-slate-400 block font-bold">CNPJ: {lead.cnpj}</span>
@@ -627,12 +626,6 @@ function CardLead({ lead, corColuna, onExpandir, onExcluir }: { lead: Lead; corC
         <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "-"}</span></p>
         <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
       </div>
-
-      {lead.tarefas.filter(t => !t.concluida).length > 0 && (
-        <div className="text-[8px] font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-bold w-fit border border-amber-200">
-          ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas
-        </div>
-      )}
 
       {/* FOOTER DE AÇÕES RÁPIDAS NO CARD */}
       <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
