@@ -86,7 +86,7 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE)
+  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE) - RETORNO FLEXÍVEL MAPEADO
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj?: string, isUpdateInDrawer = false) => {
     const cnpjAlvo = targetCnpj || inputCnpj;
     const cnpjLimpo = cnpjAlvo.replace(/\D/g, "");
@@ -97,30 +97,47 @@ export default function NedHubPage() {
       const res = await fetch(`http://localhost:5000/api/prospeccao?cnpj=${cnpjLimpo}`);
       if (res.ok) {
         const dadosBot = await res.json();
-        if (dadosBot && dadosBot.razaoSocial) {
+        
+        // Desestrutura caso a resposta venha aninhada em 'data' ou 'lead'
+        const dados = dadosBot.data || dadosBot.lead || dadosBot;
+
+        if (dados && (dados.razaoSocial || dados.razao_social || dados.nome)) {
+          const razaoMapeada = (dados.razaoSocial || dados.razao_social || dados.nome || "").toUpperCase();
+          
           if (isUpdateInDrawer && leadExpandido) {
-            // Se for atualização por dentro da gaveta, mescla os metadados da Receita no estado
+            // Mapeia variações comuns do Robo (Português/Inglês, Snake/Camel)
+            const ramoMapeado = dados.ramo || dados.atividade_principal || dados.atividade || dados.cnae_fiscal_descricao || "";
+            const cnaeMapeado = dados.cnae || dados.cnae_fiscal || dados.cnae_principal || "";
+            const enderecoMapeado = dados.logradouro || dados.endereco || dados.logradouro_empresa || "";
+            const bairroMapeado = dados.bairro || dados.bairro_empresa || "";
+            const cidadeMapeado = dados.municipio || dados.cidade || dados.localidade || "";
+            const ufMapeada = dados.uf || dados.estado || "";
+
             setLeadExpandido({
               ...leadExpandido,
-              razaoSocial: dadosBot.razaoSocial.toUpperCase(),
+              razaoSocial: razaoMapeada,
               dadosCustomizados: {
                 ...(leadExpandido.dadosCustomizados || {}),
-                ramo: dadosBot.ramo || dadosBot.atividade_principal || "",
-                cnae: dadosBot.cnae || "",
-                endereco: dadosBot.logradouro || dadosBot.endereco || "",
-                bairro: dadosBot.bairro || "",
-                cidade: dadosBot.municipio || dadosBot.cidade || "",
-                uf: dadosBot.uf || ""
+                ramo: ramoMapeado,
+                cnae: cnaeMapeado,
+                endereco: enderecoMapeado,
+                bairro: bairroMapeado,
+                cidade: cidadeMapeado,
+                uf: ufMapeada
               }
             });
-            alert("⚡ Metadados da Receita sincronizados com sucesso na gaveta!");
+            alert("⚡ Dados da Receita sincronizados na gaveta! Não esqueça de clicar em 'Salvar Todo o Contrato' no rodapé.");
           } else {
-            // Fluxo padrão de criação de novo negócio
-            setInputRazao(dadosBot.razaoSocial.toUpperCase());
-            if (dadosBot.telefone) setInputTelefone(dadosBot.telefone);
-            if (dadosBot.contato) setInputContato(dadosBot.contato);
+            // Fluxo do modal principal
+            setInputRazao(razaoMapeada);
+            if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
+            if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
           }
+        } else {
+          if (isUpdateInDrawer) alert("ℹ️ O robô local não retornou registros estruturados para este CNPJ.");
         }
+      } else {
+        if (isUpdateInDrawer) alert("⚠️ Endpoint do Robô não retornou sucesso (200).");
       }
     } catch (err) {
       alert("❌ Erro de conexão: A API local (http://localhost:5000) está offline.");
@@ -182,7 +199,7 @@ export default function NedHubPage() {
         tarefas: leadAtualizado.tarefas,
         funilId: leadAtualizado.funilId,
         estagio: leadAtualizado.estagio,
-        campos_customizados: leadAtualizado.dadosCustomizados // Garante o salvamento estruturado no JSONB do banco
+        campos_customizados: leadAtualizado.dadosCustomizados // Grava estruturado no JSONB do Supabase
       }).eq("id", leadAtualizado.id);
 
       if (error) throw error;
@@ -208,7 +225,6 @@ export default function NedHubPage() {
     });
 
     const ordenados = leadsComFlagPrioridade.sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
-
     const extrairPorEstagio = (estagio: string) => ordenados.filter(l => l.estagio === estagio);
 
     if (funilAtivo === "vendas") {
@@ -229,7 +245,6 @@ export default function NedHubPage() {
     }
   }, [leads, funilAtivo]);
 
-  // 💻 DISPARO 1: Via Cliente Local (Gmail / Outlook) para poder editar antes de enviar
   const dispararEmailClienteLocal = () => {
     if (!leadExpandido || !templateSelecionado) return;
     const tmpl = templates.find(t => t.id === templateSelecionado);
@@ -242,7 +257,6 @@ export default function NedHubPage() {
     window.location.href = mailtoUrl;
   };
 
-  // 🚀 DISPARO 2: Envio direto via API (Resend) - Vai em background
   const dispararEmailViaResendAPI = async () => {
     if (!leadExpandido || !templateSelecionado) return;
     if (!leadExpandido.email) return alert("Insira o e-mail do cliente para disparar via API.");
@@ -258,15 +272,11 @@ export default function NedHubPage() {
       const res = await fetch("/api/comercial/enviar-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: leadExpandido.email,
-          subject: assuntoFormatado,
-          text: corpoFormatado
-        })
+        body: JSON.stringify({ to: leadExpandido.email, subject: assuntoFormatado, text: corpoFormatado })
       });
 
       if (!res.ok) throw new Error("Falha no servidor Resend.");
-      alert("🚀 E-mail enviado via API Resend com sucesso direto para o cliente!");
+      alert("🚀 E-mail enviado via API Resend com sucesso!");
     } catch (err: any) {
       alert(`Erro no disparo Resend: ${err.message}`);
     } finally { setCarregando(false); }
@@ -315,7 +325,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🔍 GAVETA EXPANDIDA (COM INTEGRAÇÃO DA RECEITA DO ROBÔ VIA JSONB) */}
+      {/* 🔍 GAVETA EXPANDIDA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
@@ -348,7 +358,7 @@ export default function NedHubPage() {
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
               
-              {/* 🏢 SEÇÃO RESTAURADA: DADOS DE INTELIGÊNCIA DA RECEITA FEDERAL DO ROBÔ */}
+              {/* 🏢 SEÇÃO DADOS DE INTELIGÊNCIA DA RECEITA FEDERAL DO ROBÔ */}
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
                   <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Dados de Inteligência (Robô Receita)</h3>
@@ -373,11 +383,13 @@ export default function NedHubPage() {
                   </div>
                   <div className="col-span-2">
                     <span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade / Principal:</span>
-                    <span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Aguardando leitura do bot..."}</span>
+                    <span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">
+                      {leadExpandido.dadosCustomizados?.ramo || "Aguardando leitura do bot..."}
+                    </span>
                   </div>
                   <div className="col-span-2">
                     <span className="text-slate-500 block text-[8px] uppercase font-bold">Endereço Completo:</span>
-                    <span className="text-slate-300 font-bold block truncate">
+                    <span className="text-slate-300 font-bold block text-[10px]">
                       {leadExpandido.dadosCustomizados?.endereco 
                         ? `${leadExpandido.dadosCustomizados.endereco}, ${leadExpandido.dadosCustomizados?.bairro || ""} - ${leadExpandido.dadosCustomizados?.cidade || ""}/${leadExpandido.dadosCustomizados?.uf || ""}`
                         : "Endereço não sincronizado pelo SQLite"}
@@ -425,6 +437,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
+              {/* Seção 2: Templates de E-mail */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
                 <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo Automatizado de E-mail</h3>
                 <div className="space-y-2">
@@ -444,6 +457,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
+              {/* Seção 3: Sistema Interno de Tarefas */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
                 <div className="grid grid-cols-3 gap-2 items-end">
@@ -482,6 +496,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
+              {/* Seção 4: Agendas */}
               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200/60 space-y-2">
                 <h3 className="font-black text-blue-900 uppercase text-[10px] tracking-wider border-b border-blue-200 pb-1">🗓️ Sincronizar Agenda Externa (Criar Compromisso)</h3>
                 <div className="grid grid-cols-2 gap-2">
