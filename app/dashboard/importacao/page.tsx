@@ -6,7 +6,7 @@ import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================================
-// 🧽 FUNÇÕES DE LIMPEZA MATADORA
+// 🧽 FUNÇÕES DE LIMPEZA MATADORA E NORMALIZAÇÃO VIA API/SQLITE
 // ============================================================================
 function limparNome(texto: any): string {
   if (!texto) return "";
@@ -16,6 +16,32 @@ function limparNome(texto: any): string {
   n = n.replace(/[^A-Z0-9\s]/g, " "); 
   n = n.replace(/\b(LTDA|SA|S A|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, ""); 
   return n.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 🔥 MOTOR DE NORMALIZAÇÃO GLOBAL: Intercepta o nome bruto, tenta achar a verdade
+ * absoluta e higienizada no banco SQLite do Bot e retorna o nome unificado.
+ */
+async function normalizarNomeCedenteGlobal(nomeBruto: string): Promise<string> {
+  const nomeTratadoLocal = limparNome(nomeBruto);
+  if (!nomeTratadoLocal) return "";
+
+  try {
+    // Busca na API local do seu Bot passando o termo limpo
+    const res = await fetch(`http://localhost:5000/api/prospeccao?query=${encodeURIComponent(nomeTratadoLocal)}`);
+    if (res.ok) {
+      const dadosBot = await res.json();
+      // Se encontrar o cadastro corporativo real no SQLite, usa a Razão Social higienizada dele
+      if (dadosBot && dadosBot.razaoSocial) {
+        return limparNome(dadosBot.razaoSocial);
+      }
+    }
+  } catch (err) {
+    // Silencia erros se o bot estiver offline e segue com o fallback seguro local
+    console.warn("API Local de Prospecção do Bot offline. Usando higienização padrão.");
+  }
+
+  return nomeTratadoLocal;
 }
 
 function parseValorReal(valor: any): number {
@@ -89,9 +115,9 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 MOTORES DE LEITURA ESPECÍFICOS
+// 🤖 MOTORES DE LEITURA ESPECÍFICOS (REESTRUTURADOS ASYNC PARA FILTRO DE NOMES)
 // ============================================================================
-const processarRiscoSec = (raw: any[][]) => {
+const processarRiscoSec = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
   if (headerIdx === -1) return {};
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().replace(/[^A-Z]/g, ""));
@@ -103,8 +129,12 @@ const processarRiscoSec = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCed = String(row[idxCedente] || "");
-    const chave = limparNome(rawCed);
-    if (!chave || chave === "NAN" || chave.includes("TOTAL")) continue;
+    if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+    
+    // Roda a normalização global via SQLite/API
+    const chave = await normalizarNomeCedenteGlobal(rawCed);
+    if (!chave) continue;
+
     records[chave] = {
       cedenteOriginal: rawCed.trim(),
       risco: parseValorReal(row[idxLimUti]),
@@ -114,7 +144,7 @@ const processarRiscoSec = (raw: any[][]) => {
   return records;
 };
 
-const processarRiscoFidc = (raw: any[][]) => {
+const processarRiscoFidc = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CLIENTE"));
   if (headerIdx === -1) return {};
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
@@ -126,8 +156,11 @@ const processarRiscoFidc = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCed = String(row[idxCliente] || "");
-    const chave = limparNome(rawCed);
-    if (!chave || chave === "NAN" || chave.includes("TOTAL")) continue;
+    if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+
+    const chave = await normalizarNomeCedenteGlobal(rawCed);
+    if (!chave) continue;
+
     records[chave] = {
       cedenteOriginal: rawCed.trim(),
       risco: parseValorReal(row[idxUtilizado]),
@@ -137,7 +170,7 @@ const processarRiscoFidc = (raw: any[][]) => {
   return records;
 };
 
-const processarVopSec = (raw: any[][]) => {
+const processarVopSec = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
@@ -149,17 +182,19 @@ const processarVopSec = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCed = String(row[idxCedente] || "");
-    const chave = limparNome(rawCed);
-    if (!chave || chave === "NAN" || chave.includes("TOTAL") || chave === "CEDENTE") continue;
+    if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL") || rawCed.toUpperCase() === "CEDENTE") continue;
+    
     const dataOp = formatarDataExcel(row[idxData]);
     const mesAno = formatarMesAno(dataOp);
     const valor = parseValorReal(row[idxValor]);
-    if (valor > 0) lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+    if (valor > 0) {
+      lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+    }
   }
   return lancamentos;
 };
 
-const processarVopFidc = (raw: any[][]) => {
+const processarVopFidc = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -171,17 +206,19 @@ const processarVopFidc = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCed = String(row[idxCedente] || "");
-    const chave = limparNome(rawCed);
-    if (!chave || chave === "NAN" || chave.includes("TOTAL")) continue;
+    if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+    
     const dataOp = idxData !== -1 ? formatarDataExcel(row[idxData]) : "-";
     const mesAno = formatarMesAno(dataOp);
     const valor = parseValorReal(row[idxValor]);
-    if (valor > 0) lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+    if (valor > 0) {
+      lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+    }
   }
   return lancamentos;
 };
 
-const processarReceitasSec = (raw: any[][]) => {
+const processarReceitasSec = async (raw: any[][]) => {
   const lancamentos: any[] = [];
   for (const row of raw) {
     let aditivo = String(row[0] || "").trim();
@@ -202,7 +239,7 @@ const processarReceitasSec = (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarReceitasFidc = (raw: any[][]) => {
+const processarReceitasFidc = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -219,8 +256,8 @@ const processarReceitasFidc = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCed = String(row[idxCedente] || "");
-    const chave = limparNome(rawCed);
-    if (!chave || chave === "NAN" || chave.includes("TOTAL")) continue;
+    if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+    
     const dataOp = idxData !== -1 ? formatarDataExcel(row[idxData]) : "-";
     const mesAno = formatarMesAno(dataOp);
     const desagio = parseValorReal(row[idxDesagio]);
@@ -235,7 +272,7 @@ const processarReceitasFidc = (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarCampoLiquidadosSec = (raw: any[][]) => {
+const processarCampoLiquidadosSec = async (raw: any[][]) => {
   let colDtaBaixa = 12; let colEncargos = 15;
   for (let i = 0; i < Math.min(30, raw.length); i++) {
     const rowStr = raw[i].map(x => String(x).trim().toUpperCase());
@@ -267,7 +304,7 @@ const processarCampoLiquidadosSec = (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarCarteiraSec = (raw: any[][]) => {
+const processarCarteiraSec = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "RAZAO SOCIAL" || c.includes("CLIENTE"); }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s\.]/g, ""));
@@ -282,6 +319,11 @@ const processarCarteiraSec = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
+    
+    // Normalização assíncrona do nome do cedente na carteira aberta
+    const cedenteNormalizado = await normalizarNomeCedenteGlobal(cedente);
+    if (!cedenteNormalizado) continue;
+
     const sacado = String(row[idxSacado] || "").trim();
     const numeroTitulo = idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-";
     const vencimento = idxVencimento !== -1 ? formatarDataExcel(row[idxVencimento]) : "-";
@@ -289,12 +331,23 @@ const processarCarteiraSec = (raw: any[][]) => {
     const valorAberto = parseValorReal(row[idxValorAberto]);
     const status = checarSeVencido(vencimento);
 
-    if (valorAberto > 0) titulos.push({ origem: "SEC", cedente: limparNome(cedente), sacado: sacado.toUpperCase(), numero_titulo: numeroTitulo, vencimento: converteDataParaISO(vencimento), valor_face: valorFace, valor_aberto: valorAberto, status });
+    if (valorAberto > 0) {
+      titulos.push({ 
+        origem: "SEC", 
+        cedente: cedenteNormalizado, 
+        sacado: sacado.toUpperCase(), 
+        numero_titulo: numeroTitulo, 
+        vencimento: converteDataParaISO(vencimento), 
+        valor_face: valorFace, 
+        valor_aberto: valorAberto, 
+        status 
+      });
+    }
   }
   return titulos;
 };
 
-const processarCarteiraFidc = (raw: any[][]) => {
+const processarCarteiraFidc = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "NOME DO CEDENTE"));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -308,13 +361,28 @@ const processarCarteiraFidc = (raw: any[][]) => {
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
+    
+    const cedenteNormalizado = await normalizarNomeCedenteGlobal(cedente);
+    if (!cedenteNormalizado) continue;
+
     const sacado = String(row[idxSacado] || "").trim();
     const vencimento = formatarDataExcel(row[idxVencimento]);
     const valorFace = parseValorReal(row[idxValorFace]);
     const valorAberto = parseValorReal(row[idxValorAberto]);
     const status = checarSeVencido(vencimento);
 
-    if (valorAberto > 0) titulos.push({ origem: "FIDC", cedente: limparNome(cedente), sacado: sacado.toUpperCase(), numero_titulo: "-", vencimento: converteDataParaISO(vencimento), valor_face: valorFace, valor_aberto: valorAberto, status });
+    if (valorAberto > 0) {
+      titulos.push({ 
+        origem: "FIDC", 
+        cedente: cedenteNormalizado, 
+        sacado: sacado.toUpperCase(), 
+        numero_titulo: "-", 
+        vencimento: converteDataParaISO(vencimento), 
+        valor_face: valorFace, 
+        valor_aberto: valorAberto, 
+        status 
+      });
+    }
   }
   return titulos;
 };
@@ -368,28 +436,27 @@ export default function ImportacaoPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     setProcessando(true);
-    setStatusMsg(`Lendo e mapeando ${file.name}...`);
+    setStatusMsg(`Lendo, limpando e normalizando com SQLite: ${file.name}...`);
     try {
       const rawData = await lerArquivoExcel(file);
       let dadosMapeados: any = null;
 
-      if (tipo === "risco") dadosMapeados = empresa === "sec" ? processarRiscoSec(rawData) : processarRiscoFidc(rawData);
-      else if (tipo === "vop") dadosMapeados = empresa === "sec" ? processarVopSec(rawData) : processarVopFidc(rawData);
-      else if (tipo === "receitas") dadosMapeados = empresa === "sec" ? processarReceitasSec(rawData) : processarReceitasFidc(rawData);
-      else if (tipo === "juros") dadosMapeados = empresa === "sec" ? processarCampoLiquidadosSec(rawData) : [];
-      else if (tipo === "carteira") dadosMapeados = empresa === "sec" ? processarCarteiraSec(rawData) : processarCarteiraFidc(rawData);
+      if (tipo === "risco") dadosMapeados = empresa === "sec" ? await processarRiscoSec(rawData) : await processarRiscoFidc(rawData);
+      else if (tipo === "vop") dadosMapeados = empresa === "sec" ? await processarVopSec(rawData) : await processarVopFidc(rawData);
+      else if (tipo === "receitas") dadosMapeados = empresa === "sec" ? await processarReceitasSec(rawData) : await processarReceitasFidc(rawData);
+      else if (tipo === "juros") dadosMapeados = empresa === "sec" ? await processarCampoLiquidadosSec(rawData) : [];
+      else if (tipo === "carteira") dadosMapeados = empresa === "sec" ? await processarCarteiraSec(rawData) : await processarCarteiraFidc(rawData);
 
       setDadosFinais((prev: any) => {
         const atualizado = { ...prev };
         atualizado[tipo] = { ...atualizado[tipo], [empresa]: dadosMapeados };
         return atualizado;
       });
-      setStatusMsg(`✅ Mapeamento de ${file.name} fixado localmente.`);
-    } catch (error) { alert(`Erro ao ler o arquivo ${file.name}.`); }
+      setStatusMsg(`✅ Mapeamento e higienização global de ${file.name} fixados localmente.`);
+    } catch (error) { alert(`Erro ao ler e normalizar o arquivo ${file.name}.`); }
     finally { setProcessando(false); event.target.value = ""; }
   };
 
-  // ☁️ PROCESSAMENTO DIRETO E EM LOTE NO SUPABASE (ELIMINA O GOOGLE SHEETS)
   const dispararProSupabase = async () => {
     setProcessando(true);
     setStatusMsg("🚀 Transmitindo e consolidando dados no Supabase V2...");
@@ -406,32 +473,34 @@ export default function ImportacaoPage() {
         }
       }
 
-      // 2. Grava Módulo de Finanças (VOP, Receitas e Juros) consolidado em Lote
+      // 2. Grava Módulo de Finanças (VOP, Receitas e Juros) consolidado em Lote com Nomes Normalizados
       const loteFinancas: any[] = [];
-      const mesclarLancamento = (item: any) => {
+      const mesclarLancamento = async (item: any) => {
+        const cedenteFinalNormalizado = await normalizarNomeCedenteGlobal(item.cedenteOriginal);
         loteFinancas.push({
           empresa: item.empresa,
           data_operacao: converteDataParaISO(item.dataOp),
           mes_ano: item.mesAno,
-          cedente: limparNome(item.cedenteOriginal),
+          cedente: cedenteFinalNormalizado,
           vop: item.vop || 0,
           desagio: item.desagio || 0,
           tarifas: item.tarifas || 0,
           juros: item.juros || 0
         });
       };
-      dadosFinais.vop.sec.forEach(mesclarLancamento);
-      dadosFinais.vop.fidc.forEach(mesclarLancamento);
-      dadosFinais.receitas.sec.forEach(mesclarLancamento);
-      dadosFinais.receitas.fidc.forEach(mesclarLancamento);
-      dadosFinais.juros.sec.forEach(mesclarLancamento);
+
+      for (const item of dadosFinais.vop.sec) await mesclarLancamento(item);
+      for (const item of dadosFinais.vop.fidc) await mesclarLancamento(item);
+      for (const item of dadosFinais.receitas.sec) await mesclarLancamento(item);
+      for (const item of dadosFinais.receitas.fidc) await mesclarLancamento(item);
+      for (const item of dadosFinais.juros.sec) await mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
         const { error } = await supabase.from("extrato_financeiro").insert(loteFinancas);
         if (error) throw error;
       }
 
-      // 3. Grava Módulo de Carteira Detalhada (Limpa a foto anterior e insere a nova em blocos de 500 linhas)
+      // 3. Grava Módulo de Carteira Detalhada (Blocos de 500 linhas)
       if (dadosFinais.carteira.sec.length > 0) {
         await supabase.from("carteira_titulos").delete().eq("origem", "SEC");
         const chunk = 500;
@@ -459,7 +528,7 @@ export default function ImportacaoPage() {
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800 tracking-tight">📥 Central de Importação de Relatórios (V2 Supabase)</h2>
-          <span className="text-xs text-slate-500 font-medium">Os relatórios agora são injetados diretamente na infraestrutura do banco de dados local.</span>
+          <span className="text-xs text-slate-500 font-medium">Os relatórios agora são filtrados e normalizados em tempo real cruzando a inteligência do SQLite local.</span>
         </div>
         <button 
           onClick={dispararProSupabase}
