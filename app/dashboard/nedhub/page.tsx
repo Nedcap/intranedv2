@@ -33,6 +33,7 @@ export default function NedHubPage() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [userRole, setUserRole] = useState<string>("Consultor");
   const [carregando, setCarregando] = useState(false);
+  const [buscandoRobo, setBuscandoRobo] = useState(false);
 
   // Cores Customizáveis
   const [coresColunas, setCoresColunas] = useState<Record<string, string>>({
@@ -85,14 +86,48 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
+  // 🤖 BUSCA INTEGRADA DIRETO NO BOT LOCAL (SQLITE)
+  const consultarDadosCnpjNoRoboLocal = async () => {
+    const cnpjLimpo = inputCnpj.replace(/\D/g, "");
+    if (cnpjLimpo.length !== 14) return alert("Digite um CNPJ válido com 14 dígitos numéricos.");
+
+    try {
+      setBuscandoRobo(true);
+      const res = await fetch(`http://localhost:5000/api/prospeccao?cnpj=${cnpjLimpo}`);
+      if (res.ok) {
+        const dadosBot = await res.json();
+        if (dadosBot && dadosBot.razaoSocial) {
+          setInputRazao(dadosBot.razaoSocial.toUpperCase());
+          if (dadosBot.telefone) setInputTelefone(dadosBot.telefone);
+          if (dadosBot.contato) setInputContato(dadosBot.contato);
+          alert("⚡ Empresa localizada no banco do Robô e carregada com sucesso!");
+        } else {
+          alert("ℹ️ CNPJ não localizado no SQLite. Digite os dados manualmente.");
+        }
+      } else {
+        alert("⚠️ API do Robô local não retornou registros. Verifique se o Bot está rodando.");
+      }
+    } catch (err) {
+      alert("❌ Erro de conexão: A API local (http://localhost:5000) está offline.");
+    } finally {
+      setBuscandoRobo(false);
+    }
+  };
+
   const handleSalvarNovoLead = async () => {
     if (!inputCnpj || !inputRazao) return alert("CNPJ e Razão Social são obrigatórios.");
     try {
       const payload = {
-        cnpj: inputCnpj, razaoSocial: inputRazao, nomeContato: inputContato,
-        telefone: inputTelefone, telefones: [inputTelefone], email: "",
-        funilId: funilAtivo, estagio: funilAtivo === "vendas" ? "sem_contato" : "visita_agendada",
-        campos_customizados: {}, tarefas: []
+        cnpj: inputCnpj.replace(/\D/g, ""), 
+        razaoSocial: inputRazao.toUpperCase().trim(), 
+        nomeContato: inputContato.trim(),
+        telefone: inputTelefone, 
+        telefones: inputTelefone ? [inputTelefone] : [], 
+        email: "",
+        funilId: funilAtivo, 
+        estagio: funilAtivo === "vendas" ? "sem_contato" : "visita_agendada",
+        campos_customizados: {}, 
+        tarefas: []
       };
       const { error } = await supabase.from("crm_leads").insert([payload]);
       if (error) throw error;
@@ -250,12 +285,11 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🔍 GAVETA ESTILIZADA DE ALTA PERFORMANCE */}
+      {/* 🔍 GAVETA EXPANDIDA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
             
-            {/* Header da Gaveta */}
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
                 <span className="text-[9px] font-mono font-bold uppercase text-amber-400">Edição e Ações do Contrato</span>
@@ -282,13 +316,9 @@ export default function NedHubPage() {
               </div>
             </div>
 
-            {/* Conteúdo Rolável */}
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
-              
-              {/* Seção 1: Contatos Completos & Editáveis */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                 <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato e Comunicação</h3>
-                
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Nome do Contato Principal</label>
@@ -300,7 +330,6 @@ export default function NedHubPage() {
                   </div>
                 </div>
 
-                {/* Múltiplos Telefones */}
                 <div>
                   <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones / WhatsApps</label>
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -326,7 +355,6 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Seção 2: Templates de E-mail Integrados Duplos */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
                 <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo Automatizado de E-mail</h3>
                 <div className="space-y-2">
@@ -346,10 +374,8 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Seção 3: Sistema Interno de Tarefas & Alertas de Retorno */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
-                
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div className="col-span-1.5">
                     <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Ação Comercial</label>
@@ -386,54 +412,96 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Seção 4: Integração Rápida com Agendas Corporativas */}
               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200/60 space-y-2">
                 <h3 className="font-black text-blue-900 uppercase text-[10px] tracking-wider border-b border-blue-200 pb-1">🗓️ Sincronizar Agenda Externa (Criar Compromisso)</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  <a 
-                    href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&details=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`}
-                    target="_blank" rel="noreferrer"
-                    className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700"
-                  >
-                    📅 Lançar no Google Calendar
-                  </a>
-                  <a 
-                    href={`https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&body=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`}
-                    target="_blank" rel="noreferrer"
-                    className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700"
-                  >
-                    📧 Lançar no Outlook Calendar
-                  </a>
+                  <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&details=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`} target="_blank" rel="noreferrer" className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700">📅 Lançar no Google Calendar</a>
+                  <a href={`https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&body=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`} target="_blank" rel="noreferrer" className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700">📧 Lançar no Outlook Calendar</a>
                 </div>
               </div>
 
-              {/* Histórico Comercial Livre */}
               <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Observações Gerais e Histórico de Negociações</label>
                 <textarea rows={3} value={leadExpandido.anotacoes || ""} onChange={(e) => setLeadExpandido({ ...leadExpandido, anotacoes: e.target.value })} placeholder="Digite anotações livres sobre o cliente aqui..." className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500 bg-amber-50/10 text-slate-800" />
               </div>
             </div>
 
-            {/* Footer da Gaveta */}
             <div className="p-3 bg-slate-100 border-t flex justify-end gap-2">
               <button onClick={() => setLeadExpandido(null)} className="px-4 py-2 bg-slate-300 text-slate-700 font-bold rounded-lg uppercase">Cancelar</button>
               <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-900 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Todo o Contrato</button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* MODAL NOVO LEAD */}
+      {/* 🔮 MODAL NOVO LEAD RESTAURADO COMPLETO (COM BUSCA NO ROBÔ SQLITE) */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-5 max-w-sm w-full space-y-3">
-            <h3 className="font-black uppercase text-slate-900 text-[10px]">Criar Nova Originação</h3>
-            <input type="text" placeholder="CNPJ" value={inputCnpj} onChange={e => setInputCnpj(e.target.value)} className="w-full p-2 border rounded-lg outline-none" />
-            <input type="text" placeholder="Razão Social" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border rounded-lg outline-none" />
-            <div className="flex justify-end gap-2 text-[10px]">
-              <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 font-bold rounded-md uppercase">Sair</button>
-              <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-md uppercase">Salvar</button>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
+            <h3 className="font-black uppercase text-slate-900 text-[11px] border-b pb-1">🚀 Iniciar Nova Originação Comercial</h3>
+            
+            <div className="space-y-3 text-[11px]">
+              {/* CNPJ + BOTÃO INTEGRADO DO ROBÔ */}
+              <div>
+                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">CNPJ da Empresa:</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Somente números (14 dígitos)" 
+                    value={inputCnpj} 
+                    onChange={e => setInputCnpj(e.target.value)} 
+                    className="flex-1 p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" 
+                  />
+                  <button 
+                    type="button"
+                    onClick={consultarDadosCnpjNoRoboLocal}
+                    disabled={buscandoRobo}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[9px] rounded-lg transition-all disabled:opacity-40"
+                  >
+                    {buscandoRobo ? "⏳ Buscando..." : "🔍 Buscar no Robô"}
+                  </button>
+                </div>
+              </div>
+
+              {/* DEMAIS CAMPOS FORMULÁRIO */}
+              <div>
+                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social (Nome Oficial):</label>
+                <input 
+                  type="text" 
+                  placeholder="Nome corporativo completo" 
+                  value={inputRazao} 
+                  onChange={e => setInputRazao(e.target.value)} 
+                  className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome do Decisor / Contato:</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: Diretor Financeiro João" 
+                  value={inputContato} 
+                  onChange={e => setInputContato(e.target.value)} 
+                  className="w-full p-2 border bg-slate-50 rounded-lg outline-none text-slate-800 font-bold" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Telefone Principal:</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: 41999999999" 
+                  value={inputTelefone} 
+                  onChange={e => setInputTelefone(e.target.value)} 
+                  className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" 
+                />
+              </div>
+            </div>
+
+            {/* AÇÕES DO MODAL */}
+            <div className="flex justify-end gap-2 text-[10px] pt-2 border-t">
+              <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase">Sair</button>
+              <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-lg uppercase shadow-md">Salvar Lead</button>
             </div>
           </div>
         </div>

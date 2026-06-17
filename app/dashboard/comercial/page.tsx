@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface VisitaRow {
-  id: string; // ID original do banco para consistência
+  id: string; 
   nome: string;
   empresa?: string;
   responsavelSDR: string;
@@ -46,21 +46,20 @@ export default function ControleComercialVisitasPage() {
     }
   }, []);
 
-  // Salva alterações de comissão/configs
   const persistirConfigs = (novasConfigs: Record<string, SDRConfig>) => {
     setConfigsSDR(novasConfigs);
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA DIRETO DO SUPABASE (Aba Pós-Venda / Cards de Visita)
-  const buscarCardsPosVenda = useCallback(async () => {
+  // 2. BUSCA AUTOMÁTICA DIRETO DO SUPABASE (Visitas + Finalizados)
+  const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
-      // ATENÇÃO: Ajuste o nome da tabela 'pos_venda' e colunas se necessário no seu schema
+      // 💡 ATENÇÃO: Se o nome da sua tabela consolidada for diferente (ex: 'leads', 'crm', 'oportunidades'), altere aqui:
       const { data, error } = await supabase
-        .from("pos_venda") 
+        .from("leads") 
         .select("*")
-        .in("etapa", ["Visita Agendada", "Visita Realizada", "Visita Efetuada"]); // Filtra as etapas desejadas
+        .in("etapa", ["Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"]);
 
       if (error) throw error;
 
@@ -71,14 +70,13 @@ export default function ControleComercialVisitasPage() {
           const sdrNome = item.responsavel_sdr || item.agente_nome || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
-          // Lógica de mapeamento de status com base no estado do lead no banco
           let statusComiteInicial: any = "Em Análise";
           const estado = item.estado?.toLowerCase() || "";
           const motivoPerdaText = item.motivo_perda?.toLowerCase() || "";
 
-          if (estado === "perdida" || motivoPerdaText.includes("crédito") || motivoPerdaText.includes("recusada")) {
+          if (estado === "perdida" || estado === "perdido" || motivoPerdaText.includes("crédito") || motivoPerdaText.includes("recusada")) {
             statusComiteInicial = "Reprovado";
-          } else if (estado === "ganhou" || estado === "aprovado") {
+          } else if (estado === "ganhou" || estado === "aprovado" || item.etapa === "Finalizado") {
             statusComiteInicial = "Aprovado";
           }
 
@@ -93,13 +91,11 @@ export default function ControleComercialVisitasPage() {
             dataCriacao: item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-",
             email: item.email || "",
             telefone: item.telefone || "",
-            // Preserva status de comissão caso já usem controle interno ou inicia como Pendente
             statusComissaoAgendamento: item.status_comissao_agendamento || "Pendente",
             statusComissaoComite: item.status_comissao_comite || statusComiteInicial,
           };
         });
 
-        // Atualiza a lista de SDRs mantendo preços antigos ou aplicando padrão R$50/R$80
         const novasConfigs = { ...configsSDR };
         sdrsEncontrados.forEach((nomeSdr) => {
           if (!novasConfigs[nomeSdr]) {
@@ -112,16 +108,56 @@ export default function ControleComercialVisitasPage() {
       }
     } catch (err: any) {
       console.error(err);
-      alert(`❌ Erro ao ler dados do Nedhub: ${err.message}`);
+      alert(`❌ Erro ao ler dados: ${err.message}\nVerifique se o nome da tabela no código coincide com o banco.`);
     } finally {
       setCarregando(false);
     }
   }, [configsSDR]);
 
-  // Busca inicial automática ao montar o componente
   useEffect(() => {
-    buscarCardsPosVenda();
+    buscarCardsComercial();
   }, []);
+
+  // 3. ATUALIZAÇÃO SINCRO DA STATUS DE COMISSÃO DIRETO NO BANCO
+  const mudarStatusAgendamento = async (id: string, novoStatus: "Pendente" | "Pago") => {
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ status_comissao_agendamento: novoStatus })
+        .eq("id", id);
+
+      if (error) throw error;
+      
+      setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoAgendamento: novoStatus } : v));
+    } catch (err: any) {
+      alert(`❌ Erro ao atualizar agendamento no banco: ${err.message}`);
+    }
+  };
+
+  const mudarStatusComite = async (id: string, novoStatus: any) => {
+    try {
+      // Se aprovado, sincroniza alteração lógica no card
+      const camposAtualizados: any = { status_comissao_comite: novoStatus };
+      if (novoStatus === "Aprovado") {
+        camposAtualizados.estado = "Ganhou";
+      }
+
+      const { error } = await supabase
+        .from("leads")
+        .update(camposAtualizados)
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setVisitas(prev => prev.map(v => v.id === id ? { 
+        ...v, 
+        statusComissaoComite: novoStatus,
+        estado: novoStatus === "Aprovado" ? "Ganhou" : v.estado 
+      } : v));
+    } catch (err: any) {
+      alert(`❌ Erro ao atualizar comitê no banco: ${err.message}`);
+    }
+  };
 
   const moverLeadParaEsteiraAnalise = async (lead: VisitaRow) => {
     const confirmar = confirm(`🔍 Deseja enviar a empresa "${lead.nome}" diretamente para a lista de Análises Pendentes?`);
@@ -140,23 +176,16 @@ export default function ControleComercialVisitasPage() {
 
       if (error) throw error;
 
-      // Atualiza o estado visual local
+      // Atualiza também o status do card principal informando que foi enviado
+      await supabase.from("leads").update({ status_comissao_comite: "Enviado p/ Análise" }).eq("id", lead.id);
+
       setVisitas(prev => prev.map(v => v.id === lead.id ? { ...v, statusComissaoComite: "Enviado p/ Análise" } : v));
-      
-      alert("🚀 Sucesso! Empresa integrada. Ela já apareceu na aba 'Análises Em Comitê'.");
+      alert("🚀 Sucesso! Empresa integrada na aba de comitês.");
     } catch (err: any) {
       alert(`❌ Erro de Integração: ${err.message}`);
     } finally {
       setEnviandoLeadId(null);
     }
-  };
-
-  const mudarStatusAgendamento = (id: string, novoStatus: "Pendente" | "Pago") => {
-    setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoAgendamento: novoStatus } : v));
-  };
-
-  const mudarStatusComite = (id: string, novoStatus: any) => {
-    setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoComite: novoStatus } : v));
   };
 
   const atualizarValorComissaoSDR = (nomeSdr: string, campo: "valorAgendamento" | "valorComite", valor: number) => {
@@ -165,9 +194,7 @@ export default function ControleComercialVisitasPage() {
     persistirConfigs(novasConfigs);
   };
 
-  const listasSDRsUnicos = useMemo(() => {
-    return Object.keys(configsSDR).sort();
-  }, [configsSDR]);
+  const listasSDRsUnicos = useMemo(() => Object.keys(configsSDR).sort(), [configsSDR]);
 
   const visitasFiltradas = useMemo(() => {
     return visitas.filter(v => {
@@ -201,12 +228,12 @@ export default function ControleComercialVisitasPage() {
       {/* HEADER BAR */}
       <div className="border-b border-slate-200 pb-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 tracking-tight">🎯 Esteira Comercial Automatizada</h2>
-          <span className="text-xs text-slate-400 font-medium">Lendo diretamente os cards sincronizados em tempo real do pós-venda Nedhub.</span>
+          <h2 className="text-lg font-bold text-slate-800 tracking-tight">🎯 Esteira Comercial Automatizada (Visitas e Finalizados)</h2>
+          <span className="text-xs text-slate-400 font-medium">Sincronização em tempo real das etapas de agendamento até a conclusão.</span>
         </div>
         <div className="flex items-center gap-2">
           <button 
-            onClick={buscarCardsPosVenda} 
+            onClick={buscarCardsComercial} 
             disabled={carregando}
             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black rounded-lg shadow-sm border border-blue-700 cursor-pointer transition-all flex items-center gap-2"
           >
@@ -220,8 +247,8 @@ export default function ControleComercialVisitasPage() {
       {visitas.length === 0 && !carregando ? (
         <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2">
           <div className="text-2xl">🗂️</div>
-          <h3 className="font-bold text-slate-700 text-xs">Nenhum card de visita encontrado</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se existem leads nas colunas de visita agendada ou realizada no Nedhub.</p>
+          <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial encontrado</h3>
+          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique os filtros ou nomes de colunas de estágio do banco.</p>
         </div>
       ) : (
         <>
@@ -259,7 +286,7 @@ export default function ControleComercialVisitasPage() {
               <div className="text-2xl font-black mt-1 font-mono text-blue-900">{formatarMoeda(kpisGlobais.totalAgendamentosGanhos)}</div>
             </div>
             <div className="bg-white border border-slate-200 p-4 rounded-xl border-l-4 border-emerald-600 shadow-xs">
-              <span className="text-[11px] font-black text-slate-400 block uppercase">Comitê Aprovado (A Pagar)</span>
+              <span className="text-[11px] font-black text-slate-400 block uppercase">Comitê Aprovado / Finalizado</span>
               <div className="text-2xl font-black mt-1 font-mono text-emerald-700">{formatarMoeda(kpisGlobais.totalComiteGanhos)}</div>
             </div>
             <div className="bg-white border border-slate-200 p-4 rounded-xl border-l-4 border-amber-500 shadow-xs">
@@ -285,7 +312,7 @@ export default function ControleComercialVisitasPage() {
             </select>
           </div>
 
-          {/* TABELONA ANALÍTICA */}
+          {/* TABELA */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -294,7 +321,7 @@ export default function ControleComercialVisitasPage() {
                   <th className="p-3">SDR Responsável</th>
                   <th className="p-3 text-center">Etapa Atual</th>
                   <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
-                  <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê</th>
+                  <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê / Finalizados</th>
                   <th className="p-3 text-center">Ações Operacionais</th>
                 </tr>
               </thead>
@@ -308,11 +335,15 @@ export default function ControleComercialVisitasPage() {
                     <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-3">
                         <div className="font-bold text-slate-900 truncate max-w-[240px]">{v.nome}</div>
-                        <span className="text-[10px] text-slate-400 font-normal truncate block">{v.email || v.telefone || "Sem contatos adicionais"}</span>
+                        <span className="text-[10px] text-slate-400 font-normal truncate block">{v.email || v.telefone || "Sem contatos"}</span>
                       </td>
                       <td className="p-3 text-slate-500 font-bold">{v.responsavelSDR}</td>
-                      <td className="p-3 text-center text-slate-500">
-                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          v.etapa.includes("Finalizado") || v.etapa.includes("Ganhou") 
+                            ? "bg-emerald-100 text-emerald-800" 
+                            : "bg-slate-100 text-slate-700"
+                        }`}>
                           {v.etapa}
                         </span>
                       </td>
@@ -338,8 +369,6 @@ export default function ControleComercialVisitasPage() {
                             ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
                             : v.statusComissaoComite === "Reprovado" 
                             ? "bg-rose-100 text-rose-700 border-rose-200" 
-                            : v.statusComissaoComite === "Enviado p/ Análise"
-                            ? "bg-purple-100 text-blue-800 border-purple-200"
                             : "bg-amber-100 text-amber-700 border-amber-200"
                         }`}>
                           <option value="Em Análise">⏳ Em Análise</option>
@@ -350,7 +379,7 @@ export default function ControleComercialVisitasPage() {
                         </select>
                       </td>
 
-                      {/* ACCIONADOR */}
+                      {/* AÇÕES */}
                       <td className="p-3 text-center">
                         <button
                           onClick={() => moverLeadParaEsteiraAnalise(v)}
