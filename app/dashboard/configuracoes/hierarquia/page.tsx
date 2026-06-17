@@ -9,7 +9,7 @@ interface UsuarioSistema {
   nome: string;
   email: string;
   cargo: string;
-  superior_id?: string; // Salvaremos o id do líder diretamente aqui
+  permissoes: string[]; // Usaremos o array que já existe para guardar o líder!
 }
 
 export default function GerenciarHierarquiaPage() {
@@ -26,11 +26,19 @@ export default function GerenciarHierarquiaPage() {
       // Busca os colaboradores reais diretamente da sua tabela ativa 'usuarios'
       const { data: dbUsuarios, error: errUsuarios } = await supabase
         .from("usuarios")
-        .select("id, nome, email, cargo, superior_id")
+        .select("id, nome, email, cargo, permissoes")
         .order("nome", { ascending: true });
 
       if (errUsuarios) throw errUsuarios;
-      if (dbUsuarios) setUsuariosSistema(dbUsuarios);
+      
+      // Garante que permissões seja um array válido para evitarmos erros
+      if (dbUsuarios) {
+        const mapeados = dbUsuarios.map(u => ({
+          ...u,
+          permissoes: Array.isArray(u.permissoes) ? u.permissoes : []
+        }));
+        setUsuariosSistema(mapeados);
+      }
     } catch (err: any) {
       alert(`❌ Erro ao carregar dados do sistema: ${err.message}`);
     } finally {
@@ -42,24 +50,30 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosHierarquia();
   }, []);
 
-  // Grava ou remove a relação de subordinação diretamente na tabela 'usuarios' eliminando o erro de FK
-  const handleAlternarEquipeSubordinado = async (subordinadoId: string, jaPertence: boolean) => {
+  // Grava o vínculo de forma ninja usando a coluna permissoes da tabela usuarios
+  const handleAlternarEquipeSubordinado = async (subordinado: UsuarioSistema, jaPertence: boolean) => {
     if (!liderSelecionadoId) return;
 
     try {
       setCarregando(true);
 
-      // Define se vincula o ID do líder ou se remove (setando null)
-      const novoSuperior = !jaPertence ? liderSelecionadoId : null;
+      // Limpa qualquer tag de líder anterior que esse subordinado tenha
+      let novasPermissoes = subordinado.permissoes.filter(p => !p.startsWith("lider:"));
 
+      // Se a caixinha foi marcada (jaPertence era falso), adicionamos a tag do novo líder
+      if (!jaPertence) {
+        novasPermissoes.push(`lider:${liderSelecionadoId}`);
+      }
+
+      // Atualizamos a tabela 'usuarios' usando a coluna que já existe! Sucesso garantido.
       const { error } = await supabase
         .from("usuarios")
-        .update({ superior_id: novoSuperior })
-        .eq("id", subordinadoId);
+        .update({ permissoes: novasPermissoes })
+        .eq("id", subordinado.id);
 
       if (error) throw error;
 
-      // Recarrega os dados atualizados direto do banco garantindo a consistência na tela
+      // Recarrega os dados atualizados direto do banco
       await carregarDadosHierarquia();
     } catch (err: any) {
       console.error(err);
@@ -80,7 +94,7 @@ export default function GerenciarHierarquiaPage() {
       {/* HEADER EXCLUSIVO */}
       <div className="border-b border-slate-200 pb-3">
         <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">👥 Central de Alçadas e Controle de Equipes (NedHub)</h1>
-        <p className="text-xs text-slate-400">Monte a estrutura de subordinação do time. Os usuários marcados abaixo farão parte da carteira do líder selecionado, habilitando a visualização em cascata de relatórios e cards.</p>
+        <p className="text-xs text-slate-400">Monte a estrutura de subordinação do time. Os usuários marcados abaixo farão parte da carteira do líder selecionado.</p>
       </div>
 
       {/* SELETOR OPERACIONAL DO LÍDER */}
@@ -108,7 +122,7 @@ export default function GerenciarHierarquiaPage() {
 
       {carregando && (
         <div className="p-2 text-center bg-blue-50 text-blue-700 font-bold font-mono rounded-lg animate-pulse text-[11px]">
-          ⏳ Atualizando árvore de permissões de carteira no banco de dados...
+          ⏳ Salvando matriz de cascata na base de dados...
         </div>
       )}
 
@@ -126,8 +140,8 @@ export default function GerenciarHierarquiaPage() {
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white font-sans text-slate-700 font-medium">
               {listaMembrosDisponiveis.map((colaborador, index) => {
-                // Checa se o superior_id gravado no colaborador corresponde ao selecionado no topo
-                const pertenceAoLider = colaborador.superior_id === liderSelecionadoId;
+                // Checa se o colaborador possui a tag secreta do líder atual
+                const pertenceAoLider = colaborador.permissoes.includes(`lider:${liderSelecionadoId}`);
 
                 return (
                   <tr key={colaborador.id} className={`hover:bg-slate-50/60 transition-colors ${pertenceAoLider ? 'bg-blue-50/30 font-bold' : ''}`}>
@@ -147,13 +161,12 @@ export default function GerenciarHierarquiaPage() {
                       </span>
                     </td>
 
-                    {/* Caixa de marcação de vínculo direta */}
                     <td className="p-3 text-center">
                       <label className="flex items-center justify-center gap-3 cursor-pointer select-none">
                         <input 
                           type="checkbox" 
                           checked={pertenceAoLider}
-                          onChange={() => handleAlternarEquipeSubordinado(colaborador.id, pertenceAoLider)}
+                          onChange={() => handleAlternarEquipeSubordinado(colaborador, pertenceAoLider)}
                           className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer focus:ring-0"
                         />
                         <span className={`font-mono text-[9px] font-bold ${pertenceAoLider ? 'text-blue-600' : 'text-slate-400'}`}>
