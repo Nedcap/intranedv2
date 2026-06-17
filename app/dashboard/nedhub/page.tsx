@@ -5,35 +5,40 @@
 import { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
+interface Tarefa {
+  id: string;
+  titulo: string;
+  data: string;
+  concluida: boolean;
+}
+
 interface Lead {
   id: string;
   cnpj: string;
   razaoSocial: string;
   nomeContato: string;
   telefone: string;
+  telefones: string[]; // Suporte a múltiplos números
+  email: string;
   estagio: string;
   funilId: "vendas" | "pos_venda";
   dadosCustomizados: Record<string, any>;
-  anotacoes?: string; // Campo novo para histórico
+  anotacoes?: string;
+  tarefas: Tarefa[]; // Sistema de tarefas interno
 }
 
 export default function NedHubPage() {
   const [funilAtivo, setFunilAtivo] = useState<"vendas" | "pos_venda">("vendas");
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
   const [userRole, setUserRole] = useState<string>("Consultor");
   const [carregando, setCarregando] = useState(false);
 
-  // 🎨 Estado das Cores Customizadas por Coluna (salva temporariamente em memória)
+  // Cores Customizáveis
   const [coresColunas, setCoresColunas] = useState<Record<string, string>>({
-    sem_contato: "#ef4444",       // Vermelho
-    telefone_inexistente: "#f97316", // Laranja
-    em_fluxo: "#3b82f6",          // Azul
-    apresentacao_enviada: "#8b5cf6", // Roxo
-    interessados: "#22c55e",      // Verde
-    visita_agendada: "#06b6d4",   // Ciano
-    em_analise_mesa: "#eab308",   // Amarelo
-    convertida_aprovada: "#10b981", // Esmeralda
-    nao_convertida: "#64748b",    // Slate
+    sem_contato: "#ef4444", telefones_inexistente: "#f97316", em_fluxo: "#3b82f6",
+    apresentacao_enviada: "#8b5cf6", interessados: "#22c55e", visita_agendada: "#06b6d4",
+    em_analise_mesa: "#eab308", convertida_aprovada: "#10b981", nao_convertida: "#64748b",
   });
 
   // Estados dos Modais
@@ -45,201 +50,172 @@ export default function NedHubPage() {
   const [inputRazao, setInputRazao] = useState("");
   const [inputContato, setInputContato] = useState("");
   const [inputTelefone, setInputTelefone] = useState("");
-  const [valoresCamposCustomizados, setValoresCamposCustomizados] = useState<Record<string, any>>({});
 
-  // Sincroniza dados com o Supabase
+  // Estados internos da Gaveta de Edição/Templates
+  const [novoTelefone, setNovoTelefone] = useState("");
+  const [novaTarefaTitulo, setNovaTarefaTitulo] = useState("");
+  const [novaTarefaData, setNovaTarefaData] = useState("");
+  const [templateSelecionado, setTemplateSelecionado] = useState("");
+
   const sincronizarBaseNedHub = async () => {
     try {
       setCarregando(true);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) setUserRole(user.user_metadata?.role || "Consultor");
-      } catch (e) { console.warn(e); }
-
-      const { data: dbLeads, error } = await supabase
-        .from("crm_leads")
-        .select("*")
-        .order("id", { ascending: false });
+      const { data: dbLeads, error } = await supabase.from("crm_leads").select("*").order("id", { ascending: false });
+      const { data: dbTemplates } = await supabase.from("crm_email_templates").select("*");
       
       if (error) throw error;
-      
+      if (dbTemplates) setTemplates(dbTemplates);
       if (dbLeads) {
         setLeads(dbLeads.map((l: any) => ({
-          id: l.id,
-          cnpj: l.cnpj,
+          id: l.id, cnpj: l.cnpj,
           razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
           nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
           telefone: l.telefone || "",
+          telefones: l.telefones || [],
+          email: l.email || "",
           estagio: l.estagio || l.estágio || "sem_contato",
           funilId: l.funilId || l.funilid || l.funil_id || "vendas",
           dadosCustomizados: l.campos_customizados || {},
-          anotacoes: l.anotacoes || ""
+          anotacoes: l.anotacoes || "",
+          tarefas: l.tarefas || []
         })));
       }
-    } catch (err: any) {
-      console.error("Erro ao sincronizar:", err.message);
-    } finally {
-      setCarregando(false);
-    }
+    } catch (err: any) { console.error(err.message); } finally { setCarregando(false); }
   };
 
-  useEffect(() => {
-    sincronizarBaseNedHub();
-  }, []);
+  useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // API Local do Bot
-  const handleConsultarCnpjReceita = async () => {
-    const cnpjLimpo = inputCnpj.replace(/\D/g, "");
-    if (!cnpjLimpo) return alert("Digite um CNPJ primeiro.");
-    try {
-      const resposta = await fetch(`http://localhost:5000/api/prospeccao?cnpj=${cnpjLimpo}`);
-      if (!resposta.ok) throw new Error("CNPJ não encontrado na base do bot.");
-      const dadosReal = await resposta.json();
-      setInputRazao(dadosReal.razaoSocial);
-      setInputContato("Diretoria / Sócio");
-      setValoresCamposCustomizados({
-        "RAMO": dadosReal.ramoAtividade,
-        "SITE": dadosReal.website || "Não informado",
-        "CIDADE/UF": dadosReal.localizacao,
-        "FANTASIA": dadosReal.nomeFantasia || "Não informado"
-      });
-    } catch (err: any) {
-      alert(`⚠️ Nota: ${err.message}. Digitação manual liberada.`);
-    }
-  };
-
-  // Salvar Lead
   const handleSalvarNovoLead = async () => {
     if (!inputCnpj || !inputRazao) return alert("CNPJ e Razão Social são obrigatórios.");
     try {
       const payload = {
-        cnpj: inputCnpj,
-        razaoSocial: inputRazao,
-        nomeContato: inputContato,
-        telefone: inputTelefone,
-        funilId: funilAtivo,
-        estagio: funilAtivo === "vendas" ? "sem_contato" : "visita_agendada",
-        campos_customizados: valoresCamposCustomizados,
-        anotacoes: ""
+        cnpj: inputCnpj, razaoSocial: inputRazao, nomeContato: inputContato,
+        telefone: inputTelefone, telefones: [inputTelefone], email: "",
+        funilId: funilAtivo, estagio: funilAtivo === "vendas" ? "sem_contato" : "visita_agendada",
+        campos_customizados: {}, tarefas: []
       };
       const { error } = await supabase.from("crm_leads").insert([payload]);
       if (error) throw error;
       setModalNovoLead(false);
-      setInputCnpj(""); setInputRazao(""); setInputContato(""); setInputTelefone(""); setValoresCamposCustomizados({});
-      await sincronizarBaseNedHub();
-    } catch (err: any) { alert(`Erro ao salvar: ${err.message}`); }
-  };
-
-  // 🔄 Função de atualização de estágio no banco (usada tanto por cliques quanto por Drag & Drop)
-  const atualizarEstagioNoBanco = async (cardId: string, novoEstagio: string) => {
-    try {
-      const { error } = await supabase
-        .from("crm_leads")
-        .update({ estagio: novoEstagio })
-        .eq("id", cardId);
-      if (error) throw error;
+      setInputCnpj(""); setInputRazao(""); setInputContato(""); setInputTelefone("");
       await sincronizarBaseNedHub();
     } catch (err: any) { alert(err.message); }
   };
 
-  // Salvar Anotações de dentro do card expandido
-  const handleSalvarAnotacoes = async () => {
-    if (!leadExpandido) return;
-    try {
-      const { error } = await supabase
-        .from("crm_leads")
-        .update({ anotacoes: leadExpandido.anotacoes })
-        .eq("id", leadExpandido.id);
-      if (error) throw error;
-      alert("Informações salvas com sucesso!");
-      setLeadExpandido(null);
-      await sincronizarBaseNedHub();
-    } catch (err: any) { alert(`Erro ao salvar observações: ${err.message}`); }
+  const atualizarEstagioNoBanco = async (cardId: string, novoEstagio: string) => {
+    await supabase.from("crm_leads").update({ estagio: novoEstagio }).eq("id", cardId);
+    await sincronizarBaseNedHub();
   };
 
-  // 🫳 Elementos nativos de Drag and Drop
-  const handleOnDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  // 🔥 SALVAMENTO COMPLETO DA GAVETA EXPANDIDA (Contratos, Telefones, E-mail, Tarefas)
+  const salvarDadosGaveta = async (leadAtualizado: Lead) => {
+    try {
+      const { error } = await supabase.from("crm_leads").update({
+        razaoSocial: leadAtualizado.razaoSocial,
+        nomeContato: leadAtualizado.nomeContato,
+        email: leadAtualizado.email,
+        telefones: leadAtualizado.telefones,
+        anotacoes: leadAtualizado.anotacoes,
+        tarefas: leadAtualizado.tarefas,
+        funilId: leadAtualizado.funilId,
+        estagio: leadAtualizado.estagio
+      }).eq("id", leadAtualizado.id);
+
+      if (error) throw error;
+      setLeadExpandido(null);
+      await sincronizarBaseNedHub();
+    } catch (err: any) { alert(err.message); }
+  };
+
+  // 🫳 Funções Drag and Drop
+  const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
   const handleOnDrop = (e: React.DragEvent, estagioDestino: string) => {
     const cardId = e.dataTransfer.getData("cardId");
     if (cardId) atualizarEstagioNoBanco(cardId, estagioDestino);
   };
 
+  // 🧠 ALGORITMO: Filtra, Identifica alertas de tarefas e JOGA CARDS COM RETORNO PARA CIMA
   const colunasVisíveis = useMemo(() => {
     const filtrados = leads.filter(l => l.funilId === funilAtivo);
+    
+    // Mapeia adicionando uma flag de prioridade se houver tarefa pendente/atrasada para hoje
+    const leadsComFlagPrioridade = filtrados.map(lead => {
+      const hojeStr = new Date().toISOString().split("T")[0];
+      const temTarefaUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
+      return { ...lead, urgente: temTarefaUrgente };
+    });
+
+    // Ordena para que os urgentes fiquem no topo (true vem antes de false)
+    const ordenados = leadsComFlagPrioridade.sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
+
+    const extrairPorEstagio = (estagio: string) => ordenados.filter(l => l.estagio === estagio);
+
     if (funilAtivo === "vendas") {
       return [
-        { id: "sem_contato", nome: "🚫 Sem Contato", cards: filtrados.filter(l => l.estagio === "sem_contato") },
-        { id: "telefone_inexistente", nome: "📞 Tel. Inexistente", cards: filtrados.filter(l => l.estagio === "telefone_inexistente") },
-        { id: "em_fluxo", nome: "🔄 Em Fluxo", cards: filtrados.filter(l => l.estagio === "em_fluxo") },
-        { id: "apresentacao_enviada", nome: "✉️ Apresentação", cards: filtrados.filter(l => l.estagio === "apresentacao_enviada") },
-        { id: "interessados", nome: "🔥 Interessados", cards: filtrados.filter(l => l.estagio === "interessados") },
+        { id: "sem_contato", nome: "🚫 Sem Contato", cards: extrairPorEstagio("sem_contato") },
+        { id: "telefone_inexistente", nome: "📞 Tel. Inexistente", cards: extrairPorEstagio("telefone_inexistente") },
+        { id: "em_fluxo", nome: "🔄 Em Fluxo", cards: extrairPorEstagio("em_fluxo") },
+        { id: "apresentacao_enviada", nome: "✉️ Apresentação", cards: extrairPorEstagio("apresentacao_enviada") },
+        { id: "interessados", nome: "🔥 Interessados", cards: extrairPorEstagio("interessados") },
       ];
     } else {
       return [
-        { id: "visita_agendada", nome: "📅 Visita Agendada", cards: filtrados.filter(l => l.estagio === "visita_agendada") },
-        { id: "em_analise_mesa", nome: "⚖️ Mesa de Risco", cards: filtrados.filter(l => l.estagio === "em_analise_mesa") },
-        { id: "convertida_aprovada", nome: "💰 Convertida", cards: filtrados.filter(l => l.estagio === "convertida_aprovada") },
-        { id: "nao_convertida", nome: "❌ Não Convertida", cards: filtrados.filter(l => l.estagio === "nao_convertida") },
+        { id: "visita_agendada", nome: "📅 Visita Agendada", cards: extrairPorEstagio("visita_agendada") },
+        { id: "em_analise_mesa", nome: "⚖️ Mesa de Risco", cards: extrairPorEstagio("em_analise_mesa") },
+        { id: "convertida_aprovada", nome: "💰 Convertida", cards: extrairPorEstagio("convertida_aprovada") },
+        { id: "nao_convertida", nome: "❌ Não Convertida", cards: extrairPorEstagio("nao_convertida") },
       ];
     }
   }, [leads, funilAtivo]);
 
+  // Função para disparar e-mail com template integrado
+  const dispararEmailTemplate = () => {
+    if (!leadExpandido || !templateSelecionado) return;
+    const tmpl = templates.find(t => t.id === Number(templateSelecionado));
+    if (!tmpl) return;
+
+    let corpoFormatado = tmpl.corpo
+      .replace(/{contato}/g, leadExpandido.nomeContato)
+      .replace(/{empresa}/g, leadExpandido.razaoSocial);
+
+    const mailtoUrl = `mailto:${leadExpandido.email}?subject=${encodeURIComponent(tmpl.assunto)}&body=${encodeURIComponent(corpoFormatado)}`;
+    window.location.href = mailtoUrl;
+  };
+
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
-      {/* CONTROL HEADER */}
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
         <div className="flex items-center gap-4">
           <div>
-            <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central</h2>
-            <p className="text-xs text-slate-400">Originação integrada. Arraste os cards para mudar o estágio.</p>
+            <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v3</h2>
+            <p className="text-xs text-slate-400">Cards com tarefas agendadas sobem automaticamente no grid.</p>
           </div>
-          <select value={funilAtivo} onChange={(e) => setFunilAtivo(e.target.value as any)} className="p-2 border border-blue-300 rounded-lg bg-blue-50 text-blue-900 font-black uppercase text-[10px] outline-none shadow-xs">
+          <select value={funilAtivo} onChange={(e) => setFunilAtivo(e.target.value as any)} className="p-2 border border-blue-300 rounded-lg bg-blue-50 text-blue-900 font-black uppercase text-[10px] outline-none">
             <option value="vendas">📋 Pipeline: Funil de Vendas (SDR)</option>
             <option value="pos_venda">💼 Pipeline: Pós Venda & Comercial</option>
           </select>
         </div>
-        <div className="flex gap-2">
-          <span className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-black uppercase flex items-center">Visão: {userRole}</span>
-          <button onClick={() => setModalNovoLead(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase tracking-wider shadow-xs">+ Novo Negócio</button>
-        </div>
+        <button onClick={() => setModalNovoLead(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase text-[10px] tracking-wider shadow-xs">+ Novo Negócio</button>
       </div>
 
-      {carregando && <div className="p-2 text-center font-bold bg-blue-50 text-blue-600 rounded-lg animate-pulse">Sincronizando pipelines...</div>}
-
-      {/* KANBAN GRID COM DRAG & DROP NATIVO */}
+      {/* GRID KANBAN */}
       {!carregando && (
         <div className="flex-1 grid gap-3 h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `repeat(${colunasVisíveis.length}, minmax(0, 1fr))` }}>
           {colunasVisíveis.map(col => {
             const corAtual = coresColunas[col.id] || "#cbd5e1";
             return (
-              <div 
-                key={col.id} 
-                onDragOver={handleOnDragOver}
-                onDrop={(e) => handleOnDrop(e, col.id)}
-                className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full transition-all duration-200"
-              >
-                {/* Cabeçalho da Aba Customizável por Cor */}
-                <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center tracking-wider text-[9px]" style={{ borderTop: `4px solid ${corAtual}` }}>
-                  <span className="flex items-center gap-1.5">
-                    {col.nome}
-                  </span>
+              <div key={col.id} onDragOver={handleOnDragOver} onDrop={(e) => handleOnDrop(e, col.id)} className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full">
+                <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${corAtual}` }}>
+                  <span>{col.nome}</span>
                   <div className="flex items-center gap-1.5">
-                    {/* Seletor de cores discreto no topo direito de cada coluna */}
-                    <input 
-                      type="color" 
-                      value={corAtual} 
-                      onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))}
-                      className="w-3 h-3 border-0 rounded-sm cursor-pointer p-0 bg-transparent outline-none" 
-                      title="Mudar cor da coluna"
-                    />
-                    <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono text-slate-700">{col.cards.length}</span>
+                    <input type="color" value={corAtual} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
+                    <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
                   </div>
                 </div>
-
-                {/* Zona de Soltura dos Cards */}
                 <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
-                  {col.cards.map(lead => (
+                  {col.cards.map((lead: any) => (
                     <CardLead key={lead.id} lead={lead} corColuna={corAtual} onExpandir={setLeadExpandido} />
                   ))}
                 </div>
@@ -249,111 +225,185 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL DE CADASTRO */}
-      {modalNovoLead && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh] shadow-xl">
-            <div className="p-4 bg-slate-900 text-white font-black uppercase text-[10px] flex justify-between items-center">
-              <span>Criar Negociação ({funilAtivo === "vendas" ? "Vendas" : "Pós Venda"})</span>
-              <button onClick={() => setModalNovoLead(false)} className="text-sm hover:text-red-400">✕</button>
-            </div>
-            <div className="p-4 space-y-3 overflow-y-auto flex-1">
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">CNPJ da Empresa</label>
-                  <input type="text" placeholder="Apenas números" value={inputCnpj} onChange={e => setInputCnpj(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg font-mono font-bold text-slate-800 bg-amber-50/20 outline-none" />
-                </div>
-                <button type="button" onClick={handleConsultarCnpjReceita} className="p-2 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-lg uppercase text-[10px] h-9 shadow-xs">⚡ Puxar Bot</button>
-              </div>
+      {/* 🔍 GAVETA ESTILIZADA DE ALTA PERFORMANCE */}
+      {leadExpandido && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
+          <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
+            
+            {/* Header da Gaveta */}
+            <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
-                <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Razão Social</label>
-                <input type="text" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-slate-800 outline-none" />
+                <span className="text-[9px] font-mono font-bold uppercase text-amber-400">Edição e Ações do Contrato</span>
+                <input 
+                  type="text" 
+                  value={leadExpandido.razaoSocial} 
+                  onChange={(e) => setLeadExpandido({ ...leadExpandido, razaoSocial: e.target.value })} 
+                  className="bg-transparent text-base font-black border-b border-transparent hover:border-slate-500 focus:border-blue-500 outline-none w-[450px] text-white p-0.5"
+                />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Contato</label>
-                  <input type="text" value={inputContato} onChange={e => setInputContato(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Telefone / WhatsApp</label>
-                  <input type="text" value={inputTelefone} onChange={e => setInputTelefone(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-mono outline-none" />
-                </div>
+              
+              {/* 🔄 BOTÃO DE MOVIMENTAÇÃO ENTRE FUNIS */}
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setLeadExpandido({
+                    ...leadExpandido, 
+                    funilId: leadExpandido.funilId === "vendas" ? "pos_venda" : "vendas",
+                    estagio: leadExpandido.funilId === "vendas" ? "visita_agendada" : "sem_contato"
+                  })}
+                  className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[9px] rounded-lg shadow-sm"
+                >
+                  ➡️ Mudar para {leadExpandido.funilId === "vendas" ? "Pós-Venda" : "Funil Vendas"}
+                </button>
+                <button onClick={() => setLeadExpandido(null)} className="text-xl font-bold text-slate-400 hover:text-white px-2">✕</button>
               </div>
             </div>
-            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
-              <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 font-bold rounded-lg uppercase">Cancelar</button>
-              <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase shadow-xs">Salvar Negociação</button>
+
+            {/* Conteúdo Rolável */}
+            <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
+              
+              {/* Seção 1: Contatos Completos & Editáveis */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato e Comunicação</h3>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Nome do Contato Principal</label>
+                    <input type="text" value={leadExpandido.nomeContato} onChange={(e) => setLeadExpandido({ ...leadExpandido, nomeContato: e.target.value })} className="w-full p-2 border bg-white rounded-lg outline-none font-bold text-slate-800" />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">E-mail Corporativo</label>
+                    <input type="email" value={leadExpandido.email} onChange={(e) => setLeadExpandido({ ...leadExpandido, email: e.target.value })} placeholder="exemplo@empresa.com" className="w-full p-2 border bg-white rounded-lg outline-none text-slate-800 font-mono" />
+                  </div>
+                </div>
+
+                {/* Múltiplos Telefones */}
+                <div>
+                  <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones / WhatsApps</label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {leadExpandido.telefones.map((tel, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold">
+                        <span>{tel}</span>
+                        <a href={`https://web.whatsapp.com/send?phone=55${tel.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" title="Chamar no WhatsApp" className="text-emerald-600 hover:text-emerald-700">💬</a>
+                        <button onClick={() => {
+                          const novosTels = leadExpandido.telefones.filter((_, i) => i !== idx);
+                          setLeadExpandido({ ...leadExpandido,  telefones: novosTels });
+                        }} className="text-red-500 font-bold hover:text-red-700 ml-1">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="text" value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)} placeholder="DDD + Número (ex: 41999999999)" className="p-2 border rounded-lg bg-white flex-1 font-mono outline-none" />
+                    <button onClick={() => {
+                      if (!novoTelefone) return;
+                      setLeadExpandido({ ...leadExpandido,  telefones: [...leadExpandido.telefones, novoTelefone] });
+                      setNovoTelefone("");
+                    }} className="px-3 bg-slate-800 text-white font-black uppercase text-[9px] rounded-lg">+ Add Tel</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Seção 2: Templates de E-mail Integrados */}
+              <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
+                <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo de E-mail com Template</h3>
+                <div className="flex gap-2">
+                  <select value={templateSelecionado} onChange={e => setTemplateSelecionado(e.target.value)} className="p-2 border border-purple-300 rounded-lg bg-white text-slate-800 outline-none flex-1 font-bold">
+                    <option value="">-- Selecione um template de e-mail --</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
+                  </select>
+                  <button onClick={dispararEmailTemplate} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[9px] rounded-lg shadow-sm">⚡ Mesclar e Enviar</button>
+                </div>
+              </div>
+
+              {/* Seção 3: Sistema Interno de Tarefas & Alertas de Retorno */}
+              <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
+                <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
+                
+                {/* Criar Tarefa */}
+                <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="col-span-1.5">
+                    <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Ação Comercial</label>
+                    <input type="text" value={novaTarefaTitulo} onChange={e => setNovaTarefaTitulo(e.target.value)} placeholder="Ex: Retornar ligação da diretoria" className="w-full p-2 border bg-white rounded-lg outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Data de Retorno</label>
+                    <input type="date" value={novaTarefaData} onChange={e => setNovaTarefaData(e.target.value)} className="w-full p-2 border bg-white rounded-lg outline-none font-mono" />
+                  </div>
+                  <button onClick={() => {
+                    if (!novaTarefaTitulo || !novaTarefaData) return alert("Preencha o título e a data da tarefa.");
+                    const task: Tarefa = { id: Math.random().toString(), titulo: novaTarefaTitulo, data: novaTarefaData, concluida: false };
+                    setLeadExpandido({ ...leadExpandido, tarefas: [...leadExpandido.tarefas, task] });
+                    setNovaTarefaTitulo(""); setNovaTarefaData("");
+                  }} className="w-full p-2 bg-amber-600 hover:bg-amber-700 text-white font-black uppercase text-[9px] h-9 rounded-lg shadow-xs">Agendar</button>
+                </div>
+
+                {/* Lista de Tarefas Cadastradas */}
+                <div className="space-y-1.5 max-h-[150px] overflow-y-auto pt-2">
+                  {leadExpandido.tarefas.map(t => (
+                    <div key={t.id} className={`flex justify-between items-center p-2 rounded-lg border font-mono text-[10px] ${t.concluida ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-amber-200 text-slate-800 font-bold'}`}>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" checked={t.concluida} onChange={(e) => {
+                          const modificadas = leadExpandido.tarefas.map(task => task.id === t.id ? { ...task, concluida: e.target.checked } : task);
+                          setLeadExpandido({ ...leadExpandido, tarefas: modificadas });
+                        }} className="w-3.5 h-3.5 cursor-pointer" />
+                        <span>🔔 {t.data} - {t.titulo}</span>
+                      </div>
+                      <button onClick={() => {
+                        const limpas = leadExpandido.tarefas.filter(task => task.id !== t.id);
+                        setLeadExpandido({ ...leadExpandido, tarefas: limpas });
+                      }} className="text-red-500 hover:text-red-700 font-bold font-sans">✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Seção 4: Integração Rápida com Agendas Corporativas */}
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200/60 space-y-2">
+                <h3 className="font-black text-blue-900 uppercase text-[10px] tracking-wider border-b border-blue-200 pb-1">🗓️ Sincronizar Agenda Externa (Criar Compromisso)</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <a 
+                    href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&details=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`}
+                    target="_blank" rel="noreferrer"
+                    className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700"
+                  >
+                    📅 Lançar no Google Calendar
+                  </a>
+                  <a 
+                    href={`https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent("Reunião: " + leadExpandido.razaoSocial)}&body=${encodeURIComponent("Falar com: " + leadExpandido.nomeContato)}`}
+                    target="_blank" rel="noreferrer"
+                    className="p-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-center font-bold font-sans shadow-2xs flex items-center justify-center gap-1 text-slate-700"
+                  >
+                    📧 Lançar no Outlook Calendar
+                  </a>
+                </div>
+              </div>
+
+              {/* Histórico Comercial Livre */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Observações Gerais e Histórico de Negociações</label>
+                <textarea rows={3} value={leadExpandido.anotacoes || ""} onChange={(e) => setLeadExpandido({ ...leadExpandido, anotacoes: e.target.value })} placeholder="Digite anotações livres sobre o cliente aqui..." className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500 bg-amber-50/10 text-slate-800" />
+              </div>
             </div>
+
+            {/* Footer da Gaveta */}
+            <div className="p-3 bg-slate-100 border-t flex justify-end gap-2">
+              <button onClick={() => setLeadExpandido(null)} className="px-4 py-2 bg-slate-300 text-slate-700 font-bold rounded-lg uppercase">Cancelar</button>
+              <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-900 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Todo o Contrato</button>
+            </div>
+
           </div>
         </div>
       )}
 
-      {/* 🔍 GAVETA / MODAL DE CARD EXPANDIDO (EDIÇÃO, WHATSAPP, HISTÓRICO) */}
-      {leadExpandido && (
+      {/* MODAL NOVO LEAD (Omitido o preenchimento para foco na velocidade) */}
+      {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-xl w-full overflow-hidden flex flex-col max-h-[85vh] shadow-2xl border border-slate-100">
-            <div className="p-4 bg-slate-900 text-white font-black uppercase text-[10px] flex justify-between items-center">
-              <div className="flex flex-col">
-                <span className="text-amber-400">CNPJ: {leadExpandido.cnpj}</span>
-                <span className="text-base font-black truncate max-w-[400px]">{leadExpandido.razaoSocial}</span>
-              </div>
-              <button onClick={() => setLeadExpandido(null)} className="text-base text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-[12px]">
-              {/* Botão de Ação Rápida WhatsApp */}
-              <div className="flex gap-2">
-                <a 
-                  href={`https://web.whatsapp.com/send?phone=55${leadExpandido.telefone.replace(/\D/g, "")}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full text-center p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl uppercase tracking-wider text-[10px] flex items-center justify-center gap-2 shadow-sm transition-all"
-                >
-                  💬 Abrir no WhatsApp Web
-                </a>
-              </div>
-
-              {/* Informações de Contato Basicas */}
-              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase block">Pessoa de Contato</span>
-                  <span className="font-bold text-slate-800">{leadExpandido.nomeContato || "Não informado"}</span>
-                </div>
-                <div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase block">Telefone Gravado</span>
-                  <span className="font-mono text-slate-700">{leadExpandido.telefone || "Não informado"}</span>
-                </div>
-              </div>
-
-              {/* Área de Inclusão de Informações / Histórico Comercial */}
-              <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Observações e Histórico da Negociação (Livre)</label>
-                <textarea 
-                  rows={4}
-                  value={leadExpandido.anotacoes || ""}
-                  onChange={(e) => setLeadExpandido(prev => prev ? { ...prev, anotacoes: e.target.value } : null)}
-                  placeholder="Ex: Liguei hoje às 14h, falar com o Estevan amanhã cedo para fechar a proposta..."
-                  className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500 bg-amber-50/10 font-medium text-slate-800 text-[11px]"
-                />
-              </div>
-
-              {/* Dados do SQLite do Bot */}
-              {Object.keys(leadExpandido.dadosCustomizados).length > 0 && (
-                <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 space-y-1.5">
-                  <span className="text-[9px] font-black text-blue-700 uppercase block border-b border-blue-200 pb-1">Metadados Originais do Bot de Prospecção</span>
-                  {Object.entries(leadExpandido.dadosCustomizados).map(([k, v]: any) => (
-                    <div key={k} className="font-mono text-[10px] text-slate-600 flex justify-between">
-                      <strong className="uppercase text-slate-400">{k}:</strong> 
-                      <span className="text-slate-800 font-bold">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
-              <button onClick={() => setLeadExpandido(null)} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg uppercase">Fechar</button>
-              <button onClick={handleSalvarAnotacoes} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase shadow-md tracking-wider">💾 Salvar Alterações</button>
+          <div className="bg-white rounded-xl p-5 max-w-sm w-full space-y-3">
+            <h3 className="font-black uppercase text-slate-900 text-[10px]">Criar Nova Originação</h3>
+            <input type="text" placeholder="CNPJ" value={inputCnpj} onChange={e => setInputCnpj(e.target.value)} className="w-full p-2 border rounded-lg outline-none" />
+            <input type="text" placeholder="Razão Social" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border rounded-lg outline-none" />
+            <div className="flex justify-end gap-2 text-[10px]">
+              <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 font-bold rounded-md uppercase">Sair</button>
+              <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-md uppercase">Salvar</button>
             </div>
           </div>
         </div>
@@ -363,52 +413,48 @@ export default function NedHubPage() {
   );
 }
 
-// 🃏 COMPONENTE CARD REESCRITO COM SUPORTE A DRAG NATIVE & EXPANSÃO
+// 🃏 REESTRUTURAÇÃO DO CARD KANBAN
 function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: string; onExpandir: (l: Lead) => void }) {
-  
-  // Inicia o evento de arrastar anexando o ID do card
-  const handleOnDragStart = (e: React.DragEvent, id: string) => {
-    e.dataTransfer.setData("cardId", id);
-  };
+  const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
+
+  // Verifica se o card possui tarefas em atraso ou para hoje para emitir o alerta pulsante visual na tela
+  const hojeStr = new Date().toISOString().split("T")[0];
+  const possuiRetornoUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
 
   return (
     <div 
       draggable
       onDragStart={(e) => handleOnDragStart(e, lead.id)}
-      className="bg-white p-3 border border-slate-200 rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing group relative"
-      style={{ borderLeft: `3px solid ${corColuna}` }}
+      className={`bg-white p-3 border rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing relative ${possuiRetornoUrgente ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-400 ring-offset-1 animate-pulse-slow' : 'border-slate-200'}`}
+      style={{ borderLeft: `4px solid ${corColuna}` }}
     >
+      {possuiRetornoUrgente && (
+        <span className="absolute top-2 right-14 bg-amber-600 text-white text-[7px] px-1.5 py-0.5 font-black uppercase rounded animate-bounce">
+          ⚠️ Retorno Hoje!
+        </span>
+      )}
+
       <div className="flex justify-between items-start gap-2">
         <div className="overflow-hidden flex-1">
-          <span className="text-[8px] font-mono font-bold text-slate-400 block">CNPJ: {lead.cnpj}</span>
-          <h4 className="font-black text-slate-900 tracking-tight leading-tight uppercase truncate group-hover:text-blue-600 transition-colors">{lead.razaoSocial}</h4>
+          <span className="text-[8px] font-mono text-slate-400 block font-bold">CNPJ: {lead.cnpj}</span>
+          <h4 className="font-black text-slate-900 tracking-tight leading-tight uppercase truncate">{lead.razaoSocial}</h4>
         </div>
-        
-        {/* 🔍 Botãozinho no canto superior direito para Expandir o card */}
-        <button 
-          onClick={() => onExpandir(lead)}
-          className="p-1 bg-slate-100 hover:bg-slate-900 text-slate-500 hover:text-white rounded-md text-[9px] font-bold transition-all shadow-2xs"
-          title="Expandir informações"
-        >
-          👁️ Ver / Editar
+        <button onClick={() => onExpandir(lead)} className="p-1 bg-slate-900 text-white hover:bg-blue-600 rounded-md text-[8px] font-black uppercase transition-all shadow-2xs">
+          ⚙️ Abrir
         </button>
       </div>
 
-      <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-0.5 border border-slate-100">
-        <p>👤 <span className="font-medium text-slate-700">{lead.nomeContato || "-"}</span></p>
-        <p>📞 <span className="font-mono text-slate-600">{lead.telephone || lead.telefone || "-"}</span></p>
+      <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-0.5 border border-slate-100 font-medium">
+        <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "-"}</span></p>
+        <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
       </div>
 
-      {lead.anotacoes && (
-        <div className="text-[9px] text-slate-500 italic truncate bg-amber-50/30 px-1.5 py-0.5 rounded border border-amber-100/50">
-          📝 {lead.anotacoes}
+      {/* Badge Contador de Tarefas Pendentes */}
+      {lead.tarefas.filter(t => !t.concluida).length > 0 && (
+        <div className="text-[8px] font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-bold w-fit border border-amber-200">
+          ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas
         </div>
       )}
-
-      <div className="flex justify-between items-center pt-1 gap-2">
-        <span className="text-[7.5px] uppercase tracking-wider text-slate-400 font-mono">🫳 Arraste para mover</span>
-        <span className="text-[8px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">🔒 Ned Capital</span>
-      </div>
     </div>
   );
 }
