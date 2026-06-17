@@ -61,7 +61,7 @@ export default function NedHubPage() {
   const sincronizarBaseNedHub = async () => {
     try {
       setCarregando(true);
-      // 🔥 FIX 1: Trocado .order("id") por .order("criado_em") para impedir o UUID de quebrar a ordenação estável
+      // 🔥 CORREÇÃO DA BUSCA: Ordenando por criado_em para impedir o UUID de avacalhar o Kanban[cite: 1]
       const { data: dbLeads, error } = await supabase.from("crm_leads").select("*").order("criado_em", { ascending: false });
       const { data: dbTemplates } = await supabase.from("crm_email_templates").select("*");
       
@@ -73,7 +73,7 @@ export default function NedHubPage() {
           razaoSocial: l.razaoSocial || l.razaosocial || l.razao_social || "",
           nomeContato: l.nomeContato || l.nomecontato || l.nome_contato || "",
           telefone: l.telefone || "",
-          // 🔥 FIX 2: Garante blindagem caso a coluna ARRAY venha distorcida do Postgres
+          // 🔥 CORREÇÃO DE ARRAY: Blindagem para arrays vindas do Postgres[cite: 1]
           telefones: Array.isArray(l.telefones) ? l.telefones : l.telefones ? [l.telefones] : [],
           email: l.email || "",
           estagio: l.estagio || l.estágio || "sem_contato",
@@ -88,7 +88,7 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA NO BOT LOCAL COM MAPEAMENTO FLEXÍVEL
+  // 🤖 BUSCA INTELIGENTE SEM POPUP TRAVANDO TELA
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj?: string, isUpdateInDrawer = false) => {
     const cnpjAlvo = targetCnpj || inputCnpj;
     const cnpjLimpo = cnpjAlvo.replace(/\D/g, "");
@@ -112,7 +112,6 @@ export default function NedHubPage() {
             const cidadeMapeado = dados.municipio || dados.cidade || dados.localidade || "";
             const ufMapeada = dados.uf || dados.estado || "";
 
-            // Mescla de forma explícita para não perder chaves antigas do JSONB
             setLeadExpandido(prev => {
               if (!prev) return null;
               return {
@@ -129,14 +128,14 @@ export default function NedHubPage() {
                 }
               };
             });
-            alert("⚡ Dados da Receita carregados na tela! Clique agora no botão preto '💾 Salvar Todo o Contrato' para gravar no banco.");
+            alert("⚡ Dados da Receita carregados! Clique em 'Salvar Todo o Contrato' para gravar.");
           } else {
             setInputRazao(razaoMapeada);
             if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
             if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
           }
         } else {
-          if (isUpdateInDrawer) alert("ℹ️ O robô local não retornou registros estruturados para este CNPJ.");
+          if (isUpdateInDrawer) alert("ℹ️ O robô local não encontrou registros estruturados para este CNPJ.");
         }
       } else {
         if (isUpdateInDrawer) alert("⚠️ Endpoint do Robô não retornou sucesso (200).");
@@ -224,6 +223,7 @@ export default function NedHubPage() {
     }
   };
 
+  // Funções Drag and Drop
   const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
   const handleOnDrop = (e: React.DragEvent, estagioDestino: string) => {
     const cardId = e.dataTransfer.getData("cardId");
@@ -298,6 +298,7 @@ export default function NedHubPage() {
 
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
+      
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
         <div className="flex items-center gap-4">
@@ -336,10 +337,11 @@ export default function NedHubPage() {
         })}
       </div>
 
-      {/* GAVETA EXPANDIDA */}
+      {/* 🔍 GAVETA EXPANDIDA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
+            
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
                 <span className="text-[9px] font-mono font-bold uppercase text-amber-400">Edição e Ações do Contrato</span>
@@ -350,6 +352,7 @@ export default function NedHubPage() {
                   className="bg-transparent text-base font-black border-b border-transparent hover:border-slate-500 focus:border-blue-500 outline-none w-[450px] text-white p-0.5"
                 />
               </div>
+              
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => setLeadExpandido({
@@ -366,7 +369,8 @@ export default function NedHubPage() {
             </div>
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
-              {/* SEÇÃO DADOS DE INTELIGÊNCIA */}
+              
+              {/* 🏢 SEÇÃO DADOS DE INTELIGÊNCIA DA RECEITA FEDERAL DO ROBÔ */}
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
                   <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Dados de Inteligência (Robô Receita)</h3>
@@ -379,6 +383,7 @@ export default function NedHubPage() {
                     {buscandoRobo ? "⏳ Carregando..." : "🔄 Sincronizar Dados da Receita"}
                   </button>
                 </div>
+
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
                   <div>
                     <span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ Vinculado:</span>
@@ -405,7 +410,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* CONTATOS */}
+              {/* Seção 1: Contatos Completos & Editáveis */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                 <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato e Comunicação</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -418,6 +423,7 @@ export default function NedHubPage() {
                     <input type="email" value={leadExpandido.email} onChange={(e) => setLeadExpandido({ ...leadExpandido, email: e.target.value })} placeholder="exemplo@empresa.com" className="w-full p-2 border bg-white rounded-lg outline-none text-slate-800 font-mono" />
                   </div>
                 </div>
+
                 <div>
                   <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones / WhatsApps</label>
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -443,7 +449,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* TEMPLATES DE EMAIL */}
+              {/* Seção 2: Templates de E-mail */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
                 <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo Automatizado de E-mail</h3>
                 <div className="space-y-2">
@@ -451,6 +457,7 @@ export default function NedHubPage() {
                     <option value="">-- Selecione um template de e-mail --</option>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
                   </select>
+                  
                   <div className="grid grid-cols-2 gap-2">
                     <button onClick={dispararEmailClienteLocal} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[9px] rounded-lg shadow-sm">
                       💻 Abrir no Outlook / Gmail (Editar)
@@ -462,7 +469,7 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* TAREFAS INTERNAS */}
+              {/* Seção 3: Sistema Interno de Tarefas */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
                 <div className="grid grid-cols-3 gap-2 items-end">
@@ -515,11 +522,12 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL CADASTRO */}
+      {/* MODAL NOVO LEAD */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
             <h3 className="font-black uppercase text-slate-900 text-[11px] border-b pb-1">🚀 Iniciar Nova Originação Comercial</h3>
+            
             <div className="space-y-3 text-[11px]">
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">CNPJ da Empresa:</label>
@@ -546,10 +554,12 @@ export default function NedHubPage() {
                   </button>
                 </div>
               </div>
+
               <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social (Nome Oficial):</label><input type="text" placeholder="Nome corporativo completo" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" /></div>
               <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome do Decisor / Contato:</label><input type="text" placeholder="Ex: Diretor Financeiro João" value={inputContato} onChange={e => setInputContato(e.target.value)} className="w-full p-2 border bg-slate-50 rounded-lg outline-none text-slate-800 font-bold" /></div>
               <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Telefone Principal:</label><input type="text" placeholder="Ex: 41999999999" value={inputTelefone} onChange={e => setInputTelefone(e.target.value)} className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" /></div>
             </div>
+
             <div className="flex justify-end gap-2 text-[10px] pt-2 border-t">
               <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase">Sair</button>
               <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-lg uppercase shadow-md">Salvar Lead</button>
@@ -557,6 +567,7 @@ export default function NedHubPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
@@ -570,9 +581,16 @@ function CardLead({ lead, corColuna, onExpandir, onExcluir }: { lead: Lead; corC
     <div 
       draggable
       onDragStart={(e) => handleOnDragStart(e, lead.id)}
-      className={`bg-white p-3 border rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing relative ${possuiRetornoUrgente ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-400 ring-offset-1' : 'border-slate-200'}`}
+      className={`bg-white p-3 border rounded-xl shadow-xs hover:shadow-md transition-all space-y-2 cursor-grab active:cursor-grabbing relative ${possuiRetornoUrgente ? 'border-amber-500 bg-amber-50/20 ring-2 ring-amber-400 ring-offset-1 animate-pulse-slow' : 'border-slate-200'}`}
       style={{ borderLeft: `4px solid ${corColuna}` }}
     >
+      {/* 🔮 RESTAURADO: O balão de notificação pulando que havia sumido! */}
+      {possuiRetornoUrgente && (
+        <span className="absolute top-2 right-2 bg-amber-600 text-white text-[7px] px-1.5 py-0.5 font-black uppercase rounded animate-bounce">
+          ⚠️ Retorno Hoje!
+        </span>
+      )}
+
       <div className="flex justify-between items-start gap-2">
         <div className="overflow-hidden flex-1">
           <span className="text-[8px] font-mono text-slate-400 block font-bold">CNPJ: {lead.cnpj}</span>
@@ -585,6 +603,14 @@ function CardLead({ lead, corColuna, onExpandir, onExcluir }: { lead: Lead; corC
         <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
       </div>
 
+      {/* RESTAURADO: Contador de tarefas pendentes no card */}
+      {lead.tarefas?.filter(t => !t.concluida).length > 0 && (
+        <div className="text-[8px] font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-bold w-fit border border-amber-200">
+          ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas
+        </div>
+      )}
+
+      {/* FOOTER DE AÇÕES RÁPIDAS NO CARD */}
       <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
         <button onClick={() => onExcluir(lead.id, lead.razaoSocial)} className="text-red-500 hover:text-red-700 font-bold p-1 uppercase tracking-tighter transition-colors">
           🗑️ Excluir
