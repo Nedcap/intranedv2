@@ -20,7 +20,7 @@ interface Lead {
   razaoSocial: string;
   nomeContato: string;
   telefone: string;
-  telefones: string[];
+  telefones: string[]; 
   email: string;
   estagio: string;
   funilId: "vendas" | "pos_venda";
@@ -30,10 +30,10 @@ interface Lead {
   atualizadoEm?: string;
 }
 
-// Mock de Usuários do Sistema para Simulação de Níveis e Agendas
+// 🏢 COLOQUE OS NOMES REAIS DOS SEUS GERENTES COMERCIAIS AQUI:
 const GERENTES_COMERCIAIS = [
-  { id: "gerente_1", nome: "Rodrigo Silva (Sul)" },
-  { id: "gerente_2", nome: "Mariana Costa (SP/RJ)" },
+  { id: "gerente_1", nome: "Gerente Comercial 1" },
+  { id: "gerente_2", nome: "Gerente Comercial 2" },
 ];
 
 export default function NedHubPage() {
@@ -41,17 +41,18 @@ export default function NedHubPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   
-  // 🔐 CONTROLE DE GESTÃO: Mude para 'SDR' para testar os bloqueios de exclusão/edição ou 'Diretor' para liberar tudo
+  // 🔐 CONTROLE DE GESTÃO DA DIRETORIA (Altere para 'SDR' para testar as travas operacionais)
   const [userRole, setUserRole] = useState<"Diretor" | "Consultor" | "SDR">("Diretor");
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
 
   const [carregando, setCarregando] = useState(false);
   const [buscandoRobo, setBuscandoRobo] = useState(false);
+  const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  // Estado das Agendas Livres configuradas pelos Gerentes Comerciais
+  // Banco de Horários Disponíveis configurados pelo Comercial
   const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({
-    "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00", "2026-06-19 16:00"],
-    "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30", "2026-06-20 09:30"],
+    "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00"],
+    "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30"],
   });
 
   const [coresColunas, setCoresColunas] = useState<Record<string, string>>({
@@ -60,21 +61,22 @@ export default function NedHubPage() {
     em_analise_mesa: "#eab308", convertida_aprovada: "#10b981", nao_convertida: "#64748b",
   });
 
-  // Modais
+  // Estados dos Modais e Gavetas
   const [modalNovoLead, setModalNovoLead] = useState(false);
   const [leadExpandido, setLeadExpandido] = useState<Lead | null>(null);
   const [modalCalendarioPopup, setModalCalendarioPopup] = useState<{ aberto: boolean; lead: Lead | null }>({ aberto: false, lead: null });
-  const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  // Formulário de Cadastro
+  // Formulário de Cadastro Novo Lead
   const [inputCnpj, setInputCnpj] = useState("");
   const [inputRazao, setInputRazao] = useState("");
   const [inputContato, setInputContato] = useState("");
   const [inputTelefone, setInputTelefone] = useState("");
   const [dadosAutomotivosBot, setDadosAutomotivosBot] = useState<Record<string, any>>({});
 
-  // Gaveta interna
+  // Internos da Gaveta
   const [novoTelefone, setNovoTelefone] = useState("");
+  const [novaTarefaTitulo, setNovaTarefaTitulo] = useState("");
+  const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
 
@@ -107,7 +109,7 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA INTELIGENTE ANTECIPADA: Dispara direto no input do Cadastro
+  // 🤖 AUTO-BUSCA NO CADASTRO (AO DIGITAR OS 14 DÍGITOS)
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
     const cnpjLimpo = targetCnpj.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return;
@@ -124,7 +126,6 @@ export default function NedHubPage() {
           if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
           if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
           
-          // Guarda os dados de inteligência adicionais para salvar de uma vez só
           setDadosAutomotivosBot({
             ramo: dados.ramo || dados.atividade_principal || dados.atividade || "",
             cnae: dados.cnae || dados.cnae_fiscal || "",
@@ -136,7 +137,7 @@ export default function NedHubPage() {
         }
       }
     } catch (err) {
-      console.log("Robô offline ou indisponível no momento.");
+      console.log("Robô local offline.");
     } finally {
       setBuscandoRobo(false);
     }
@@ -171,10 +172,8 @@ export default function NedHubPage() {
   };
 
   const handleExcluirLead = async (cardId: string, razaoSocial: string) => {
-    // Trava de segurança para SDR
-    if (userRole === "SDR") return alert("❌ Acesso Negado: Usuários SDR não têm permissão para deletar dados do NedHub.");
-    
-    if (!confirm(`⚠️ CONFIRMAÇÃO DIRETORIA: Deseja mesmo deletar a empresa "${razaoSocial}"?`)) return;
+    if (userRole === "SDR") return alert("❌ Bloqueio Comercial: SDRs não possuem permissão para excluir registros.");
+    if (!confirm(`⚠️ ATENÇÃO DIRETORIA: Deseja deletar permanentemente a empresa "${razaoSocial}"?`)) return;
     try {
       setCarregando(true);
       const { error } = await supabase.from("crm_leads").delete().eq("id", cardId);
@@ -207,6 +206,7 @@ export default function NedHubPage() {
     } catch (err: any) { alert(err.message); } finally { setCarregando(false); }
   };
 
+  // 🔥 SOLUÇÃO DO LIMBO: Altera o estágio e move a visualização para o pipeline de Pós-Venda
   const agendarHorarioGerentePeloSdr = async (dataHora: string) => {
     if (!modalCalendarioPopup.lead) return;
     const leadAlvo = modalCalendarioPopup.lead;
@@ -214,7 +214,7 @@ export default function NedHubPage() {
     
     const novaAgendaTarefa: Tarefa = {
       id: Math.random().toString(),
-      titulo: `Reunião Comercial - Ref: ${GERENTES_COMERCIAis_Map(gerenteSelecionadoAgenda)}`,
+      titulo: `Reunião Agendada com ${getGerenteNome(gerenteSelecionadoAgenda)}`,
       data: data,
       horario: hora,
       gerenteId: gerenteSelecionadoAgenda,
@@ -223,25 +223,47 @@ export default function NedHubPage() {
 
     const tarefasAtualizadas = [...(leadAlvo.tarefas || []), novaAgendaTarefa];
     
-    // Remove o horário livre do gerente já que foi preenchido
     setHorariosDisponiveisGerentes(prev => ({
       ...prev,
       [gerenteSelecionadoAgenda]: prev[gerenteSelecionadoAgenda].filter(h => h !== dataHora)
     }));
 
-    // Atualiza diretamente no banco para garantir consistência imediata
-    await supabase.from("crm_leads").update({ tarefas: tarefasAtualizadas, estagio: "visita_agendada" }).eq("id", leadAlvo.id);
+    // Atualiza estágio para visita_agendada e altera o funilId para 'pos_venda'
+    await supabase.from("crm_leads").update({ 
+      tarefas: tarefasAtualizadas, 
+      estagio: "visita_agendada",
+      funilId: "pos_venda" 
+    }).eq("id", leadAlvo.id);
+
     setModalCalendarioPopup({ aberto: false, lead: null });
+    setFunilAtivo("pos_venda"); // Muda a tela do usuário para o Pós-venda para ver o card lá!
     await sincronizarBaseNedHub();
-    alert("📅 Sucesso! Horário travado na agenda do comercial e card atualizado.");
+    alert("📅 Reunião fixada! O card foi movido com sucesso para a coluna 'Visita Agendada' no Funil de Pós-Venda.");
   };
 
-  const GERENTES_COMERCIAis_Map = (id: string) => GERENTES_COMERCIAIS.find(g => g.id === id)?.nome || "";
+  const getGerenteNome = (id: string) => GERENTES_COMERCIAIS.find(g => g.id === id)?.nome || "";
 
-  const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
-  const handleOnDrop = (e: React.DragEvent, estagioDestino: string) => {
-    const cardId = e.dataTransfer.getData("cardId");
-    if (cardId) atualizarEstagioNoBanco(cardId, estagioDestino);
+  const dispararEmailClienteLocal = () => {
+    if (!leadExpandido || !templateSelecionado) return;
+    const tmpl = templates.find(t => t.id === templateSelecionado);
+    if (!tmpl) return;
+    const assuntoFormatado = tmpl.assunto.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
+    const corpoFormatado = tmpl.corpo.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
+    window.location.href = `mailto:${leadExpandido.email}?subject=${encodeURIComponent(assuntoFormatado)}&body=${encodeURIComponent(corpoFormatado)}`;
+  };
+
+  const dispararEmailViaResendAPI = async () => {
+    if (!leadExpandido || !templateSelecionado || !leadExpandido.email) return alert("Dados insuficientes para envio via API.");
+    const tmpl = templates.find(t => t.id === templateSelecionado);
+    if (!tmpl) return;
+    try {
+      const res = await fetch("/api/comercial/enviar-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: leadExpandido.email, subject: tmpl.assunto, text: tmpl.corpo })
+      });
+      if (res.ok) alert("🚀 E-mail disparado via Resend!");
+    } catch (e) { alert("Erro ao disparar API."); }
   };
 
   const colunasVisíveis = useMemo(() => {
@@ -272,100 +294,67 @@ export default function NedHubPage() {
     }
   }, [leads, funilAtivo]);
 
-  // Indicadores de Controle de Gestão (Visão Diretores)
   const metricasAuditoria = useMemo(() => {
     const hojeStr = new Date().toISOString().split("T")[0];
-    let totais = 0;
-    let atrasadas = 0;
-    let semDadosCompletos = 0;
-
+    let totais = 0, atrasadas = 0, incompletos = 0;
     leads.forEach(l => {
       totais += l.tarefas.length;
       atrasadas += l.tarefas.filter(t => !t.concluida && t.data < hojeStr).length;
-      if (!l.dadosCustomizados?.ramo || !l.email) semDadosCompletos++;
+      if (!l.dadosCustomizados?.ramo) incompletos++;
     });
-
-    return { totais, atrasadas, semDadosCompletos };
+    return { totais, atrasadas, incompletos };
   }, [leads]);
 
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
-      {/* CONTROLE SUPERIOR DE AMBIENTE & ROLES */}
-      <div className="flex bg-slate-900 text-white p-2.5 rounded-xl justify-between items-center text-[10px] font-mono">
-        <div className="flex items-center gap-4">
-          <span>👑 NÍVEL DE ACESSO ATUAL:</span>
-          <div className="flex gap-1.5">
-            {["Diretor", "Consultor", "SDR"].map((role: any) => (
-              <button key={role} onClick={() => setUserRole(role)} className={`px-3 py-1 rounded font-bold uppercase text-[9px] ${userRole === role ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
-                {role}
-              </button>
-            ))}
-          </div>
+      {/* SELETOR DE PERMISSÕES DA GESTÃO */}
+      <div className="flex bg-slate-900 text-white p-2 rounded-xl justify-between items-center text-[10px] font-mono">
+        <div className="flex items-center gap-3">
+          <span>🔒 CARGO OPERACIONAL:</span>
+          {["Diretor", "SDR"].map((role: any) => (
+            <button key={role} onClick={() => setUserRole(role)} className={`px-2 py-0.5 rounded font-bold uppercase ${userRole === role ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>{role}</button>
+          ))}
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setAbaAtivaConfig("kanban")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'kanban' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>📋 Workspace Kanban</button>
-          <button onClick={() => setAbaAtivaConfig("auditoria_direcao")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'auditoria_direcao' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'}`}>📊 Painel do Diretor (Auditoria SDR)</button>
+          <button onClick={() => setAbaAtivaConfig("kanban")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'kanban' ? 'bg-blue-600' : 'bg-slate-800'}`}>📋 Kanban</button>
+          <button onClick={() => setAbaAtivaConfig("auditoria_direcao")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'auditoria_direcao' ? 'bg-purple-600' : 'bg-slate-800'}`}>📊 Auditoria Gestão</button>
         </div>
       </div>
 
       {abaAtivaConfig === "auditoria_direcao" ? (
-        /* 📊 PAINEL DE CONTROLE DE GESTÃO DA DIRETORIA */
-        <div className="flex-1 bg-white border border-slate-200 rounded-xl p-5 space-y-4 overflow-y-auto">
-          <div>
-            <h2 className="text-sm font-black text-slate-900 uppercase">📊 Painel de Controle de Gestão e Auditoria Operacional</h2>
-            <p className="text-slate-400 text-[10px]">Visão exclusiva para monitorar o cumprimento de prazos, tratamento de leads e qualidade dos dados dos SDRs.</p>
+        /* VISÃO DE AUDITORIA GESTÃO */
+        <div className="flex-1 bg-white border rounded-xl p-5 space-y-4 overflow-y-auto">
+          <h3 className="font-black uppercase text-slate-900">📊 Controle de Produtividade dos SDRs</h3>
+          <div className="grid grid-cols-3 gap-4 font-mono">
+            <div className="p-3 bg-slate-50 border rounded-xl"><span className="text-slate-400 block text-[9px] uppercase">Lembretes Totais</span><span className="text-xl font-bold">{metricasAuditoria.totais}</span></div>
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl"><span className="text-red-500 block text-[9px] uppercase">🚨 Tarefas Esquecidas/Atrasadas</span><span className="text-xl font-bold text-red-600">{metricasAuditoria.atrasadas}</span></div>
+            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl"><span className="text-amber-600 block text-[9px] uppercase">⚠️ Faltando Dados da Receita</span><span className="text-xl font-bold text-amber-700">{metricasAuditoria.incompletos}</span></div>
           </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-              <span className="text-slate-400 block font-bold uppercase text-[8px]">Total de Lembretes Criados</span>
-              <span className="text-xl font-black text-slate-800 font-mono">{metricasAuditoria.totais}</span>
-            </div>
-            <div className="p-4 bg-red-50 border border-red-100 rounded-xl">
-              <span className="text-red-500 block font-bold uppercase text-[8px]">🚨 Lembretes/Agendas Atrasadas (Não Cumpridas)</span>
-              <span className="text-xl font-black text-red-600 font-mono">{metricasAuditoria.atrasadas}</span>
-            </div>
-            <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl">
-              <span className="text-amber-600 block font-bold uppercase text-[8px]">⚠️ Contratos Sem Sincronização Completa</span>
-              <span className="text-xl font-black text-amber-700 font-mono">{metricasAuditoria.semDadosCompletos}</span>
-            </div>
-          </div>
-
-          {/* LISTAGEM COMPREENSIVA DE AUDITORIA */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <table className="w-full text-left font-mono text-[10px]">
-              <thead className="bg-slate-100 border-b font-sans uppercase text-[8px] text-slate-500">
-                <tr>
-                  <th className="p-2.5">Empresa / Lead</th>
-                  <th className="p-2.5">Estágio Atual</th>
-                  <th className="p-2.5">Última Modificação</th>
-                  <th className="p-2.5">Tarefas Pendentes</th>
-                  <th className="p-2.5 text-right">Ação</th>
+          <table className="w-full text-left border-collapse text-[10px] font-mono">
+            <thead className="bg-slate-100 uppercase text-[9px]">
+              <tr><th className="p-2">Empresa</th><th className="p-2">Estágio</th><th className="p-2">Pendências</th><th className="p-2 text-right">Ação</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {leads.map(l => (
+                <tr key={l.id} className="hover:bg-slate-50">
+                  <td className="p-2 font-sans font-bold">{l.razaoSocial}</td>
+                  <td className="p-2 uppercase">{l.estagio}</td>
+                  <td className="p-2 text-red-500 font-bold">{l.tarefas.filter(t => !t.concluida).length} abertas</td>
+                  <td className="p-2 text-right"><button onClick={() => { setLeadExpandido(l); setAbaAtivaConfig("kanban"); }} className="text-blue-600 font-bold underline font-sans">Inspecionar</button></td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {leads.map(lead => (
-                  <tr key={lead.id} className="hover:bg-slate-50/50">
-                    <td className="p-2.5 font-bold font-sans text-slate-900">{lead.razaoSocial}</td>
-                    <td className="p-2.5 uppercase"><span className="px-1.5 py-0.5 rounded text-[8px] text-white font-sans font-bold" style={{ backgroundColor: coresColunas[lead.estagio] }}>{lead.estagio}</span></td>
-                    <td className="p-2.5 text-slate-500">{lead.atualizadoEm ? new Date(lead.atualizadoEm).toLocaleString() : "-"}</td>
-                    <td className="p-2.5 font-bold text-slate-700">{lead.tarefas.filter(t => !t.concluida).length} pendente(s)</td>
-                    <td className="p-2.5 text-right"><button onClick={() => { setLeadExpandido(lead); setAbaAtivaConfig("kanban"); }} className="text-blue-600 hover:underline font-sans font-bold">Inspecionar</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
-        /* KANBAN WORKSPACE */
+        /* KANBAN ORIGINAL */
         <>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
             <div className="flex items-center gap-4">
               <div>
-                <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v5</h2>
-                <p className="text-xs text-slate-400">Dados do bot inseridos no cadastro. Bloqueio operacional ativo para SDR.</p>
+                <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v4</h2>
+                <p className="text-xs text-slate-400">Cards com tarefas agendadas sobem automaticamente no grid.</p>
               </div>
               <select value={funilAtivo} onChange={(e) => setFunilAtivo(e.target.value as any)} className="p-2 border border-blue-300 rounded-lg bg-blue-50 text-blue-900 font-black uppercase text-[10px] outline-none">
                 <option value="vendas">📋 Pipeline: Funil de Vendas (SDR)</option>
@@ -382,7 +371,10 @@ export default function NedHubPage() {
                 <div key={col.id} onDragOver={handleOnDragOver} onDrop={(e) => handleOnDrop(e, col.id)} className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full">
                   <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${colorCurrent}` }}>
                     <span>{col.nome}</span>
-                    <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
+                    <div className="flex items-center gap-1.5">
+                      <input type="color" value={colorCurrent} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
+                      <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
+                    </div>
                   </div>
                   <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
                     {col.cards.map((lead: any) => (
@@ -396,139 +388,185 @@ export default function NedHubPage() {
         </>
       )}
 
-      {/* 🔍 GAVETA EXPANDIDA (COM TRAVA DE EDIÇÃO PARA SDR) */}
+      {/* 🔍 GAVETA ORIGINAL RESTAURADA */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
-          <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200">
+          <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
             
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
-                <span className="text-[9px] font-mono font-bold uppercase text-amber-400">Visualização de Registro</span>
+                <span className="text-[9px] font-mono font-bold uppercase text-amber-400">Edição e Ações do Contrato</span>
                 <input 
                   type="text" 
                   disabled={userRole === "SDR"}
                   value={leadExpandido.razaoSocial} 
                   onChange={(e) => setLeadExpandido({ ...leadExpandido, razaoSocial: e.target.value })} 
-                  className="bg-transparent text-base font-black border-b border-transparent focus:border-blue-500 outline-none w-[450px] text-white p-0.5 disabled:opacity-70"
+                  className="bg-transparent text-base font-black border-b border-transparent hover:border-slate-500 focus:border-blue-500 outline-none w-[450px] text-white p-0.5 disabled:opacity-60"
                 />
               </div>
-              <button onClick={() => setLeadExpandido(null)} className="text-xl font-bold text-slate-400 hover:text-white px-2">✕</button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setLeadExpandido({
+                    ...leadExpandido, 
+                    funilId: leadExpandido.funilId === "vendas" ? "pos_venda" : "vendas",
+                    estagio: leadExpandido.funilId === "vendas" ? "visita_agendada" : "sem_contato"
+                  })}
+                  className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[9px] rounded-lg shadow-sm"
+                >
+                  ➡️ Mudar para {leadExpandido.funilId === "vendas" ? "Pós-Venda" : "Funil Vendas"}
+                </button>
+                <button onClick={() => setLeadExpandido(null)} className="text-xl font-bold text-slate-400 hover:text-white px-2">✕</button>
+              </div>
             </div>
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
               
-              {/* INFOS EXCLUSIVAS DA RECEITA (BLOQUEADO PARA SDR ALTERAR) */}
-              <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3">
-                <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Inteligência de Mercado Estruturada</h3>
+              {/* 🏢 SEÇÃO ORIGINAL DO ROBÔ RECEITA DE VOLTA */}
+              <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
+                <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Dados de Inteligência (Robô Receita)</h3>
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
-                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ:</span><span className="text-white font-bold">{leadExpandido.cnpj}</span></div>
-                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNAE Fiscal:</span><span className="text-amber-200 font-bold">{leadExpandido.dadosCustomizados?.cnae || "Não Cadastrado"}</span></div>
-                  <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade:</span><span className="text-white block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Grave através da automação de cadastro."}</span></div>
+                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ Vinculado:</span><span className="text-white font-bold">{leadExpandido.cnpj}</span></div>
+                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNAE Fiscal:</span><span className="text-amber-200 font-bold">{leadExpandido.dadosCustomizados?.cnae || "Não Mapeado"}</span></div>
+                  <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade:</span><span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Aguardando bot..."}</span></div>
+                  <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Endereço Completo:</span><span className="text-slate-300 font-bold block text-[10px]">{leadExpandido.dadosCustomizados?.endereco || "Não sincronizado"}</span></div>
                 </div>
-                {userRole === "SDR" && <p className="text-[8px] text-slate-400 italic">🔒 Alterações nos dados analíticos da empresa necessitam de permissão da diretoria.</p>}
               </div>
 
-              {/* Contatos */}
+              {/* Seção 1: Contatos */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato</h3>
+                <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato e Comunicação</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Nome do Contato Principal</label>
-                    <input type="text" disabled={userRole === "SDR"} value={leadExpandido.nomeContato} onChange={(e) => setLeadExpandido({ ...leadExpandido, nomeContato: e.target.value })} className="w-full p-2 border bg-white rounded-lg text-slate-800 font-bold disabled:bg-slate-100" />
+                    <input type="text" value={leadExpandido.nomeContato} onChange={(e) => setLeadExpandido({ ...leadExpandido, nomeContato: e.target.value })} className="w-full p-2 border bg-white rounded-lg font-bold text-slate-800 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">E-mail</label>
-                    <input type="email" disabled={userRole === "SDR"} value={leadExpandido.email} onChange={(e) => setLeadExpandido({ ...leadExpandido, email: e.target.value })} className="w-full p-2 border bg-white rounded-lg font-mono text-slate-800 disabled:bg-slate-100" />
+                    <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">E-mail Corporativo</label>
+                    <input type="email" value={leadExpandido.email} onChange={(e) => setLeadExpandido({ ...leadExpandido, email: e.target.value })} placeholder="exemplo@empresa.com" className="w-full p-2 border bg-white rounded-lg outline-none text-slate-800 font-mono" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones</label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {leadExpandido.telefones?.map((tel, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold">
+                        <span>{tel}</span>
+                        <button onClick={() => setLeadExpandido({ ...leadExpandido,  telefones: leadExpandido.telefones.filter((_, i) => i !== idx) })} className="text-red-500 font-bold ml-1">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="text" value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)} placeholder="DDD + Número" className="p-2 border rounded-lg bg-white flex-1 font-mono outline-none" />
+                    <button onClick={() => { if (!novoTelefone) return; setLeadExpandido({ ...leadExpandido, telefones: [...(leadExpandido.telefones || []), novoTelefone] }); setNovoTelefone(""); }} className="px-3 bg-slate-800 text-white font-black text-[9px] rounded-lg">+ Add Tel</button>
                   </div>
                 </div>
               </div>
 
-              {/* Agenda Histórica Interna */}
-              <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-2">
-                <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Compromissos e Agendamentos</h3>
+              {/* Seção 2: Templates de E-mail */}
+              <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
+                <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo Automatizado de E-mail</h3>
+                <div className="space-y-2">
+                  <select value={templateSelecionado} onChange={e => setTemplateSelecionado(e.target.value)} className="w-full p-2 border border-purple-300 rounded-lg bg-white text-slate-800 outline-none font-bold">
+                    <option value="">-- Selecione um template de e-mail --</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={dispararEmailClienteLocal} className="px-3 py-2 bg-slate-800 text-white font-black uppercase text-[9px] rounded-lg">💻 Abrir Outlook / Gmail</button>
+                    <button onClick={dispararEmailViaResendAPI} className="px-3 py-2 bg-purple-600 text-white font-black uppercase text-[9px] rounded-lg">🚀 Enviar Direto (API)</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Seção 3: Lembretes e Tarefas Originais */}
+              <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
+                <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
+                <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="col-span-1.5">
+                    <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Ação Comercial</label>
+                    <input type="text" value={novaTarefaTitulo} onChange={e => setNovaTarefaTitulo(e.target.value)} placeholder="Ex: Retornar ligação da diretoria" className="w-full p-2 border bg-white rounded-lg outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Data de Retorno</label>
+                    <input type="date" value={novaTarefaData} onChange={e => setNovaTarefaData(e.target.value)} className="w-full p-2 border bg-white rounded-lg outline-none font-mono" />
+                  </div>
+                  <button onClick={() => {
+                    if (!novaTarefaTitulo || !novaTarefaData) return alert("Preencha o título e a data da tarefa.");
+                    const task: Tarefa = { id: Math.random().toString(), titulo: novaTarefaTitulo, data: novaTarefaData, concluida: false };
+                    setLeadExpandido({ ...leadExpandido, tarefas: [...(leadExpandido.tarefas || []), task] });
+                    setNovaTarefaTitulo(""); setNovaTarefaData("");
+                  }} className="w-full p-2 bg-amber-600 text-white font-black uppercase text-[9px] h-9 rounded-lg">Agendar</button>
+                </div>
                 <div className="space-y-1.5 max-h-[150px] overflow-y-auto">
                   {leadExpandido.tarefas?.map(t => (
-                    <div key={t.id} className={`flex justify-between items-center p-2 rounded-lg border font-mono text-[10px] ${t.concluida ? 'bg-slate-100 text-slate-400 line-through' : 'bg-white border-amber-200 text-slate-800 font-bold'}`}>
+                    <div key={t.id} className={`flex justify-between items-center p-2 rounded-lg border font-mono text-[10px] ${t.concluida ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-amber-200 text-slate-800 font-bold'}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" checked={t.concluida} onChange={(e) => {
-                          const mod = leadExpandido.tarefas.map(task => task.id === t.id ? { ...task, concluida: e.target.checked } : task);
-                          setLeadExpandido({ ...leadExpandido, tarefas: mod });
+                          const modificadas = leadExpandido.tarefas.map(task => task.id === t.id ? { ...task, concluida: e.target.checked } : task);
+                          setLeadExpandido({ ...leadExpandido, tarefas: modificadas });
                         }} className="w-3.5 h-3.5 cursor-pointer" />
-                        <span>🔔 Agenda: {t.data} {t.horario ? `@ ${t.horario}` : ''} - {t.titulo}</span>
+                        <span>🔔 {t.data} {t.horario ? `@ ${t.horario}` : ''} - {t.titulo}</span>
                       </div>
+                      <button onClick={() => setLeadExpandido({ ...leadExpandido, tarefas: leadExpandido.tarefas.filter(task => task.id !== t.id) })} className="text-red-500 hover:text-red-700 font-bold font-sans">✕</button>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Bloco de Notas */}
               <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Observações Gerais</label>
-                <textarea rows={3} value={leadExpandido.anotacoes || ""} onChange={(e) => setLeadExpandido({ ...leadExpandido, anotacoes: e.target.value })} className="w-full p-3 border border-slate-300 rounded-xl text-slate-800" />
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">📝 Histórico de Negociações</label>
+                <textarea rows={3} value={leadExpandido.anotacoes || ""} onChange={(e) => setLeadExpandido({ ...leadExpandido, anotacoes: e.target.value })} placeholder="Digite anotações livres..." className="w-full p-3 border border-slate-300 rounded-xl outline-none" />
               </div>
-
             </div>
 
             <div className="p-3 bg-slate-100 border-t flex justify-end gap-2">
               <button onClick={() => setLeadExpandido(null)} className="px-4 py-2 bg-slate-300 text-slate-700 font-bold rounded-lg uppercase">Cancelar</button>
-              <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-950 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Alterações</button>
+              <button onClick={() => salvarDadosGaveta(leadExpandido)} className="px-5 py-2 bg-slate-950 text-white font-black rounded-lg uppercase tracking-wider shadow-md">💾 Salvar Todo o Contrato</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 📅 POPUP DE CALENDÁRIO COMERCIAL EXCLUSIVO */}
+      {/* POPUP DE CALENDÁRIO COMERCIAL EXCLUSIVO */}
       {modalCalendarioPopup.aberto && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-5 max-w-lg w-full space-y-4 border border-slate-200 shadow-2xl">
             <div className="flex justify-between items-center border-b pb-2">
               <div>
-                <h3 className="font-black text-slate-900 uppercase text-[11px]">🗓️ Central de Janelas Disponíveis do Comercial</h3>
-                <p className="text-slate-400 text-[9px]">SDR seleciona a agenda livre do gerente e efetua a reserva direta para o lead.</p>
+                <h3 className="font-black text-slate-900 uppercase text-[11px]">🗓️ Central de Janelas Livres do Comercial</h3>
+                <p className="text-slate-400 text-[9px]">SDR seleciona a janela livre do gerente para cravar a agenda.</p>
               </div>
               <button onClick={() => setModalCalendarioPopup({ aberto: false, lead: null })} className="text-lg font-black hover:text-red-500">✕</button>
             </div>
-
             <div className="bg-slate-50 p-3 rounded-xl space-y-3">
               <div>
-                <label className="block text-[9px] uppercase font-bold text-slate-500 mb-1">Visualizar Calendário de:</label>
+                <label className="block text-[9px] uppercase font-bold text-slate-500 mb-1">Agenda do Gerente:</label>
                 <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2 border bg-white rounded-lg font-bold text-slate-800 outline-none text-[10px]">
                   {GERENTES_COMERCIAIS.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                 </select>
               </div>
 
-              {/* 🛑 SEÇÃO DO COMERCIAL: Cadastra novas janelas de espaço livre */}
-              {(userRole === "Diretor" || userRole === "Consultor") && (
+              {userRole !== "SDR" && (
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
-                  <span className="block text-[8px] font-black uppercase text-amber-600">➕ Liberar Nova Janela de Horário (Ação do Comercial)</span>
+                  <span className="block text-[8px] font-black uppercase text-amber-600">➕ Liberar Nova Janela (Ação do Comercial)</span>
                   <div className="flex gap-2">
                     <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-1.5 border rounded text-[10px] bg-slate-50 font-mono outline-none flex-1" />
                     <button onClick={() => {
                       if(!novoHorarioDisponivel) return;
                       const formatada = novoHorarioDisponivel.replace("T", " ");
-                      setHorariosDisponiveisGerentes(prev => ({
-                        ...prev,
-                        [gerenteSelecionadoAgenda]: [...(prev[gerenteSelecionadoAgenda] || []), formatada].sort()
-                      }));
+                      setHorariosDisponiveisGerentes(prev => ({ ...prev, [gerenteSelecionadoAgenda]: [...(prev[gerenteSelecionadoAgenda] || []), formatada].sort() }));
                       setNovoHorarioDisponivel("");
-                    }} className="px-3 py-1 bg-slate-900 text-white font-bold rounded text-[9px] uppercase">Liberar Espaço</button>
+                    }} className="px-3 py-1 bg-slate-900 text-white font-bold rounded text-[9px] uppercase">Cadastrar</button>
                   </div>
                 </div>
               )}
 
-              {/* Grid de Horários Livres para Escolha do SDR */}
               <div>
-                <span className="block text-[9px] uppercase font-bold text-slate-500 mb-1.5">Horários Disponíveis Identificados:</span>
                 <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1">
                   {horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.length === 0 ? (
-                    <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Nenhum horário livre cadastrado para este comercial.</p>
+                    <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Sem horários vagos.</p>
                   ) : (
                     horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.map((horario, index) => (
-                      <button 
-                        key={index} 
-                        onClick={() => agendarHorarioGerentePeloSdr(horario)}
-                        className="p-2 bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 text-emerald-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]"
-                      >
+                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 text-emerald-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
                         📅 {horario}
                       </button>
                     ))
@@ -540,15 +578,14 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL NOVO LEAD (COM EXECUÇÃO DE ROBÔ ANTECIPADA) */}
+      {/* MODAL NOVO LEAD (COM AUTO-BUSCA) */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
             <div>
               <h3 className="font-black uppercase text-slate-900 text-[11px]">🚀 Iniciar Nova Originação Comercial</h3>
-              <p className="text-slate-400 text-[9px]">Ao preencher os 14 números do CNPJ o robô local faz a varredura completa automática.</p>
+              <p className="text-slate-400 text-[9px]">Ao digitar os 14 números do CNPJ o robô faz a busca instantânea em background.</p>
             </div>
-            
             <div className="space-y-3 text-[11px]">
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">CNPJ da Empresa:</label>
@@ -565,15 +602,13 @@ export default function NedHubPage() {
                     }} 
                     className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" 
                   />
-                  {buscandoRobo && <span className="absolute right-2 top-2 text-amber-500 font-bold animate-pulse">🤖 Lendo...</span>}
+                  {buscandoRobo && <span className="absolute right-2 top-2 text-amber-500 font-bold animate-pulse">🤖 Buscando...</span>}
                 </div>
               </div>
-
-              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social:</label><input type="text" placeholder="Puxado automaticamente pelo bot" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" /></div>
-              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome do Decisor:</label><input type="text" placeholder="Nome do contato principal" value={inputContato} onChange={e => setInputContato(e.target.value)} className="w-full p-2 border bg-slate-50 rounded-lg outline-none text-slate-800 font-bold" /></div>
-              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Telefone Principal:</label><input type="text" placeholder="Fixo ou celular" value={inputTelefone} onChange={e => setInputTelefone(e.target.value)} className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" /></div>
+              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social:</label><input type="text" placeholder="Preenchido pelo bot" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" /></div>
+              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome do Decisor:</label><input type="text" placeholder="Contato principal" value={inputContato} onChange={e => setInputContato(e.target.value)} className="w-full p-2 border bg-slate-50 rounded-lg outline-none text-slate-800 font-bold" /></div>
+              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Telefone Principal:</label><input type="text" placeholder="Celular ou Fixo" value={inputTelefone} onChange={e => setInputTelefone(e.target.value)} className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" /></div>
             </div>
-
             <div className="flex justify-end gap-2 text-[10px] pt-2 border-t">
               <button onClick={() => setModalNovoLead(false)} className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase">Sair</button>
               <button onClick={handleSalvarNovoLead} className="px-4 py-1.5 bg-blue-600 text-white font-black rounded-lg uppercase shadow-md">Salvar Lead</button>
@@ -611,31 +646,31 @@ function CardLead({ lead, corColuna, onExpandir, onExcluir, onAbrirCalendario }:
         </div>
       </div>
 
-      {/* BOTÃO DE CALENDÁRIO DA AGENDA DENTRO DO CARD */}
+      {/* 🗓️ BOTÃO DE POPUP DE AGENDA/CALENDÁRIO EXCLUSIVO NO CARD */}
       <button 
         onClick={() => onAbrirCalendario(lead)}
         className="w-full py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-600 text-blue-700 hover:text-white font-black uppercase tracking-wider rounded-lg text-center transition-all text-[8px]"
       >
-        🗓️ Marcar Reunião Comercial
+        🗓️ Agendar com Comercial
       </button>
 
       <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-0.5 border border-slate-100 font-medium">
         <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "-"}</span></p>
+        <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
       </div>
 
       {lead.tarefas?.filter(t => !t.concluida).length > 0 && (
         <div className="text-[8px] font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-bold w-fit border border-amber-200">
-          ⏳ {lead.tarefas.filter(t => !t.concluida).length} compromisso(s)
+          ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas
         </div>
       )}
 
       <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[9px]">
-        {/* O Botão de excluir sumirá visualmente via código de ação acima caso a função barre, mas mantemos o clique monitorado pelo nível */}
         <button onClick={() => onExcluir(lead.id, lead.razaoSocial)} className="text-red-500 hover:text-red-700 font-bold p-1 uppercase tracking-tighter transition-colors">
           🗑️ Excluir
         </button>
-        <button onClick={() => onExpandir(lead)} className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white font-black uppercase rounded text-[8px] transition-all">
-          ⚙️ Abrir Card
+        <button onClick={() => onExpandir(lead)} className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white font-black uppercase rounded text-[8px] transition-all shadow-3xs">
+          ⚙️ Abrir
         </button>
       </div>
     </div>
