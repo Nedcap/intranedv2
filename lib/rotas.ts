@@ -27,7 +27,10 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // ADMINISTRAÇÃO / CONTROLES CORE
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Administração", defaultMaster: true },
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Administração", defaultMaster: true },
-  { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true }
+  { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true },
+  
+  // 🌳 NOVA ROTA DE HIERARQUIA INTEGRADA DIRECT NO MENU:
+  { nome: "Hierarquias e Acessos", path: "/dashboard/configuracoes/hierarquia", icone: "🌳", categoria: "Administração", defaultMaster: true }
 ];
 
 export const obterRotasMaster = () => 
