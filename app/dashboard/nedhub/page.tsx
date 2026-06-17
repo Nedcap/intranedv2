@@ -86,9 +86,10 @@ export default function NedHubPage() {
 
   useEffect(() => { sincronizarBaseNedHub(); }, []);
 
-  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE) - SEM POPUP TRAVANDO TELA
-  const consultarDadosCnpjNoRoboLocal = async () => {
-    const cnpjLimpo = inputCnpj.replace(/\D/g, "");
+  // 🤖 BUSCA ULTRA VELOZ NO BOT LOCAL (SQLITE)
+  const consultarDadosCnpjNoRoboLocal = async (targetCnpj?: string, isUpdateInDrawer = false) => {
+    const cnpjAlvo = targetCnpj || inputCnpj;
+    const cnpjLimpo = cnpjAlvo.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return alert("Digite um CNPJ válido com 14 dígitos numéricos.");
 
     try {
@@ -97,10 +98,28 @@ export default function NedHubPage() {
       if (res.ok) {
         const dadosBot = await res.json();
         if (dadosBot && dadosBot.razaoSocial) {
-          setInputRazao(dadosBot.razaoSocial.toUpperCase());
-          if (dadosBot.telefone) setInputTelefone(dadosBot.telefone);
-          if (dadosBot.contato) setInputContato(dadosBot.contato);
-          // ⚡ Removido o alert estático por usabilidade de fluxo contínuo!
+          if (isUpdateInDrawer && leadExpandido) {
+            // Se for atualização por dentro da gaveta, mescla os metadados da Receita no estado
+            setLeadExpandido({
+              ...leadExpandido,
+              razaoSocial: dadosBot.razaoSocial.toUpperCase(),
+              dadosCustomizados: {
+                ...(leadExpandido.dadosCustomizados || {}),
+                ramo: dadosBot.ramo || dadosBot.atividade_principal || "",
+                cnae: dadosBot.cnae || "",
+                endereco: dadosBot.logradouro || dadosBot.endereco || "",
+                bairro: dadosBot.bairro || "",
+                cidade: dadosBot.municipio || dadosBot.cidade || "",
+                uf: dadosBot.uf || ""
+              }
+            });
+            alert("⚡ Metadados da Receita sincronizados com sucesso na gaveta!");
+          } else {
+            // Fluxo padrão de criação de novo negócio
+            setInputRazao(dadosBot.razaoSocial.toUpperCase());
+            if (dadosBot.telefone) setInputTelefone(dadosBot.telefone);
+            if (dadosBot.contato) setInputContato(dadosBot.contato);
+          }
         }
       }
     } catch (err) {
@@ -162,7 +181,8 @@ export default function NedHubPage() {
         anotacoes: leadAtualizado.anotacoes,
         tarefas: leadAtualizado.tarefas,
         funilId: leadAtualizado.funilId,
-        estagio: leadAtualizado.estagio
+        estagio: leadAtualizado.estagio,
+        campos_customizados: leadAtualizado.dadosCustomizados // Garante o salvamento estruturado no JSONB do banco
       }).eq("id", leadAtualizado.id);
 
       if (error) throw error;
@@ -274,19 +294,19 @@ export default function NedHubPage() {
       {!carregando && (
         <div className="flex-1 grid gap-3 h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `repeat(${colunasVisíveis.length}, minmax(0, 1fr))` }}>
           {colunasVisíveis.map(col => {
-            const corAtual = coresColunas[col.id] || "#cbd5e1";
+            const colorCurrent = coresColunas[col.id] || "#cbd5e1";
             return (
               <div key={col.id} onDragOver={handleOnDragOver} onDrop={(e) => handleOnDrop(e, col.id)} className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden h-full">
-                <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${corAtual}` }}>
+                <div className="p-3 bg-white font-black text-slate-800 border-b border-slate-200 uppercase flex justify-between items-center text-[9px]" style={{ borderTop: `4px solid ${colorCurrent}` }}>
                   <span>{col.nome}</span>
                   <div className="flex items-center gap-1.5">
-                    <input type="color" value={corAtual} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
+                    <input type="color" value={colorCurrent} onChange={(e) => setCoresColunas(prev => ({ ...prev, [col.id]: e.target.value }))} className="w-3 h-3 cursor-pointer p-0 bg-transparent border-0" />
                     <span className="bg-slate-200 px-2 py-0.5 rounded-full font-mono">{col.cards.length}</span>
                   </div>
                 </div>
                 <div className="p-2 space-y-2 overflow-y-auto flex-1 content-start bg-slate-50/40">
                   {col.cards.map((lead: any) => (
-                    <CardLead key={lead.id} lead={lead} corColuna={corAtual} onExpandir={setLeadExpandido} onExcluir={handleExcluirLead} />
+                    <CardLead key={lead.id} lead={lead} corColuna={colorCurrent} onExpandir={setLeadExpandido} onExcluir={handleExcluirLead} />
                   ))}
                 </div>
               </div>
@@ -295,7 +315,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🔍 GAVETA EXPANDIDA */}
+      {/* 🔍 GAVETA EXPANDIDA (COM INTEGRAÇÃO DA RECEITA DO ROBÔ VIA JSONB) */}
       {leadExpandido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-end z-50 transition-all">
           <div className="bg-white h-full max-w-2xl w-full flex flex-col shadow-2xl border-l border-slate-200 animate-slide-left">
@@ -327,6 +347,46 @@ export default function NedHubPage() {
             </div>
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
+              
+              {/* 🏢 SEÇÃO RESTAURADA: DADOS DE INTELIGÊNCIA DA RECEITA FEDERAL DO ROBÔ */}
+              <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
+                  <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Dados de Inteligência (Robô Receita)</h3>
+                  <button
+                    type="button"
+                    onClick={() => consultarDadosCnpjNoRoboLocal(leadExpandido.cnpj, true)}
+                    disabled={buscandoRobo}
+                    className="px-2 py-1 bg-amber-500 text-slate-950 font-black uppercase text-[8px] rounded hover:bg-amber-400 transition-all disabled:opacity-50"
+                  >
+                    {buscandoRobo ? "⏳ Carregando..." : "🔄 Sincronizar Dados da Receita"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
+                  <div>
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ Vinculado:</span>
+                    <span className="text-white font-bold">{leadExpandido.cnpj}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">CNAE Fiscal:</span>
+                    <span className="text-amber-200 font-bold">{leadExpandido.dadosCustomizados?.cnae || "Não mapeado"}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade / Principal:</span>
+                    <span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Aguardando leitura do bot..."}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">Endereço Completo:</span>
+                    <span className="text-slate-300 font-bold block truncate">
+                      {leadExpandido.dadosCustomizados?.endereco 
+                        ? `${leadExpandido.dadosCustomizados.endereco}, ${leadExpandido.dadosCustomizados?.bairro || ""} - ${leadExpandido.dadosCustomizados?.cidade || ""}/${leadExpandido.dadosCustomizados?.uf || ""}`
+                        : "Endereço não sincronizado pelo SQLite"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Seção 1: Contatos Completos & Editáveis */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                 <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato e Comunicação</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -461,7 +521,6 @@ export default function NedHubPage() {
                     onChange={e => {
                       setInputCnpj(e.target.value);
                       if(e.target.value.replace(/\D/g, "").length === 14) {
-                        // Gatilho rápido se digitar ou colar direto os 14 dígitos
                         setTimeout(() => consultarDadosCnpjNoRoboLocal(), 100);
                       }
                     }} 
@@ -469,7 +528,7 @@ export default function NedHubPage() {
                   />
                   <button 
                     type="button"
-                    onClick={consultarDadosCnpjNoRoboLocal}
+                    onClick={() => consultarDadosCnpjNoRoboLocal()}
                     disabled={buscandoRobo}
                     className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[9px] rounded-lg transition-all disabled:opacity-40"
                   >
