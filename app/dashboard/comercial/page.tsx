@@ -7,12 +7,8 @@ import { supabase } from "@/lib/supabase";
 interface VisitaRow {
   id: string; 
   nome: string;
-  empresa?: string;
   responsavelSDR: string;
   etapa: string;
-  estado: string;
-  motivoPerda: string;
-  dataCriacao: string;
   email?: string;
   telefone?: string;
   statusComissaoAgendamento: "Pendente" | "Pago";
@@ -51,15 +47,15 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA DIRETO DO SUPABASE (Visitas + Finalizados)
+  // 2. BUSCA AUTOMÁTICA DIRETO DA TABELA crm_leads (Visitas + Finalizados)
   const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
-      // 💡 ATENÇÃO: Se o nome da sua tabela consolidada for diferente (ex: 'leads', 'crm', 'oportunidades'), altere aqui:
       const { data, error } = await supabase
-        .from("leads") 
+        .from("crm_leads") 
         .select("*")
-        .in("etapa", ["Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"]);
+        // Filtra os estágios baseados no seu pipeline do CRM (Ajuste as strings se necessário)
+        .in("estagio", ["Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"]);
 
       if (error) throw error;
 
@@ -67,32 +63,32 @@ export default function ControleComercialVisitasPage() {
         const sdrsEncontrados = new Set<string>();
         
         const dadosMapeados: VisitaRow[] = data.map((item: any) => {
-          const sdrNome = item.responsavel_sdr || item.agente_nome || "Sem SDR Mapeado";
+          const sdrNome = item.responsavel_nome || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
+          // Lógica inicial baseada na etapa do CRM
           let statusComiteInicial: any = "Em Análise";
-          const estado = item.estado?.toLowerCase() || "";
-          const motivoPerdaText = item.motivo_perda?.toLowerCase() || "";
+          const estagioLower = item.estagio?.toLowerCase() || "";
 
-          if (estado === "perdida" || estado === "perdido" || motivoPerdaText.includes("crédito") || motivoPerdaText.includes("recusada")) {
+          if (estagioLower === "perdido") {
             statusComiteInicial = "Reprovado";
-          } else if (estado === "ganhou" || estado === "aprovado" || item.etapa === "Finalizado") {
+          } else if (estagioLower === "ganhou" || estagioLower === "finalizado") {
             statusComiteInicial = "Aprovado";
           }
 
+          // Pegando dados dos campos customizados ou das colunas diretas
+          const statusAgendamentoSalvo = item.campos_customizados?.status_comissao_agendamento || "Pendente";
+          const statusComiteSalvo = item.campos_customizados?.status_comissao_comite || statusComiteInicial;
+
           return {
             id: item.id.toString(),
-            nome: item.nome_empresa || item.nome || "Empresa sem Nome",
-            empresa: item.empresa || "",
+            nome: item.razaoSocial || item.nomeContato || "Empresa sem Nome",
             responsavelSDR: sdrNome,
-            etapa: item.etapa || "",
-            estado: item.estado || "",
-            motivoPerda: item.motivo_perda || "",
-            dataCriacao: item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-",
+            etapa: item.estagio || "",
             email: item.email || "",
             telefone: item.telefone || "",
-            statusComissaoAgendamento: item.status_comissao_agendamento || "Pendente",
-            statusComissaoComite: item.status_comissao_comite || statusComiteInicial,
+            statusComissaoAgendamento: statusAgendamentoSalvo,
+            statusComissaoComite: statusComiteSalvo,
           };
         });
 
@@ -108,7 +104,7 @@ export default function ControleComercialVisitasPage() {
       }
     } catch (err: any) {
       console.error(err);
-      alert(`❌ Erro ao ler dados: ${err.message}\nVerifique se o nome da tabela no código coincide com o banco.`);
+      alert(`❌ Erro ao ler dados: ${err.message}`);
     } finally {
       setCarregando(false);
     }
@@ -118,33 +114,49 @@ export default function ControleComercialVisitasPage() {
     buscarCardsComercial();
   }, []);
 
-  // 3. ATUALIZAÇÃO SINCRO DA STATUS DE COMISSÃO DIRETO NO BANCO
+  // 3. PERSISTÊNCIA REVERSA: Salva os status dentro do objeto jsonb (campos_customizados) do crm_leads
   const mudarStatusAgendamento = async (id: string, novoStatus: "Pendente" | "Pago") => {
     try {
+      const leadAtual = visitas.find(v => v.id === id);
+      const { data: currentLead } = await supabase.from("crm_leads").select("campos_customizados").eq("id", id).single();
+      
+      const novosCampos = {
+        ...(currentLead?.campos_customizados || {}),
+        status_comissao_agendamento: novoStatus
+      };
+
       const { error } = await supabase
-        .from("leads")
-        .update({ status_comissao_agendamento: novoStatus })
+        .from("crm_leads")
+        .update({ campos_customizados: novosCampos })
         .eq("id", id);
 
       if (error) throw error;
       
       setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoAgendamento: novoStatus } : v));
     } catch (err: any) {
-      alert(`❌ Erro ao atualizar agendamento no banco: ${err.message}`);
+      alert(`❌ Erro ao atualizar agendamento: ${err.message}`);
     }
   };
 
   const mudarStatusComite = async (id: string, novoStatus: any) => {
     try {
-      // Se aprovado, sincroniza alteração lógica no card
-      const camposAtualizados: any = { status_comissao_comite: novoStatus };
+      const { data: currentLead } = await supabase.from("crm_leads").select("campos_customizados").eq("id", id).single();
+      
+      const novosCampos = {
+        ...(currentLead?.campos_customizados || {}),
+        status_comissao_comite: novoStatus
+      };
+
+      const updatePayload: any = { campos_customizados: novosCampos };
+      
+      // Se aprovou a comissão, atualiza automaticamente o estágio do lead para "Ganhou" ou "Finalizado"
       if (novoStatus === "Aprovado") {
-        camposAtualizados.estado = "Ganhou";
+        updatePayload.estagio = "Ganhou";
       }
 
       const { error } = await supabase
-        .from("leads")
-        .update(camposAtualizados)
+        .from("crm_leads")
+        .update(updatePayload)
         .eq("id", id);
 
       if (error) throw error;
@@ -152,35 +164,35 @@ export default function ControleComercialVisitasPage() {
       setVisitas(prev => prev.map(v => v.id === id ? { 
         ...v, 
         statusComissaoComite: novoStatus,
-        estado: novoStatus === "Aprovado" ? "Ganhou" : v.estado 
+        etapa: novoStatus === "Aprovado" ? "Ganhou" : v.etapa 
       } : v));
     } catch (err: any) {
-      alert(`❌ Erro ao atualizar comitê no banco: ${err.message}`);
+      alert(`❌ Erro ao atualizar comitê: ${err.message}`);
     }
   };
 
+  // 4. ENVIA PARA A TABELA DE ANALISES (Substituindo a antiga em_analise)
   const moverLeadParaEsteiraAnalise = async (lead: VisitaRow) => {
     const confirmar = confirm(`🔍 Deseja enviar a empresa "${lead.nome}" diretamente para a lista de Análises Pendentes?`);
     if (!confirmar) return;
 
     try {
       setEnviandoLeadId(lead.id);
-      const dataFormatada = new Date().toISOString().split("T")[0];
 
-      const { error } = await supabase.from("em_analise").insert({
-        agente_nome: lead.responsavelSDR || "Comercial Ned",
-        nome_empresa: lead.nome.trim().toUpperCase(),
-        data_envio: dataFormatada,
-        pendencias: "Enviado via Esteira Comercial Automatizada"
+      // Insere na tabela 'analises' baseado nas colunas reais do seu mapa
+      const { error } = await supabase.from("analises").insert({
+        empresa_nome: lead.nome.trim().toUpperCase(),
+        comercial: lead.responsavelSDR || "Comercial Ned",
+        status: "Pendente",
+        caminho_local: "Enviado via Esteira Comercial Automatizada"
       });
 
       if (error) throw error;
 
-      // Atualiza também o status do card principal informando que foi enviado
-      await supabase.from("leads").update({ status_comissao_comite: "Enviado p/ Análise" }).eq("id", lead.id);
+      // Sincroniza o crm_leads avisando que foi enviado
+      await mudarStatusComite(lead.id, "Enviado p/ Análise");
 
-      setVisitas(prev => prev.map(v => v.id === lead.id ? { ...v, statusComissaoComite: "Enviado p/ Análise" } : v));
-      alert("🚀 Sucesso! Empresa integrada na aba de comitês.");
+      alert("🚀 Sucesso! Empresa integrada na tabela de Análises.");
     } catch (err: any) {
       alert(`❌ Erro de Integração: ${err.message}`);
     } finally {
@@ -229,7 +241,7 @@ export default function ControleComercialVisitasPage() {
       <div className="border-b border-slate-200 pb-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-800 tracking-tight">🎯 Esteira Comercial Automatizada (Visitas e Finalizados)</h2>
-          <span className="text-xs text-slate-400 font-medium">Sincronização em tempo real das etapas de agendamento até a conclusão.</span>
+          <span className="text-xs text-slate-400 font-medium">Sincronizado com a tabela crm_leads em tempo real.</span>
         </div>
         <div className="flex items-center gap-2">
           <button 
@@ -248,7 +260,7 @@ export default function ControleComercialVisitasPage() {
         <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2">
           <div className="text-2xl">🗂️</div>
           <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial encontrado</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique os filtros ou nomes de colunas de estágio do banco.</p>
+          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads estão nos estágios corretos no CRM.</p>
         </div>
       ) : (
         <>
@@ -319,10 +331,10 @@ export default function ControleComercialVisitasPage() {
                 <tr className="bg-slate-800 text-white font-black uppercase text-[11px] border-b border-slate-900">
                   <th className="p-3">Lead Comercial</th>
                   <th className="p-3">SDR Responsável</th>
-                  <th className="p-3 text-center">Etapa Atual</th>
+                  <th className="p-3 text-center">Estágio Atual</th>
                   <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
                   <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê / Finalizados</th>
-                  <th className="p-3 text-center">Ações Operacionais</th>
+                  <th className="p-3 text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -340,7 +352,7 @@ export default function ControleComercialVisitasPage() {
                       <td className="p-3 text-slate-500 font-bold">{v.responsavelSDR}</td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          v.etapa.includes("Finalizado") || v.etapa.includes("Ganhou") 
+                          v.etapa.toLowerCase().includes("finalizado") || v.etapa.toLowerCase().includes("ganhou") 
                             ? "bg-emerald-100 text-emerald-800" 
                             : "bg-slate-100 text-slate-700"
                         }`}>
