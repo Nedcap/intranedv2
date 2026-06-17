@@ -9,16 +9,11 @@ interface UsuarioSistema {
   nome: string;
   email: string;
   cargo: string;
-}
-
-interface RelacaoHierarquia {
-  subordinado_id: string;
-  superior_id: string;
+  superior_id?: string; // Salvaremos o id do líder diretamente aqui
 }
 
 export default function GerenciarHierarquiaPage() {
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
-  const [vinculos, setVinculos] = useState<RelacaoHierarquia[]>([]);
   const [carregando, setCarregando] = useState(false);
   
   // Usuário superior selecionado no filtro do topo para gerenciar sua equipe direta
@@ -28,22 +23,14 @@ export default function GerenciarHierarquiaPage() {
     try {
       setCarregando(true);
       
-      // Busca os colaboradores reais da tabela 'usuarios'
+      // Busca os colaboradores reais diretamente da sua tabela ativa 'usuarios'
       const { data: dbUsuarios, error: errUsuarios } = await supabase
         .from("usuarios")
-        .select("id, nome, email, cargo")
+        .select("id, nome, email, cargo, superior_id")
         .order("nome", { ascending: true });
 
-      // Busca os vínculos vigentes de subordinação
-      const { data: dbVinculos, error: errVinculos } = await supabase
-        .from("crm_hierarquia")
-        .select("subordinado_id, superior_id");
-
       if (errUsuarios) throw errUsuarios;
-      if (errVinculos) throw errVinculos;
-
       if (dbUsuarios) setUsuariosSistema(dbUsuarios);
-      if (dbVinculos) setVinculos(dbVinculos);
     } catch (err: any) {
       alert(`❌ Erro ao carregar dados do sistema: ${err.message}`);
     } finally {
@@ -55,49 +42,28 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosHierarquia();
   }, []);
 
-  // Grava ou remove a relação de subordinação de forma direta e persistente
+  // Grava ou remove a relação de subordinação diretamente na tabela 'usuarios' eliminando o erro de FK
   const handleAlternarEquipeSubordinado = async (subordinadoId: string, jaPertence: boolean) => {
     if (!liderSelecionadoId) return;
 
     try {
       setCarregando(true);
 
-      if (!jaPertence) {
-        // Remove qualquer vínculo pré-existente desse subordinado para evitar duplicidade de gerência direta
-        const { error: deleteError } = await supabase
-          .from("crm_hierarquia")
-          .delete()
-          .eq("subordinado_id", subordinadoId);
-          
-        if (deleteError) throw deleteError;
+      // Define se vincula o ID do líder ou se remove (setando null)
+      const novoSuperior = !jaPertence ? liderSelecionadoId : null;
 
-        // Cria a nova relação na cascata
-        const { error: insertError } = await supabase
-          .from("crm_hierarquia")
-          .insert([
-            {
-              subordinado_id: subordinadoId,
-              superior_id: liderSelecionadoId
-            }
-          ]);
+      const { error } = await supabase
+        .from("usuarios")
+        .update({ superior_id: novoSuperior })
+        .eq("id", subordinadoId);
 
-        if (insertError) throw insertError;
-      } else {
-        // Remove a relação de cascata com o líder selecionado
-        const { error: removeError } = await supabase
-          .from("crm_hierarquia")
-          .delete()
-          .eq("subordinado_id", subordinadoId)
-          .eq("superior_id", liderSelecionadoId);
+      if (error) throw error;
 
-        if (removeError) throw removeError;
-      }
-
-      // Atualiza os estados locais direto do banco após a gravação concluída com sucesso
+      // Recarrega os dados atualizados direto do banco garantindo a consistência na tela
       await carregarDadosHierarquia();
     } catch (err: any) {
       console.error(err);
-      alert(`❌ Erro de persistência no Supabase: ${err.message}. A caixinha foi restaurada ao estado anterior.`);
+      alert(`❌ Erro de persistência no Supabase: ${err.message}.`);
     } finally {
       setCarregando(false);
     }
@@ -142,7 +108,7 @@ export default function GerenciarHierarquiaPage() {
 
       {carregando && (
         <div className="p-2 text-center bg-blue-50 text-blue-700 font-bold font-mono rounded-lg animate-pulse text-[11px]">
-          ⏳ Comunicando alterações de segurança com o banco de dados...
+          ⏳ Atualizando árvore de permissões de carteira no banco de dados...
         </div>
       )}
 
@@ -160,10 +126,8 @@ export default function GerenciarHierarquiaPage() {
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white font-sans text-slate-700 font-medium">
               {listaMembrosDisponiveis.map((colaborador, index) => {
-                // Checa se o colaborador da linha está amarrado ao líder ativo do topo
-                const pertenceAoLider = vinculos.some(
-                  v => v.subordinado_id === colaborador.id && v.superior_id === liderSelecionadoId
-                );
+                // Checa se o superior_id gravado no colaborador corresponde ao selecionado no topo
+                const pertenceAoLider = colaborador.superior_id === liderSelecionadoId;
 
                 return (
                   <tr key={colaborador.id} className={`hover:bg-slate-50/60 transition-colors ${pertenceAoLider ? 'bg-blue-50/30 font-bold' : ''}`}>
