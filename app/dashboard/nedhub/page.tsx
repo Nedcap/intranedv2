@@ -107,7 +107,6 @@ export default function NedHubPage() {
     await sincronizarBaseNedHub();
   };
 
-  // 🔥 SALVAMENTO COMPLETO DA GAVETA EXPANDIDA (Contratos, Telefones, E-mail, Tarefas)
   const salvarDadosGaveta = async (leadAtualizado: Lead) => {
     try {
       const { error } = await supabase.from("crm_leads").update({
@@ -127,25 +126,22 @@ export default function NedHubPage() {
     } catch (err: any) { alert(err.message); }
   };
 
-  // 🫳 Funções Drag and Drop
+  // Funções Drag and Drop
   const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
   const handleOnDrop = (e: React.DragEvent, estagioDestino: string) => {
     const cardId = e.dataTransfer.getData("cardId");
     if (cardId) atualizarEstagioNoBanco(cardId, estagioDestino);
   };
 
-  // 🧠 ALGORITMO: Filtra, Identifica alertas de tarefas e JOGA CARDS COM RETORNO PARA CIMA
   const colunasVisíveis = useMemo(() => {
     const filtrados = leads.filter(l => l.funilId === funilAtivo);
     
-    // Mapeia adicionando uma flag de prioridade se houver tarefa pendente/atrasada para hoje
     const leadsComFlagPrioridade = filtrados.map(lead => {
       const hojeStr = new Date().toISOString().split("T")[0];
       const temTarefaUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
       return { ...lead, urgente: temTarefaUrgente };
     });
 
-    // Ordena para que os urgentes fiquem no topo (true vem antes de false)
     const ordenados = leadsComFlagPrioridade.sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
 
     const extrairPorEstagio = (estagio: string) => ordenados.filter(l => l.estagio === estagio);
@@ -168,18 +164,47 @@ export default function NedHubPage() {
     }
   }, [leads, funilAtivo]);
 
-  // Função para disparar e-mail com template integrado
-  const dispararEmailTemplate = () => {
+  // 💻 DISPARO 1: Via Cliente Local (Gmail / Outlook) para poder editar antes de enviar
+  const dispararEmailClienteLocal = () => {
     if (!leadExpandido || !templateSelecionado) return;
-    const tmpl = templates.find(t => t.id === Number(templateSelecionado));
+    const tmpl = templates.find(t => t.id === templateSelecionado);
     if (!tmpl) return;
 
-    let corpoFormatado = tmpl.corpo
-      .replace(/{contato}/g, leadExpandido.nomeContato)
-      .replace(/{empresa}/g, leadExpandido.razaoSocial);
+    const assuntoFormatado = tmpl.assunto.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
+    const corpoFormatado = tmpl.corpo.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
 
-    const mailtoUrl = `mailto:${leadExpandido.email}?subject=${encodeURIComponent(tmpl.assunto)}&body=${encodeURIComponent(corpoFormatado)}`;
+    const mailtoUrl = `mailto:${leadExpandido.email}?subject=${encodeURIComponent(assuntoFormatado)}&body=${encodeURIComponent(corpoFormatado)}`;
     window.location.href = mailtoUrl;
+  };
+
+  // 🚀 DISPARO 2: Envio direto via API (Resend) - Vai em background
+  const dispararEmailViaResendAPI = async () => {
+    if (!leadExpandido || !templateSelecionado) return;
+    if (!leadExpandido.email) return alert("Insira o e-mail do cliente para disparar via API.");
+    
+    const tmpl = templates.find(t => t.id === templateSelecionado);
+    if (!tmpl) return;
+
+    const assuntoFormatado = tmpl.assunto.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
+    const corpoFormatado = tmpl.corpo.replace(/{empresa}/g, leadExpandido.razaoSocial).replace(/{contato}/g, leadExpandido.nomeContato);
+
+    try {
+      setCarregando(true);
+      const res = await fetch("/api/comercial/enviar-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: leadExpandido.email,
+          subject: assuntoFormatado,
+          text: corpoFormatado
+        })
+      });
+
+      if (!res.ok) throw new Error("Falha no servidor Resend.");
+      alert("🚀 E-mail enviado via API Resend com sucesso direto para o cliente!");
+    } catch (err: any) {
+      alert(`Erro no disparo Resend: ${err.message}`);
+    } finally { setCarregando(false); }
   };
 
   return (
@@ -189,7 +214,7 @@ export default function NedHubPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
         <div className="flex items-center gap-4">
           <div>
-            <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v3</h2>
+            <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v4</h2>
             <p className="text-xs text-slate-400">Cards com tarefas agendadas sobem automaticamente no grid.</p>
           </div>
           <select value={funilAtivo} onChange={(e) => setFunilAtivo(e.target.value as any)} className="p-2 border border-blue-300 rounded-lg bg-blue-50 text-blue-900 font-black uppercase text-[10px] outline-none">
@@ -242,7 +267,6 @@ export default function NedHubPage() {
                 />
               </div>
               
-              {/* 🔄 BOTÃO DE MOVIMENTAÇÃO ENTRE FUNIS */}
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => setLeadExpandido({
@@ -302,15 +326,23 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Seção 2: Templates de E-mail Integrados */}
+              {/* Seção 2: Templates de E-mail Integrados Duplos */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
-                <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo de E-mail com Template</h3>
-                <div className="flex gap-2">
-                  <select value={templateSelecionado} onChange={e => setTemplateSelecionado(e.target.value)} className="p-2 border border-purple-300 rounded-lg bg-white text-slate-800 outline-none flex-1 font-bold">
+                <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Disparo Automatizado de E-mail</h3>
+                <div className="space-y-2">
+                  <select value={templateSelecionado} onChange={e => setTemplateSelecionado(e.target.value)} className="w-full p-2 border border-purple-300 rounded-lg bg-white text-slate-800 outline-none font-bold">
                     <option value="">-- Selecione um template de e-mail --</option>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
                   </select>
-                  <button onClick={dispararEmailTemplate} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[9px] rounded-lg shadow-sm">⚡ Mesclar e Enviar</button>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={dispararEmailClienteLocal} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[9px] rounded-lg shadow-sm">
+                      💻 Abrir no Outlook / Gmail (Editar)
+                    </button>
+                    <button onClick={dispararEmailViaResendAPI} className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[9px] rounded-lg shadow-sm">
+                      🚀 Enviar Direto (Via Resend API)
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -318,7 +350,6 @@ export default function NedHubPage() {
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Agendamento de Tarefas e Alertas</h3>
                 
-                {/* Criar Tarefa */}
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div className="col-span-1.5">
                     <label className="block text-[8px] text-slate-400 uppercase font-bold mb-1">Ação Comercial</label>
@@ -336,7 +367,6 @@ export default function NedHubPage() {
                   }} className="w-full p-2 bg-amber-600 hover:bg-amber-700 text-white font-black uppercase text-[9px] h-9 rounded-lg shadow-xs">Agendar</button>
                 </div>
 
-                {/* Lista de Tarefas Cadastradas */}
                 <div className="space-y-1.5 max-h-[150px] overflow-y-auto pt-2">
                   {leadExpandido.tarefas.map(t => (
                     <div key={t.id} className={`flex justify-between items-center p-2 rounded-lg border font-mono text-[10px] ${t.concluida ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-amber-200 text-slate-800 font-bold'}`}>
@@ -394,7 +424,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* MODAL NOVO LEAD (Omitido o preenchimento para foco na velocidade) */}
+      {/* MODAL NOVO LEAD */}
       {modalNovoLead && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl p-5 max-w-sm w-full space-y-3">
@@ -413,11 +443,8 @@ export default function NedHubPage() {
   );
 }
 
-// 🃏 REESTRUTURAÇÃO DO CARD KANBAN
 function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: string; onExpandir: (l: Lead) => void }) {
   const handleOnDragStart = (e: React.DragEvent, id: string) => { e.dataTransfer.setData("cardId", id); };
-
-  // Verifica se o card possui tarefas em atraso ou para hoje para emitir o alerta pulsante visual na tela
   const hojeStr = new Date().toISOString().split("T")[0];
   const possuiRetornoUrgente = lead.tarefas.some(t => !t.concluida && t.data <= hojeStr);
 
@@ -449,7 +476,6 @@ function CardLead({ lead, corColuna, onExpandir }: { lead: Lead; corColuna: stri
         <p>📧 <span className="font-mono text-slate-600 truncate block max-w-[150px]">{lead.email || "-"}</span></p>
       </div>
 
-      {/* Badge Contador de Tarefas Pendentes */}
       {lead.tarefas.filter(t => !t.concluida).length > 0 && (
         <div className="text-[8px] font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-bold w-fit border border-amber-200">
           ⏳ {lead.tarefas.filter(t => !t.concluida).length} tarefas agendadas

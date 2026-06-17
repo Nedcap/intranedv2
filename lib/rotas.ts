@@ -30,7 +30,10 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true },
   
   // 🌳 NOVA ROTA DE HIERARQUIA INTEGRADA DIRECT NO MENU:
-  { nome: "Hierarquias e Acessos", path: "/dashboard/configuracoes/hierarquia", icone: "🌳", categoria: "Administração", defaultMaster: true }
+  { nome: "Hierarquias e Acessos", path: "/dashboard/configuracoes/hierarquia", icone: "🌳", categoria: "Administração", defaultMaster: true },
+  
+  // ✉️ NOVA ROTA DOS TEMPLATES DE E-MAIL COM TAGS E RESEND:
+  { nome: "Templates de E-mail", path: "/dashboard/configuracoes/templates", icone: "✉️", categoria: "Administração", defaultMaster: true }
 ];
 
 export const obterRotasMaster = () => 

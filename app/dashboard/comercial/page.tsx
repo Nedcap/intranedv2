@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface VisitaRow {
-  id: string;
+  id: string; // ID original do banco para consistência
   nome: string;
   empresa?: string;
   responsavelSDR: string;
@@ -36,133 +36,92 @@ export default function ControleComercialVisitasPage() {
   const [filtroStatusComite, setFiltroStatusComite] = useState("");
   const [buscaTexto, setBuscaTexto] = useState("");
 
+  // 1. Carrega as configurações de SDR salvas localmente
   useEffect(() => {
     try {
-      const salvasVisitas = localStorage.getItem("ned_comercial_visitas");
       const salvasConfigs = localStorage.getItem("ned_comercial_sdr_configs");
-      if (salvasVisitas) setVisitas(JSON.parse(salvasVisitas));
       if (salvasConfigs) setConfigsSDR(JSON.parse(salvasConfigs));
     } catch (e) {
-      console.error("Erro ao ler cache:", e);
+      console.error("Erro ao ler cache de configs:", e);
     }
   }, []);
 
-  const persistirDados = (novasVisitas: VisitaRow[], novasConfigs = configsSDR) => {
-    setVisitas(novasVisitas);
+  // Salva alterações de comissão/configs
+  const persistirConfigs = (novasConfigs: Record<string, SDRConfig>) => {
     setConfigsSDR(novasConfigs);
-    localStorage.setItem("ned_comercial_visitas", JSON.stringify(novasVisitas));
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  const handleImportarCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // 2. BUSCA AUTOMÁTICA DIRETO DO SUPABASE (Aba Pós-Venda / Cards de Visita)
+  const buscarCardsPosVenda = useCallback(async () => {
     setCarregando(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        if (!text) return;
+    try {
+      // ATENÇÃO: Ajuste o nome da tabela 'pos_venda' e colunas se necessário no seu schema
+      const { data, error } = await supabase
+        .from("pos_venda") 
+        .select("*")
+        .in("etapa", ["Visita Agendada", "Visita Realizada", "Visita Efetuada"]); // Filtra as etapas desejadas
 
-        const lines = text.split(/\r?\n/);
-        let startIdx = 0;
-        
-        if (lines[0] && lines[0].includes("sep=")) startIdx = 1;
-        while (startIdx < lines.length && !lines[startIdx].trim()) startIdx++;
+      if (error) throw error;
 
-        const parseLineCSV = (linhaTexto: string) => {
-          const colunas = [];
-          let dentroDeAspas = false;
-          let celulaAcumulada = "";
-          for (let i = 0; i < linhaTexto.length; i++) {
-            const char = linhaTexto[i];
-            if (char === '"') {
-              dentroDeAspas = !dentroDeAspas;
-            } else if (char === ',' && !dentroDeAspas) {
-              colunas.push(celulaAcumulada.trim().replace(/^"|"$/g, ""));
-              celulaAcumulada = "";
-            } else {
-              celulaAcumulada += char;
-            }
-          }
-          colunas.push(celulaAcumulada.trim().replace(/^"|"$/g, ""));
-          return colunas;
-        };
-
-        const headers = parseLineCSV(lines[startIdx]);
-        
-        const idxNome = headers.indexOf("Nome");
-        const idxEmpresa = headers.indexOf("Empresa");
-        const idxEtapa = headers.indexOf("Etapa");
-        const idxEstado = headers.indexOf("Estado");
-        const idxMotivoLoss = headers.indexOf("Motivo de Perda");
-        const idxDataCriacao = headers.indexOf("Data de criação");
-        const idxResponsavel = headers.indexOf("Responsável");
-        const idxEmail = headers.indexOf("Email");
-        const idxTelefone = headers.indexOf("Telefone");
-
-        const listaNovasVisitas: VisitaRow[] = [];
+      if (data) {
         const sdrsEncontrados = new Set<string>();
-
-        // Timestamp único para garantir imutabilidade das chaves no render
-        const importBatchId = Date.now();
-
-        for (let i = startIdx + 1; i < lines.length; i++) {
-          const linhaLimpa = lines[i].trim();
-          if (!linhaLimpa) continue;
-
-          const colunas = parseLineCSV(linhaLimpa);
-          if (colunas.length < headers.length || !colunas[idxNome]) continue;
-
-          const sdrNome = colunas[idxResponsavel] || "Sem SDR Mapeado";
+        
+        const dadosMapeados: VisitaRow[] = data.map((item: any) => {
+          const sdrNome = item.responsavel_sdr || item.agente_nome || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
-          const estadoLead = colunas[idxEstado] || "";
-          const motivoPerdaText = colunas[idxMotivoLoss] || "";
-
+          // Lógica de mapeamento de status com base no estado do lead no banco
           let statusComiteInicial: any = "Em Análise";
-          if (estadoLead.toLowerCase() === "perdida" || motivoPerdaText.toLowerCase().includes("crédito") || motivoPerdaText.toLowerCase().includes("recusada")) {
+          const estado = item.estado?.toLowerCase() || "";
+          const motivoPerdaText = item.motivo_perda?.toLowerCase() || "";
+
+          if (estado === "perdida" || motivoPerdaText.includes("crédito") || motivoPerdaText.includes("recusada")) {
             statusComiteInicial = "Reprovado";
-          } else if (estadoLead.toLowerCase() === "ganhou" || estadoLead.toLowerCase() === "aprovado") {
+          } else if (estado === "ganhou" || estado === "aprovado") {
             statusComiteInicial = "Aprovado";
           }
 
-          listaNovasVisitas.push({
-            // 🎯 ID Absoluto e Linear para evitar Call Stack Overflow
-            id: `row-${i}-${importBatchId}`,
-            nome: colunas[idxNome],
-            empresa: colunas[idxEmpresa] || "",
+          return {
+            id: item.id.toString(),
+            nome: item.nome_empresa || item.nome || "Empresa sem Nome",
+            empresa: item.empresa || "",
             responsavelSDR: sdrNome,
-            etapa: colunas[idxEtapa] || "",
-            estado: estadoLead,
-            motivoPerda: motivoPerdaText,
-            dataCriacao: colunas[idxDataCriacao] || "-",
-            email: colunas[idxEmail] || "",
-            telefone: colunas[idxTelefone] || "",
-            statusComissaoAgendamento: "Pendente",
-            statusComissaoComite: statusComiteInicial
-          });
-        }
+            etapa: item.etapa || "",
+            estado: item.estado || "",
+            motivoPerda: item.motivo_perda || "",
+            dataCriacao: item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-",
+            email: item.email || "",
+            telefone: item.telefone || "",
+            // Preserva status de comissão caso já usem controle interno ou inicia como Pendente
+            statusComissaoAgendamento: item.status_comissao_agendamento || "Pendente",
+            statusComissaoComite: item.status_comissao_comite || statusComiteInicial,
+          };
+        });
 
+        // Atualiza a lista de SDRs mantendo preços antigos ou aplicando padrão R$50/R$80
         const novasConfigs = { ...configsSDR };
-        sdrsEncontrados.forEach(nomeSdr => {
+        sdrsEncontrados.forEach((nomeSdr) => {
           if (!novasConfigs[nomeSdr]) {
             novasConfigs[nomeSdr] = { nome: nomeSdr, valorAgendamento: 50, valorComite: 80 };
           }
         });
 
-        persistirDados(listaNovasVisitas, novasConfigs);
-        alert(`✅ Sucesso! Planilha processada linha por linha. ${listaNovasVisitas.length} leads comerciais carregados.`);
-      } catch (err) {
-        console.error(err);
-        alert("❌ Erro no processamento do arquivo.");
-      } finally {
-        setCarregando(false);
+        setVisitas(dadosMapeados);
+        persistirConfigs(novasConfigs);
       }
-    };
-    reader.readAsText(file, "UTF-8");
-  };
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ Erro ao ler dados do Nedhub: ${err.message}`);
+    } finally {
+      setCarregando(false);
+    }
+  }, [configsSDR]);
+
+  // Busca inicial automática ao montar o componente
+  useEffect(() => {
+    buscarCardsPosVenda();
+  }, []);
 
   const moverLeadParaEsteiraAnalise = async (lead: VisitaRow) => {
     const confirmar = confirm(`🔍 Deseja enviar a empresa "${lead.nome}" diretamente para a lista de Análises Pendentes?`);
@@ -176,15 +135,15 @@ export default function ControleComercialVisitasPage() {
         agente_nome: lead.responsavelSDR || "Comercial Ned",
         nome_empresa: lead.nome.trim().toUpperCase(),
         data_envio: dataFormatada,
-        pendencias: "Enviado via Esteira Comercial"
+        pendencias: "Enviado via Esteira Comercial Automatizada"
       });
 
       if (error) throw error;
 
-      const atualizadas = visitas.map(v => v.id === lead.id ? { ...v, statusComissaoComite: "Enviado p/ Análise" as any } : v);
-      persistirDados(atualizadas);
+      // Atualiza o estado visual local
+      setVisitas(prev => prev.map(v => v.id === lead.id ? { ...v, statusComissaoComite: "Enviado p/ Análise" } : v));
       
-      alert("🚀 Sucesso! Empresa integrada. Ela já apareceu na aba 'Análises Em Comitê' na esteira de entrada.");
+      alert("🚀 Sucesso! Empresa integrada. Ela já apareceu na aba 'Análises Em Comitê'.");
     } catch (err: any) {
       alert(`❌ Erro de Integração: ${err.message}`);
     } finally {
@@ -193,20 +152,19 @@ export default function ControleComercialVisitasPage() {
   };
 
   const mudarStatusAgendamento = (id: string, novoStatus: "Pendente" | "Pago") => {
-    persistirDados(visitas.map(v => v.id === id ? { ...v, statusComissaoAgendamento: novoStatus } : v));
+    setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoAgendamento: novoStatus } : v));
   };
 
   const mudarStatusComite = (id: string, novoStatus: any) => {
-    persistirDados(visitas.map(v => v.id === id ? { ...v, statusComissaoComite: novoStatus } : v));
+    setVisitas(prev => prev.map(v => v.id === id ? { ...v, statusComissaoComite: novoStatus } : v));
   };
 
   const atualizarValorComissaoSDR = (nomeSdr: string, campo: "valorAgendamento" | "valorComite", valor: number) => {
     const novasConfigs = { ...configsSDR };
     novasConfigs[nomeSdr] = { ...novasConfigs[nomeSdr], [campo]: valor };
-    persistirDados(visitas, novasConfigs);
+    persistirConfigs(novasConfigs);
   };
 
-  // 🎯 MEMORIZAÇÃO FIEL DAS LISTAS CONTRA LOOPS INFINITOS DE RENDER
   const listasSDRsUnicos = useMemo(() => {
     return Object.keys(configsSDR).sort();
   }, [configsSDR]);
@@ -243,27 +201,27 @@ export default function ControleComercialVisitasPage() {
       {/* HEADER BAR */}
       <div className="border-b border-slate-200 pb-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 tracking-tight">🎯 Esteira Comercial Integrada</h2>
-          <span className="text-xs text-slate-400 font-medium">Controle linear de leads comerciais e integração instantânea com a mesa de análise de crédito.</span>
+          <h2 className="text-lg font-bold text-slate-800 tracking-tight">🎯 Esteira Comercial Automatizada</h2>
+          <span className="text-xs text-slate-400 font-medium">Lendo diretamente os cards sincronizados em tempo real do pós-venda Nedhub.</span>
         </div>
         <div className="flex items-center gap-2">
-          {visitas.length > 0 && (
-            <button onClick={() => { if(confirm("Zerar painel?")) persistirDados([], {}); }} className="px-3 py-1.5 text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg font-bold cursor-pointer transition-all">🗑️ Limpar Painel</button>
-          )}
-          <label className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg shadow-sm border border-blue-700 cursor-pointer transition-all flex items-center gap-2">
-            📥 Importar CSV Exclusivo
-            <input type="file" accept=".csv" onChange={handleImportarCSV} className="hidden" />
-          </label>
+          <button 
+            onClick={buscarCardsPosVenda} 
+            disabled={carregando}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black rounded-lg shadow-sm border border-blue-700 cursor-pointer transition-all flex items-center gap-2"
+          >
+            {carregando ? "🔄 Sincronizando..." : "🔄 Sincronizar Nedhub"}
+          </button>
         </div>
       </div>
 
-      {carregando && <div className="p-8 font-bold text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-xl">⏳ Lendo linhas de forma linear...</div>}
+      {carregando && <div className="p-8 font-bold text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-xl">⏳ Carregando dados da API do Supabase...</div>}
 
-      {visitas.length === 0 ? (
+      {visitas.length === 0 && !carregando ? (
         <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2">
           <div className="text-2xl">🗂️</div>
-          <h3 className="font-bold text-slate-700 text-xs">Nenhum dado comercial ativo</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Faça a importação do arquivo CSV extraído do CRM para popular a esteira operacional.</p>
+          <h3 className="font-bold text-slate-700 text-xs">Nenhum card de visita encontrado</h3>
+          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se existem leads nas colunas de visita agendada ou realizada no Nedhub.</p>
         </div>
       ) : (
         <>
@@ -327,14 +285,14 @@ export default function ControleComercialVisitasPage() {
             </select>
           </div>
 
-          {/* TABELONA ANALÍTICA COM BOTÃO DE INTEGRAÇÃO */}
+          {/* TABELONA ANALÍTICA */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-800 text-white font-black uppercase text-[11px] border-b border-slate-900">
                   <th className="p-3">Lead Comercial</th>
                   <th className="p-3">SDR Responsável</th>
-                  <th className="p-3 text-center">Criação</th>
+                  <th className="p-3 text-center">Etapa Atual</th>
                   <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
                   <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê</th>
                   <th className="p-3 text-center">Ações Operacionais</th>
@@ -353,7 +311,11 @@ export default function ControleComercialVisitasPage() {
                         <span className="text-[10px] text-slate-400 font-normal truncate block">{v.email || v.telefone || "Sem contatos adicionais"}</span>
                       </td>
                       <td className="p-3 text-slate-500 font-bold">{v.responsavelSDR}</td>
-                      <td className="p-3 text-center text-slate-500">{v.dataCriacao}</td>
+                      <td className="p-3 text-center text-slate-500">
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                          {v.etapa}
+                        </span>
+                      </td>
                       
                       {/* GATILHO 1 */}
                       <td className="p-3 bg-blue-50/10 text-center space-y-1">
@@ -388,7 +350,7 @@ export default function ControleComercialVisitasPage() {
                         </select>
                       </td>
 
-                      {/* 🚀 BOTÃO DE INTEGRAÇÃO COM ANÁLISES PENDENTES */}
+                      {/* ACCIONADOR */}
                       <td className="p-3 text-center">
                         <button
                           onClick={() => moverLeadParaEsteiraAnalise(v)}
