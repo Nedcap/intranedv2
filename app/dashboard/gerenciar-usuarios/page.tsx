@@ -44,9 +44,12 @@ export default function GerenciarUsuariosPage() {
     setEmail(user.email || "");
     setSenha(""); // Mantido em branco por segurança
     
+    // 🎯 SDR ADICIONADO AQUI
     const cargoSalvo = user.cargo || "Comercial";
     if (cargoSalvo.toLowerCase() === "comercial") {
       setCargo("Comercial");
+    } else if (cargoSalvo.toLowerCase() === "sdr") {
+      setCargo("SDR");
     } else if (cargoSalvo.toLowerCase() === "operacional") {
       setCargo("Operacional");
     } else if (cargoSalvo.toLowerCase() === "master") {
@@ -55,10 +58,18 @@ export default function GerenciarUsuariosPage() {
       setCargo(cargoSalvo);
     }
 
-    // Mapeia permissões salvas restaurando corretamente o estado dos checkboxes
+    // Mapeia permissões salvas restaurando o estado dos checkboxes.
+    // Preparado para ler Array antigo ou o JSONB novo sem quebrar.
     const novasPerms: Record<string, boolean> = {};
+    const permsBanco = user.permissoes || {};
+    const isArray = Array.isArray(permsBanco);
+
     MAPA_DE_ROTAS.forEach(r => {
-      novasPerms[r.path] = Array.isArray(user.permissoes) && user.permissoes.includes(r.path);
+      if (isArray) {
+        novasPerms[r.path] = permsBanco.includes(r.path);
+      } else {
+        novasPerms[r.path] = !!permsBanco[r.path];
+      }
     });
     setPermissoes(novasPerms);
   };
@@ -78,9 +89,22 @@ export default function GerenciarUsuariosPage() {
 
     try {
       setSalvando(true);
-      // Transforma as chaves ativas do objeto em array estruturada para gravação de JSON/Array
-      const arrayPermissoes = Object.keys(permissoes).filter(k => permissoes[k] === true);
       const emailTratado = email.trim().toLowerCase();
+
+      // 🛡️ BLINDAGEM DA HIERARQUIA: 
+      // Em vez de forçar um Array e apagar a chave "lider_id", mantemos o objeto do banco.
+      const payloadPermissoes = (selecionado?.permissoes && !Array.isArray(selecionado.permissoes)) 
+        ? { ...selecionado.permissoes } 
+        : {};
+
+      // Atualiza apenas os módulos de visualização no JSON
+      MAPA_DE_ROTAS.forEach(r => {
+        if (permissoes[r.path]) {
+          payloadPermissoes[r.path] = true;
+        } else {
+          delete payloadPermissoes[r.path];
+        }
+      });
 
       if (selecionado) {
         // Modo Edição
@@ -88,11 +112,11 @@ export default function GerenciarUsuariosPage() {
           nome: nome.trim(),
           email: emailTratado,
           cargo: cargo,
-          permissoes: arrayPermissoes
+          permissoes: payloadPermissoes
         };
 
         if (senha.trim()) {
-          payloadUpdate.senha = Math.random().toString(36).substring(2); // Mock ou Hash no seu backend RPC/Edge
+          payloadUpdate.senha = senha.trim(); // Ajuste conforme a sua criptografia
         }
 
         const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
@@ -110,7 +134,7 @@ export default function GerenciarUsuariosPage() {
           email: emailTratado,
           senha: senha.trim(),
           cargo: cargo,
-          permissoes: arrayPermissoes
+          permissoes: payloadPermissoes
         }]);
 
         if (error) throw error;
@@ -129,6 +153,13 @@ export default function GerenciarUsuariosPage() {
 
   const alternarPermissao = (path: string) => {
     setPermissoes(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  // Calcula visualmente quantos módulos a pessoa tem, ignorando as chaves internas do sistema (ex: lider_id)
+  const contarModulos = (perms: any) => {
+    if (!perms) return 0;
+    if (Array.isArray(perms)) return perms.length;
+    return Object.keys(perms).filter(k => k.startsWith("/")).length;
   };
 
   if (carregando) return <div className="p-8 text-center text-blue-600 font-bold animate-pulse text-xs uppercase font-mono">Carregando central de acessos e políticas do banco...</div>;
@@ -168,6 +199,8 @@ export default function GerenciarUsuariosPage() {
             <div className="flex flex-col space-y-1">
               <label className="font-bold text-slate-500 uppercase text-[9px]">Cargo / Alçada de Permissão:</label>
               <select value={cargo} onChange={(e) => setCargo(e.target.value)} className="p-2 border border-slate-200 rounded-lg outline-none bg-white focus:border-blue-500 font-black text-slate-800">
+                {/* 🎯 ADICIONADO O SDR E ORDENADO */}
+                <option value="SDR">SDR (Filtro por Liderança/Próprios)</option>
                 <option value="Comercial">Comercial (Filtro por Carteira)</option>
                 <option value="Operacional">Operacional (Acesso Geral)</option>
                 <option value="Master">Master (Acesso Completo + Configurações)</option>
@@ -221,13 +254,15 @@ export default function GerenciarUsuariosPage() {
                     <td className="p-3.5">
                       <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
                         u.cargo === 'Master' ? 'bg-purple-100 text-purple-700' :
-                        u.cargo === 'Operacional' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                        u.cargo === 'Operacional' ? 'bg-blue-100 text-blue-700' : 
+                        u.cargo === 'SDR' ? 'bg-emerald-100 text-emerald-700' : 
+                        'bg-amber-100 text-amber-700'
                       }`}>
                         {u.cargo || "Comercial"}
                       </span>
                     </td>
                     <td className="p-3.5 text-center text-slate-600 font-bold font-mono">
-                      {u.cargo === 'Master' ? "ACESSO TOTAL" : `🔓 ${Array.isArray(u.permissoes) ? u.permissoes.length : 0} módulos`}
+                      {u.cargo === 'Master' ? "ACESSO TOTAL" : `🔓 ${contarModulos(u.permissoes)} módulos`}
                     </td>
                     <td className="p-3.5 text-right">
                       <button onClick={() => iniciarEdicao(u)} className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white font-black rounded text-[9px] cursor-pointer transition-all uppercase shadow-xs">
