@@ -3,10 +3,9 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { carregarPlanilhaCarteiraGviz } from "@/actions/dashboard-service";
 
 // ============================================================================
-// 🧱 INTERFACES DE DADOS ORIGINAIS DA V1
+// 🧱 INTERFACES DE DADOS ORIGINAIS DA V1 (Mantidas)
 // ============================================================================
 interface Titulo {
   cedente: string;
@@ -60,7 +59,7 @@ export default function CarteiraDinamicaPage() {
   const [ordenacaoColunaSub, setOrdenacaoColunaSub] = useState("vencimento"); 
   const [ordenacaoDirecaoSub, setOrdenacaoDirecaoSub] = useState<"asc" | "desc">("asc");
 
-  // 📥 BUSCA DADOS UTILIZANDO O MÉTODO SEGURO DE SERVIDOR (GVIZ SERVER ACTION)
+  // 📥 BUSCA DADOS UTILIZANDO O SUPABASE V2
   const carregarDadosCarteira = async () => {
     try {
       setCarregando(true);
@@ -86,108 +85,67 @@ export default function CarteiraDinamicaPage() {
         }
       }
 
-      // 🚀 Chamada segura via Server Action (Elimina de vez o fetch bugado da API local)
-      const valoresSec = await carregarPlanilhaCarteiraGviz("CARTEIRA_SEC");
-      const valoresFidc = await carregarPlanilhaCarteiraGviz("CARTEIRA_FIDC");
+      // 🚀 Chamada segura e instantânea no banco
+      let querySec = supabase.from("carteira_sec").select("*");
+      let queryFidc = supabase.from("carteira_fidc").select("*");
 
-      if (!valoresSec || !valoresFidc) throw new Error("Erro ao coletar dados das matrizes do Google Sheets.");
+      if (isComercial) {
+        if (allowedCedentes.length > 0) {
+          querySec = querySec.in("cedente", allowedCedentes);
+          queryFidc = queryFidc.in("cedente", allowedCedentes);
+        } else {
+          // Bloqueio se não tiver cliente na carteira
+          querySec = querySec.in("cedente", ["__VAZIO__"]);
+          queryFidc = queryFidc.in("cedente", ["__VAZIO__"]);
+        }
+      }
 
-      // Remonta a matriz idêntica à lida pelo fetch antigo do Sheets para não quebrar os índices r[x]
-      const linhasSec = [[], ...valoresSec];
-      const linhasFidc = [[], ...valoresFidc];
+      const [resSec, resFidc] = await Promise.all([querySec, queryFidc]);
+
+      if (resSec.error) throw new Error(resSec.error.message);
+      if (resFidc.error) throw new Error(resFidc.error.message);
 
       const listaTitulos: Titulo[] = [];
-      
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
 
-      // 🎯 PARSER DE DATAS: Lê tanto "22/05/2026" quanto o objeto formatado "Date(2026,5,22)" do sheets
-      const parseDataBR = (dStr: string) => {
-        if (!dStr) return null;
-        const stringLimpa = String(dStr).trim();
+      // 🎯 Processa títulos SEC
+      resSec.data?.forEach(row => {
+        const dtVenc = new Date(`${row.vencimento}T12:00:00`);
+        const diffDias = Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+        const dtFormatada = `${String(dtVenc.getDate()).padStart(2, '0')}/${String(dtVenc.getMonth() + 1).padStart(2, '0')}/${dtVenc.getFullYear()}`;
 
-        if (stringLimpa.includes("Date(")) {
-          const extrairModulo = stringLimpa.replace(/Date\(|\)/g, ""); 
-          const partes = extrairModulo.split(",");
-          if (partes.length === 3) {
-            const ano = parseInt(partes[0]);
-            const mes = parseInt(partes[1]); 
-            const dia = parseInt(partes[2]);
-            const d = new Date(ano, mes, dia);
-            d.setHours(0, 0, 0, 0);
-            return d;
-          }
-        }
+        listaTitulos.push({
+          cedente: row.cedente,
+          sacado: row.sacado,
+          numeroTitulo: row.numero_titulo || "-",
+          vencimento: dtFormatada,
+          valorFace: Number(row.valor_face),
+          valorAberto: Number(row.valor_aberto),
+          status: row.status as "Vencido" | "A Vencer",
+          origem: "SEC",
+          diasParaVencer: diffDias
+        });
+      });
 
-        const p = stringLimpa.split("/");
-        if (p.length === 3) {
-          const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
-          d.setHours(0, 0, 0, 0);
-          return d;
-        }
+      // 🎯 Processa títulos FIDC
+      resFidc.data?.forEach(row => {
+        const dtVenc = new Date(`${row.vencimento}T12:00:00`);
+        const diffDias = Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+        const dtFormatada = `${String(dtVenc.getDate()).padStart(2, '0')}/${String(dtVenc.getMonth() + 1).padStart(2, '0')}/${dtVenc.getFullYear()}`;
 
-        return null;
-      };
-
-      const formatarDataParaExibicao = (dStr: string) => {
-        const dt = parseDataBR(dStr);
-        if (!dt) return dStr;
-        return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
-      };
-
-      // Processa títulos da Securitizadora por posições puras de array
-      if (linhasSec.length > 1) {
-        for (let i = 1; i < linhasSec.length; i++) {
-          const r = linhasSec[i];
-          if (!r || !r[0] || String(r[0]).trim().toUpperCase() === "CEDENTE") continue;
-
-          const cedenteNome = String(r[0]).trim().toUpperCase();
-          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
-
-          const vencRaw = String(r[3] || "");
-          const dtVenc = parseDataBR(vencRaw);
-          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
-
-          listaTitulos.push({
-            cedente: cedenteNome,
-            sacado: String(r[1]).trim().toUpperCase(),
-            numeroTitulo: String(r[2] || "-"),
-            vencimento: formatarDataParaExibicao(vencRaw),
-            valorFace: parseFloat(r[4]) || 0,
-            valorAberto: parseFloat(r[5]) || 0,
-            status: String(r[6] || "").includes("Vencido") ? "Vencido" : "A Vencer",
-            origem: "SEC",
-            diasParaVencer: diffDias
-          });
-        }
-      }
-
-      // Processa títulos do FIDC por posições puras de array
-      if (linhasFidc.length > 1) {
-        for (let i = 1; i < linhasFidc.length; i++) {
-          const r = linhasFidc[i];
-          if (!r || !r[0] || String(r[0]).trim().toUpperCase() === "CEDENTE") continue;
-
-          const cedenteNome = String(r[0]).trim().toUpperCase();
-          if (isComercial && !allowedCedentes.includes(cedenteNome)) continue;
-
-          const vencRaw = String(r[2] || "");
-          const dtVenc = parseDataBR(vencRaw);
-          const diffDias = dtVenc ? Math.floor((dtVenc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)) : 0;
-
-          listaTitulos.push({
-            cedente: cedenteNome,
-            sacado: String(r[1]).trim().toUpperCase(),
-            numeroTitulo: "-",
-            vencimento: formatarDataParaExibicao(vencRaw),
-            valorFace: parseFloat(r[3]) || 0,
-            valorAberto: parseFloat(r[4]) || 0,
-            status: String(r[5] || "").includes("Vencido") ? "Vencido" : "A Vencer",
-            origem: "FIDC",
-            diasParaVencer: diffDias
-          });
-        }
-      }
+        listaTitulos.push({
+          cedente: row.cedente,
+          sacado: row.sacado,
+          numeroTitulo: "-",
+          vencimento: dtFormatada,
+          valorFace: Number(row.valor_face),
+          valorAberto: Number(row.valor_aberto),
+          status: row.status as "Vencido" | "A Vencer",
+          origem: "FIDC",
+          diasParaVencer: diffDias
+        });
+      });
 
       setTitulosOriginais(listaTitulos);
     } catch (err: any) {
@@ -322,7 +280,7 @@ export default function CarteiraDinamicaPage() {
     return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   };
 
-  if (carregando) return <div className="p-10 font-bold text-center animate-pulse text-slate-500 text-xs">⏳ Carregando volumes analíticos via API... Aguarde!</div>;
+  if (carregando) return <div className="p-10 font-bold text-center animate-pulse text-slate-500 text-xs">⏳ Carregando volumes analíticos direto do banco... Aguarde!</div>;
   if (erro) return <div className="p-10 text-red-600 font-bold text-center">❌ Erro no banco de dados: {erro}</div>;
 
   return (
