@@ -328,7 +328,7 @@ export default function FinanceiroCalendarioPage() {
             </div>
 
             <div className="grid grid-cols-7 gap-2">
-              {diasBrancos.map((_, i) => <div key={`b-${i}`} className="min-h-[120px] bg-slate-50/50 rounded-xl border border-transparent"></div>)}
+              {diasBrancos.map((_, i) => <div key={`b-${i}`} className="h-[150px] bg-slate-50/50 rounded-xl border border-transparent"></div>)}
 
               {diasMes.map(dia => {
                 const dataString = `${mesAtivo}-${String(dia).padStart(2, "0")}`;
@@ -337,43 +337,55 @@ export default function FinanceiroCalendarioPage() {
                 const valorDia = pagsNoDia.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
                 const isHoje = dataString === hojeStr;
                 
-                // Notificações flutuantes (Atrasado ou Próximo a Vencer)
                 const hasAtraso = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento < hojeStr);
                 const hasAlerta = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento >= hojeStr && p.data_vencimento <= dataMais2Str);
+
+                // 🎯 LIMITANDO VISUALIZAÇÃO: Mostra apenas 3 itens no calendário
+                const MAX_ITEMS = 3;
+                const visiblePags = pagsNoDia.slice(0, MAX_ITEMS);
+                const hiddenCount = pagsNoDia.length - MAX_ITEMS;
 
                 return (
                   <div 
                     key={dia} 
                     onClick={() => setDiaSelecionado(dataString)}
-                    className={`min-h-[120px] relative border rounded-xl p-2 flex flex-col gap-1 cursor-pointer transition-all ${isHoje ? "border-blue-400 ring-1 ring-blue-100 bg-blue-50/20 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"}`}
+                    className={`h-[150px] relative border rounded-xl p-2.5 flex flex-col gap-2 cursor-pointer transition-all overflow-hidden ${isHoje ? "border-blue-400 ring-2 ring-blue-100 bg-blue-50/20 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"}`}
                   >
                     {/* Badges de Notificação */}
                     {hasAtraso && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Existem contas em atraso neste dia!"></div>}
                     {!hasAtraso && hasAlerta && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Vencimentos previstos para hoje/amanhã!"></div>}
 
-                    <div className="flex justify-between items-start">
-                      <span className={`text-xs font-black ${isHoje ? "bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-xs" : "text-slate-500"}`}>
+                    {/* Cabeçalho do Dia */}
+                    <div className="flex justify-between items-start shrink-0">
+                      <span className={`text-xs font-black ${isHoje ? "bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-md" : "text-slate-500"}`}>
                         {dia}
                       </span>
                       {valorDia > 0 && (
-                        <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shadow-xs">
                           {fM(valorDia)}
                         </span>
                       )}
                     </div>
 
-                    {/* 🔥 SCROLL INVISÍVEL ADICIONADO AQUI: className "no-scrollbar" */}
-                    <div className="mt-1 flex flex-col gap-1 overflow-y-auto max-h-[80px] no-scrollbar">
-                      {pagsNoDia.map(p => (
-                        <div key={p.id} className={`text-[9px] font-bold px-1.5 py-1 rounded truncate border ${
+                    {/* Lista de Contas (Limitada a 3) */}
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      {visiblePags.map(p => (
+                        <div key={p.id} className={`text-[10px] font-bold px-2 py-1 rounded-md truncate border flex items-center gap-1.5 shadow-xs ${
                           p.status === "PAGO" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
                           p.status === "PROGRAMADO" ? "bg-blue-50 text-blue-700 border-blue-200" :
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`} title={`${p.descricao} - ${fM(p.valor)}`}>
-                          {p.status === "PAGO" ? "✅ " : p.status === "PROGRAMADO" ? "🗓️ " : "⏳ "}
-                          {p.descricao || "Nova Conta"}
+                          <span className="text-[9px] leading-none">{p.status === "PAGO" ? "✅" : p.status === "PROGRAMADO" ? "🗓️" : "⏳"}</span>
+                          <span className="truncate">{p.descricao || "Nova Conta"}</span>
                         </div>
                       ))}
+                      
+                      {/* Botão de "+ X Contas" se ultrapassar o limite */}
+                      {hiddenCount > 0 && (
+                        <div className="text-[9px] font-black text-slate-500 text-center mt-auto bg-slate-50 border border-slate-200 py-1 rounded-md hover:bg-slate-100 transition-colors">
+                          + {hiddenCount} {hiddenCount === 1 ? "conta" : "contas"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -420,7 +432,7 @@ export default function FinanceiroCalendarioPage() {
             </div>
 
             {/* Grid Tabelão */}
-            <div className="flex-1 overflow-auto bg-slate-100/50 p-4 custom-scrollbar">
+            <div className="flex-1 overflow-auto bg-slate-100/50 p-4">
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                 <table className="w-full text-left border-collapse min-w-[1100px]">
                   <thead>
@@ -542,19 +554,6 @@ export default function FinanceiroCalendarioPage() {
           </div>
         </div>
       )}
-
-      {/* 🔮 CSS GLOBAL INJETADO PARA BARRAS DE ROLAGEM */}
-      <style dangerouslySetContent={{__html: `
-        /* Barra Customizada para o Modal Grande */
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        /* 🔥 SCROLL INVISÍVEL PARA OS DIAS DO CALENDÁRIO */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}} />
     </div>
   );
 }
