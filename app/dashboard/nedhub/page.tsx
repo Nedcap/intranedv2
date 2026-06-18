@@ -46,6 +46,14 @@ const parseCustomizados = (dados: any) => {
   return dados;
 };
 
+// Utilitário global para gerar link do WhatsApp
+const gerarLinkWhatsApp = (telefone: string) => {
+  if (!telefone) return "";
+  const numeros = telefone.replace(/\D/g, "");
+  const ddi = numeros.startsWith("55") ? numeros : `55${numeros}`;
+  return `https://wa.me/${ddi}`;
+};
+
 export default function NedHubPage() {
   const [funilAtivo, setFunilAtivo] = useState<"vendas" | "pos_venda">("vendas");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -53,7 +61,6 @@ export default function NedHubPage() {
   const [gerentesComerciais, setGerentesComerciais] = useState<GerenteComercial[]>([]);
   
   const [userId, setUserId] = useState<string | null>(null);
-  
   const [userRole, setUserRole] = useState<string>(""); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("");
@@ -73,7 +80,6 @@ export default function NedHubPage() {
   const [modalNovoLead, setModalNovoLead] = useState(false);
   const [leadExpandido, setLeadExpandido] = useState<Lead | null>(null);
   
-  // 📌 Modais independentes de Agenda
   const [modalCalendarioPopup, setModalCalendarioPopup] = useState<{ aberto: boolean; lead: Lead | null }>({ aberto: false, lead: null });
   const [modalGestaoAgenda, setModalGestaoAgenda] = useState(false);
 
@@ -87,8 +93,16 @@ export default function NedHubPage() {
   const [novaTarefaTitulo, setNovaTarefaTitulo] = useState("");
   const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
-  const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
+
+  // 📌 Estados para Geração em Lote da Agenda do Comercial
+  const [dataLote, setDataLote] = useState("");
+  const [horaInicioLote, setHoraInicioLote] = useState("08:00");
+  const [horaFimLote, setHoraFimLote] = useState("17:00");
+  const [intervaloLote, setIntervaloLote] = useState("90"); // Padrão de 1h30
+
+  // 📌 Estados do Agendamento Profissional SDR
   const [filtroDataSdr, setFiltroDataSdr] = useState("");
+  const [slotsSelecionadosParaAgendar, setSlotsSelecionadosParaAgendar] = useState<string[]>([]);
 
   useEffect(() => {
     const localSlots = localStorage.getItem("nedhub_slots_comercial");
@@ -96,6 +110,7 @@ export default function NedHubPage() {
     
     const hojeStr = new Date().toISOString().split("T")[0];
     setFiltroDataSdr(hojeStr);
+    setDataLote(hojeStr);
   }, []);
 
   const salvarSlotsNoLocal = (novosSlots: Record<string, string[]>) => {
@@ -290,26 +305,63 @@ export default function NedHubPage() {
     }
   };
 
-  const agendarHorarioGerentePeloSdr = async (dataHora: string) => {
-    if (!modalCalendarioPopup.lead) return;
-    const leadAlvo = modalCalendarioPopup.lead;
-    const [data, hora] = dataHora.split(" ");
-    
-    const novaAgendaTarefa: Tarefa = {
-      id: Math.random().toString(),
-      titulo: `Reunião Comercial - Responsável: ${getGerenteNome(gerenteSelecionadoAgenda)}`,
-      data: data,
-      horario: hora,
-      gerenteId: gerenteSelecionadoAgenda,
-      concluida: false
-    };
+  // 📌 GERAÇÃO DE MÚLTIPLOS HORÁRIOS PELO COMERCIAL
+  const handleGerarLote = () => {
+    if (!dataLote || !horaInicioLote || !horaFimLote || !intervaloLote || !gerenteSelecionadoAgenda) {
+      return alert("Preencha todos os campos do gerador.");
+    }
 
-    const tarefasAtualizadas = [...(leadAlvo.tarefas || []), novaAgendaTarefa];
+    const novosSlots: string[] = [];
+    let horaAtual = new Date(`${dataLote}T${horaInicioLote}`);
+    const horaFim = new Date(`${dataLote}T${horaFimLote}`);
+
+    while (horaAtual <= horaFim) {
+      const yyyy = horaAtual.getFullYear();
+      const mm = String(horaAtual.getMonth() + 1).padStart(2, '0');
+      const dd = String(horaAtual.getDate()).padStart(2, '0');
+      const hh = String(horaAtual.getHours()).padStart(2, '0');
+      const min = String(horaAtual.getMinutes()).padStart(2, '0');
+      
+      novosSlots.push(`${yyyy}-${mm}-${dd} ${hh}:${min}`);
+      horaAtual = new Date(horaAtual.getTime() + parseInt(intervaloLote) * 60000);
+    }
+
+    const existentes = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
+    // Unir sem duplicatas e ordenar
+    const combinados = Array.from(new Set([...existentes, ...novosSlots])).sort();
+
+    salvarSlotsNoLocal({
+      ...horariosDisponiveisGerentes,
+      [gerenteSelecionadoAgenda]: combinados
+    });
+
+    alert(`✅ ${novosSlots.length} horários foram gerados com sucesso para ${dataLote.split('-').reverse().join('/')}!`);
+  };
+
+  // 📌 AGENDAMENTO MÚLTIPLO PELO SDR
+  const agendarHorariosSelecionados = async () => {
+    if (!modalCalendarioPopup.lead || slotsSelecionadosParaAgendar.length === 0) return;
+    
+    const leadAlvo = modalCalendarioPopup.lead;
+    const novasTarefas: Tarefa[] = slotsSelecionadosParaAgendar.map(dataHora => {
+      const [data, hora] = dataHora.split(" ");
+      return {
+        id: Math.random().toString(),
+        titulo: `Reunião Comercial - Responsável: ${getGerenteNome(gerenteSelecionadoAgenda)}`,
+        data: data,
+        horario: hora,
+        gerenteId: gerenteSelecionadoAgenda,
+        concluida: false
+      };
+    });
+
+    const tarefasAtualizadas = [...(leadAlvo.tarefas || []), ...novasTarefas];
     
     const slotsFiltrados = {
       ...horariosDisponiveisGerentes,
-      [gerenteSelecionadoAgenda]: (horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []).filter(h => h !== dataHora)
+      [gerenteSelecionadoAgenda]: (horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []).filter(h => !slotsSelecionadosParaAgendar.includes(h))
     };
+    
     salvarSlotsNoLocal(slotsFiltrados);
 
     await supabase.from("crm_leads").update({ 
@@ -319,9 +371,10 @@ export default function NedHubPage() {
     }).eq("id", leadAlvo.id);
 
     setModalCalendarioPopup({ aberto: false, lead: null });
+    setSlotsSelecionadosParaAgendar([]);
     setFunilAtivo("pos_venda"); 
     await sincronizarBaseNedHub();
-    alert("📅 Reunião fixada e card movido com sucesso para 'Visita Agendada' no Funil Comercial.");
+    alert(`📅 ${slotsSelecionadosParaAgendar.length} opção(ões) de horário reservadas no card com sucesso!`);
   };
 
   const getGerenteNome = (id: string | number) => gerentesComerciais.find(g => g.id.toString() === id.toString())?.nome || "";
@@ -394,7 +447,6 @@ export default function NedHubPage() {
     return { totais, atrasadas, incompletos };
   }, [leads]);
 
-  // 🔴 O erro estava aqui! Todo Hook (como useMemo) OBRIGATORIAMENTE precisa vir ANTES de um "return" no React.
   const slotsGerenteFiltradosPorData = useMemo(() => {
     if (!gerenteSelecionadoAgenda) return [];
     const todosOsSlots = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
@@ -571,9 +623,13 @@ export default function NedHubPage() {
                   <label className="block text-[9px] text-slate-400 uppercase font-bold mb-1">Lista de Telefones</label>
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {leadExpandido.telefones?.map((tel, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold">
+                      <div key={idx} className="flex items-center gap-1.5 bg-white border border-slate-300 px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold shadow-sm">
                         <span>{tel}</span>
-                        <button onClick={() => setLeadExpandido({ ...leadExpandido,  telefones: leadExpandido.telefones.filter((_, i) => i !== idx) })} className="text-red-500 font-bold ml-1">✕</button>
+                        {/* 🟢 Botão WhatsApp do Drawer */}
+                        <button onClick={() => window.open(gerarLinkWhatsApp(tel), '_blank')} className="text-green-500 hover:text-green-600 font-bold px-1 transition-colors" title="Chamar no WhatsApp">
+                          💬
+                        </button>
+                        <button onClick={() => setLeadExpandido({ ...leadExpandido,  telefones: leadExpandido.telefones.filter((_, i) => i !== idx) })} className="text-red-500 hover:text-red-600 font-bold ml-1 border-l pl-1.5">✕</button>
                       </div>
                     ))}
                   </div>
@@ -646,45 +702,80 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🟢 MODAL DE GESTÃO DA AGENDA DO COMERCIAL (Abre via botão Header) */}
+      {/* 🟢 MODAL DE GESTÃO DA AGENDA DO COMERCIAL COM GERADOR EM LOTE */}
       {modalGestaoAgenda && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl border border-slate-100">
+          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl border border-slate-100">
             <div className="flex justify-between items-center border-b pb-3">
               <div>
                 <h3 className="font-black uppercase text-emerald-700 text-sm tracking-tight">📅 Gerenciar Minha Agenda</h3>
-                <p className="text-slate-400 text-[10px]">Libere blocos de horário para as marcações dos SDRs.</p>
+                <p className="text-slate-400 text-[10px]">Libere blocos de horário específicos ou gere o dia todo de uma vez.</p>
               </div>
               <button onClick={() => setModalGestaoAgenda(false)} className="text-xl font-bold text-slate-400 hover:text-red-500">✕</button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Selecionar Comercial:</label>
-                <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2.5 border bg-slate-50 rounded-lg font-bold text-slate-800 outline-none text-[11px]">
-                  {gerentesComerciais.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
-                </select>
-              </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4 border-r pr-6">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Selecionar Comercial:</label>
+                  <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2.5 border bg-slate-50 rounded-lg font-bold text-slate-800 outline-none text-[11px]">
+                    {gerentesComerciais.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+                  </select>
+                </div>
 
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 space-y-3">
-                <span className="block text-[10px] font-black uppercase text-emerald-800 border-b border-emerald-200 pb-1">➕ Adicionar Novo Bloco de Horário</span>
-                <div className="flex gap-2">
-                  <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-2 border border-emerald-300 rounded-lg text-[11px] bg-white font-mono outline-none flex-1 font-bold text-slate-800" />
-                  <button onClick={() => {
-                    if(!novoHorarioDisponivel || !gerenteSelecionadoAgenda) return;
-                    const formatada = novoHorarioDisponivel.replace("T", " ");
-                    const atualizados = { ...horariosDisponiveisGerentes, [gerenteSelecionadoAgenda]: [...(horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []), formatada].sort() };
-                    salvarSlotsNoLocal(atualizados);
-                    setNovoHorarioDisponivel("");
-                  }} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-lg text-[10px] uppercase shadow-sm transition-all">
-                    Liberar
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                  <span className="block text-[10px] font-black uppercase text-slate-700 border-b border-slate-200 pb-1">➕ Adicionar Horário Único</span>
+                  <div className="flex gap-2">
+                    <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-2 border border-slate-300 rounded-lg text-[11px] bg-white font-mono outline-none flex-1 font-bold text-slate-800" />
+                    <button onClick={() => {
+                      if(!novoHorarioDisponivel || !gerenteSelecionadoAgenda) return;
+                      const formatada = novoHorarioDisponivel.replace("T", " ");
+                      const atualizados = { ...horariosDisponiveisGerentes, [gerenteSelecionadoAgenda]: [...(horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []), formatada].sort() };
+                      salvarSlotsNoLocal(atualizados);
+                      setNovoHorarioDisponivel("");
+                    }} className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-lg text-[10px] uppercase shadow-sm transition-all">
+                      Liberar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 space-y-3 shadow-inner">
+                  <span className="block text-[10px] font-black uppercase text-emerald-800 border-b border-emerald-200 pb-1">⚡ Gerador em Lote (Dia Todo)</span>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Data Alvo</label>
+                      <input type="date" value={dataLote} onChange={e => setDataLote(e.target.value)} className="w-full p-2 border border-emerald-300 rounded bg-white text-[10px] font-bold outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Início</label>
+                      <input type="time" value={horaInicioLote} onChange={e => setHoraInicioLote(e.target.value)} className="w-full p-2 border border-emerald-300 rounded bg-white text-[10px] font-bold outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Fim</label>
+                      <input type="time" value={horaFimLote} onChange={e => setHoraFimLote(e.target.value)} className="w-full p-2 border border-emerald-300 rounded bg-white text-[10px] font-bold outline-none" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Intervalo (Minutos)</label>
+                      <select value={intervaloLote} onChange={e => setIntervaloLote(e.target.value)} className="w-full p-2 border border-emerald-300 rounded bg-white text-[10px] font-bold outline-none">
+                        <option value="30">30 Minutos</option>
+                        <option value="45">45 Minutos</option>
+                        <option value="60">1 Hora (60 min)</option>
+                        <option value="90">1 Hora e 30 Min (90 min)</option>
+                        <option value="120">2 Horas (120 min)</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <button onClick={handleGerarLote} className="w-full mt-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-lg text-[10px] uppercase shadow-md transition-all tracking-wider">
+                    🔄 Gerar Janelas Automáticas
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Horários Ativos deste Comercial:</label>
-                <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                <label className="block text-[10px] uppercase font-black text-slate-700 mb-2 border-b pb-1">Horários Ativos deste Comercial:</label>
+                <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
                   {(!horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || horariosDisponiveisGerentes[gerenteSelecionadoAgenda].length === 0) ? (
                     <p className="text-slate-400 italic text-[10px] text-center py-6 bg-slate-50 rounded-lg border border-dashed">Nenhum horário liberado.</p>
                   ) : (
@@ -710,44 +801,55 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🗓️ POPUP DE AGENDAMENTO EXCLUSIVO DO SDR (Otimizado com Filtros) */}
+      {/* 🗓️ POPUP DE AGENDAMENTO EXCLUSIVO DO SDR (Seleção Múltipla Otimizada) */}
       {modalCalendarioPopup.aberto && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 border border-slate-200 shadow-2xl">
+          <div className="bg-white rounded-2xl p-6 max-w-xl w-full space-y-4 border border-slate-200 shadow-2xl">
             <div className="flex justify-between items-start border-b pb-3">
               <div>
-                <h3 className="font-black text-blue-900 uppercase text-[12px] tracking-tight">🗓️ Central de Agendamento SDR</h3>
-                <p className="text-slate-400 text-[10px] leading-tight mt-0.5">Selecione o profissional, filtre a data e reserve o horário disponível.</p>
+                <h3 className="font-black text-blue-900 uppercase text-[12px] tracking-tight">🗓️ Central de Agendamento Profissional</h3>
+                <p className="text-slate-400 text-[10px] leading-tight mt-0.5">Você pode selecionar **múltiplas opções** de horário para propor ao cliente.</p>
               </div>
-              <button onClick={() => setModalCalendarioPopup({ aberto: false, lead: null })} className="text-lg font-black text-slate-400 hover:text-red-500">✕</button>
+              <button onClick={() => { setModalCalendarioPopup({ aberto: false, lead: null }); setSlotsSelecionadosParaAgendar([]); }} className="text-lg font-black text-slate-400 hover:text-red-500">✕</button>
             </div>
             
-            <div className="space-y-4">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Vincular Reunião Ao Comercial:</label>
-                  <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2.5 border border-slate-300 bg-white rounded-lg font-bold text-slate-800 outline-none text-[11px] shadow-sm">
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Comercial Responsável:</label>
+                  <select value={gerenteSelecionadoAgenda} onChange={e => { setGerenteSelecionadoAgenda(e.target.value); setSlotsSelecionadosParaAgendar([]); }} className="w-full p-2.5 border border-slate-300 bg-white rounded-lg font-bold text-slate-800 outline-none text-[11px] shadow-sm">
                     {gerentesComerciais.length === 0 && <option value="">Carregando lista...</option>}
                     {gerentesComerciais.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">📅 Escolha a Data da Reunião:</label>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">📅 Filtrar por Data:</label>
                   <input type="date" value={filtroDataSdr} onChange={e => setFiltroDataSdr(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg text-[11px] bg-white font-mono outline-none font-bold text-slate-800 shadow-sm" />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 border-b pb-1">Horários Livres para {filtroDataSdr.split("-").reverse().join("/")}:</label>
-                <div className="grid grid-cols-3 gap-2 max-h-[140px] overflow-y-auto pr-1">
+              <div className="flex flex-col h-full">
+                <label className="block text-[10px] uppercase font-black text-slate-600 mb-2 border-b pb-1">Opções Livres para {filtroDataSdr.split("-").reverse().join("/")}:</label>
+                <div className="grid grid-cols-3 gap-2 flex-1 content-start overflow-y-auto pr-1">
                   {slotsGerenteFiltradosPorData.length === 0 ? (
-                    <p className="text-slate-400 italic text-[10px] col-span-3 text-center py-6 bg-slate-50 rounded-xl border border-dashed">Nenhuma agenda livre localizada nesta data.</p>
+                    <p className="text-slate-400 italic text-[10px] col-span-3 text-center py-6 bg-slate-50 rounded-xl border border-dashed">Nenhum horário liberado nesta data.</p>
                   ) : (
                     slotsGerenteFiltradosPorData.map((horarioCompleto, index) => {
                       const apenasHora = horarioCompleto.split(" ")[1];
+                      const isSelected = slotsSelecionadosParaAgendar.includes(horarioCompleto);
+                      
                       return (
-                        <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horarioCompleto)} className="p-2.5 bg-blue-50 hover:bg-blue-600 border border-blue-200 text-blue-800 hover:text-white rounded-xl text-center font-mono font-black transition-all text-[11px] shadow-sm">
+                        <button key={index} 
+                          onClick={() => {
+                            if (isSelected) {
+                              setSlotsSelecionadosParaAgendar(prev => prev.filter(h => h !== horarioCompleto));
+                            } else {
+                              setSlotsSelecionadosParaAgendar(prev => [...prev, horarioCompleto]);
+                            }
+                          }} 
+                          className={`p-2.5 border rounded-xl text-center font-mono font-black transition-all text-[11px] shadow-sm ${isSelected ? 'bg-blue-600 border-blue-700 text-white scale-105 shadow-md ring-2 ring-blue-300 ring-offset-1' : 'bg-white border-blue-200 text-blue-800 hover:bg-blue-50'}`}
+                        >
                           {apenasHora}
                         </button>
                       );
@@ -755,6 +857,19 @@ export default function NedHubPage() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="pt-3 border-t flex justify-between items-center">
+              <span className="text-[10px] font-bold text-slate-500">
+                {slotsSelecionadosParaAgendar.length === 0 ? "Nenhum horário selecionado." : `✅ ${slotsSelecionadosParaAgendar.length} horário(s) na seleção.`}
+              </span>
+              <button 
+                disabled={slotsSelecionadosParaAgendar.length === 0}
+                onClick={agendarHorariosSelecionados} 
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black uppercase text-[10px] tracking-wider rounded-lg shadow-md transition-all"
+              >
+                Confirmar Reuniões
+              </button>
             </div>
           </div>
         </div>
@@ -835,8 +950,26 @@ function CardLead({ lead, corColuna, userRole, onExpandir, onExcluir, onAbrirCal
         🗓️ Agendar com Comercial
       </button>
 
-      <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-lg space-y-1 border border-slate-100 font-medium">
-        <p>👤 <span className="font-bold text-slate-800">{lead.nomeContato || "Não informado"}</span></p>
+      <div className="text-[10px] text-slate-500 bg-slate-50 p-2 rounded-lg space-y-1.5 border border-slate-100 font-medium">
+        <div className="flex justify-between items-center">
+          <p className="flex items-center gap-1">👤 <span className="font-bold text-slate-800 truncate max-w-[120px]">{lead.nomeContato || "Não informado"}</span></p>
+          
+          {/* 🟢 Botão direto de WhatsApp no Kanban Card */}
+          {(lead.telefone || (lead.telefones && lead.telefones.length > 0)) && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const num = lead.telefone || lead.telefones[0];
+                window.open(gerarLinkWhatsApp(num), '_blank');
+              }}
+              className="bg-green-100 hover:bg-green-500 text-green-700 hover:text-white px-1.5 py-0.5 rounded flex items-center gap-1 font-bold text-[8px] uppercase transition-colors"
+              title="Conversar no WhatsApp"
+            >
+              💬 Zap
+            </button>
+          )}
+        </div>
+
         {lead.dadosCustomizados?.ramo && (
           <p className="text-slate-600 font-mono text-[9px] uppercase truncate">⚙️ {lead.dadosCustomizados.ramo}</p>
         )}
