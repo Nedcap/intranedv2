@@ -17,6 +17,17 @@ export interface BaseUniversal {
   variacoes: string[];
 }
 
+// Limpa pontuações, acentos e espaços de cabeçalhos para não ter erro de leitura
+const strClean = (c: any) => {
+  if (!c) return "";
+  return String(c)
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Tira acentos
+    .replace(/[^A-Z0-9]/g, ""); // Tira tudo que não for letra ou número (pontos, traços, espaços)
+};
+
 function limparNome(texto: any): string {
   if (!texto) return "";
   let n = String(texto).toUpperCase().trim();
@@ -132,13 +143,14 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 PROCESSADORES (ALINHADOS COM OS NOVOS CABEÇALHOS)
+// 🤖 PROCESSADORES (INVENCÍVEIS A PONTUAÇÕES NAS COLUNAS)
 // ============================================================================
 
 const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return {};
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().replace(/[^A-Z]/g, ""));
+  
+  const header = raw[headerIdx].map(strClean);
   const idxCedente = header.indexOf("CEDENTE");
   const idxLimUti = header.findIndex(c => c.includes("LIMUTI") || c.includes("UTI") || c.includes("RISCO"));
   const idxVencidos = header.findIndex(c => c.includes("VENCIDOS"));
@@ -162,9 +174,10 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CLIENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CLIENTE"));
   if (headerIdx === -1) return {};
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
+  
+  const header = raw[headerIdx].map(strClean);
   const idxCliente = header.indexOf("CLIENTE");
   const idxUtilizado = header.indexOf("UTILIZADO");
   const idxVencido = header.indexOf("VENCIDO");
@@ -188,9 +201,10 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
+  
+  const header = raw[headerIdx].map(strClean);
   const idxCedente = header.indexOf("CEDENTE");
   const idxData = header.findIndex(c => c.includes("DTANEG") || c.includes("DATA"));
   const idxValor = header.findIndex(c => c.includes("APROVADO") || c.includes("VLRAPROV"));
@@ -212,12 +226,13 @@ const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "NOME DO CEDENTE" || c === "CEDENTE"; }));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
-  const idxCedente = header.findIndex(c => c.includes("NOME DO CEDENTE") || c === "CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DATA DA OPERACAO") || c.includes("DATA OPER") || c.includes("CRIACAO"));
-  const idxValor = header.findIndex(c => c.includes("VALOR FACE") || c === "FACE");
+  
+  const header = raw[headerIdx].map(strClean);
+  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
+  const idxData = header.findIndex(c => c.includes("DATADAOPERACAO") || c.includes("DATAOPER") || c.includes("CRIACAO"));
+  const idxValor = header.findIndex(c => c.includes("VALORFACE") || c === "FACE");
 
   const lancamentos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
@@ -236,16 +251,15 @@ const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
-  // Procura pelo cabeçalho
-  let headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "ADITIVO"));
+  let headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "ADITIVO"));
   const lancamentos: any[] = [];
 
   if (headerIdx !== -1) {
-    const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
-    const idxCedente = header.indexOf("CLIENTE");
-    const idxAditivo = header.indexOf("ADITIVO");
+    const header = raw[headerIdx].map(strClean);
+    const idxCedente = header.findIndex(c => c.includes("CLIENTE") || c.includes("CEDENTE"));
+    const idxAditivo = header.findIndex(c => c === "ADITIVO");
     const idxDesagio = header.findIndex(c => c.includes("DIFERENCIAL") || c.includes("DESAGIO"));
-    const idxTaxa = header.findIndex(c => c.includes("TAXASERVICO"));
+    const idxTaxa = header.findIndex(c => c.includes("TAXASERVICO") || c.includes("TARIFA"));
     const idxDespesa = header.findIndex(c => c.includes("DESPESAS"));
 
     for (let i = headerIdx + 1; i < raw.length; i++) {
@@ -268,7 +282,6 @@ const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
       }
     }
   } else {
-    // Fallback caso não tenha cabeçalho explícito (formato legado)
     for (const row of raw) {
       let aditivo = String(row[0] || "").trim();
       if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
@@ -290,12 +303,13 @@ const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "NOME DO CEDENTE" || c === "CEDENTE"; }));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
-  const idxCedente = header.findIndex(c => c.includes("NOME DO CEDENTE") || c === "CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DATA DA OPER") || c.includes("DATA OPER") || c.includes("CRIACAO"));
-  const idxDesagio = header.findIndex(c => c === "DESAGIO" || c.includes("VALOR DESAGIO") || c.includes("DESCONTO"));
+  
+  const header = raw[headerIdx].map(strClean);
+  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
+  const idxData = header.findIndex(c => c.includes("DATADAOPER") || c.includes("DATAOPER") || c.includes("CRIACAO"));
+  const idxDesagio = header.findIndex(c => c === "DESAGIO" || c.includes("VALORDESAGIO") || c.includes("DESCONTO"));
   
   const indicesTarifas = header.reduce((acc: number[], col, idx) => {
     if (col.includes("DESPESA") || col.includes("TARIFA") || col.includes("TAXA")) acc.push(idx);
@@ -325,9 +339,9 @@ const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
 const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   let colDtaBaixa = 12; let colEncargos = 15;
   for (let i = 0; i < Math.min(30, raw.length); i++) {
-    const rowStr = raw[i].map(x => String(x).trim().toUpperCase());
-    if (rowStr.includes("DTA BAIXA") || rowStr.includes("DATA BAIXA")) {
-      colDtaBaixa = rowStr.findIndex(x => x.includes("DTA BAIXA") || x.includes("DATA BAIXA"));
+    const rowStr = raw[i].map(x => strClean(x));
+    if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA")) {
+      colDtaBaixa = rowStr.findIndex(x => x.includes("DTABAIXA") || x.includes("DATABAIXA"));
       colEncargos = rowStr.findIndex(x => x.includes("ENCARGOS"));
       break;
     }
@@ -336,7 +350,6 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   let currentCedente = "";
   for (const row of raw) {
     const c0 = String(row[0] || "").trim();
-    // Identifica sub-cabeçalhos de cedente pelo padrão do relatório QPROF
     if (/^\d+\s*-/.test(c0) && (!row[1] || String(row[1]).trim() === "")) { 
       currentCedente = c0.replace(/^\d+\s*-\s*/, "").trim(); 
       continue; 
@@ -359,19 +372,26 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "RAZAO SOCIAL" || c.includes("CLIENTE"); }));
+  const headerIdx = raw.findIndex(row => row.some(cell => { 
+    const c = strClean(cell); 
+    return c === "CEDENTE" || c === "RAZAOSOCIAL" || c.includes("CLIENTE"); 
+  }));
+  
   if (headerIdx === -1) return [];
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s\.]/g, ""));
+  
+  const header = raw[headerIdx].map(strClean);
+  
   const idxCedente = header.findIndex(c => c === "CEDENTE" || c.includes("RAZAO") || c.includes("CLIENTE"));
-  const idxSacado = header.findIndex(c => c === "SACADO" || c.includes("NOME SACADO") || c.includes("SACADO DEVEDOR"));
-  const idxNumTitulo = header.findIndex(c => c.includes("NOSSO NUM") || c.includes("DOCUMENTO") || c.includes("TITULO"));
-  const idxVencimento = header.findIndex(c => c.includes("DTA VCTO") || c.includes("VENCIMENTO"));
-  const idxValorFace = header.findIndex(c => c.includes("VLR FACE") || c.includes("VALOR FACE"));
-  const idxValorAberto = header.findIndex(c => c.includes("VLR ABERTO") || c.includes("VALOR ABERTO"));
+  const idxSacado = header.findIndex(c => c === "SACADO" || c.includes("NOMESACADO") || c.includes("SACADODEVEDOR"));
+  const idxNumTitulo = header.findIndex(c => c.includes("NOSSONUM") || c.includes("DOCUMENTO") || c.includes("TITULO"));
+  const idxVencimento = header.findIndex(c => c.includes("DTAVCTO") || c.includes("VENCIMENTO"));
+  const idxValorFace = header.findIndex(c => c.includes("VLRFACE") || c.includes("VALORFACE") || c.includes("FACE"));
+  const idxValorAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c.includes("ABERTO"));
 
   const titulos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
-    const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
+    const row = raw[i]; 
+    const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
     const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
@@ -381,7 +401,7 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
     const numeroTitulo = idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-";
     const vencimento = idxVencimento !== -1 ? formatarDataExcel(row[idxVencimento]) : "-";
     const valorFace = idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0;
-    const valorAberto = parseValorReal(row[idxValorAberto]);
+    const valorAberto = idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0;
     const status = checarSeVencido(vencimento);
 
     if (valorAberto > 0) {
@@ -400,18 +420,20 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "NOME DO CEDENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
-  const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
-  const idxCedente = header.indexOf("NOME DO CEDENTE");
-  const idxSacado = header.indexOf("NOME DO SACADO");
-  const idxVencimento = header.findIndex(c => c.includes("DATA DE VENCIMENTO"));
-  const idxValorFace = header.indexOf("VALOR FACE");
-  const idxValorAberto = header.indexOf("VALOR ABERTO");
+  
+  const header = raw[headerIdx].map(strClean);
+  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
+  const idxSacado = header.findIndex(c => c.includes("NOMEDOSACADO") || c === "SACADO");
+  const idxVencimento = header.findIndex(c => c.includes("DATADEVENCIMENTO") || c === "VENCIMENTO");
+  const idxValorFace = header.findIndex(c => c.includes("VALORFACE") || c === "FACE");
+  const idxValorAberto = header.findIndex(c => c.includes("VALORABERTO") || c === "ABERTO");
 
   const titulos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
-    const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
+    const row = raw[i]; 
+    const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
     const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
@@ -533,10 +555,7 @@ export default function ImportacaoPage() {
     setProcessando(true);
     setStatusMsg("🚀 Consolidando e Transmitindo dados para o Supabase V2...");
     try {
-      // ======================================================================
       // 1. GRAVAR RISCO (DASH CARTEIRA)
-      // Proteção: Mescla os dados atuais do banco com os novos arquivos
-      // ======================================================================
       const { data: dbCarteira } = await supabase.from('dash_carteira').select('*');
       const carteiraMap = new Map();
       dbCarteira?.forEach(row => carteiraMap.set(row.cedente, row));
@@ -562,9 +581,7 @@ export default function ImportacaoPage() {
         if (error) throw error;
       }
 
-      // ======================================================================
       // 2. GRAVAR EXTRATO FINANCEIRO E AGREGAR DASH VOP
-      // ======================================================================
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
         const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, baseUniversalData);
@@ -587,11 +604,9 @@ export default function ImportacaoPage() {
       for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
-        // Envia log detalhado
         const { error: errExtrato } = await supabase.from("extrato_financeiro").insert(loteFinancas);
         if (errExtrato) throw errExtrato;
 
-        // Calcula DASH VOP de forma protegida (mesclando com banco existente)
         const { data: dbVop } = await supabase.from('dash_vop').select('*');
         const vopMap = new Map();
         dbVop?.forEach(row => vopMap.set(`${row.mes_ano}_${row.cedente}`, row));
@@ -618,11 +633,8 @@ export default function ImportacaoPage() {
         }
       }
 
-      // ======================================================================
       // 3. GRAVAR CARTEIRA DETALHADA EM ABERTO (FOTOS DIÁRIAS)
-      // ======================================================================
       if (dadosFinais.carteira.sec.length > 0) {
-        // Truque para apagar todas as linhas da tabela (PostgREST exige filtro)
         await supabase.from("carteira_sec").delete().neq("id", "00000000-0000-0000-0000-000000000000");
         const chunk = 500;
         for (let i = 0; i < dadosFinais.carteira.sec.length; i += chunk) {
