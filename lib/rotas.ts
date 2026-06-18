@@ -25,6 +25,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Restritivos Sócios", path: "/dashboard/restritivos-socios", icone: "👥", categoria: "Crédito", defaultMaster: true },
 
   // ADMINISTRAÇÃO / CONTROLES CORE
+  { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Administração", defaultMaster: true },
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Administração", defaultMaster: true },
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Administração", defaultMaster: true },
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Administração", defaultMaster: true },
