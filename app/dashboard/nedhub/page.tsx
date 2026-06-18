@@ -36,6 +36,15 @@ const GERENTES_COMERCIAIS = [
   { id: "gerente_2", nome: "Gerente Comercial 2" },
 ];
 
+// Função utilitária para garantir que o JSON do banco venha como Objeto e não como String
+const parseCustomizados = (dados: any) => {
+  if (!dados) return {};
+  if (typeof dados === 'string') {
+    try { return JSON.parse(dados); } catch { return {}; }
+  }
+  return dados;
+};
+
 export default function NedHubPage() {
   const [funilAtivo, setFunilAtivo] = useState<"vendas" | "pos_venda">("vendas");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -43,16 +52,14 @@ export default function NedHubPage() {
   
   const [userId, setUserId] = useState<string | null>(null);
   
-  // CORREÇÃO: Inicializa vazio para não dar privilégio Master falso antes da resposta do banco
   const [userRole, setUserRole] = useState<string>(""); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
   const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
 
-  const [carregando, setCarregando] = useState(true); // Iniciando como true para o loading inicial
+  const [carregando, setCarregando] = useState(true); 
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  // Banco de Janelas Livres para o Comercial
   const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({
     "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00"],
     "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30"],
@@ -80,7 +87,6 @@ export default function NedHubPage() {
   const [templateSelecionado, setTemplateSelecionado] = useState("");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
 
-  // Persistência das janelas internas do comercial
   useEffect(() => {
     const localSlots = localStorage.getItem("nedhub_slots_comercial");
     if (localSlots) setHorariosDisponiveisGerentes(JSON.parse(localSlots));
@@ -91,7 +97,6 @@ export default function NedHubPage() {
     localStorage.setItem("nedhub_slots_comercial", JSON.stringify(novosSlots));
   };
 
-  // CORREÇÃO: Função de carregar perfil reajustada para garantir a queda na role correta
   const carregarSessaoEPerfilReal = async () => {
     try {
       setCarregando(true);
@@ -113,14 +118,14 @@ export default function NedHubPage() {
       if (profile && profile.role) {
         setUserRole(profile.role);
       } else {
-        setUserRole("SDR"); // Fallback seguro caso o perfil exista mas esteja sem role
+        setUserRole("SDR"); 
       }
 
       const { data: hierarquia } = await supabase.from("crm_hierarquia").select("subordinado_id").eq("superior_id", user.id);
       if (hierarquia) setSubordinadosIds(hierarquia.map(h => h.subordinado_id));
     } catch (e) {
       console.error("Erro ao carregar sessão real de hierarquia", e);
-      setUserRole("SDR"); // Se falhar a requisição, joga para a role mais restrita por segurança (SDR)
+      setUserRole("SDR"); 
     } finally {
       setCarregando(false);
     }
@@ -143,7 +148,7 @@ export default function NedHubPage() {
           email: l.email || "",
           estagio: l.estagio || l.estágio || "sem_contato",
           funilId: l.funilId || l.funilid || l.funil_id || "vendas",
-          dadosCustomizados: l.campos_customizados || l.camposCustomizados || {},
+          dadosCustomizados: parseCustomizados(l.campos_customizados || l.camposCustomizados),
           anotacoes: l.anotacoes || "",
           tarefas: Array.isArray(l.tarefas) ? l.tarefas : [],
           atualizadoEm: l.atualizado_em || l.criado_em,
@@ -155,7 +160,6 @@ export default function NedHubPage() {
     }
   };
 
-  // Carrega a sessão e depois sincroniza os leads
   useEffect(() => { 
     const inicializar = async () => {
       await carregarSessaoEPerfilReal();
@@ -175,17 +179,17 @@ export default function NedHubPage() {
         const dadosBot = await res.json();
         const dados = dadosBot.data || dadosBot.lead || dadosBot;
 
-        if (dados && (dados.razaoSocial || dados.razao_social || dados.nome)) {
+        if (dados && (dados.razaoSocial || dados.razao_social || dados.nome || dados.natureza_juridica)) {
           setInputRazao((dados.razaoSocial || dados.razao_social || dados.nome || "").toUpperCase());
           if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
           if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
           
           setDadosAutomotivosBot({
-            ramo: dados.ramo || dados.atividade_principal || dados.atividade || "",
-            cnae: dados.cnae || dados.cnae_fiscal || "",
+            ramo: dados.ramo || dados.atividade_principal || dados.atividade || dados.descricao || "",
+            cnae: dados.cnae_principal || dados.cnae || dados.cnae_fiscal || "",
             endereco: dados.logradouro || dados.endereco || dados.logradouro_completo || "",
             bairro: dados.bairro || "",
-            cidade: dados.municipio || dados.cidade || "",
+            cidade: dados.municipio_rf || dados.municipio || dados.cidade || "",
             uf: dados.uf || ""
           });
         }
@@ -376,7 +380,6 @@ export default function NedHubPage() {
     return { totais, atrasadas, incompletos };
   }, [leads]);
 
-  // Tela de carregamento simples para evitar renderizar a UI com dados errados antes do Supabase responder
   if (carregando && !userRole) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white font-mono text-xs">
@@ -503,10 +506,25 @@ export default function NedHubPage() {
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Informações Corporativas (Receita Federal)</h3>
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
-                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ:</span><span className="text-white font-bold">{leadExpandido.cnpj}</span></div>
-                  <div><span className="text-slate-500 block text-[8px] uppercase font-bold">CNAE Fiscal:</span><span className="text-amber-200 font-bold">{leadExpandido.dadosCustomizados?.cnae || "Não Cadastrado"}</span></div>
-                  <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade:</span><span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Não Sincronizado"}</span></div>
-                  <div className="col-span-2"><span className="text-slate-500 block text-[8px] uppercase font-bold">Endereço Completo:</span><span className="text-slate-300 font-bold block text-[10px]">{leadExpandido.dadosCustomizados?.endereco || "Aguardando bot..."}</span></div>
+                  <div>
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">CNPJ:</span>
+                    <span className="text-white font-bold">{leadExpandido.cnpj}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">CNAE Principal:</span>
+                    <span className="text-amber-200 font-bold">{leadExpandido.dadosCustomizados?.cnae || leadExpandido.dadosCustomizados?.cnae_principal || "Não Cadastrado"}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">Ramo de Atividade:</span>
+                    <span className="text-white font-bold block bg-slate-950 p-1.5 rounded border border-slate-800 text-[9px] uppercase">{leadExpandido.dadosCustomizados?.ramo || "Não Sincronizado"}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-slate-500 block text-[8px] uppercase font-bold">Resumo do Endereço:</span>
+                    <span className="text-slate-300 font-bold block text-[10px]">
+                      {leadExpandido.dadosCustomizados?.endereco ? `${leadExpandido.dadosCustomizados.endereco}, ` : ""}
+                      Bairro: {leadExpandido.dadosCustomizados?.bairro || "N/A"} | Cidade: {leadExpandido.dadosCustomizados?.cidade || leadExpandido.dadosCustomizados?.municipio_rf || "N/A"} - {leadExpandido.dadosCustomizados?.uf || "N/A"}
+                    </span>
+                  </div>
                 </div>
               </div>
 
