@@ -8,6 +8,11 @@ import { supabase } from "@/lib/supabase";
 // ============================================================================
 // 🧽 FUNÇÕES DE LIMPEZA MATADORA E NORMALIZAÇÃO VIA API/SQLITE
 // ============================================================================
+
+// 🚀 NOSSA ARMA SECRETA: O Dicionário de Cache
+// Isso evita que o sistema faça milhares de requisições repetidas para a mesma empresa.
+const cacheNormalizacao = new Map<string, string>();
+
 function limparNome(texto: any): string {
   if (!texto) return "";
   let n = String(texto).toUpperCase().trim();
@@ -19,28 +24,35 @@ function limparNome(texto: any): string {
 }
 
 /**
- * 🔥 MOTOR DE NORMALIZAÇÃO GLOBAL: Intercepta o nome bruto, tenta achar a verdade
- * absoluta e higienizada no banco SQLite do Bot e retorna o nome unificado.
+ * 🔥 MOTOR DE NORMALIZAÇÃO GLOBAL OTIMIZADO:
+ * Agora ele checa a memória RAM antes de incomodar a API do Bot.
  */
 async function normalizarNomeCedenteGlobal(nomeBruto: string): Promise<string> {
   const nomeTratadoLocal = limparNome(nomeBruto);
   if (!nomeTratadoLocal) return "";
 
+  // 1. CHECAGEM DE CACHE: Se já pesquisamos essa empresa hoje, devolve na hora!
+  if (cacheNormalizacao.has(nomeTratadoLocal)) {
+    return cacheNormalizacao.get(nomeTratadoLocal)!;
+  }
+
+  // 2. Não achou no cache? Vai na API buscar a verdade absoluta
   try {
-    // Busca na API local do seu Bot passando o termo limpo
     const res = await fetch(`http://localhost:5000/api/prospeccao?query=${encodeURIComponent(nomeTratadoLocal)}`);
     if (res.ok) {
       const dadosBot = await res.json();
-      // Se encontrar o cadastro corporativo real no SQLite, usa a Razão Social higienizada dele
       if (dadosBot && dadosBot.razaoSocial) {
-        return limparNome(dadosBot.razaoSocial);
+        const nomeFinal = limparNome(dadosBot.razaoSocial);
+        cacheNormalizacao.set(nomeTratadoLocal, nomeFinal); // Salva no dicionário para a próxima!
+        return nomeFinal;
       }
     }
   } catch (err) {
-    // Silencia erros se o bot estiver offline e segue com o fallback seguro local
-    console.warn("API Local de Prospecção do Bot offline. Usando higienização padrão.");
+    console.warn(`API Local offline ou falha para: ${nomeTratadoLocal}. Usando fallback.`);
   }
 
+  // 3. Fallback Seguro: Se a API falhar ou não achar, salva o nome limpo no cache e segue o jogo
+  cacheNormalizacao.set(nomeTratadoLocal, nomeTratadoLocal);
   return nomeTratadoLocal;
 }
 
@@ -115,7 +127,7 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 MOTORES DE LEITURA ESPECÍFICOS (REESTRUTURADOS ASYNC PARA FILTRO DE NOMES)
+// 🤖 MOTORES DE LEITURA ESPECÍFICOS
 // ============================================================================
 const processarRiscoSec = async (raw: any[][]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
@@ -131,7 +143,6 @@ const processarRiscoSec = async (raw: any[][]) => {
     const rawCed = String(row[idxCedente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
     
-    // Roda a normalização global via SQLite/API
     const chave = await normalizarNomeCedenteGlobal(rawCed);
     if (!chave) continue;
 
@@ -320,7 +331,6 @@ const processarCarteiraSec = async (raw: any[][]) => {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    // Normalização assíncrona do nome do cedente na carteira aberta
     const cedenteNormalizado = await normalizarNomeCedenteGlobal(cedente);
     if (!cedenteNormalizado) continue;
 
@@ -436,7 +446,7 @@ export default function ImportacaoPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     setProcessando(true);
-    setStatusMsg(`Lendo, limpando e normalizando com SQLite: ${file.name}...`);
+    setStatusMsg(`Lendo e mapeando nomes para: ${file.name}... (Isto pode levar alguns segundos)`);
     try {
       const rawData = await lerArquivoExcel(file);
       let dadosMapeados: any = null;
@@ -452,7 +462,7 @@ export default function ImportacaoPage() {
         atualizado[tipo] = { ...atualizado[tipo], [empresa]: dadosMapeados };
         return atualizado;
       });
-      setStatusMsg(`✅ Mapeamento e higienização global de ${file.name} fixados localmente.`);
+      setStatusMsg(`✅ Mapeamento concluído em ${file.name}! Cache em memória atualizado.`);
     } catch (error) { alert(`Erro ao ler e normalizar o arquivo ${file.name}.`); }
     finally { setProcessando(false); event.target.value = ""; }
   };
