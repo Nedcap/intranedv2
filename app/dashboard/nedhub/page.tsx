@@ -31,12 +31,13 @@ interface Lead {
   responsavel_id?: string;
 }
 
-const GERENTES_COMERCIAIS = [
-  { id: "gerente_1", nome: "Gerente Comercial 1" },
-  { id: "gerente_2", nome: "Gerente Comercial 2" },
-];
+// 📌 Nova tipagem para o Supabase
+interface GerenteComercial {
+  id: number;
+  nome: string;
+  email: string;
+}
 
-// Função utilitária para garantir que o JSON do banco venha como Objeto e não como String
 const parseCustomizados = (dados: any) => {
   if (!dados) return {};
   if (typeof dados === 'string') {
@@ -49,21 +50,19 @@ export default function NedHubPage() {
   const [funilAtivo, setFunilAtivo] = useState<"vendas" | "pos_venda">("vendas");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
+  const [gerentesComerciais, setGerentesComerciais] = useState<GerenteComercial[]>([]);
   
   const [userId, setUserId] = useState<string | null>(null);
   
   const [userRole, setUserRole] = useState<string>(""); 
   const [subordinadosIds, setSubordinadosIds] = useState<string[]>([]);
-  const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("gerente_1");
+  const [gerenteSelecionadoAgenda, setGerenteSelecionadoAgenda] = useState<string>("");
 
   const [carregando, setCarregando] = useState(true); 
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
-  const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({
-    "gerente_1": ["2026-06-18 09:00", "2026-06-18 14:00", "2026-06-19 10:00"],
-    "gerente_2": ["2026-06-18 11:00", "2026-06-18 15:30"],
-  });
+  const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({});
 
   const [coresColunas, setCoresColunas] = useState<Record<string, string>>({
     sem_contato: "#ef4444", telefones_inexistente: "#f97316", em_fluxo: "#3b82f6",
@@ -73,7 +72,10 @@ export default function NedHubPage() {
 
   const [modalNovoLead, setModalNovoLead] = useState(false);
   const [leadExpandido, setLeadExpandido] = useState<Lead | null>(null);
+  
+  // 📌 Modais independentes de Agenda
   const [modalCalendarioPopup, setModalCalendarioPopup] = useState<{ aberto: boolean; lead: Lead | null }>({ aberto: false, lead: null });
+  const [modalGestaoAgenda, setModalGestaoAgenda] = useState(false);
 
   const [inputCnpj, setInputCnpj] = useState("");
   const [inputRazao, setInputRazao] = useState("");
@@ -86,10 +88,15 @@ export default function NedHubPage() {
   const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
+  const [filtroDataSdr, setFiltroDataSdr] = useState("");
 
   useEffect(() => {
     const localSlots = localStorage.getItem("nedhub_slots_comercial");
     if (localSlots) setHorariosDisponiveisGerentes(JSON.parse(localSlots));
+    
+    // Configura o filtro de data padrão para hoje
+    const hojeStr = new Date().toISOString().split("T")[0];
+    setFiltroDataSdr(hojeStr);
   }, []);
 
   const salvarSlotsNoLocal = (novosSlots: Record<string, string[]>) => {
@@ -136,8 +143,18 @@ export default function NedHubPage() {
       const { data: dbLeads, error } = await supabase.from("crm_leads").select("*").order("criado_em", { ascending: false });
       const { data: dbTemplates } = await supabase.from("crm_email_templates").select("*");
       
+      // 📌 Busca os Gerentes Comerciais do banco de dados
+      const { data: dbGerentes } = await supabase.from("gerentes_comerciais").select("*").order("nome");
+      
       if (error) throw error;
       if (dbTemplates) setTemplates(dbTemplates);
+      if (dbGerentes) {
+        setGerentesComerciais(dbGerentes);
+        if (dbGerentes.length > 0 && !gerenteSelecionadoAgenda) {
+          setGerenteSelecionadoAgenda(dbGerentes[0].id.toString());
+        }
+      }
+      
       if (dbLeads) {
         setLeads(dbLeads.map((l: any) => ({
           id: l.id, cnpj: l.cnpj,
@@ -166,6 +183,7 @@ export default function NedHubPage() {
       await sincronizarBaseNedHub();
     };
     inicializar();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
@@ -294,7 +312,7 @@ export default function NedHubPage() {
     
     const slotsFiltrados = {
       ...horariosDisponiveisGerentes,
-      [gerenteSelecionadoAgenda]: horariosDisponiveisGerentes[gerenteSelecionadoAgenda].filter(h => h !== dataHora)
+      [gerenteSelecionadoAgenda]: (horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []).filter(h => h !== dataHora)
     };
     salvarSlotsNoLocal(slotsFiltrados);
 
@@ -310,7 +328,7 @@ export default function NedHubPage() {
     alert("📅 Reunião fixada e card movido com sucesso para 'Visita Agendada' no Funil Comercial.");
   };
 
-  const getGerenteNome = (id: string) => GERENTES_COMERCIAIS.find(g => g.id === id)?.nome || "";
+  const getGerenteNome = (id: string | number) => gerentesComerciais.find(g => g.id.toString() === id.toString())?.nome || "";
 
   const dispararEmailClienteLocal = () => {
     if (!leadExpandido || !templateSelecionado) return;
@@ -388,6 +406,14 @@ export default function NedHubPage() {
     );
   }
 
+  // Lógica para filtrar slots dinâmicos do SDR
+  const slotsGerenteFiltradosPorData = useMemo(() => {
+    if (!gerenteSelecionadoAgenda) return [];
+    const todosOsSlots = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
+    if (!filtroDataSdr) return todosOsSlots;
+    return todosOsSlots.filter(slot => slot.startsWith(filtroDataSdr));
+  }, [gerenteSelecionadoAgenda, filtroDataSdr, horariosDisponiveisGerentes]);
+
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
       
@@ -397,7 +423,12 @@ export default function NedHubPage() {
           <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BANCO):</span>
           <span className="bg-slate-800 px-2 py-0.5 rounded text-white font-bold uppercase">{userRole || "Carregando..."}</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {userRole !== "SDR" && (
+            <button onClick={() => setModalGestaoAgenda(true)} className="px-3 py-1 mr-2 bg-emerald-600 hover:bg-emerald-700 border border-emerald-500 rounded uppercase font-black tracking-wide text-white transition-all shadow-sm">
+              📅 Gerenciar Minha Agenda
+            </button>
+          )}
           <button onClick={() => setAbaAtivaConfig("kanban")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'kanban' ? 'bg-blue-600' : 'bg-slate-800'}`}>📋 Workspace Kanban</button>
           <button onClick={() => setAbaAtivaConfig("auditoria_direcao")} className={`px-3 py-1 rounded uppercase font-bold ${abaAtivaConfig === 'auditoria_direcao' ? 'bg-purple-600' : 'bg-slate-800'}`}>📊 Painel de Controle de Gestão</button>
         </div>
@@ -502,7 +533,6 @@ export default function NedHubPage() {
 
             <div className="flex-1 p-5 space-y-4 overflow-y-auto text-[11px]">
               
-              {/* AREA PRETA INTELIGENCIA - TRAVADA SE FOR SDR */}
               <div className="bg-slate-900 text-slate-100 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
                 <h3 className="font-black uppercase text-[10px] tracking-wider text-amber-400">🏢 Informações Corporativas (Receita Federal)</h3>
                 <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
@@ -528,7 +558,6 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Contatos */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                 <h3 className="font-black text-slate-900 uppercase text-[10px] tracking-wider border-b pb-1">👤 Dados de Contato</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -558,7 +587,6 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Templates */}
               <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-200/60 space-y-3">
                 <h3 className="font-black text-purple-900 uppercase text-[10px] tracking-wider border-b border-purple-200 pb-1">✉️ Templates de Comunicação</h3>
                 <div className="space-y-2">
@@ -573,7 +601,6 @@ export default function NedHubPage() {
                 </div>
               </div>
 
-              {/* Lembretes e Tarefas */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/60 space-y-3">
                 <h3 className="font-black text-amber-900 uppercase text-[10px] tracking-wider border-b border-amber-200 pb-1">📅 Compromissos e Alertas de Retorno</h3>
                 <div className="grid grid-cols-3 gap-2 items-end">
@@ -622,51 +649,112 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* POPUP DE CALENDÁRIO INTERNO */}
-      {modalCalendarioPopup.aberto && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-5 max-w-lg w-full space-y-4 border border-slate-200 shadow-2xl">
-            <div className="flex justify-between items-center border-b pb-2">
+      {/* 🟢 MODAL DE GESTÃO DA AGENDA DO COMERCIAL (Abre via botão Header) */}
+      {modalGestaoAgenda && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl border border-slate-100">
+            <div className="flex justify-between items-center border-b pb-3">
               <div>
-                <h3 className="font-black text-slate-900 uppercase text-[11px]">🗓️ Central de Horários do Comercial</h3>
-                <p className="text-slate-400 text-[9px]">O SDR escolhe as janelas cadastradas pelo próprio Comercial.</p>
+                <h3 className="font-black uppercase text-emerald-700 text-sm tracking-tight">📅 Gerenciar Minha Agenda</h3>
+                <p className="text-slate-400 text-[10px]">Libere blocos de horário para as marcações dos SDRs.</p>
               </div>
-              <button onClick={() => setModalCalendarioPopup({ aberto: false, lead: null })} className="text-lg font-black hover:text-red-500">✕</button>
+              <button onClick={() => setModalGestaoAgenda(false)} className="text-xl font-bold text-slate-400 hover:text-red-500">✕</button>
             </div>
-            <div className="bg-slate-50 p-3 rounded-xl space-y-3">
+
+            <div className="space-y-4">
               <div>
-                <label className="block value-[9px] uppercase font-bold text-slate-500 mb-1">Visualizar Agenda Livre de:</label>
-                <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2 border bg-white rounded-lg font-bold text-slate-800 outline-none text-[10px]">
-                  {GERENTES_COMERCIAIS.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Selecionar Comercial:</label>
+                <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2.5 border bg-slate-50 rounded-lg font-bold text-slate-800 outline-none text-[11px]">
+                  {gerentesComerciais.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                 </select>
               </div>
 
-              {userRole !== "SDR" && (
-                <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
-                  <span className="block text-[8px] font-black uppercase text-emerald-600">➕ Comercial: Liberar nova janela de horário</span>
-                  <div className="flex gap-2">
-                    <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-1.5 border rounded text-[10px] bg-slate-50 font-mono outline-none flex-1" />
-                    <button onClick={() => {
-                      if(!novoHorarioDisponivel) return;
-                      const formatada = novoHorarioDisponivel.replace("T", " ");
-                      const atualizados = { ...horariosDisponiveisGerentes, [gerenteSelecionadoAgenda]: [...(horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []), formatada].sort() };
-                      salvarSlotsNoLocal(atualizados);
-                      setNovoHorarioDisponivel("");
-                    }} className="px-3 py-1 bg-emerald-600 text-white font-bold rounded text-[9px] uppercase">Disponibilizar</button>
-                  </div>
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 space-y-3">
+                <span className="block text-[10px] font-black uppercase text-emerald-800 border-b border-emerald-200 pb-1">➕ Adicionar Novo Bloco de Horário</span>
+                <div className="flex gap-2">
+                  <input type="datetime-local" value={novoHorarioDisponivel} onChange={e => setNovoHorarioDisponivel(e.target.value)} className="p-2 border border-emerald-300 rounded-lg text-[11px] bg-white font-mono outline-none flex-1 font-bold text-slate-800" />
+                  <button onClick={() => {
+                    if(!novoHorarioDisponivel || !gerenteSelecionadoAgenda) return;
+                    const formatada = novoHorarioDisponivel.replace("T", " ");
+                    const atualizados = { ...horariosDisponiveisGerentes, [gerenteSelecionadoAgenda]: [...(horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || []), formatada].sort() };
+                    salvarSlotsNoLocal(atualizados);
+                    setNovoHorarioDisponivel("");
+                  }} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-lg text-[10px] uppercase shadow-sm transition-all">
+                    Liberar
+                  </button>
                 </div>
-              )}
+              </div>
 
               <div>
-                <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1">
-                  {horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.length === 0 ? (
-                    <p className="text-slate-400 italic text-[9px] col-span-2 text-center py-4 bg-white rounded border">Nenhum horário comercial disponível.</p>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Horários Ativos deste Comercial:</label>
+                <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                  {(!horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || horariosDisponiveisGerentes[gerenteSelecionadoAgenda].length === 0) ? (
+                    <p className="text-slate-400 italic text-[10px] text-center py-6 bg-slate-50 rounded-lg border border-dashed">Nenhum horário liberado.</p>
                   ) : (
-                    horariosDisponiveisGerentes[gerenteSelecionadoAgenda]?.map((horario, index) => (
-                      <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horario)} className="p-2 bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 text-emerald-800 hover:text-white rounded-xl text-center font-mono font-bold transition-all text-[10px]">
-                        📅 {horario}
-                      </button>
+                    horariosDisponiveisGerentes[gerenteSelecionadoAgenda].map((horario, index) => (
+                      <div key={index} className="flex justify-between items-center p-2.5 bg-white border border-slate-200 rounded-lg shadow-sm">
+                        <span className="font-mono font-bold text-slate-700 text-[11px]">🕒 {horario}</span>
+                        <button onClick={() => {
+                          const atualizados = {
+                            ...horariosDisponiveisGerentes,
+                            [gerenteSelecionadoAgenda]: horariosDisponiveisGerentes[gerenteSelecionadoAgenda].filter(h => h !== horario)
+                          };
+                          salvarSlotsNoLocal(atualizados);
+                        }} className="text-[10px] font-black text-red-500 hover:text-white hover:bg-red-500 px-2 py-1 rounded transition-colors uppercase">
+                          Remover
+                        </button>
+                      </div>
                     ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🗓️ POPUP DE AGENDAMENTO EXCLUSIVO DO SDR (Otimizado com Filtros) */}
+      {modalCalendarioPopup.aberto && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex justify-between items-start border-b pb-3">
+              <div>
+                <h3 className="font-black text-blue-900 uppercase text-[12px] tracking-tight">🗓️ Central de Agendamento SDR</h3>
+                <p className="text-slate-400 text-[10px] leading-tight mt-0.5">Selecione o profissional, filtre a data e reserve o horário disponível.</p>
+              </div>
+              <button onClick={() => setModalCalendarioPopup({ aberto: false, lead: null })} className="text-lg font-black text-slate-400 hover:text-red-500">✕</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Vincular Reunião Ao Comercial:</label>
+                  <select value={gerenteSelecionadoAgenda} onChange={e => setGerenteSelecionadoAgenda(e.target.value)} className="w-full p-2.5 border border-slate-300 bg-white rounded-lg font-bold text-slate-800 outline-none text-[11px] shadow-sm">
+                    {gerentesComerciais.length === 0 && <option value="">Carregando lista...</option>}
+                    {gerentesComerciais.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">📅 Escolha a Data da Reunião:</label>
+                  <input type="date" value={filtroDataSdr} onChange={e => setFiltroDataSdr(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg text-[11px] bg-white font-mono outline-none font-bold text-slate-800 shadow-sm" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 border-b pb-1">Horários Livres para {filtroDataSdr.split("-").reverse().join("/")}:</label>
+                <div className="grid grid-cols-3 gap-2 max-h-[140px] overflow-y-auto pr-1">
+                  {slotsGerenteFiltradosPorData.length === 0 ? (
+                    <p className="text-slate-400 italic text-[10px] col-span-3 text-center py-6 bg-slate-50 rounded-xl border border-dashed">Nenhuma agenda livre localizada nesta data.</p>
+                  ) : (
+                    slotsGerenteFiltradosPorData.map((horarioCompleto, index) => {
+                      const apenasHora = horarioCompleto.split(" ")[1];
+                      return (
+                        <button key={index} onClick={() => agendarHorarioGerentePeloSdr(horarioCompleto)} className="p-2.5 bg-blue-50 hover:bg-blue-600 border border-blue-200 text-blue-800 hover:text-white rounded-xl text-center font-mono font-black transition-all text-[11px] shadow-sm">
+                          {apenasHora}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
