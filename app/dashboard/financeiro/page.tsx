@@ -28,7 +28,7 @@ const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const CATEGORIAS_PADRAO = ["Aluguel", "Impostos", "Salários", "Software", "Serviços", "Marketing", "Administrativo"];
 
 // ============================================================================
-// 🧹 MOTOR DE NORMALIZAÇÃO DE TEXTO (CORRETOR)
+// 🧹 MOTOR DE NORMALIZAÇÃO DE TEXTO (CORRETOR) - Usado apenas ao SALVAR
 // ============================================================================
 const normalizarTexto = (texto: string) => {
   if (!texto) return "";
@@ -149,7 +149,7 @@ export default function FinanceiroCalendarioPage() {
   const dataMais2Str = dataMais2.toISOString().split("T")[0];
 
   // ==========================================================================
-  // ✏️ MANIPULAÇÃO DO GRID NO MODAL (EXCEL-LIKE COM CORRETOR)
+  // ✏️ MANIPULAÇÃO DO GRID NO MODAL (EXCEL-LIKE)
   // ==========================================================================
   const pagamentosDoDia = useMemo(() => {
     if (!diaSelecionado) return [];
@@ -175,12 +175,10 @@ export default function FinanceiroCalendarioPage() {
   };
 
   const atualizarCelula = (id: string, campo: keyof Pagamento, valor: any) => {
-    // Normaliza descrições no momento da digitação ("blur" virtual)
-    const valorCorrigido = campo === "descricao" ? normalizarTexto(valor) : valor;
-
+    // ⚠️ Removido o normalizador daqui para não travar a digitação (espaços e caps lock)
     setPagamentos(prev => prev.map(p => {
       if (p.id === id) {
-        const pModificado = { ...p, [campo]: valorCorrigido };
+        const pModificado = { ...p, [campo]: valor };
         if (campo === "data_vencimento") pModificado.mes_ano = String(valor).substring(0, 7);
         return pModificado as Pagamento;
       }
@@ -190,7 +188,7 @@ export default function FinanceiroCalendarioPage() {
 
   const atualizarCelulaCustomizada = (id: string, coluna: string, valor: string) => {
     setPagamentos(prev => prev.map(p => {
-      if (p.id === id) return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: normalizarTexto(valor) } };
+      if (p.id === id) return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: valor } };
       return p;
     }));
   };
@@ -264,6 +262,9 @@ export default function FinanceiroCalendarioPage() {
     }
   };
 
+  // ==========================================================================
+  // 💾 SALVAMENTO NO BANCO (COM NORMALIZAÇÃO AUTOMÁTICA)
+  // ==========================================================================
   const salvarPlanilha = async () => {
     setSalvando(true);
     try {
@@ -272,9 +273,15 @@ export default function FinanceiroCalendarioPage() {
       for (const p of pagamentosDoDia) {
         const { isNovo, isRecorrente, ...rest } = p;
         
-        // Assegura que o texto vai pro banco limpo (última barreira de defesa)
+        // 🎯 O corretor só age aqui! O usuário digita livre, o sistema salva limpo.
         rest.descricao = normalizarTexto(rest.descricao);
         rest.categoria = normalizarTexto(rest.categoria);
+        
+        if (rest.dados_customizados) {
+          Object.keys(rest.dados_customizados).forEach(key => {
+            rest.dados_customizados[key] = normalizarTexto(rest.dados_customizados[key]);
+          });
+        }
 
         payload.push(rest);
 
@@ -574,7 +581,6 @@ export default function FinanceiroCalendarioPage() {
                               className="w-full p-2 text-sm outline-none bg-transparent font-mono font-black text-right text-slate-900 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
                             />
                           </td>
-                          {/* Renderiza Células Dinâmicas */}
                           {colunasDinamicas.map(col => (
                             <td key={col} className="p-1.5 border-r border-slate-200 bg-purple-50/20">
                               <input 
@@ -611,7 +617,6 @@ export default function FinanceiroCalendarioPage() {
         </div>
       )}
 
-      {/* 🔮 CSS GLOBAL INJETADO PARA BARRAS DE ROLAGEM */}
       <style dangerouslySetContent={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
