@@ -148,7 +148,6 @@ export default function NedHubPage() {
       
       if (dbGerentes) {
         setGerentesComerciais(dbGerentes);
-        // Proteção contra re-render resets
         setGerenteSelecionadoAgenda(prev => prev ? prev : (dbGerentes.length > 0 ? dbGerentes[0].id.toString() : ""));
       }
       
@@ -180,6 +179,7 @@ export default function NedHubPage() {
       await sincronizarBaseNedHub();
     };
     inicializar();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
@@ -394,6 +394,15 @@ export default function NedHubPage() {
     return { totais, atrasadas, incompletos };
   }, [leads]);
 
+  // 🔴 O erro estava aqui! Todo Hook (como useMemo) OBRIGATORIAMENTE precisa vir ANTES de um "return" no React.
+  const slotsGerenteFiltradosPorData = useMemo(() => {
+    if (!gerenteSelecionadoAgenda) return [];
+    const todosOsSlots = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
+    if (!filtroDataSdr) return todosOsSlots;
+    return todosOsSlots.filter(slot => slot.startsWith(filtroDataSdr));
+  }, [gerenteSelecionadoAgenda, filtroDataSdr, horariosDisponiveisGerentes]);
+
+
   if (carregando && !userRole) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white font-mono text-xs">
@@ -401,13 +410,6 @@ export default function NedHubPage() {
       </div>
     );
   }
-
-  const slotsGerenteFiltradosPorData = useMemo(() => {
-    if (!gerenteSelecionadoAgenda) return [];
-    const todosOsSlots = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
-    if (!filtroDataSdr) return todosOsSlots;
-    return todosOsSlots.filter(slot => slot.startsWith(filtroDataSdr));
-  }, [gerenteSelecionadoAgenda, filtroDataSdr, horariosDisponiveisGerentes]);
 
   return (
     <div className="h-[calc(100vh-40px)] flex flex-col font-sans text-slate-700 bg-slate-50 text-[11px] overflow-hidden p-4 space-y-4">
