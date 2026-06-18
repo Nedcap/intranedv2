@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================================
-// 🧱 INTERFACES DE DADOS ORIGINAIS DA V1 (Mantidas)
+// 🧱 INTERFACES DE DADOS
 // ============================================================================
 interface Titulo {
   cedente: string;
@@ -13,7 +13,6 @@ interface Titulo {
   numeroTitulo?: string;
   vencimento: string;
   valorFace: number;
-  valorAberto: number;
   status: "Vencido" | "A Vencer";
   origem: "SEC" | "FIDC";
   diasParaVencer: number; 
@@ -21,7 +20,6 @@ interface Titulo {
 
 interface AgregacaoEmpresa {
   valorFace: number;
-  valorAberto: number;
   vencido: number;
   aVencer: number;
   titulos: Titulo[];
@@ -32,7 +30,6 @@ interface AgregacaoCedente {
   sec: AgregacaoEmpresa;
   fidc: AgregacaoEmpresa;
   totalFace: number;
-  totalAberto: number;
   totalVencido: number;
   totalAVencer: number;
 }
@@ -65,7 +62,7 @@ export default function CarteiraDinamicaPage() {
       setCarregando(true);
       setErro(null);
 
-      // 🔐 Validação de permissões comercial nativa da V1
+      // 🔐 Validação de permissões comercial nativa
       const userStr = localStorage.getItem("intraned_user");
       let allowedCedentes: string[] = [];
       let isComercial = false;
@@ -94,7 +91,6 @@ export default function CarteiraDinamicaPage() {
           querySec = querySec.in("cedente", allowedCedentes);
           queryFidc = queryFidc.in("cedente", allowedCedentes);
         } else {
-          // Bloqueio se não tiver cliente na carteira
           querySec = querySec.in("cedente", ["__VAZIO__"]);
           queryFidc = queryFidc.in("cedente", ["__VAZIO__"]);
         }
@@ -121,7 +117,6 @@ export default function CarteiraDinamicaPage() {
           numeroTitulo: row.numero_titulo || "-",
           vencimento: dtFormatada,
           valorFace: Number(row.valor_face),
-          valorAberto: Number(row.valor_aberto),
           status: row.status as "Vencido" | "A Vencer",
           origem: "SEC",
           diasParaVencer: diffDias
@@ -140,7 +135,6 @@ export default function CarteiraDinamicaPage() {
           numeroTitulo: "-",
           vencimento: dtFormatada,
           valorFace: Number(row.valor_face),
-          valorAberto: Number(row.valor_aberto),
           status: row.status as "Vencido" | "A Vencer",
           origem: "FIDC",
           diasParaVencer: diffDias
@@ -157,16 +151,16 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🧮 CARD DO TOPO: Previsão de recebimento calculando distâncias reais em dias
+  // 🧮 CARD DO TOPO: Previsão de recebimento
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
 
     titulosOriginais.forEach((t) => {
       if (t.status === "Vencido") {
-        totalVencido += t.valorAberto;
+        totalVencido += t.valorFace;
       } else if (t.status === "A Vencer" && t.diasParaVencer <= diasProjecao && t.diasParaVencer >= 0) {
-        totalProjetadoAVencer += t.valorAberto;
+        totalProjetadoAVencer += t.valorFace;
       }
     });
 
@@ -182,26 +176,24 @@ export default function CarteiraDinamicaPage() {
       if (!agrupamento[c]) {
         agrupamento[c] = {
           nome: c,
-          sec: { valorFace: 0, valorAberto: 0, vencido: 0, aVencer: 0, titulos: [] },
-          fidc: { valorFace: 0, valorAberto: 0, vencido: 0, aVencer: 0, titulos: [] },
-          totalFace: 0, totalAberto: 0, totalVencido: 0, totalAVencer: 0
+          sec: { valorFace: 0, vencido: 0, aVencer: 0, titulos: [] },
+          fidc: { valorFace: 0, vencido: 0, aVencer: 0, titulos: [] },
+          totalFace: 0, totalVencido: 0, totalAVencer: 0
         };
       }
 
       const emp = titulo.origem === "SEC" ? agrupamento[c].sec : agrupamento[c].fidc;
       
       emp.valorFace += titulo.valorFace;
-      emp.valorAberto += titulo.valorAberto;
-      if (titulo.status === "Vencido") emp.vencido += titulo.valorAberto;
-      else emp.aVencer += titulo.valorAberto;
+      if (titulo.status === "Vencido") emp.vencido += titulo.valorFace;
+      else emp.aVencer += titulo.valorFace;
       emp.titulos.push(titulo);
 
       agrupamento[c].totalFace += titulo.valorFace;
-      agrupamento[c].totalAberto += titulo.valorAberto;
       if (titulo.status === "Vencido") {
-        agrupamento[c].totalVencido += titulo.valorAberto;
+        agrupamento[c].totalVencido += titulo.valorFace;
       } else {
-        agrupamento[c].totalAVencer += titulo.valorAberto;
+        agrupamento[c].totalAVencer += titulo.valorFace;
       }
     });
 
@@ -230,7 +222,6 @@ export default function CarteiraDinamicaPage() {
   const columnToKey = (colName: string) => {
     if (colName === "cedente") return "nome";
     if (colName === "face") return "totalFace";
-    if (colName === "aberto") return "totalAberto";
     if (colName === "vencido") return "totalVencido";
     if (colName === "avencer") return "totalAVencer";
     return "nome";
@@ -304,7 +295,7 @@ export default function CarteiraDinamicaPage() {
             <span className="text-lg">🚨</span>
           </div>
           <div className="text-2xl font-black text-rose-600 mt-2 font-mono">{formatarMoeda(kpisGlobais.totalVencido)}</div>
-          <span className="text-[10px] text-slate-400 font-medium mt-1">Soma de todos os títulos com vencimento anterior à data atual.</span>
+          <span className="text-[10px] text-slate-400 font-medium mt-1">Soma do Valor Face de todos os títulos com vencimento anterior à data atual.</span>
         </div>
 
         {/* Card 2: Simulador de Liquidez Futura */}
@@ -335,7 +326,6 @@ export default function CarteiraDinamicaPage() {
               <th className="p-3 w-10 text-center">Abrir</th>
               <th onClick={() => lidarOrdenacaoMaster("cedente")} className="p-3 w-[350px] cursor-pointer hover:bg-slate-700 transition-colors">Cedente / Origem {renderSetaOrdenacao("cedente")}</th>
               <th onClick={() => lidarOrdenacaoMaster("face")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors">Valor Face Global {renderSetaOrdenacao("face")}</th>
-              <th onClick={() => lidarOrdenacaoMaster("aberto")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors">Saldo Aberto {renderSetaOrdenacao("aberto")}</th>
               <th onClick={() => lidarOrdenacaoMaster("vencido")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors text-rose-300">Total Vencido {renderSetaOrdenacao("vencido")}</th>
               <th onClick={() => lidarOrdenacaoMaster("avencer")} className="p-3 text-right cursor-pointer hover:bg-slate-700 transition-colors text-emerald-300">A Vencer {renderSetaOrdenacao("avencer")}</th>
             </tr>
@@ -354,7 +344,6 @@ export default function CarteiraDinamicaPage() {
                     </td>
                     <td className="p-2.5 text-[13px] tracking-tight font-black text-slate-900 uppercase truncate max-w-[340px]">{cedente.nome}</td>
                     <td className="p-2.5 text-right font-mono text-slate-600">{formatarMoeda(cedente.totalFace)}</td>
-                    <td className="p-2.5 text-right font-mono text-blue-900">{formatarMoeda(cedente.totalAberto)}</td>
                     <td className="p-2.5 text-right font-mono bg-rose-50/40 text-rose-700">{formatarMoeda(cedente.totalVencido)}</td>
                     <td className="p-2.5 text-right font-mono bg-emerald-50/40 text-emerald-700">{formatarMoeda(cedente.totalAVencer)}</td>
                   </tr>
@@ -362,7 +351,7 @@ export default function CarteiraDinamicaPage() {
                   {/* NÍVEL 2 */}
                   {cedExpandido && (
                     <tr style={{ display: "contents" }}>
-                      {/* SECURITIZADORA */}
+                      {/* NED SECURITIZADORA */}
                       {cedente.sec.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
                           <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
@@ -371,17 +360,16 @@ export default function CarteiraDinamicaPage() {
                                 {subExpandidos[`${cedente.nome}|||SEC`] ? "−" : "+"}
                               </button>
                             </td>
-                            <td className="p-2 pl-6 text-blue-800 font-bold uppercase tracking-tight flex items-center gap-1">🏦 Securitizadora</td>
+                            <td className="p-2 pl-6 text-blue-800 font-bold uppercase tracking-tight flex items-center gap-1">🏦 Ned Securitizadora</td>
                             <td className="p-2 text-right font-mono text-slate-500">{formatarMoeda(cedente.sec.valorFace)}</td>
-                            <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(cedente.sec.valorAberto)}</td>
                             <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.sec.vencido)}</td>
                             <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.sec.aVencer)}</td>
                           </tr>
 
-                          {/* NÍVEL 3: SECURITIZADORA */}
+                          {/* NÍVEL 3: NED SECURITIZADORA */}
                           {subExpandidos[`${cedente.nome}|||SEC`] && (
                             <tr>
-                              <td colSpan={6} className="bg-slate-100/50 p-4">
+                              <td colSpan={5} className="bg-slate-100/50 p-4">
                                 <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
                                   <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
                                     <span className="font-bold text-slate-500 text-[11px] uppercase">Filtros Avançados:</span>
@@ -391,7 +379,7 @@ export default function CarteiraDinamicaPage() {
                                     </select>
                                     <span className="font-bold text-slate-500 text-[11px] uppercase ml-auto">Ordenar:</span>
                                     <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none">
-                                      <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo Aberto</option>
+                                      <option value="vencimento">Vencimento</option><option value="valorFace">Valor Face</option>
                                     </select>
                                     <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
                                       {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
@@ -405,7 +393,6 @@ export default function CarteiraDinamicaPage() {
                                         <th className="p-2 text-center">Nº Título</th>
                                         <th className="p-2 text-center">Vencimento</th>
                                         <th className="p-2 text-right">Valor Face</th>
-                                        <th className="p-2 text-right">Saldo Aberto</th>
                                         <th className="p-2 text-center">Envelhecimento</th>
                                       </tr>
                                     </thead>
@@ -416,7 +403,6 @@ export default function CarteiraDinamicaPage() {
                                           <td className="p-2 text-center text-slate-500">{t.numeroTitulo}</td>
                                           <td className="p-2 text-center font-bold text-slate-600">{t.vencimento}</td>
                                           <td className="p-2 text-right font-mono text-slate-500">{formatarMoeda(t.valorFace)}</td>
-                                          <td className="p-2 text-right font-mono text-blue-900">{formatarMoeda(t.valorAberto)}</td>
                                           <td className="p-2 text-center">
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status}</span>
                                           </td>
@@ -431,7 +417,7 @@ export default function CarteiraDinamicaPage() {
                         </tr>
                       )}
 
-                      {/* FIDC */}
+                      {/* NED FIDC */}
                       {cedente.fidc.titulos.length > 0 && (
                         <tr style={{ display: "contents" }}>
                           <tr className="bg-white text-slate-700 font-semibold text-[12px] hover:bg-slate-50 transition-colors">
@@ -440,17 +426,16 @@ export default function CarteiraDinamicaPage() {
                                 {subExpandidos[`${cedente.nome}|||FIDC`] ? "−" : "+"}
                               </button>
                             </td>
-                            <td className="p-2 pl-6 text-purple-800 font-bold uppercase tracking-tight flex items-center gap-1">🔮 Fundo FIDC</td>
+                            <td className="p-2 pl-6 text-purple-800 font-bold uppercase tracking-tight flex items-center gap-1">🔮 Ned FIDC</td>
                             <td className="p-2 text-right font-mono text-slate-500">{formatarMoeda(cedente.fidc.valorFace)}</td>
-                            <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(cedente.fidc.valorAberto)}</td>
                             <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.fidc.vencido)}</td>
                             <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.fidc.aVencer)}</td>
                           </tr>
 
-                          {/* NÍVEL 3: FIDC */}
+                          {/* NÍVEL 3: NED FIDC */}
                           {subExpandidos[`${cedente.nome}|||FIDC`] && (
                             <tr>
-                              <td colSpan={6} className="bg-slate-100/50 p-4">
+                              <td colSpan={5} className="bg-slate-100/50 p-4">
                                 <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
                                   <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
                                     <span className="font-bold text-slate-500 text-[11px] uppercase">Filtros Avançados:</span>
@@ -460,7 +445,7 @@ export default function CarteiraDinamicaPage() {
                                     </select>
                                     <span className="font-bold text-slate-500 text-[11px] uppercase ml-auto">Ordenar:</span>
                                     <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none">
-                                      <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo Aberto</option>
+                                      <option value="vencimento">Vencimento</option><option value="valorFace">Valor Face</option>
                                     </select>
                                     <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer">
                                       {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
@@ -473,7 +458,6 @@ export default function CarteiraDinamicaPage() {
                                         <th className="p-2">Sacado / Devedor</th>
                                         <th className="p-2 text-center">Vencimento</th>
                                         <th className="p-2 text-right">Valor Face</th>
-                                        <th className="p-2 text-right">Saldo Aberto</th>
                                         <th className="p-2 text-center">Envelhecimento</th>
                                       </tr>
                                     </thead>
@@ -483,7 +467,6 @@ export default function CarteiraDinamicaPage() {
                                           <td className="p-2 font-bold text-slate-800 max-w-[280px] truncate">{t.sacado}</td>
                                           <td className="p-2 text-center font-bold text-slate-600">{t.vencimento}</td>
                                           <td className="p-2 text-right font-mono text-slate-500">{formatarMoeda(t.valorFace)}</td>
-                                          <td className="p-2 text-right font-mono text-blue-900">{formatarMoeda(t.valorAberto)}</td>
                                           <td className="p-2 text-center">
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status}</span>
                                           </td>
