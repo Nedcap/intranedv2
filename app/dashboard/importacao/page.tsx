@@ -1,22 +1,29 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================================
-// 🧽 FUNÇÕES DE LIMPEZA MATADORA E NORMALIZAÇÃO VIA API/SQLITE
+// 🧽 MOTOR SÍNCRONO DE LIMPEZA E CRUZAMENTO EM MEMÓRIA RAM
 // ============================================================================
 
-// 🚀 NOSSA ARMA SECRETA: O Dicionário de Cache
-// Isso evita que o sistema faça milhares de requisições repetidas para a mesma empresa.
-const cacheNormalizacao = new Map<string, string>();
+export interface BaseUniversal {
+  cnpj: string;
+  nome_oficial: string;
+  nome_fantasia: string;
+  nome_curto: string;
+  variacoes: string[];
+}
 
 function limparNome(texto: any): string {
   if (!texto) return "";
   let n = String(texto).toUpperCase().trim();
-  n = n.replace(/^\d+\s*-\s*/, ""); 
+  
+  // 🔥 MATA O CÓDIGO INICIAL: Remove números seguidos de espaços, traços, pontos ou underscores
+  n = n.replace(/^\d+[\s\-\.\_]+/, ""); 
+  
   n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
   n = n.replace(/[^A-Z0-9\s]/g, " "); 
   n = n.replace(/\b(LTDA|SA|S A|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, ""); 
@@ -24,36 +31,42 @@ function limparNome(texto: any): string {
 }
 
 /**
- * 🔥 MOTOR DE NORMALIZAÇÃO GLOBAL OTIMIZADO:
- * Agora ele checa a memória RAM antes de incomodar a API do Bot.
+ * ⚡ CRUZAMENTO INSTANTÂNEO: Checa o nome da planilha contra a Base Universal na RAM.
+ * Retorna o NOME OFICIAL se achar qualquer correspondência, senão retorna o nome limpo original.
  */
-async function normalizarNomeCedenteGlobal(nomeBruto: string): Promise<string> {
-  const nomeTratadoLocal = limparNome(nomeBruto);
-  if (!nomeTratadoLocal) return "";
+function normalizarPelaBaseUniversal(nomeBruto: string, base: BaseUniversal[]): string {
+  const limpo = limparNome(nomeBruto);
+  if (!limpo) return "";
 
-  // 1. CHECAGEM DE CACHE: Se já pesquisamos essa empresa hoje, devolve na hora!
-  if (cacheNormalizacao.has(nomeTratadoLocal)) {
-    return cacheNormalizacao.get(nomeTratadoLocal)!;
-  }
+  const match = base.find(b => {
+    // 1. Checa contra o nome oficial
+    const oficialLimpo = limparNome(b.nome_oficial);
+    if (oficialLimpo === limpo || oficialLimpo.includes(limpo) || limpo.includes(oficialLimpo)) return true;
 
-  // 2. Não achou no cache? Vai na API buscar a verdade absoluta
-  try {
-    const res = await fetch(`http://localhost:5000/api/prospeccao?query=${encodeURIComponent(nomeTratadoLocal)}`);
-    if (res.ok) {
-      const dadosBot = await res.json();
-      if (dadosBot && dadosBot.razaoSocial) {
-        const nomeFinal = limparNome(dadosBot.razaoSocial);
-        cacheNormalizacao.set(nomeTratadoLocal, nomeFinal); // Salva no dicionário para a próxima!
-        return nomeFinal;
+    // 2. Checa contra o nome fantasia
+    if (b.nome_fantasia) {
+      const fantasiaLimpo = limparNome(b.nome_fantasia);
+      if (fantasiaLimpo === limpo || fantasiaLimpo.includes(limpo) || limpo.includes(fantasiaLimpo)) return true;
+    }
+
+    // 3. Checa contra o nome curto
+    if (b.nome_curto) {
+      const curtoLimpo = limparNome(b.nome_curto);
+      if (curtoLimpo === limpo || curtoLimpo.includes(limpo) || limpo.includes(curtoLimpo)) return true;
+    }
+
+    // 4. Checa contra o array de variações de erro
+    if (b.variacoes && Array.isArray(b.variacoes)) {
+      for (const variacao of b.variacoes) {
+        const vLimpo = limparNome(variacao);
+        if (vLimpo === limpo || vLimpo.includes(limpo) || limpo.includes(vLimpo)) return true;
       }
     }
-  } catch (err) {
-    console.warn(`API Local offline ou falha para: ${nomeTratadoLocal}. Usando fallback.`);
-  }
 
-  // 3. Fallback Seguro: Se a API falhar ou não achar, salva o nome limpo no cache e segue o jogo
-  cacheNormalizacao.set(nomeTratadoLocal, nomeTratadoLocal);
-  return nomeTratadoLocal;
+    return false;
+  });
+
+  return match ? match.nome_oficial : limpo; // Se não achar na base, usa o que limpou como novo
 }
 
 function parseValorReal(valor: any): number {
@@ -127,9 +140,10 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 MOTORES DE LEITURA ESPECÍFICOS
+// 🤖 PROCESSADORES (AGORA 100% SÍNCRONOS E ULTRA RÁPIDOS)
 // ============================================================================
-const processarRiscoSec = async (raw: any[][]) => {
+
+const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
   if (headerIdx === -1) return {};
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().replace(/[^A-Z]/g, ""));
@@ -143,7 +157,8 @@ const processarRiscoSec = async (raw: any[][]) => {
     const rawCed = String(row[idxCedente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
     
-    const chave = await normalizarNomeCedenteGlobal(rawCed);
+    // Normalização a jato via RAM
+    const chave = normalizarPelaBaseUniversal(rawCed, base);
     if (!chave) continue;
 
     records[chave] = {
@@ -155,7 +170,7 @@ const processarRiscoSec = async (raw: any[][]) => {
   return records;
 };
 
-const processarRiscoFidc = async (raw: any[][]) => {
+const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CLIENTE"));
   if (headerIdx === -1) return {};
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
@@ -169,7 +184,7 @@ const processarRiscoFidc = async (raw: any[][]) => {
     const rawCed = String(row[idxCliente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
 
-    const chave = await normalizarNomeCedenteGlobal(rawCed);
+    const chave = normalizarPelaBaseUniversal(rawCed, base);
     if (!chave) continue;
 
     records[chave] = {
@@ -181,7 +196,7 @@ const processarRiscoFidc = async (raw: any[][]) => {
   return records;
 };
 
-const processarVopSec = async (raw: any[][]) => {
+const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "CEDENTE"));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
@@ -205,7 +220,7 @@ const processarVopSec = async (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarVopFidc = async (raw: any[][]) => {
+const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -229,7 +244,7 @@ const processarVopFidc = async (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarReceitasSec = async (raw: any[][]) => {
+const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
   const lancamentos: any[] = [];
   for (const row of raw) {
     let aditivo = String(row[0] || "").trim();
@@ -250,7 +265,7 @@ const processarReceitasSec = async (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarReceitasFidc = async (raw: any[][]) => {
+const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -283,7 +298,7 @@ const processarReceitasFidc = async (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarCampoLiquidadosSec = async (raw: any[][]) => {
+const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   let colDtaBaixa = 12; let colEncargos = 15;
   for (let i = 0; i < Math.min(30, raw.length); i++) {
     const rowStr = raw[i].map(x => String(x).trim().toUpperCase());
@@ -315,7 +330,7 @@ const processarCampoLiquidadosSec = async (raw: any[][]) => {
   return lancamentos;
 };
 
-const processarCarteiraSec = async (raw: any[][]) => {
+const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "RAZAO SOCIAL" || c.includes("CLIENTE"); }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s\.]/g, ""));
@@ -331,7 +346,8 @@ const processarCarteiraSec = async (raw: any[][]) => {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    const cedenteNormalizado = await normalizarNomeCedenteGlobal(cedente);
+    // Normaliza Instantâneo
+    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
@@ -357,7 +373,7 @@ const processarCarteiraSec = async (raw: any[][]) => {
   return titulos;
 };
 
-const processarCarteiraFidc = async (raw: any[][]) => {
+const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "NOME DO CEDENTE"));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
@@ -372,7 +388,7 @@ const processarCarteiraFidc = async (raw: any[][]) => {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
-    const cedenteNormalizado = await normalizarNomeCedenteGlobal(cedente);
+    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
@@ -401,6 +417,7 @@ const processarCarteiraFidc = async (raw: any[][]) => {
 // 📊 COMPONENTE VISUAL PRINCIPAL
 // ============================================================================
 export default function ImportacaoPage() {
+  const [baseUniversalData, setBaseUniversalData] = useState<BaseUniversal[]>([]);
   const [dadosFinais, setDadosFinais] = useState<any>({
     risco: { sec: null, fidc: null },
     vop: { sec: [], fidc: [] },
@@ -411,6 +428,23 @@ export default function ImportacaoPage() {
 
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
+
+  // 1. CARREGA A BASE UNIVERSAL NA MEMÓRIA QUANDO ABRE A PÁGINA
+  useEffect(() => {
+    const carregarBase = async () => {
+      setStatusMsg("📦 Baixando Base Universal de Cedentes na memória RAM...");
+      const { data, error } = await supabase.from("base_universal_cedentes").select("*");
+      if (error) {
+        console.error(error);
+        setStatusMsg("❌ Erro ao baixar Base Universal.");
+      } else if (data) {
+        setBaseUniversalData(data);
+        setStatusMsg(`✅ Base Universal pronta: ${data.length} empresas carregadas na memória.`);
+        setTimeout(() => setStatusMsg(""), 3000);
+      }
+    };
+    carregarBase();
+  }, []);
 
   const lerArquivoExcel = (file: File): Promise<any[][]> => {
     return new Promise((resolve, reject) => {
@@ -446,25 +480,31 @@ export default function ImportacaoPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     setProcessando(true);
-    setStatusMsg(`Lendo e mapeando nomes para: ${file.name}... (Isto pode levar alguns segundos)`);
+    setStatusMsg(`Lendo e cruzando com Base Universal: ${file.name}...`);
+    
     try {
       const rawData = await lerArquivoExcel(file);
       let dadosMapeados: any = null;
 
-      if (tipo === "risco") dadosMapeados = empresa === "sec" ? await processarRiscoSec(rawData) : await processarRiscoFidc(rawData);
-      else if (tipo === "vop") dadosMapeados = empresa === "sec" ? await processarVopSec(rawData) : await processarVopFidc(rawData);
-      else if (tipo === "receitas") dadosMapeados = empresa === "sec" ? await processarReceitasSec(rawData) : await processarReceitasFidc(rawData);
-      else if (tipo === "juros") dadosMapeados = empresa === "sec" ? await processarCampoLiquidadosSec(rawData) : [];
-      else if (tipo === "carteira") dadosMapeados = empresa === "sec" ? await processarCarteiraSec(rawData) : await processarCarteiraFidc(rawData);
+      // Passamos a base carregada da RAM para todos os processadores
+      if (tipo === "risco") dadosMapeados = empresa === "sec" ? processarRiscoSec(rawData, baseUniversalData) : processarRiscoFidc(rawData, baseUniversalData);
+      else if (tipo === "vop") dadosMapeados = empresa === "sec" ? processarVopSec(rawData, baseUniversalData) : processarVopFidc(rawData, baseUniversalData);
+      else if (tipo === "receitas") dadosMapeados = empresa === "sec" ? processarReceitasSec(rawData, baseUniversalData) : processarReceitasFidc(rawData, baseUniversalData);
+      else if (tipo === "juros") dadosMapeados = empresa === "sec" ? processarCampoLiquidadosSec(rawData, baseUniversalData) : [];
+      else if (tipo === "carteira") dadosMapeados = empresa === "sec" ? processarCarteiraSec(rawData, baseUniversalData) : processarCarteiraFidc(rawData, baseUniversalData);
 
       setDadosFinais((prev: any) => {
         const atualizado = { ...prev };
         atualizado[tipo] = { ...atualizado[tipo], [empresa]: dadosMapeados };
         return atualizado;
       });
-      setStatusMsg(`✅ Mapeamento concluído em ${file.name}! Cache em memória atualizado.`);
-    } catch (error) { alert(`Erro ao ler e normalizar o arquivo ${file.name}.`); }
-    finally { setProcessando(false); event.target.value = ""; }
+      setStatusMsg(`✅ Processamento instantâneo concluído em ${file.name}!`);
+    } catch (error) { 
+      alert(`Erro ao ler e normalizar o arquivo ${file.name}.`); 
+    } finally { 
+      setProcessando(false); 
+      event.target.value = ""; 
+    }
   };
 
   const dispararProSupabase = async () => {
@@ -485,8 +525,8 @@ export default function ImportacaoPage() {
 
       // 2. Grava Módulo de Finanças (VOP, Receitas e Juros) consolidado em Lote com Nomes Normalizados
       const loteFinancas: any[] = [];
-      const mesclarLancamento = async (item: any) => {
-        const cedenteFinalNormalizado = await normalizarNomeCedenteGlobal(item.cedenteOriginal);
+      const mesclarLancamento = (item: any) => {
+        const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, baseUniversalData);
         loteFinancas.push({
           empresa: item.empresa,
           data_operacao: converteDataParaISO(item.dataOp),
@@ -499,11 +539,11 @@ export default function ImportacaoPage() {
         });
       };
 
-      for (const item of dadosFinais.vop.sec) await mesclarLancamento(item);
-      for (const item of dadosFinais.vop.fidc) await mesclarLancamento(item);
-      for (const item of dadosFinais.receitas.sec) await mesclarLancamento(item);
-      for (const item of dadosFinais.receitas.fidc) await mesclarLancamento(item);
-      for (const item of dadosFinais.juros.sec) await mesclarLancamento(item);
+      for (const item of dadosFinais.vop.sec) mesclarLancamento(item);
+      for (const item of dadosFinais.vop.fidc) mesclarLancamento(item);
+      for (const item of dadosFinais.receitas.sec) mesclarLancamento(item);
+      for (const item of dadosFinais.receitas.fidc) mesclarLancamento(item);
+      for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
         const { error } = await supabase.from("extrato_financeiro").insert(loteFinancas);
@@ -537,19 +577,19 @@ export default function ImportacaoPage() {
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight">📥 Central de Importação de Relatórios (V2 Supabase)</h2>
-          <span className="text-xs text-slate-500 font-medium">Os relatórios agora são filtrados e normalizados em tempo real cruzando a inteligência do SQLite local.</span>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">📥 Central de Importação de Relatórios (Motor Síncrono Universal)</h2>
+          <span className="text-xs text-slate-500 font-medium">Cruzamento instantâneo via MDM (Master Data Management).</span>
         </div>
         <button 
           onClick={dispararProSupabase}
-          disabled={processando}
+          disabled={processando || baseUniversalData.length === 0}
           className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
         >
-          {processando ? "⏳ Transmitindo..." : "☁️ Enviar para a Infraestrutura V2"}
+          {processando ? "⏳ Processando..." : "☁️ Enviar para o Banco Central"}
         </button>
       </div>
 
-      {statusMsg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
+      {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Bloco 1 */}
