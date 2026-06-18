@@ -7,29 +7,40 @@ import { supabase } from "@/lib/supabase";
 interface Pagamento {
   id: string;
   isNovo?: boolean;
+  isRecorrente?: boolean;
   empresa: string;
   mes_ano: string;
   data_vencimento: string;
   descricao: string;
   categoria: string;
   valor: number;
-  status: "Pago" | "A Vencer" | "Atrasado";
+  status: "PREVISTO" | "PROGRAMADO" | "PAGO";
   dados_customizados: Record<string, string>;
 }
 
 const EMPRESAS = [
+  { id: "TODAS", nome: "Visão Consolidada", cnpj: "SEC + FIDC" },
   { id: "SEC", nome: "Ned Capital Securitizadora", cnpj: "45.490.426/0001-09" },
   { id: "FIDC", nome: "Ned Fidc (Consultoria)", cnpj: "34.768.252/0001-87" }
 ];
 
 const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const CATEGORIAS_PADRAO = ["Aluguel", "Impostos", "Salários", "Software", "Serviços", "Marketing", "Administrativo"];
+
+// Função segura para adicionar meses sem pular fuso horário
+const adicionarMeses = (dataString: string, meses: number) => {
+  const [a, m, d] = dataString.split("-").map(Number);
+  const dt = new Date(a, m - 1 + meses, d, 12, 0, 0);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+};
 
 export default function FinanceiroCalendarioPage() {
-  const [empresaAtiva, setEmpresaAtiva] = useState("SEC");
+  const [empresaAtiva, setEmpresaAtiva] = useState("TODAS");
   const [mesAtivo, setMesAtivo] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
   const [colunasDinamicas, setColunasDinamicas] = useState<string[]>([]);
+  const [categoriasLocais, setCategoriasLocais] = useState<string[]>(CATEGORIAS_PADRAO);
   
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -43,23 +54,34 @@ export default function FinanceiroCalendarioPage() {
   const carregarPlanilha = async () => {
     setCarregando(true);
     try {
-      const { data: cols } = await supabase
-        .from("financeiro_colunas")
-        .select("nome_coluna")
-        .eq("empresa", empresaAtiva);
-      
-      if (cols) setColunasDinamicas(cols.map(c => c.nome_coluna));
+      // 1. Busca Colunas Dinâmicas
+      let qCols = supabase.from("financeiro_colunas").select("nome_coluna");
+      if (empresaAtiva !== "TODAS") qCols = qCols.eq("empresa", empresaAtiva);
+      const { data: cols } = await qCols;
+      if (cols) {
+        const colunasUnicas = Array.from(new Set(cols.map(c => c.nome_coluna)));
+        setColunasDinamicas(colunasUnicas);
+      }
 
-      const { data: pags } = await supabase
-        .from("financeiro_pagamentos")
-        .select("*")
-        .eq("empresa", empresaAtiva)
-        .eq("mes_ano", mesAtivo)
-        .order("data_vencimento", { ascending: true });
+      // 2. Busca Pagamentos
+      let qPags = supabase.from("financeiro_pagamentos").select("*").eq("mes_ano", mesAtivo).order("data_vencimento", { ascending: true });
+      if (empresaAtiva !== "TODAS") {
+        qPags = qPags.eq("empresa", empresaAtiva);
+      } else {
+        qPags = qPags.in("empresa", ["SEC", "FIDC"]);
+      }
+      
+      const { data: pags } = await qPags;
 
       if (pags) {
+        // Encontra categorias novas que vieram do banco
+        const catsDoBanco = pags.map(p => p.categoria).filter(Boolean);
+        const todasCats = Array.from(new Set([...categoriasLocais, ...catsDoBanco]));
+        setCategoriasLocais(todasCats);
+
         setPagamentos(pags.map(p => ({
           ...p,
+          status: p.status === "A Vencer" || p.status === "Atrasado" ? "PREVISTO" : p.status, // Normaliza os status antigos
           dados_customizados: p.dados_customizados || {}
         })));
       } else {
@@ -88,7 +110,7 @@ export default function FinanceiroCalendarioPage() {
     pagamentos.forEach(p => {
       const v = Number(p.valor) || 0;
       totalMes += v;
-      if (p.status === "Pago") totalPago += v;
+      if (p.status === "PAGO") totalPago += v;
       else totalAberto += v;
     });
 
@@ -111,6 +133,11 @@ export default function FinanceiroCalendarioPage() {
     };
   }, [mesAtivo]);
 
+  const hojeStr = new Date().toISOString().split("T")[0];
+  const dataMais2 = new Date();
+  dataMais2.setDate(dataMais2.getDate() + 2);
+  const dataMais2Str = dataMais2.toISOString().split("T")[0];
+
   // ==========================================================================
   // ✏️ MANIPULAÇÃO DO GRID NO MODAL (EXCEL-LIKE)
   // ==========================================================================
@@ -124,13 +151,14 @@ export default function FinanceiroCalendarioPage() {
     const novaLinha: Pagamento = {
       id: crypto.randomUUID(),
       isNovo: true,
-      empresa: empresaAtiva,
+      isRecorrente: false,
+      empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, // Fallback para não salvar "TODAS" no banco
       mes_ano: mesAtivo,
       data_vencimento: diaSelecionado,
       descricao: "",
-      categoria: "",
+      categoria: categoriasLocais[0] || "",
       valor: 0,
-      status: "A Vencer",
+      status: "PREVISTO",
       dados_customizados: {}
     };
     setPagamentos([...pagamentos, novaLinha]);
@@ -140,10 +168,7 @@ export default function FinanceiroCalendarioPage() {
     setPagamentos(prev => prev.map(p => {
       if (p.id === id) {
         const pModificado = { ...p, [campo]: valor };
-        // Se mudar a data de vencimento, ajusta o mes_ano automaticamente
-        if (campo === "data_vencimento") {
-          pModificado.mes_ano = String(valor).substring(0, 7);
-        }
+        if (campo === "data_vencimento") pModificado.mes_ano = String(valor).substring(0, 7);
         return pModificado as Pagamento;
       }
       return p;
@@ -152,11 +177,22 @@ export default function FinanceiroCalendarioPage() {
 
   const atualizarCelulaCustomizada = (id: string, coluna: string, valor: string) => {
     setPagamentos(prev => prev.map(p => {
-      if (p.id === id) {
-        return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: valor } };
-      }
+      if (p.id === id) return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: valor } };
       return p;
     }));
+  };
+
+  const lidarMudancaCategoria = (id: string, valor: string) => {
+    if (valor === "NOVA_CATEGORIA") {
+      const nova = prompt("Digite o nome da nova categoria:");
+      if (nova && nova.trim() !== "") {
+        const novaLimpa = nova.trim().toUpperCase();
+        if (!categoriasLocais.includes(novaLimpa)) setCategoriasLocais([...categoriasLocais, novaLimpa]);
+        atualizarCelula(id, "categoria", novaLimpa);
+      }
+    } else {
+      atualizarCelula(id, "categoria", valor);
+    }
   };
 
   const removerLinha = async (id: string, isNovo?: boolean) => {
@@ -165,7 +201,6 @@ export default function FinanceiroCalendarioPage() {
       return;
     }
     if (!confirm("Deletar esta conta definitivamente?")) return;
-    
     setPagamentos(prev => prev.filter(p => p.id !== id));
     await supabase.from("financeiro_pagamentos").delete().eq("id", id);
   };
@@ -174,24 +209,36 @@ export default function FinanceiroCalendarioPage() {
     const nome = prompt("Digite o nome da nova coluna (Ex: NF, Código de Barras):");
     if (!nome || nome.trim() === "") return;
     const nomeLimpo = nome.trim().toUpperCase();
-
-    if (colunasDinamicas.includes(nomeLimpo)) {
-      alert("Esta coluna já existe!");
-      return;
-    }
+    if (colunasDinamicas.includes(nomeLimpo)) return alert("Esta coluna já existe!");
 
     setColunasDinamicas([...colunasDinamicas, nomeLimpo]);
-    await supabase.from("financeiro_colunas").insert({ empresa: empresaAtiva, nome_coluna: nomeLimpo });
+    // Salva a coluna com a primeira empresa se estiver no consolidado (as duas vão compartilhar no front)
+    await supabase.from("financeiro_colunas").insert({ empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, nome_coluna: nomeLimpo });
   };
 
   const salvarPlanilha = async () => {
     setSalvando(true);
     try {
-      // Pega apenas as linhas que estão na tela do modal para salvar
-      const payload = pagamentosDoDia.map(p => {
-        const { isNovo, ...rest } = p;
-        return rest;
-      });
+      const payload = [];
+
+      for (const p of pagamentosDoDia) {
+        const { isNovo, isRecorrente, ...rest } = p;
+        payload.push(rest);
+
+        // Gera os próximos 11 meses caso seja recorrente
+        if (isRecorrente) {
+          for (let m = 1; m <= 11; m++) {
+            const novaData = adicionarMeses(rest.data_vencimento, m);
+            payload.push({
+              ...rest,
+              id: crypto.randomUUID(),
+              data_vencimento: novaData,
+              mes_ano: novaData.substring(0, 7),
+              status: "PREVISTO" // As projeções sempre entram como Previsto
+            });
+          }
+        }
+      }
 
       if (payload.length > 0) {
         const { error } = await supabase.from("financeiro_pagamentos").upsert(payload, { onConflict: "id" });
@@ -217,19 +264,19 @@ export default function FinanceiroCalendarioPage() {
           <span className="text-xs text-slate-500 font-medium">Controle visual de Fluxo de Caixa e Contas a Pagar.</span>
         </div>
         
-        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 overflow-hidden">
           {EMPRESAS.map(emp => (
             <button
               key={emp.id}
               onClick={() => setEmpresaAtiva(emp.id)}
               className={`px-4 py-2 rounded-md font-bold text-xs transition-all flex flex-col items-center ${
                 empresaAtiva === emp.id 
-                  ? "bg-blue-600 text-white shadow-md" 
+                  ? emp.id === "TODAS" ? "bg-slate-900 text-white shadow-md" : "bg-blue-600 text-white shadow-md" 
                   : "text-slate-500 hover:bg-slate-200"
               }`}
             >
               <span className="uppercase">{emp.nome}</span>
-              <span className={`text-[9px] font-mono ${empresaAtiva === emp.id ? "text-blue-200" : "text-slate-400"}`}>
+              <span className={`text-[9px] font-mono ${empresaAtiva === emp.id ? "text-slate-300" : "text-slate-400"}`}>
                 {emp.cnpj}
               </span>
             </button>
@@ -260,7 +307,7 @@ export default function FinanceiroCalendarioPage() {
             <span className="text-2xl font-black text-emerald-700 font-mono mt-1">{fM(kpis.totalPago)}</span>
           </div>
           <div className="bg-amber-50 border border-amber-100 p-5 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[11px] font-black uppercase text-amber-700 tracking-wider">Em Aberto / Atrasado</span>
+            <span className="text-[11px] font-black uppercase text-amber-700 tracking-wider">Em Aberto (Prev. / Prog.)</span>
             <span className="text-2xl font-black text-amber-700 font-mono mt-1">{fM(kpis.totalAberto)}</span>
           </div>
         </div>
@@ -272,7 +319,6 @@ export default function FinanceiroCalendarioPage() {
           <div className="h-64 flex items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando calendário...</div>
         ) : (
           <>
-            {/* Cabeçalho dos Dias da Semana */}
             <div className="grid grid-cols-7 gap-2 mb-2">
               {DIAS_SEMANA.map(d => (
                 <div key={d} className="text-center font-black text-slate-400 text-[10px] uppercase tracking-wider py-1">
@@ -281,26 +327,30 @@ export default function FinanceiroCalendarioPage() {
               ))}
             </div>
 
-            {/* Grid de Dias */}
             <div className="grid grid-cols-7 gap-2">
-              {/* Espaços em branco do início do mês */}
               {diasBrancos.map((_, i) => <div key={`b-${i}`} className="min-h-[120px] bg-slate-50/50 rounded-xl border border-transparent"></div>)}
 
-              {/* Dias Reais */}
               {diasMes.map(dia => {
                 const dataString = `${mesAtivo}-${String(dia).padStart(2, "0")}`;
                 const pagsNoDia = pagamentos.filter(p => p.data_vencimento === dataString);
                 
                 const valorDia = pagsNoDia.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
-                const hojeStr = new Date().toISOString().split("T")[0];
                 const isHoje = dataString === hojeStr;
+                
+                // Notificações flutuantes (Atrasado ou Próximo a Vencer)
+                const hasAtraso = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento < hojeStr);
+                const hasAlerta = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento >= hojeStr && p.data_vencimento <= dataMais2Str);
 
                 return (
                   <div 
                     key={dia} 
                     onClick={() => setDiaSelecionado(dataString)}
-                    className={`min-h-[120px] border rounded-xl p-2 flex flex-col gap-1 cursor-pointer transition-all ${isHoje ? "border-blue-400 ring-1 ring-blue-100 bg-blue-50/20 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"}`}
+                    className={`min-h-[120px] relative border rounded-xl p-2 flex flex-col gap-1 cursor-pointer transition-all ${isHoje ? "border-blue-400 ring-1 ring-blue-100 bg-blue-50/20 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"}`}
                   >
+                    {/* Badges de Notificação */}
+                    {hasAtraso && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Existem contas em atraso neste dia!"></div>}
+                    {!hasAtraso && hasAlerta && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Vencimentos previstos para hoje/amanhã!"></div>}
+
                     <div className="flex justify-between items-start">
                       <span className={`text-xs font-black ${isHoje ? "bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-xs" : "text-slate-500"}`}>
                         {dia}
@@ -315,11 +365,11 @@ export default function FinanceiroCalendarioPage() {
                     <div className="mt-1 flex flex-col gap-1 overflow-y-auto max-h-[80px] custom-scrollbar pr-1">
                       {pagsNoDia.map(p => (
                         <div key={p.id} className={`text-[9px] font-bold px-1.5 py-1 rounded truncate border ${
-                          p.status === "Pago" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                          p.status === "Atrasado" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                          p.status === "PAGO" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                          p.status === "PROGRAMADO" ? "bg-blue-50 text-blue-700 border-blue-200" :
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`} title={`${p.descricao} - ${fM(p.valor)}`}>
-                          {p.status === "Pago" ? "✅ " : p.status === "Atrasado" ? "🚨 " : "⏳ "}
+                          {p.status === "PAGO" ? "✅ " : p.status === "PROGRAMADO" ? "🗓️ " : "⏳ "}
                           {p.descricao || "Nova Conta"}
                         </div>
                       ))}
@@ -356,7 +406,7 @@ export default function FinanceiroCalendarioPage() {
                   ➕ Nova Conta a Pagar
                 </button>
                 <button onClick={adicionarColunaCustomizada} className="px-4 py-2 bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-600 hover:text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-colors flex items-center gap-1.5 shadow-sm">
-                  ➕ Add Coluna
+                  ➕ Add Coluna Customizada
                 </button>
               </div>
               <button 
@@ -371,32 +421,40 @@ export default function FinanceiroCalendarioPage() {
             {/* Grid Tabelão */}
             <div className="flex-1 overflow-auto bg-slate-100/50 p-4">
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <table className="w-full text-left border-collapse min-w-[900px]">
+                <table className="w-full text-left border-collapse min-w-[1100px]">
                   <thead>
                     <tr className="bg-slate-100 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none border-b border-slate-200">
-                      <th className="p-2 border-r border-slate-200 w-10 text-center">Excluir</th>
-                      <th className="p-2 border-r border-slate-200 w-36">Vencimento</th>
-                      <th className="p-2 border-r border-slate-200 min-w-[200px]">Beneficiário / Descrição</th>
-                      <th className="p-2 border-r border-slate-200 w-40">Categoria</th>
-                      <th className="p-2 border-r border-slate-200 w-36 text-right">Valor (R$)</th>
                       <th className="p-2 border-r border-slate-200 w-36 text-center">Status</th>
-                      {colunasDinamicas.map(col => (
-                        <th key={col} className="p-2 border-r border-slate-200 w-40 bg-purple-50 text-purple-700 truncate" title={col}>
-                          {col}
-                        </th>
-                      ))}
+                      <th className="p-2 border-r border-slate-200 w-36">Vencimento</th>
+                      {empresaAtiva === "TODAS" && <th className="p-2 border-r border-slate-200 w-32 bg-amber-50">Empresa</th>}
+                      <th className="p-2 border-r border-slate-200 min-w-[200px]">Beneficiário / Descrição</th>
+                      <th className="p-2 border-r border-slate-200 w-44">Categoria</th>
+                      <th className="p-2 border-r border-slate-200 w-36 text-right">Valor (R$)</th>
+                      {colunasDinamicas.map(col => <th key={col} className="p-2 border-r border-slate-200 w-40 bg-purple-50 text-purple-700 truncate" title={col}>{col}</th>)}
+                      <th className="p-2 border-r border-slate-200 w-24 text-center bg-blue-50 text-blue-700" title="Repetir nos próximos 11 meses">Recorrente?</th>
+                      <th className="p-2 border-slate-200 w-16 text-center text-rose-500">Excluir</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
                     {pagamentosDoDia.length === 0 ? (
-                      <tr><td colSpan={6 + colunasDinamicas.length} className="p-12 text-center text-slate-400 italic">Nenhum pagamento registrado para o dia {diaSelecionado.split("-").reverse().join("/")}.</td></tr>
+                      <tr><td colSpan={10 + colunasDinamicas.length} className="p-12 text-center text-slate-400 italic">Nenhum pagamento registrado para o dia {diaSelecionado.split("-").reverse().join("/")}.</td></tr>
                     ) : (
                       pagamentosDoDia.map((pag) => (
                         <tr key={pag.id} className={`hover:bg-blue-50/30 transition-colors ${pag.isNovo ? 'bg-emerald-50/30' : ''}`}>
                           <td className="p-1.5 border-r border-slate-200 text-center">
-                            <button onClick={() => removerLinha(pag.id, pag.isNovo)} className="w-6 h-6 rounded bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white font-bold flex items-center justify-center transition-colors shadow-xs">
-                              ✕
-                            </button>
+                            <select 
+                              value={pag.status} 
+                              onChange={(e) => atualizarCelula(pag.id, "status", e.target.value)}
+                              className={`w-full p-2 text-xs outline-none font-black rounded border border-transparent hover:border-slate-300 cursor-pointer appearance-none text-center shadow-xs ${
+                                pag.status === "PAGO" ? "bg-emerald-100 text-emerald-800" :
+                                pag.status === "PROGRAMADO" ? "bg-blue-100 text-blue-800" :
+                                "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              <option value="PREVISTO">⏳ PREVISTO</option>
+                              <option value="PROGRAMADO">🗓️ PROGRAMADO</option>
+                              <option value="PAGO">✅ PAGO</option>
+                            </select>
                           </td>
                           <td className="p-1.5 border-r border-slate-200">
                             <input 
@@ -406,6 +464,18 @@ export default function FinanceiroCalendarioPage() {
                               className="w-full p-2 text-xs outline-none bg-transparent font-medium text-slate-700 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
                             />
                           </td>
+                          {empresaAtiva === "TODAS" && (
+                            <td className="p-1.5 border-r border-slate-200 bg-amber-50/30">
+                              <select 
+                                value={pag.empresa} 
+                                onChange={(e) => atualizarCelula(pag.id, "empresa", e.target.value)}
+                                className="w-full p-2 text-xs outline-none bg-transparent font-bold text-amber-900 cursor-pointer"
+                              >
+                                <option value="SEC">SEC</option>
+                                <option value="FIDC">FIDC</option>
+                              </select>
+                            </td>
+                          )}
                           <td className="p-1.5 border-r border-slate-200">
                             <input 
                               type="text" 
@@ -416,13 +486,15 @@ export default function FinanceiroCalendarioPage() {
                             />
                           </td>
                           <td className="p-1.5 border-r border-slate-200">
-                            <input 
-                              type="text" 
-                              placeholder="Ex: Fixos"
+                            <select 
                               value={pag.categoria} 
-                              onChange={(e) => atualizarCelula(pag.id, "categoria", e.target.value)}
-                              className="w-full p-2 text-xs outline-none bg-transparent font-medium text-slate-600 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
-                            />
+                              onChange={(e) => lidarMudancaCategoria(pag.id, e.target.value)}
+                              className="w-full p-2 text-xs outline-none bg-transparent font-bold text-slate-600 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300 cursor-pointer"
+                            >
+                              <option value="" disabled>Selecione...</option>
+                              {categoriasLocais.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                              <option value="NOVA_CATEGORIA" className="font-black text-blue-600 bg-blue-50">➕ Nova Categoria...</option>
+                            </select>
                           </td>
                           <td className="p-1.5 border-r border-slate-200 bg-slate-50/30">
                             <input 
@@ -430,23 +502,8 @@ export default function FinanceiroCalendarioPage() {
                               step="0.01"
                               value={pag.valor || ""} 
                               onChange={(e) => atualizarCelula(pag.id, "valor", parseFloat(e.target.value) || 0)}
-                              className="w-full p-2 text-sm outline-none bg-transparent font-mono font-bold text-right text-slate-900 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
+                              className="w-full p-2 text-sm outline-none bg-transparent font-mono font-black text-right text-slate-900 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
                             />
-                          </td>
-                          <td className="p-1.5 border-r border-slate-200 text-center">
-                            <select 
-                              value={pag.status} 
-                              onChange={(e) => atualizarCelula(pag.id, "status", e.target.value)}
-                              className={`w-full p-2 text-xs outline-none font-bold rounded border border-transparent hover:border-slate-300 cursor-pointer appearance-none text-center shadow-xs ${
-                                pag.status === "Pago" ? "bg-emerald-100 text-emerald-800" :
-                                pag.status === "Atrasado" ? "bg-rose-100 text-rose-800" :
-                                "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              <option value="A Vencer">⏳ A Vencer</option>
-                              <option value="Pago">✅ Pago</option>
-                              <option value="Atrasado">🚨 Atrasado</option>
-                            </select>
                           </td>
                           {/* Renderiza Células Dinâmicas */}
                           {colunasDinamicas.map(col => (
@@ -459,6 +516,20 @@ export default function FinanceiroCalendarioPage() {
                               />
                             </td>
                           ))}
+                          <td className="p-1.5 border-r border-slate-200 text-center bg-blue-50/30">
+                            <input 
+                              type="checkbox" 
+                              checked={pag.isRecorrente || false}
+                              onChange={(e) => atualizarCelula(pag.id, "isRecorrente", e.target.checked)}
+                              className="w-4 h-4 text-blue-600 rounded bg-slate-100 border-slate-300 cursor-pointer"
+                              title="Tornar despesa recorrente (12 meses)"
+                            />
+                          </td>
+                          <td className="p-1.5 text-center">
+                            <button onClick={() => removerLinha(pag.id, pag.isNovo)} className="w-full py-1.5 rounded bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white font-bold transition-colors text-[10px] uppercase">
+                              Excluir
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -471,7 +542,6 @@ export default function FinanceiroCalendarioPage() {
         </div>
       )}
 
-      {/* STYLES PARA SCROLLBAR FINA */}
       <style dangerouslySetContent={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
