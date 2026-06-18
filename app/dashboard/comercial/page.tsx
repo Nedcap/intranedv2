@@ -252,34 +252,32 @@ export default function ControleComercialVisitasPage() {
 
       {carregando && <div className="p-8 font-bold text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-xl">⏳ Carregando dados da API do Supabase...</div>}
 
-      {visitas.length === 0 && !carregando ? (
-        <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2 shadow-xs">
-          <div className="text-3xl opacity-80">🗂️</div>
-          <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial / visita encontrado</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads foram movidos para "Visita Agendada" ou estágios posteriores no painel principal do NedHub.</p>
-        </div>
-      ) : (
+      {!carregando && (
         <>
           {/* MATRIZ DE PREÇO SDR */}
           <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
             <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-2">⚙️ Ajustar Tabelas de Preço Variáveis por SDR</span>
             <div className="flex flex-wrap gap-3">
-              {listasSDRsUnicos.map(nome => {
-                const cfg = configsSDR[nome] || { nome, valorAgendamento: 50, valorComite: 80 };
-                return (
-                  <div key={nome} className="bg-slate-50 p-2 border border-slate-200 rounded-lg flex items-center gap-3">
-                    <span className="font-black text-slate-800 px-1 truncate max-w-[120px] uppercase">{nome.substring(0, 15)}</span>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-slate-400 font-bold">Agendamento:</span>
-                      <input type="number" value={cfg.valorAgendamento} onChange={(e) => atualizarValorComissaoSDR(nome, "valorAgendamento", parseFloat(e.target.value) || 0)} className="w-12 p-0.5 text-center bg-white border border-slate-200 rounded font-bold" />
+              {listasSDRsUnicos.length === 0 ? (
+                <span className="text-slate-400 italic font-medium">Nenhum SDR mapeado ainda.</span>
+              ) : (
+                listasSDRsUnicos.map(nome => {
+                  const cfg = configsSDR[nome] || { nome, valorAgendamento: 50, valorComite: 80 };
+                  return (
+                    <div key={nome} className="bg-slate-50 p-2 border border-slate-200 rounded-lg flex items-center gap-3">
+                      <span className="font-black text-slate-800 px-1 truncate max-w-[120px] uppercase">{nome.substring(0, 15)}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Agendamento:</span>
+                        <input type="number" value={cfg.valorAgendamento} onChange={(e) => atualizarValorComissaoSDR(nome, "valorAgendamento", parseFloat(e.target.value) || 0)} className="w-12 p-0.5 text-center bg-white border border-slate-200 rounded font-bold" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Comitê:</span>
+                        <input type="number" value={cfg.valorComite} onChange={(e) => atualizarValorComissaoSDR(nome, "valorComite", parseFloat(e.target.value) || 0)} className="w-12 p-0.5 text-center bg-white border border-slate-200 rounded font-bold" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-slate-400 font-bold">Comitê:</span>
-                      <input type="number" value={cfg.valorComite} onChange={(e) => atualizarValorComissaoSDR(nome, "valorComite", parseFloat(e.target.value) || 0)} className="w-12 p-0.5 text-center bg-white border border-slate-200 rounded font-bold" />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -320,26 +318,28 @@ export default function ControleComercialVisitasPage() {
             </select>
           </div>
 
-          {/* TABELA */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-800 text-white font-black uppercase text-[11px] border-b border-slate-900">
-                  <th className="p-3">Lead Comercial</th>
-                  <th className="p-3">SDR Responsável</th>
-                  <th className="p-3 text-center">Estágio Atual</th>
-                  <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
-                  <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê</th>
-                  <th className="p-3 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-[11px]">
-                {visitasFiltradas.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum lead corresponde aos filtros selecionados.</td>
+          {/* TABELA CONDICIONAL */}
+          {visitasFiltradas.length === 0 ? (
+            <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2 shadow-xs">
+              <div className="text-3xl opacity-80">🗂️</div>
+              <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial / visita encontrado</h3>
+              <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Não há leads que correspondam aos filtros ou não existem "Visitas Agendadas" no NedHub.</p>
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-black uppercase text-[11px] border-b border-slate-900">
+                    <th className="p-3">Lead Comercial</th>
+                    <th className="p-3">SDR Responsável</th>
+                    <th className="p-3 text-center">Estágio Atual</th>
+                    <th className="p-3 text-center bg-blue-950/40">Gatilho 1: Visita</th>
+                    <th className="p-3 text-center bg-slate-900">Gatilho 2: Comitê</th>
+                    <th className="p-3 text-center">Ações</th>
                   </tr>
-                ) : (
-                  visitasFiltradas.map((v) => {
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-[11px]">
+                  {visitasFiltradas.map((v) => {
                     const cfg = configsSDR[v.responsavelSDR] || { valorAgendamento: 50, valorComite: 80 };
                     const estaEnviando = enviandoLeadId === v.id;
                     const jaFoiEnviado = v.statusComissaoComite === "Enviado p/ Análise";
@@ -353,7 +353,7 @@ export default function ControleComercialVisitasPage() {
                         <td className="p-3 text-slate-500 font-bold uppercase truncate max-w-[150px]">{v.responsavelSDR}</td>
                         <td className="p-3 text-center">
                           <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800">
-                            {v.etapa.replace("_", " ")}
+                            {v.etapa.replace(/_/g, " ")}
                           </span>
                         </td>
                         
@@ -404,11 +404,11 @@ export default function ControleComercialVisitasPage() {
                         </td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

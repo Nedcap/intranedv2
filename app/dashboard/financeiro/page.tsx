@@ -27,7 +27,19 @@ const EMPRESAS = [
 const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const CATEGORIAS_PADRAO = ["Aluguel", "Impostos", "Salários", "Software", "Serviços", "Marketing", "Administrativo"];
 
-// Função segura para adicionar meses sem pular fuso horário
+// ============================================================================
+// 🧹 MOTOR DE NORMALIZAÇÃO DE TEXTO (CORRETOR)
+// ============================================================================
+const normalizarTexto = (texto: string) => {
+  if (!texto) return "";
+  // Tira espaços duplos e garante Capitalização Padrão (Primeira Maiúscula)
+  return texto
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
+};
+
 const adicionarMeses = (dataString: string, meses: number) => {
   const [a, m, d] = dataString.split("-").map(Number);
   const dt = new Date(a, m - 1 + meses, d, 12, 0, 0);
@@ -44,6 +56,7 @@ export default function FinanceiroCalendarioPage() {
   
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [normalizando, setNormalizando] = useState(false);
 
   // 🗓️ CONTROLE DO MODAL DE DIA ESPECÍFICO
   const [diaSelecionado, setDiaSelecionado] = useState<string | null>(null);
@@ -54,7 +67,6 @@ export default function FinanceiroCalendarioPage() {
   const carregarPlanilha = async () => {
     setCarregando(true);
     try {
-      // 1. Busca Colunas Dinâmicas
       let qCols = supabase.from("financeiro_colunas").select("nome_coluna");
       if (empresaAtiva !== "TODAS") qCols = qCols.eq("empresa", empresaAtiva);
       const { data: cols } = await qCols;
@@ -63,7 +75,6 @@ export default function FinanceiroCalendarioPage() {
         setColunasDinamicas(colunasUnicas);
       }
 
-      // 2. Busca Pagamentos
       let qPags = supabase.from("financeiro_pagamentos").select("*").eq("mes_ano", mesAtivo).order("data_vencimento", { ascending: true });
       if (empresaAtiva !== "TODAS") {
         qPags = qPags.eq("empresa", empresaAtiva);
@@ -74,14 +85,13 @@ export default function FinanceiroCalendarioPage() {
       const { data: pags } = await qPags;
 
       if (pags) {
-        // Encontra categorias novas que vieram do banco
-        const catsDoBanco = pags.map(p => p.categoria).filter(Boolean);
+        const catsDoBanco = pags.map(p => normalizarTexto(p.categoria)).filter(Boolean);
         const todasCats = Array.from(new Set([...categoriasLocais, ...catsDoBanco]));
         setCategoriasLocais(todasCats);
 
         setPagamentos(pags.map(p => ({
           ...p,
-          status: p.status === "A Vencer" || p.status === "Atrasado" ? "PREVISTO" : p.status, // Normaliza os status antigos
+          status: p.status === "A Vencer" || p.status === "Atrasado" ? "PREVISTO" : p.status, 
           dados_customizados: p.dados_customizados || {}
         })));
       } else {
@@ -120,7 +130,7 @@ export default function FinanceiroCalendarioPage() {
   const fM = (val: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
 
   // ==========================================================================
-  // 🗓️ GERADOR DO CALENDÁRIO
+  // 🗓️ GERADOR DO CALENDÁRIO E NOTIFICAÇÕES
   // ==========================================================================
   const { diasBrancos, diasMes } = useMemo(() => {
     const [ano, mes] = mesAtivo.split("-").map(Number);
@@ -139,7 +149,7 @@ export default function FinanceiroCalendarioPage() {
   const dataMais2Str = dataMais2.toISOString().split("T")[0];
 
   // ==========================================================================
-  // ✏️ MANIPULAÇÃO DO GRID NO MODAL (EXCEL-LIKE)
+  // ✏️ MANIPULAÇÃO DO GRID NO MODAL (EXCEL-LIKE COM CORRETOR)
   // ==========================================================================
   const pagamentosDoDia = useMemo(() => {
     if (!diaSelecionado) return [];
@@ -152,7 +162,7 @@ export default function FinanceiroCalendarioPage() {
       id: crypto.randomUUID(),
       isNovo: true,
       isRecorrente: false,
-      empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, // Fallback para não salvar "TODAS" no banco
+      empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, 
       mes_ano: mesAtivo,
       data_vencimento: diaSelecionado,
       descricao: "",
@@ -165,9 +175,12 @@ export default function FinanceiroCalendarioPage() {
   };
 
   const atualizarCelula = (id: string, campo: keyof Pagamento, valor: any) => {
+    // Normaliza descrições no momento da digitação ("blur" virtual)
+    const valorCorrigido = campo === "descricao" ? normalizarTexto(valor) : valor;
+
     setPagamentos(prev => prev.map(p => {
       if (p.id === id) {
-        const pModificado = { ...p, [campo]: valor };
+        const pModificado = { ...p, [campo]: valorCorrigido };
         if (campo === "data_vencimento") pModificado.mes_ano = String(valor).substring(0, 7);
         return pModificado as Pagamento;
       }
@@ -177,7 +190,7 @@ export default function FinanceiroCalendarioPage() {
 
   const atualizarCelulaCustomizada = (id: string, coluna: string, valor: string) => {
     setPagamentos(prev => prev.map(p => {
-      if (p.id === id) return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: valor } };
+      if (p.id === id) return { ...p, dados_customizados: { ...p.dados_customizados, [coluna]: normalizarTexto(valor) } };
       return p;
     }));
   };
@@ -186,7 +199,7 @@ export default function FinanceiroCalendarioPage() {
     if (valor === "NOVA_CATEGORIA") {
       const nova = prompt("Digite o nome da nova categoria:");
       if (nova && nova.trim() !== "") {
-        const novaLimpa = nova.trim().toUpperCase();
+        const novaLimpa = normalizarTexto(nova);
         if (!categoriasLocais.includes(novaLimpa)) setCategoriasLocais([...categoriasLocais, novaLimpa]);
         atualizarCelula(id, "categoria", novaLimpa);
       }
@@ -212,8 +225,43 @@ export default function FinanceiroCalendarioPage() {
     if (colunasDinamicas.includes(nomeLimpo)) return alert("Esta coluna já existe!");
 
     setColunasDinamicas([...colunasDinamicas, nomeLimpo]);
-    // Salva a coluna com a primeira empresa se estiver no consolidado (as duas vão compartilhar no front)
     await supabase.from("financeiro_colunas").insert({ empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, nome_coluna: nomeLimpo });
+  };
+
+  // 🧹 Pincel Mágico: Limpa as sujeiras do banco de uma vez só
+  const limparSujeiraDoBanco = async () => {
+    setNormalizando(true);
+    try {
+      const payloadLimpo = pagamentos.map(p => {
+        const customLimpo: Record<string, string> = {};
+        if (p.dados_customizados) {
+          Object.keys(p.dados_customizados).forEach(key => {
+            customLimpo[key] = normalizarTexto(p.dados_customizados[key]);
+          });
+        }
+
+        return {
+          ...p,
+          descricao: normalizarTexto(p.descricao),
+          categoria: normalizarTexto(p.categoria),
+          dados_customizados: customLimpo
+        };
+      });
+
+      setPagamentos(payloadLimpo);
+
+      const arrayUpdate = payloadLimpo.filter(p => !p.isNovo).map(({ isNovo, isRecorrente, ...rest }) => rest);
+      
+      if (arrayUpdate.length > 0) {
+        await supabase.from("financeiro_pagamentos").upsert(arrayUpdate, { onConflict: "id" });
+      }
+
+      alert("✨ Pincel mágico passado! Todos os textos deste mês foram padronizados.");
+    } catch (e: any) {
+      alert(`Erro ao normalizar: ${e.message}`);
+    } finally {
+      setNormalizando(false);
+    }
   };
 
   const salvarPlanilha = async () => {
@@ -223,9 +271,13 @@ export default function FinanceiroCalendarioPage() {
 
       for (const p of pagamentosDoDia) {
         const { isNovo, isRecorrente, ...rest } = p;
+        
+        // Assegura que o texto vai pro banco limpo (última barreira de defesa)
+        rest.descricao = normalizarTexto(rest.descricao);
+        rest.categoria = normalizarTexto(rest.categoria);
+
         payload.push(rest);
 
-        // Gera os próximos 11 meses caso seja recorrente
         if (isRecorrente) {
           for (let m = 1; m <= 11; m++) {
             const novaData = adicionarMeses(rest.data_vencimento, m);
@@ -234,7 +286,7 @@ export default function FinanceiroCalendarioPage() {
               id: crypto.randomUUID(),
               data_vencimento: novaData,
               mes_ano: novaData.substring(0, 7),
-              status: "PREVISTO" // As projeções sempre entram como Previsto
+              status: "PREVISTO" 
             });
           }
         }
@@ -315,6 +367,18 @@ export default function FinanceiroCalendarioPage() {
 
       {/* 🗓️ CALENDÁRIO VISUAL */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-4">
+        {/* Barra de Ferramentas Auxiliar */}
+        <div className="flex justify-end mb-4 border-b border-slate-100 pb-2">
+           <button 
+            onClick={limparSujeiraDoBanco} 
+            disabled={carregando || normalizando || pagamentos.length === 0}
+            className="text-[10px] uppercase font-black tracking-wider flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 rounded-md border border-slate-200 hover:border-indigo-200 transition-colors disabled:opacity-50"
+            title="Padroniza todas as descrições (Primeira Letra Maiúscula) e remove espaços duplos do banco."
+          >
+            {normalizando ? "⏳ Padronizando..." : "🧹 Normalizar Textos do Mês"}
+          </button>
+        </div>
+
         {carregando ? (
           <div className="h-64 flex items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando calendário...</div>
         ) : (
@@ -340,7 +404,6 @@ export default function FinanceiroCalendarioPage() {
                 const hasAtraso = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento < hojeStr);
                 const hasAlerta = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento >= hojeStr && p.data_vencimento <= dataMais2Str);
 
-                // 🎯 LIMITANDO VISUALIZAÇÃO: Mostra apenas 3 itens no calendário
                 const MAX_ITEMS = 3;
                 const visiblePags = pagsNoDia.slice(0, MAX_ITEMS);
                 const hiddenCount = pagsNoDia.length - MAX_ITEMS;
@@ -351,11 +414,9 @@ export default function FinanceiroCalendarioPage() {
                     onClick={() => setDiaSelecionado(dataString)}
                     className={`h-[150px] relative border rounded-xl p-2.5 flex flex-col gap-2 cursor-pointer transition-all overflow-hidden ${isHoje ? "border-blue-400 ring-2 ring-blue-100 bg-blue-50/20 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"}`}
                   >
-                    {/* Badges de Notificação */}
                     {hasAtraso && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Existem contas em atraso neste dia!"></div>}
                     {!hasAtraso && hasAlerta && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Vencimentos previstos para hoje/amanhã!"></div>}
 
-                    {/* Cabeçalho do Dia */}
                     <div className="flex justify-between items-start shrink-0">
                       <span className={`text-xs font-black ${isHoje ? "bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-md" : "text-slate-500"}`}>
                         {dia}
@@ -367,7 +428,6 @@ export default function FinanceiroCalendarioPage() {
                       )}
                     </div>
 
-                    {/* Lista de Contas (Limitada a 3) */}
                     <div className="flex flex-col gap-1.5 flex-1">
                       {visiblePags.map(p => (
                         <div key={p.id} className={`text-[10px] font-bold px-2 py-1 rounded-md truncate border flex items-center gap-1.5 shadow-xs ${
@@ -380,7 +440,6 @@ export default function FinanceiroCalendarioPage() {
                         </div>
                       ))}
                       
-                      {/* Botão de "+ X Contas" se ultrapassar o limite */}
                       {hiddenCount > 0 && (
                         <div className="text-[9px] font-black text-slate-500 text-center mt-auto bg-slate-50 border border-slate-200 py-1 rounded-md hover:bg-slate-100 transition-colors">
                           + {hiddenCount} {hiddenCount === 1 ? "conta" : "contas"}
@@ -400,7 +459,6 @@ export default function FinanceiroCalendarioPage() {
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-8">
           <div className="bg-white w-full max-w-7xl max-h-full rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
             
-            {/* Header do Modal */}
             <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
               <div>
                 <h3 className="font-black uppercase tracking-wider flex items-center gap-2">
@@ -412,7 +470,6 @@ export default function FinanceiroCalendarioPage() {
               <button onClick={() => setDiaSelecionado(null)} className="text-xl font-black text-slate-400 hover:text-white px-2">✕</button>
             </div>
 
-            {/* Barra de Ferramentas */}
             <div className="bg-slate-50 border-b border-slate-200 p-3 flex justify-between items-center shrink-0">
               <div className="flex gap-2">
                 <button onClick={adicionarLinhaNoDia} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-colors flex items-center gap-1.5 shadow-sm">
@@ -431,8 +488,7 @@ export default function FinanceiroCalendarioPage() {
               </button>
             </div>
 
-            {/* Grid Tabelão */}
-            <div className="flex-1 overflow-auto bg-slate-100/50 p-4">
+            <div className="flex-1 overflow-auto bg-slate-100/50 p-4 custom-scrollbar">
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                 <table className="w-full text-left border-collapse min-w-[1100px]">
                   <thead>
@@ -492,10 +548,10 @@ export default function FinanceiroCalendarioPage() {
                           <td className="p-1.5 border-r border-slate-200">
                             <input 
                               type="text" 
-                              placeholder="Ex: Aluguel..."
+                              placeholder="Ex: Aluguel da Sede..."
                               value={pag.descricao} 
                               onChange={(e) => atualizarCelula(pag.id, "descricao", e.target.value)}
-                              className="w-full p-2 text-xs outline-none bg-transparent font-bold text-slate-800 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300 uppercase"
+                              className="w-full p-2 text-xs outline-none bg-transparent font-bold text-slate-800 focus:bg-white focus:ring-1 ring-blue-500 rounded border border-transparent hover:border-slate-300"
                             />
                           </td>
                           <td className="p-1.5 border-r border-slate-200">
@@ -554,6 +610,16 @@ export default function FinanceiroCalendarioPage() {
           </div>
         </div>
       )}
+
+      {/* 🔮 CSS GLOBAL INJETADO PARA BARRAS DE ROLAGEM */}
+      <style dangerouslySetContent={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}} />
     </div>
   );
 }
