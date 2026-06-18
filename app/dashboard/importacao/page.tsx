@@ -21,7 +21,7 @@ function limparNome(texto: any): string {
   if (!texto) return "";
   let n = String(texto).toUpperCase().trim();
   
-  // 🔥 MATA O CÓDIGO INICIAL: Remove números seguidos de espaços, traços, pontos ou underscores
+  // 🔥 MATA O CÓDIGO INICIAL (ex: "1234 - ", "001_", "456.")
   n = n.replace(/^\d+[\s\-\.\_]+/, ""); 
   
   n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
@@ -30,32 +30,24 @@ function limparNome(texto: any): string {
   return n.replace(/\s+/g, " ").trim();
 }
 
-/**
- * ⚡ CRUZAMENTO INSTANTÂNEO: Checa o nome da planilha contra a Base Universal na RAM.
- * Retorna o NOME OFICIAL se achar qualquer correspondência, senão retorna o nome limpo original.
- */
 function normalizarPelaBaseUniversal(nomeBruto: string, base: BaseUniversal[]): string {
   const limpo = limparNome(nomeBruto);
   if (!limpo) return "";
 
   const match = base.find(b => {
-    // 1. Checa contra o nome oficial
     const oficialLimpo = limparNome(b.nome_oficial);
     if (oficialLimpo === limpo || oficialLimpo.includes(limpo) || limpo.includes(oficialLimpo)) return true;
 
-    // 2. Checa contra o nome fantasia
     if (b.nome_fantasia) {
       const fantasiaLimpo = limparNome(b.nome_fantasia);
       if (fantasiaLimpo === limpo || fantasiaLimpo.includes(limpo) || limpo.includes(fantasiaLimpo)) return true;
     }
 
-    // 3. Checa contra o nome curto
     if (b.nome_curto) {
       const curtoLimpo = limparNome(b.nome_curto);
       if (curtoLimpo === limpo || curtoLimpo.includes(limpo) || limpo.includes(curtoLimpo)) return true;
     }
 
-    // 4. Checa contra o array de variações de erro
     if (b.variacoes && Array.isArray(b.variacoes)) {
       for (const variacao of b.variacoes) {
         const vLimpo = limparNome(variacao);
@@ -66,7 +58,7 @@ function normalizarPelaBaseUniversal(nomeBruto: string, base: BaseUniversal[]): 
     return false;
   });
 
-  return match ? match.nome_oficial : limpo; // Se não achar na base, usa o que limpou como novo
+  return match ? match.nome_oficial : limpo; 
 }
 
 function parseValorReal(valor: any): number {
@@ -140,7 +132,7 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 PROCESSADORES (AGORA 100% SÍNCRONOS E ULTRA RÁPIDOS)
+// 🤖 PROCESSADORES (ALINHADOS COM OS NOVOS CABEÇALHOS)
 // ============================================================================
 
 const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
@@ -148,7 +140,7 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   if (headerIdx === -1) return {};
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().replace(/[^A-Z]/g, ""));
   const idxCedente = header.indexOf("CEDENTE");
-  const idxLimUti = header.findIndex(c => c.includes("LIMUTI") || c.includes("RISCO"));
+  const idxLimUti = header.findIndex(c => c.includes("LIMUTI") || c.includes("UTI") || c.includes("RISCO"));
   const idxVencidos = header.findIndex(c => c.includes("VENCIDOS"));
   
   const records: any = {};
@@ -157,7 +149,6 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
     const rawCed = String(row[idxCedente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
     
-    // Normalização a jato via RAM
     const chave = normalizarPelaBaseUniversal(rawCed, base);
     if (!chave) continue;
 
@@ -201,7 +192,7 @@ const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
   const idxCedente = header.indexOf("CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DTA") || c.includes("DATA"));
+  const idxData = header.findIndex(c => c.includes("DTANEG") || c.includes("DATA"));
   const idxValor = header.findIndex(c => c.includes("APROVADO") || c.includes("VLRAPROV"));
 
   const lancamentos: any[] = [];
@@ -221,12 +212,12 @@ const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
+  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "NOME DO CEDENTE" || c === "CEDENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
-  const idxCedente = header.findIndex(c => c === "CEDENTE" || c.includes("NOME DO CEDENTE") || c === "CLIENTE");
-  const idxData = header.findIndex(c => c.includes("DATA DA OPER") || c.includes("DATA OPER") || c === "DATA");
-  const idxValor = header.findIndex(c => c.includes("VALOR FACE") || c.includes("FACE") || c.includes("VALOR"));
+  const idxCedente = header.findIndex(c => c.includes("NOME DO CEDENTE") || c === "CEDENTE");
+  const idxData = header.findIndex(c => c.includes("DATA DA OPERACAO") || c.includes("DATA OPER") || c.includes("CRIACAO"));
+  const idxValor = header.findIndex(c => c.includes("VALOR FACE") || c === "FACE");
 
   const lancamentos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
@@ -245,20 +236,53 @@ const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
+  // Procura pelo cabeçalho
+  let headerIdx = raw.findIndex(row => row.some(cell => String(cell).trim().toUpperCase() === "ADITIVO"));
   const lancamentos: any[] = [];
-  for (const row of raw) {
-    let aditivo = String(row[0] || "").trim();
-    if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
-    if (aditivo.length === 10 && /^\d+$/.test(aditivo)) {
-      const yy = aditivo.substring(0, 2); const mm = aditivo.substring(2, 4); const dd = aditivo.substring(4, 6);
-      if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-        const dataOp = `${dd}/${mm}/20${yy}`;
-        const mesAno = `${mm}/20${yy}`;
-        const rawCed = String(row[5] || "").trim();
-        if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL") || rawCed.toUpperCase() === "CLIENTE") continue;
-        const desagio = parseValorReal(row[12]);
-        const tarifas = parseValorReal(row[14]);
-        lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, vop: 0, desagio, tarifas, juros: 0 });
+
+  if (headerIdx !== -1) {
+    const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z]/g, ""));
+    const idxCedente = header.indexOf("CLIENTE");
+    const idxAditivo = header.indexOf("ADITIVO");
+    const idxDesagio = header.findIndex(c => c.includes("DIFERENCIAL") || c.includes("DESAGIO"));
+    const idxTaxa = header.findIndex(c => c.includes("TAXASERVICO"));
+    const idxDespesa = header.findIndex(c => c.includes("DESPESAS"));
+
+    for (let i = headerIdx + 1; i < raw.length; i++) {
+      const row = raw[i];
+      let aditivo = String(row[idxAditivo] || "").trim();
+      if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
+      
+      if (aditivo.length >= 6 && /^\d+$/.test(aditivo)) {
+        const yy = aditivo.substring(0, 2); const mm = aditivo.substring(2, 4); const dd = aditivo.substring(4, 6);
+        if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+          const dataOp = `${dd}/${mm}/20${yy}`;
+          const mesAno = `${mm}/20${yy}`;
+          const rawCed = String(row[idxCedente] || "").trim();
+          if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+          
+          const desagio = parseValorReal(row[idxDesagio]);
+          const tarifas = parseValorReal(row[idxTaxa]) + parseValorReal(row[idxDespesa]);
+          lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, vop: 0, desagio, tarifas, juros: 0 });
+        }
+      }
+    }
+  } else {
+    // Fallback caso não tenha cabeçalho explícito (formato legado)
+    for (const row of raw) {
+      let aditivo = String(row[0] || "").trim();
+      if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
+      if (aditivo.length === 10 && /^\d+$/.test(aditivo)) {
+        const yy = aditivo.substring(0, 2); const mm = aditivo.substring(2, 4); const dd = aditivo.substring(4, 6);
+        if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+          const dataOp = `${dd}/${mm}/20${yy}`;
+          const mesAno = `${mm}/20${yy}`;
+          const rawCed = String(row[3] || row[5] || "").trim();
+          if (!rawCed || rawCed.toUpperCase().includes("TOTAL")) continue;
+          const desagio = parseValorReal(row[8] || row[12]);
+          const tarifas = parseValorReal(row[9]) + parseValorReal(row[10]);
+          lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, vop: 0, desagio, tarifas, juros: 0 });
+        }
       }
     }
   }
@@ -266,15 +290,15 @@ const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "CEDENTE" || c === "NOME DO CEDENTE" || c === "CLIENTE"; }));
+  const headerIdx = raw.findIndex(row => row.some(cell => { const c = String(cell).trim().toUpperCase(); return c === "NOME DO CEDENTE" || c === "CEDENTE"; }));
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
-  const idxCedente = header.findIndex(c => c === "CEDENTE" || c.includes("NOME DO CEDENTE") || c === "CLIENTE");
-  const idxData = header.findIndex(c => c.includes("DATA DA OPER") || c.includes("DATA OPER") || c === "DATA");
+  const idxCedente = header.findIndex(c => c.includes("NOME DO CEDENTE") || c === "CEDENTE");
+  const idxData = header.findIndex(c => c.includes("DATA DA OPER") || c.includes("DATA OPER") || c.includes("CRIACAO"));
   const idxDesagio = header.findIndex(c => c === "DESAGIO" || c.includes("VALOR DESAGIO") || c.includes("DESCONTO"));
   
   const indicesTarifas = header.reduce((acc: number[], col, idx) => {
-    if (col.includes("DESPESA") || col.includes("TARIFA") || col.includes("TAXA") || col.includes("SVALORTAR") || col.includes("SVALORDESP")) acc.push(idx);
+    if (col.includes("DESPESA") || col.includes("TARIFA") || col.includes("TAXA")) acc.push(idx);
     return acc;
   }, []);
 
@@ -312,7 +336,11 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   let currentCedente = "";
   for (const row of raw) {
     const c0 = String(row[0] || "").trim();
-    if (/^\d+\s*-/.test(c0) && (!row[1] || String(row[1]).trim() === "")) { currentCedente = c0.replace(/^\d+\s*-\s*/, "").trim(); continue; }
+    // Identifica sub-cabeçalhos de cedente pelo padrão do relatório QPROF
+    if (/^\d+\s*-/.test(c0) && (!row[1] || String(row[1]).trim() === "")) { 
+      currentCedente = c0.replace(/^\d+\s*-\s*/, "").trim(); 
+      continue; 
+    }
     if (row.map(x => String(x).toUpperCase()).join(" ").includes("TOTAL")) continue;
     const valorDataBruto = row[colDtaBaixa]; const valorEncargoBruto = row[colEncargos];
     if (currentCedente && valorDataBruto && valorEncargoBruto) {
@@ -335,18 +363,17 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   if (headerIdx === -1) return [];
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s\.]/g, ""));
   const idxCedente = header.findIndex(c => c === "CEDENTE" || c.includes("RAZAO") || c.includes("CLIENTE"));
-  const idxSacado = header.findIndex(c => c === "SACADO" || c.includes("NOME SACADO") || c.includes("SACADO/DEVEDOR"));
-  const idxNumTitulo = header.findIndex(c => c.includes("NUM") || c.includes("TITULO") || c.includes("DOCUMENTO"));
-  const idxVencimento = header.findIndex(c => c.includes("VCTO") || c.includes("VENCIMENTO") || c.includes("DATA VENC"));
-  const idxValorFace = header.findIndex(c => c.includes("VLR FACE") || c.includes("VALOR FACE") || c.includes("FACE"));
-  const idxValorAberto = header.findIndex(c => c.includes("VLR ABERTO") || c.includes("VALOR ABERTO") || c.includes("ABERTO"));
+  const idxSacado = header.findIndex(c => c === "SACADO" || c.includes("NOME SACADO") || c.includes("SACADO DEVEDOR"));
+  const idxNumTitulo = header.findIndex(c => c.includes("NOSSO NUM") || c.includes("DOCUMENTO") || c.includes("TITULO"));
+  const idxVencimento = header.findIndex(c => c.includes("DTA VCTO") || c.includes("VENCIMENTO"));
+  const idxValorFace = header.findIndex(c => c.includes("VLR FACE") || c.includes("VALOR FACE"));
+  const idxValorAberto = header.findIndex(c => c.includes("VLR ABERTO") || c.includes("VALOR ABERTO"));
 
   const titulos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i]; const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    // Normaliza Instantâneo
     const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
     if (!cedenteNormalizado) continue;
 
@@ -359,7 +386,6 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
 
     if (valorAberto > 0) {
       titulos.push({ 
-        origem: "SEC", 
         cedente: cedenteNormalizado, 
         sacado: sacado.toUpperCase(), 
         numero_titulo: numeroTitulo, 
@@ -379,7 +405,7 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
   const header = raw[headerIdx].map(c => String(c).trim().toUpperCase().normalize("NFD").replace(/[^A-Z\s]/g, ""));
   const idxCedente = header.indexOf("NOME DO CEDENTE");
   const idxSacado = header.indexOf("NOME DO SACADO");
-  const idxVencimento = header.indexOf("DATA DE VENCIMENTO ORIGINAL");
+  const idxVencimento = header.findIndex(c => c.includes("DATA DE VENCIMENTO"));
   const idxValorFace = header.indexOf("VALOR FACE");
   const idxValorAberto = header.indexOf("VALOR ABERTO");
 
@@ -399,10 +425,8 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
 
     if (valorAberto > 0) {
       titulos.push({ 
-        origem: "FIDC", 
         cedente: cedenteNormalizado, 
         sacado: sacado.toUpperCase(), 
-        numero_titulo: "-", 
         vencimento: converteDataParaISO(vencimento), 
         valor_face: valorFace, 
         valor_aberto: valorAberto, 
@@ -429,7 +453,6 @@ export default function ImportacaoPage() {
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
 
-  // 1. CARREGA A BASE UNIVERSAL NA MEMÓRIA QUANDO ABRE A PÁGINA
   useEffect(() => {
     const carregarBase = async () => {
       setStatusMsg("📦 Baixando Base Universal de Cedentes na memória RAM...");
@@ -486,7 +509,6 @@ export default function ImportacaoPage() {
       const rawData = await lerArquivoExcel(file);
       let dadosMapeados: any = null;
 
-      // Passamos a base carregada da RAM para todos os processadores
       if (tipo === "risco") dadosMapeados = empresa === "sec" ? processarRiscoSec(rawData, baseUniversalData) : processarRiscoFidc(rawData, baseUniversalData);
       else if (tipo === "vop") dadosMapeados = empresa === "sec" ? processarVopSec(rawData, baseUniversalData) : processarVopFidc(rawData, baseUniversalData);
       else if (tipo === "receitas") dadosMapeados = empresa === "sec" ? processarReceitasSec(rawData, baseUniversalData) : processarReceitasFidc(rawData, baseUniversalData);
@@ -509,21 +531,40 @@ export default function ImportacaoPage() {
 
   const dispararProSupabase = async () => {
     setProcessando(true);
-    setStatusMsg("🚀 Transmitindo e consolidando dados no Supabase V2...");
+    setStatusMsg("🚀 Consolidando e Transmitindo dados para o Supabase V2...");
     try {
-      // 1. Grava Módulo de Risco de Carteira
-      if (dadosFinais.risco.sec) {
-        for (const [chave, val] of Object.entries(dadosFinais.risco.sec) as any) {
-          await supabase.from("cadastro_cedentes").update({ risco_sec: val.risco, vencido_sec: val.vencido }).eq("cedente", chave);
-        }
+      // ======================================================================
+      // 1. GRAVAR RISCO (DASH CARTEIRA)
+      // Proteção: Mescla os dados atuais do banco com os novos arquivos
+      // ======================================================================
+      const { data: dbCarteira } = await supabase.from('dash_carteira').select('*');
+      const carteiraMap = new Map();
+      dbCarteira?.forEach(row => carteiraMap.set(row.cedente, row));
+
+      for (const [chave, val] of Object.entries(dadosFinais.risco.sec || {}) as any) {
+        const existente = carteiraMap.get(chave) || { risco_fidc: 0, vencido_fidc: 0 };
+        carteiraMap.set(chave, { ...existente, cedente: chave, risco_sec: val.risco, vencido_sec: val.vencido });
       }
-      if (dadosFinais.risco.fidc) {
-        for (const [chave, val] of Object.entries(dadosFinais.risco.fidc) as any) {
-          await supabase.from("cadastro_cedentes").update({ risco_fidc: val.risco, vencido_fidc: val.vencido }).eq("cedente", chave);
-        }
+      for (const [chave, val] of Object.entries(dadosFinais.risco.fidc || {}) as any) {
+        const existente = carteiraMap.get(chave) || { risco_sec: 0, vencido_sec: 0 };
+        carteiraMap.set(chave, { ...existente, cedente: chave, risco_fidc: val.risco, vencido_fidc: val.vencido });
       }
 
-      // 2. Grava Módulo de Finanças (VOP, Receitas e Juros) consolidado em Lote com Nomes Normalizados
+      const carteiraPayload = Array.from(carteiraMap.values()).map((row: any) => ({
+        ...row,
+        risco_consolidado: (row.risco_sec || 0) + (row.risco_fidc || 0),
+        vencido_consolidado: (row.vencido_sec || 0) + (row.vencido_fidc || 0),
+        atualizado_em: new Date().toISOString()
+      }));
+
+      if (carteiraPayload.length > 0) {
+        const { error } = await supabase.from("dash_carteira").upsert(carteiraPayload, { onConflict: "cedente" });
+        if (error) throw error;
+      }
+
+      // ======================================================================
+      // 2. GRAVAR EXTRATO FINANCEIRO E AGREGAR DASH VOP
+      // ======================================================================
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
         const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, baseUniversalData);
@@ -546,27 +587,57 @@ export default function ImportacaoPage() {
       for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
-        const { error } = await supabase.from("extrato_financeiro").insert(loteFinancas);
-        if (error) throw error;
+        // Envia log detalhado
+        const { error: errExtrato } = await supabase.from("extrato_financeiro").insert(loteFinancas);
+        if (errExtrato) throw errExtrato;
+
+        // Calcula DASH VOP de forma protegida (mesclando com banco existente)
+        const { data: dbVop } = await supabase.from('dash_vop').select('*');
+        const vopMap = new Map();
+        dbVop?.forEach(row => vopMap.set(`${row.mes_ano}_${row.cedente}`, row));
+
+        loteFinancas.forEach(item => {
+          if (item.vop > 0) {
+            const key = `${item.mes_ano}_${item.cedente}`;
+            if (!vopMap.has(key)) vopMap.set(key, { mes_ano: item.mes_ano, cedente: item.cedente, vop_sec: 0, vop_fidc: 0 });
+            const obj = vopMap.get(key);
+            if (item.empresa === 'SEC') obj.vop_sec += item.vop;
+            if (item.empresa === 'FIDC') obj.vop_fidc += item.vop;
+          }
+        });
+
+        const vopPayload = Array.from(vopMap.values()).map((v: any) => ({
+          ...v, 
+          vop_consolidado: (v.vop_sec || 0) + (v.vop_fidc || 0),
+          atualizado_em: new Date().toISOString()
+        }));
+
+        if (vopPayload.length > 0) {
+          const { error: errVop } = await supabase.from("dash_vop").upsert(vopPayload, { onConflict: "mes_ano,cedente" });
+          if (errVop) throw errVop;
+        }
       }
 
-      // 3. Grava Módulo de Carteira Detalhada (Blocos de 500 linhas)
+      // ======================================================================
+      // 3. GRAVAR CARTEIRA DETALHADA EM ABERTO (FOTOS DIÁRIAS)
+      // ======================================================================
       if (dadosFinais.carteira.sec.length > 0) {
-        await supabase.from("carteira_titulos").delete().eq("origem", "SEC");
+        // Truque para apagar todas as linhas da tabela (PostgREST exige filtro)
+        await supabase.from("carteira_sec").delete().neq("id", "00000000-0000-0000-0000-000000000000");
         const chunk = 500;
         for (let i = 0; i < dadosFinais.carteira.sec.length; i += chunk) {
-          await supabase.from("carteira_titulos").insert(dadosFinais.carteira.sec.slice(i, i + chunk));
+          await supabase.from("carteira_sec").insert(dadosFinais.carteira.sec.slice(i, i + chunk));
         }
       }
       if (dadosFinais.carteira.fidc.length > 0) {
-        await supabase.from("carteira_titulos").delete().eq("origem", "FIDC");
+        await supabase.from("carteira_fidc").delete().neq("id", "00000000-0000-0000-0000-000000000000");
         const chunk = 500;
         for (let i = 0; i < dadosFinais.carteira.fidc.length; i += chunk) {
-          await supabase.from("carteira_titulos").insert(dadosFinais.carteira.fidc.slice(i, i + chunk));
+          await supabase.from("carteira_fidc").insert(dadosFinais.carteira.fidc.slice(i, i + chunk));
         }
       }
 
-      setStatusMsg("✅ Sincronização V2 concluída com sucesso direto no banco de dados!");
+      setStatusMsg("✅ Sincronização e recálculo finalizados com sucesso!");
       setDadosFinais({ risco: { sec: null, fidc: null }, vop: { sec: [], fidc: [] }, receitas: { sec: [], fidc: [] }, juros: { sec: [], fidc: [] }, carteira: { sec: [], fidc: [] }});
     } catch (err: any) {
       alert(`❌ Erro no envio direto: ${err.message}`);

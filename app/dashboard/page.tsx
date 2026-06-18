@@ -100,31 +100,6 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", clickFora);
   }, []);
 
-  const fetchGoogleSheet = async (sheetName: string) => {
-    try {
-      const sheetId = "1uJ_BysO5VW6DLxoDuoy2ZKzEtRBcptydAa87Ih8cRCw";
-      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
-      const res = await fetch(url);
-      const text = await res.text();
-      const jsonString = text.substring(text.indexOf("({") + 1, text.lastIndexOf("})") + 1);
-      const jsonData = JSON.parse(jsonString);
-      const headers = jsonData.table.cols.map((c: any) => c?.label?.trim().toLowerCase() || "");
-      
-      return jsonData.table.rows.map((r: any) => {
-        const rowData: any = {};
-        r.c.forEach((cell: any, i: number) => {
-          if (headers[i]) {
-            rowData[headers[i]] = cell ? ((cell.f || cell.v) ?? null) : null;
-          }
-        });
-        return rowData;
-      });
-    } catch (error) {
-      console.error(`Erro ao buscar aba ${sheetName}:`, error);
-      return [];
-    }
-  };
-
   const carregarDashboardFiel = async () => {
     try {
       setCarregando(true);
@@ -141,108 +116,70 @@ export default function DashboardPage() {
         if (cargoUser === "comercial") {
           isComercial = true;
           const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-          if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
+          if (vinculos) allowedCedentes = vinculos.map((c: any) => c.cedente);
         }
       }
 
-      // 1. Comitê de Crédito
+      // 1. Comitê de Crédito (analises)
       let queryAnalises = supabase.from("analises").select("*");
       if (isComercial) { queryAnalises = queryAnalises.eq("comercial", userNome); }
       const resAnalises = await queryAnalises;
       setAnalises(resAnalises.data || []);
 
-      // 2. Coleta do Google Sheets
-      const [vopRaw, cartRaw, receitasRaw] = await Promise.all([
-        fetchGoogleSheet("LANCAMENTOS_VOP"),
-        fetchGoogleSheet("BASE_CARTEIRA"),
-        fetchGoogleSheet("RECEITAS")
+      // Preparar consultas V2 com trava de comercial
+      let qVop = supabase.from("dash_vop").select("*");
+      let qCarteira = supabase.from("dash_carteira").select("*");
+      let qExtrato = supabase.from("extrato_financeiro").select("*");
+
+      if (isComercial) {
+        if (allowedCedentes.length > 0) {
+          qVop = qVop.in("cedente", allowedCedentes);
+          qCarteira = qCarteira.in("cedente", allowedCedentes);
+          qExtrato = qExtrato.in("cedente", allowedCedentes);
+        } else {
+          // Bloqueio total se comercial não tiver carteira vinculada
+          qVop = qVop.in("cedente", ["__VAZIO__"]);
+          qCarteira = qCarteira.in("cedente", ["__VAZIO__"]);
+          qExtrato = qExtrato.in("cedente", ["__VAZIO__"]);
+        }
+      }
+
+      // 2. Extração Simultânea e Super Rápida (Supabase V2)
+      const [resVop, resCarteira, resExtrato] = await Promise.all([
+        qVop,
+        qCarteira,
+        qExtrato
       ]);
 
-      // 3. Processamento VOP
-      const vopMap: { [key: string]: any } = {};
-      vopRaw.forEach((r: any) => {
-        const cedente = simplificarNome(r["cedente"]);
-        if (!cedente) return;
-        if (isComercial && !allowedCedentes.includes(cedente)) return;
+      setDashVop(resVop.data || []);
+      setDashCarteira(resCarteira.data || []);
+      setDashReceitas(resExtrato.data || []);
 
-        const mes_ano = String(r["mes/ano"] || r["mês/ano"] || r["mes ano"] || "").trim();
-        const chave = `${cedente}_${mes_ano}`;
-        if (!vopMap[chave]) vopMap[chave] = { mes_ano, cedente, vop_sec: 0, vop_fidc: 0 };
-        vopMap[chave].vop_sec += parseValorReal(r["vop sec"]);
-        vopMap[chave].vop_fidc += parseValorReal(r["vop fidc"]);
-      });
-      const vopFinal = Object.values(vopMap);
-      setDashVop(vopFinal);
-
-      // 4. Processamento Carteira
-      const cartMap: { [key: string]: any } = {};
-      cartRaw.forEach((r: any) => {
-        const cedente = simplificarNome(r["cedente"]);
-        if (!cedente) return;
-        if (isComercial && !allowedCedentes.includes(cedente)) return;
-
-        if (!cartMap[cedente]) {
-          cartMap[cedente] = { cedente, risco_consolidated: 0, risco_sec: 0, risco_fidc: 0, vencidos_securitizadora: 0, vencidos_fidc: 0 };
-        }
-        cartMap[cedente].risco_consolidated += parseValorReal(r["risco total"] || r["risco consolidado"]);
-        cartMap[cedente].risco_sec += parseValorReal(r["risco sec"] || r["risco securitizadora"]);
-        cartMap[cedente].risco_fidc += parseValorReal(r["risco fidc"]);
-        cartMap[cedente].vencidos_securitizadora += parseValorReal(r["vencido sec"] || r["vencidos sec"]);
-        cartMap[cedente].vencidos_fidc += parseValorReal(r["vencido fidc"] || r["vencidos fidc"]);
-      });
-      const cartFinal = Object.values(cartMap);
-      setDashCarteira(cartFinal);
-
-      // 5. Processamento Receitas
-      const recMap: { [key: string]: any } = {};
-      receitasRaw.forEach((r: any) => {
-        const emp = String(r["empresa"] || "").trim().toUpperCase();
-        const rawCedente = String(r["cedente"] || "").trim();
-        const dataOp = String(r["data"] || r["mês/ano"] || r["mes/ano"] || "").trim();
-        if (!rawCedente || !dataOp) return;
-
-        const cedente = simplificarNome(rawCedente);
-        if (isComercial && !allowedCedentes.includes(cedente)) return;
-
-        const mes_ano = extrairMesAnoDeDataBR(dataOp);
-        const chave = `${emp}_${dataOp}_${cedente}`;
-
-        if (!recMap[chave]) {
-          recMap[chave] = { empresa: emp, data: dataOp, mes_ano, cedente, desagio: 0, tarifas: 0, juros: 0 };
-        }
-        
-        recMap[chave].desagio += parseValorReal(r["deságio"] || r["desagio"] || r["deságio retido"] || 0);
-        recMap[chave].tarifas += parseValorReal(r["tarifas"] || r["despesas"] || r["tarifas / despesas"] || 0);
-        recMap[chave].juros += parseValorReal(r["juros e multa"] || r["juros"] || r["encargos"] || 0); 
-      });
-      const recFinal = Object.values(recMap);
-      setDashReceitas(recFinal);
-
-      // 6. Configuração de Filtros
+      // 3. Configuração Dinâmica de Filtros
       const mesesUnicos = Array.from(new Set([
-        ...vopFinal.map(v => formatarMesAno(v.mes_ano)),
-        ...recFinal.map(r => formatarMesAno(r.mes_ano))
+        ...(resVop.data || []).map(v => formatarMesAno(v.mes_ano)),
+        ...(resExtrato.data || []).map(r => formatarMesAno(r.mes_ano))
       ].filter(str => str && /^(0[1-9]|1[0-2])\/\d{4}$/.test(str)))).sort((a, b) => {
         const [mA, yA] = a.split("/"); const [mB, yB] = b.split("/");
         return (parseInt(yB) * 100 + parseInt(mB)) - (parseInt(yA) * 100 + parseInt(mA));
       });
-      setListaMeses(mesesUnicos);
       
-      // 🎯 Fix: Inicia selecionando TODOS os meses para forçar a exibição instantânea de dados históricos
+      setListaMeses(mesesUnicos);
       if (mesesSel.length === 0 && mesesUnicos.length > 0) {
         setMesesSel(mesesUnicos);
       }
 
       const cedentesUnicos = Array.from(new Set([
-        ...vopFinal.map(v => v.cedente),
-        ...cartFinal.map(c => c.cedente),
-        ...recFinal.map(r => r.cedente)
+        ...(resVop.data || []).map(v => v.cedente),
+        ...(resCarteira.data || []).map(c => c.cedente),
+        ...(resExtrato.data || []).map(r => r.cedente)
       ].filter(Boolean))).sort();
+      
       setListaCedentes(cedentesUnicos);
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
 
     } catch (err) {
-      console.error("Erro no processamento geral:", err);
+      console.error("Erro no processamento V2:", err);
     } finally {
       setCarregando(false);
     }
@@ -250,21 +187,25 @@ export default function DashboardPage() {
 
   useEffect(() => { carregarDashboardFiel(); }, []);
 
-  const sincronizarGoogleSheets = async () => {
+  const sincronizarSupabase = async () => {
     setSincronizando(true);
     await carregarDashboardFiel();
     setSincronizando(false);
-    alert("🔄 Sincronizado! Dados lidos com sucesso.");
+    alert("🔄 Sincronizado! Lançamentos atualizados a partir do Supabase.");
   };
 
   const filtroAtivo = (emp: string, m_a: string, ced: string) => {
-    const bateEmpresa = empresasSel.includes(emp.toUpperCase()); // 🎯 Fix: Removido 'Pattern =' que corrompia a leitura
+    const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
     const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
-    const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced.toUpperCase());
+    const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced);
     return bateEmpresa && bateMes && bateCedente;
   };
 
   const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === listaMeses.length ? "Todos" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
+
+  // ==========================================================================
+  // ⚡ CÁLCULOS E MAPEAMENTOS DOS CARDS (Atualizados com novas colunas)
+  // ==========================================================================
 
   let aprovadosMes = 0; let recusadosMes = 0; let somaDias = 0; let qtdSla = 0;
   analises.forEach(a => {
@@ -294,25 +235,33 @@ export default function DashboardPage() {
 
   let vopVidaTodaSec = 0; let vopVidaTodaFidc = 0;
   dashVop.forEach(v => {
-    vopVidaTodaSec += parseValorReal(v.vop_sec);
-    vopVidaTodaFidc += parseValorReal(v.vop_fidc);
+    if (cedentesSel.includes(v.cedente)) {
+      vopVidaTodaSec += parseValorReal(v.vop_sec);
+      vopVidaTodaFidc += parseValorReal(v.vop_fidc);
+    }
   });
   const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
 
   let riscoSec = 0; let riscoFidc = 0; let vencidosSec = 0; let vencidosFidc = 0;
   dashCarteira.forEach(c => {
     if (cedentesSel.includes(c.cedente)) {
-      if (empresasSel.includes("SEC")) { riscoSec += c.risco_sec; vencidosSec += c.vencidos_securitizadora; }
-      if (empresasSel.includes("FIDC")) { riscoFidc += c.risco_fidc; vencidosFidc += c.vencidos_fidc; }
+      if (empresasSel.includes("SEC")) { 
+        riscoSec += parseValorReal(c.risco_sec); 
+        vencidosSec += parseValorReal(c.vencido_sec); 
+      }
+      if (empresasSel.includes("FIDC")) { 
+        riscoFidc += parseValorReal(c.risco_fidc); 
+        vencidosFidc += parseValorReal(c.vencido_fidc); 
+      }
     }
   });
 
   let totalDesagio = 0; let totalTarifas = 0; let totalJurosMultas = 0;
   dashReceitas.forEach(r => {
     if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
-      totalDesagio += r.desagio;
-      totalTarifas += r.tarifas;
-      totalJurosMultas += r.juros; 
+      totalDesagio += parseValorReal(r.desagio);
+      totalTarifas += parseValorReal(r.tarifas);
+      totalJurosMultas += parseValorReal(r.juros); 
     }
   });
   const receitaTotalAcumulada = totalDesagio + totalTarifas + totalJurosMultas;
@@ -332,7 +281,7 @@ export default function DashboardPage() {
 
   const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
-  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Conectando às planilhas integradas Ned Capital...</div>;
+  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Conectando ao Banco Central Ned Capital (Supabase)...</div>;
 
   return (
     <div className="space-y-8 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans text-slate-800">
@@ -535,15 +484,15 @@ export default function DashboardPage() {
           <span className="text-xl">📊</span>
           <div className="flex flex-col">
             <span className="text-xs font-bold text-slate-700">Painel Integrado Ned Capital</span>
-            <span className="text-[10px] font-bold text-slate-400">🔥 Filtros Cruzados Ativos — Conexão Direta e Pura via Google Sheets</span>
+            <span className="text-[10px] font-bold text-emerald-600">🔥 Filtros Cruzados Ativos — Conexão Direta e Pura via Supabase V2</span>
           </div>
         </div>
         <button 
-          onClick={sincronizarGoogleSheets} 
+          onClick={sincronizarSupabase} 
           disabled={sincronizando}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs shadow-sm disabled:opacity-50"
+          className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs shadow-sm disabled:opacity-50"
         >
-          {sincronizando ? "⏳ Puxando..." : "🔄 Forçar Re-Leitura dos Lançamentos"}
+          {sincronizando ? "⏳ Puxando..." : "🔄 Atualizar Dados da Tela"}
         </button>
       </div>
 
