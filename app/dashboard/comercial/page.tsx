@@ -47,14 +47,13 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA DIRETO DA TABELA crm_leads (Mapeando com strings reais do banco)
+  // 2. BUSCA AUTOMÁTICA DIRETO DA TABELA crm_leads
   const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
       const { data, error } = await supabase
         .from("crm_leads") 
         .select("*")
-        // 🔥 Ajustado para incluir as strings reais com underlines e minúsculas geradas pelo sistema
         .in("estagio", [
           "visita_agendada", "visita_realizada", "visita_efetuada", "finalizado", "ganhou", "perdido",
           "Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"
@@ -66,11 +65,9 @@ export default function ControleComercialVisitasPage() {
         const sdrsEncontrados = new Set<string>();
         
         const dadosMapeados: VisitaRow[] = data.map((item: any) => {
-          // Fallback seguro caso o nome amarrado não exista direto
           const sdrNome = item.responsavel_nome || item.responsavel_id || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
-          // Lógica inicial baseada na etapa do CRM
           let statusComiteInicial: any = "Em Análise";
           const estagioLower = item.estagio?.toLowerCase() || "";
 
@@ -80,7 +77,6 @@ export default function ControleComercialVisitasPage() {
             statusComiteInicial = "Aprovado";
           }
 
-          // Pegando dados dos campos customizados ou das colunas diretas
           const statusAgendamentoSalvo = item.campos_customizados?.status_comissao_agendamento || "Pendente";
           const statusComiteSalvo = item.campos_customizados?.status_comissao_comite || statusComiteInicial;
 
@@ -116,9 +112,10 @@ export default function ControleComercialVisitasPage() {
 
   useEffect(() => {
     buscarCardsComercial();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 3. PERSISTÊNCIA REVERSA: Salva os status dentro do objeto jsonb (campos_customizados) do crm_leads
+  // 3. PERSISTÊNCIA REVERSA
   const mudarStatusAgendamento = async (id: string, novoStatus: "Pendente" | "Pago") => {
     try {
       const { data: currentLead } = await supabase.from("crm_leads").select("campos_customizados").eq("id", id).single();
@@ -152,7 +149,6 @@ export default function ControleComercialVisitasPage() {
 
       const updatePayload: any = { campos_customizados: novosCampos };
       
-      // Se aprovou a comissão, atualiza automaticamente o estágio do lead mantendo consistência do padrão do banco
       if (novoStatus === "Aprovado") {
         updatePayload.estagio = "convertida_aprovada";
       }
@@ -257,10 +253,10 @@ export default function ControleComercialVisitasPage() {
       {carregando && <div className="p-8 font-bold text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-xl">⏳ Carregando dados da API do Supabase...</div>}
 
       {visitas.length === 0 && !carregando ? (
-        <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2">
-          <div className="text-2xl">🗂️</div>
-          <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial encontrado</h3>
-          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads foram movidos para "Visita Agendada" no painel principal.</p>
+        <div className="p-12 border border-dashed border-slate-300 bg-white rounded-xl text-center space-y-2 shadow-xs">
+          <div className="text-3xl opacity-80">🗂️</div>
+          <h3 className="font-bold text-slate-700 text-xs">Nenhum card comercial / visita encontrado</h3>
+          <p className="text-slate-400 max-w-sm mx-auto text-[11px]">Verifique se os leads foram movidos para "Visita Agendada" ou estágios posteriores no painel principal do NedHub.</p>
         </div>
       ) : (
         <>
@@ -338,72 +334,78 @@ export default function ControleComercialVisitasPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-[11px]">
-                {visitasFiltradas.map((v) => {
-                  const cfg = configsSDR[v.responsavelSDR] || { valorAgendamento: 50, valorComite: 80 };
-                  const estaEnviando = enviandoLeadId === v.id;
-                  const jaFoiEnviado = v.statusComissaoComite === "Enviado p/ Análise";
+                {visitasFiltradas.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum lead corresponde aos filtros selecionados.</td>
+                  </tr>
+                ) : (
+                  visitasFiltradas.map((v) => {
+                    const cfg = configsSDR[v.responsavelSDR] || { valorAgendamento: 50, valorComite: 80 };
+                    const estaEnviando = enviandoLeadId === v.id;
+                    const jaFoiEnviado = v.statusComissaoComite === "Enviado p/ Análise";
 
-                  return (
-                    <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-3">
-                        <div className="font-bold text-slate-900 truncate max-w-[240px] uppercase">{v.nome}</div>
-                        <span className="text-[10px] text-slate-400 font-normal truncate block font-mono">{v.email || v.telefone || "Sem contatos"}</span>
-                      </td>
-                      <td className="p-3 text-slate-500 font-bold uppercase truncate max-w-[150px]">{v.responsavelSDR}</td>
-                      <td className="p-3 text-center">
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800">
-                          {v.etapa.replace("_", " ")}
-                        </span>
-                      </td>
-                      
-                      {/* GATILHO 1 */}
-                      <td className="p-3 bg-blue-50/10 text-center space-y-1">
-                        <div className="font-black text-blue-900 font-mono">{formatarMoeda(cfg.valorAgendamento)}</div>
-                        <select value={v.statusComissaoAgendamento} onChange={(e) => mudarStatusAgendamento(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none ${
-                          v.statusComissaoAgendamento === "Pago" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-blue-100 text-blue-700 border-blue-200"
-                        }`}>
-                          <option value="Pendente">⏳ Pendente</option>
-                          <option value="Pago">✅ Pago</option>
-                        </select>
-                      </td>
+                    return (
+                      <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 truncate max-w-[240px] uppercase">{v.nome}</div>
+                          <span className="text-[10px] text-slate-400 font-normal truncate block font-mono">{v.email || v.telefone || "Sem contatos"}</span>
+                        </td>
+                        <td className="p-3 text-slate-500 font-bold uppercase truncate max-w-[150px]">{v.responsavelSDR}</td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800">
+                            {v.etapa.replace("_", " ")}
+                          </span>
+                        </td>
+                        
+                        {/* GATILHO 1 */}
+                        <td className="p-3 bg-blue-50/10 text-center space-y-1">
+                          <div className="font-black text-blue-900 font-mono">{formatarMoeda(cfg.valorAgendamento)}</div>
+                          <select value={v.statusComissaoAgendamento} onChange={(e) => mudarStatusAgendamento(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none cursor-pointer ${
+                            v.statusComissaoAgendamento === "Pago" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-blue-100 text-blue-700 border-blue-200"
+                          }`}>
+                            <option value="Pendente">⏳ Pendente</option>
+                            <option value="Pago">✅ Pago</option>
+                          </select>
+                        </td>
 
-                      {/* GATILHO 2 */}
-                      <td className="p-3 bg-slate-50/50 text-center space-y-1">
-                        <div className="font-black text-slate-700 font-mono">
-                          {v.statusComissaoComite === "Reprovado" ? formatarMoeda(0) : formatarMoeda(cfg.valorComite)}
-                        </div>
-                        <select value={v.statusComissaoComite} onChange={(e) => mudarStatusComite(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none ${
-                          v.statusComissaoComite === "Pago" || v.statusComissaoComite === "Aprovado" 
-                            ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
-                            : v.statusComissaoComite === "Reprovado" 
-                            ? "bg-rose-100 text-rose-700 border-rose-200" 
-                            : "bg-amber-100 text-amber-700 border-amber-200"
-                        }`}>
-                          <option value="Em Análise">⏳ Em Análise</option>
-                          <option value="Aprovado">🟢 Aprovado (Comitê)</option>
-                          <option value="Reprovado">🔴 Reprovado (Perda)</option>
-                          <option value="Enviado p/ Análise">🚀 Enviado p/ Análise</option>
-                          <option value="Pago">🏁 Confirmado Pago</option>
-                        </select>
-                      </td>
+                        {/* GATILHO 2 */}
+                        <td className="p-3 bg-slate-50/50 text-center space-y-1">
+                          <div className="font-black text-slate-700 font-mono">
+                            {v.statusComissaoComite === "Reprovado" ? formatarMoeda(0) : formatarMoeda(cfg.valorComite)}
+                          </div>
+                          <select value={v.statusComissaoComite} onChange={(e) => mudarStatusComite(v.id, e.target.value as any)} className={`p-0.5 border rounded text-[10px] font-black outline-none cursor-pointer ${
+                            v.statusComissaoComite === "Pago" || v.statusComissaoComite === "Aprovado" 
+                              ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
+                              : v.statusComissaoComite === "Reprovado" 
+                              ? "bg-rose-100 text-rose-700 border-rose-200" 
+                              : "bg-amber-100 text-amber-700 border-amber-200"
+                          }`}>
+                            <option value="Em Análise">⏳ Em Análise</option>
+                            <option value="Aprovado">🟢 Aprovado (Comitê)</option>
+                            <option value="Reprovado">🔴 Reprovado (Perda)</option>
+                            <option value="Enviado p/ Análise">🚀 Enviado p/ Análise</option>
+                            <option value="Pago">🏁 Confirmado Pago</option>
+                          </select>
+                        </td>
 
-                      {/* AÇÕES */}
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() => moverLeadParaEsteiraAnalise(v)}
-                          disabled={estaEnviando || jaFoiEnviado}
-                          className={`px-3 py-1 font-black rounded-lg text-[10px] uppercase shadow-2xs transition-all cursor-pointer ${
-                            jaFoiEnviado
-                              ? "bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-not-allowed"
-                              : "bg-slate-900 hover:bg-slate-800 text-white"
-                          }`}
-                        >
-                          {estaEnviando ? "⏳ Gravando..." : jaFoiEnviado ? "🚀 Na Esteira" : "🔍 Enviar p/ Análise"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        {/* AÇÕES */}
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => moverLeadParaEsteiraAnalise(v)}
+                            disabled={estaEnviando || jaFoiEnviado}
+                            className={`px-3 py-1 font-black rounded-lg text-[10px] uppercase shadow-2xs transition-all cursor-pointer ${
+                              jaFoiEnviado
+                                ? "bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-not-allowed"
+                                : "bg-slate-900 hover:bg-slate-800 text-white"
+                            }`}
+                          >
+                            {estaEnviando ? "⏳ Gravando..." : jaFoiEnviado ? "🚀 Na Esteira" : "🔍 Enviar p/ Análise"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

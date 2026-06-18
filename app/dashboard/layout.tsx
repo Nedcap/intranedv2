@@ -15,9 +15,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // 📂 Estado para controlar quais categorias do submenu estão abertas/expandidas
   const [submenusAbertos, setSubmenusAbertos] = useState<Record<string, boolean>>({
-    "Operações": true,
+    "Geral": true,
+    "Comercial": false,
     "Crédito": false,
-    "Administração": false,
+    "Financeiro": false,
+    "Cadastro": false,
+    "Configurações": false,
   });
 
   useEffect(() => {
@@ -67,9 +70,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // 📦 Agrupa os links permitidos por categoria para montar os submenus
   const rotasAgrupadas = {
-    "Operações": linksPermitidos.filter(l => l.categoria === "Operações"),
+    "Geral": linksPermitidos.filter(l => l.categoria === "Geral"),
+    "Comercial": linksPermitidos.filter(l => l.categoria === "Comercial"),
     "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
-    "Administração": linksPermitidos.filter(l => l.categoria === "Administração"),
+    "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
+    "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
+    "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
   };
 
   // Alternador de sanfona (abre uma e mantém as outras como o usuário decidir)
@@ -139,6 +145,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               const estaAberto = submenusAbertos[categoria];
               const contemLinkAtivo = links.some(l => l.path === pathname);
 
+              // 🎯 Renderiza os ícones principais baseados na nova estrutura de categorias
+              const getIconeCategoria = (cat: string) => {
+                switch(cat) {
+                  case "Geral": return "🏠";
+                  case "Comercial": return "🎯";
+                  case "Crédito": return "⚖️";
+                  case "Financeiro": return "💰";
+                  case "Cadastro": return "📝";
+                  case "Configurações": return "⚙️";
+                  default: return "📦";
+                }
+              };
+
               return (
                 <div key={categoria} className="space-y-1">
                   {/* Botão de Disparo do Menu Pai */}
@@ -151,7 +170,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span>{categoria === "Operações" ? "📦" : categoria === "Crédito" ? "⚖️" : "⚙️"}</span>
+                      <span>{getIconeCategoria(categoria)}</span>
                       <span>{categoria}</span>
                     </div>
                     <span className="text-[10px] font-mono opacity-60">
