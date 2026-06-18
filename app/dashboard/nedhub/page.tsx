@@ -31,7 +31,6 @@ interface Lead {
   responsavel_id?: string;
 }
 
-// 📌 Tipagem para o Supabase
 interface GerenteComercial {
   id: number;
   nome: string;
@@ -94,13 +93,14 @@ export default function NedHubPage() {
   const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
 
-  // 📌 Estados para Geração em Lote da Agenda do Comercial
+  // Estados para Geração em Lote da Agenda do Comercial
   const [dataLote, setDataLote] = useState("");
   const [horaInicioLote, setHoraInicioLote] = useState("08:00");
   const [horaFimLote, setHoraFimLote] = useState("17:00");
-  const [intervaloLote, setIntervaloLote] = useState("90"); // Padrão de 1h30
+  const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
+  const [intervaloLote, setIntervaloLote] = useState("90");
 
-  // 📌 Estados do Agendamento Profissional SDR
+  // Estados do Agendamento Profissional SDR
   const [filtroDataSdr, setFiltroDataSdr] = useState("");
   const [slotsSelecionadosParaAgendar, setSlotsSelecionadosParaAgendar] = useState<string[]>([]);
 
@@ -305,7 +305,6 @@ export default function NedHubPage() {
     }
   };
 
-  // 📌 GERAÇÃO DE MÚLTIPLOS HORÁRIOS PELO COMERCIAL
   const handleGerarLote = () => {
     if (!dataLote || !horaInicioLote || !horaFimLote || !intervaloLote || !gerenteSelecionadoAgenda) {
       return alert("Preencha todos os campos do gerador.");
@@ -327,7 +326,6 @@ export default function NedHubPage() {
     }
 
     const existentes = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
-    // Unir sem duplicatas e ordenar
     const combinados = Array.from(new Set([...existentes, ...novosSlots])).sort();
 
     salvarSlotsNoLocal({
@@ -338,7 +336,6 @@ export default function NedHubPage() {
     alert(`✅ ${novosSlots.length} horários foram gerados com sucesso para ${dataLote.split('-').reverse().join('/')}!`);
   };
 
-  // 📌 AGENDAMENTO MÚLTIPLO PELO SDR
   const agendarHorariosSelecionados = async () => {
     if (!modalCalendarioPopup.lead || slotsSelecionadosParaAgendar.length === 0) return;
     
