@@ -362,7 +362,8 @@ export default function FinanceiroCalendarioPage() {
                       )}
                     </div>
 
-                    <div className="mt-1 flex flex-col gap-1 overflow-y-auto max-h-[80px] custom-scrollbar pr-1">
+                    {/* 🔥 SCROLL INVISÍVEL ADICIONADO AQUI: className "no-scrollbar" */}
+                    <div className="mt-1 flex flex-col gap-1 overflow-y-auto max-h-[80px] no-scrollbar">
                       {pagsNoDia.map(p => (
                         <div key={p.id} className={`text-[9px] font-bold px-1.5 py-1 rounded truncate border ${
                           p.status === "PAGO" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
@@ -419,7 +420,7 @@ export default function FinanceiroCalendarioPage() {
             </div>
 
             {/* Grid Tabelão */}
-            <div className="flex-1 overflow-auto bg-slate-100/50 p-4">
+            <div className="flex-1 overflow-auto bg-slate-100/50 p-4 custom-scrollbar">
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                 <table className="w-full text-left border-collapse min-w-[1100px]">
                   <thead>
@@ -542,11 +543,17 @@ export default function FinanceiroCalendarioPage() {
         </div>
       )}
 
+      {/* 🔮 CSS GLOBAL INJETADO PARA BARRAS DE ROLAGEM */}
       <style dangerouslySetContent={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        /* Barra Customizada para o Modal Grande */
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* 🔥 SCROLL INVISÍVEL PARA OS DIAS DO CALENDÁRIO */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}} />
     </div>
   );
