@@ -31,7 +31,7 @@ interface Lead {
   responsavel_id?: string;
 }
 
-// 📌 Nova tipagem para o Supabase
+// 📌 Tipagem para o Supabase
 interface GerenteComercial {
   id: number;
   nome: string;
@@ -94,7 +94,6 @@ export default function NedHubPage() {
     const localSlots = localStorage.getItem("nedhub_slots_comercial");
     if (localSlots) setHorariosDisponiveisGerentes(JSON.parse(localSlots));
     
-    // Configura o filtro de data padrão para hoje
     const hojeStr = new Date().toISOString().split("T")[0];
     setFiltroDataSdr(hojeStr);
   }, []);
@@ -142,17 +141,15 @@ export default function NedHubPage() {
     try {
       const { data: dbLeads, error } = await supabase.from("crm_leads").select("*").order("criado_em", { ascending: false });
       const { data: dbTemplates } = await supabase.from("crm_email_templates").select("*");
-      
-      // 📌 Busca os Gerentes Comerciais do banco de dados
       const { data: dbGerentes } = await supabase.from("gerentes_comerciais").select("*").order("nome");
       
       if (error) throw error;
       if (dbTemplates) setTemplates(dbTemplates);
+      
       if (dbGerentes) {
         setGerentesComerciais(dbGerentes);
-        if (dbGerentes.length > 0 && !gerenteSelecionadoAgenda) {
-          setGerenteSelecionadoAgenda(dbGerentes[0].id.toString());
-        }
+        // Proteção contra re-render resets
+        setGerenteSelecionadoAgenda(prev => prev ? prev : (dbGerentes.length > 0 ? dbGerentes[0].id.toString() : ""));
       }
       
       if (dbLeads) {
@@ -183,7 +180,6 @@ export default function NedHubPage() {
       await sincronizarBaseNedHub();
     };
     inicializar();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
@@ -406,7 +402,6 @@ export default function NedHubPage() {
     );
   }
 
-  // Lógica para filtrar slots dinâmicos do SDR
   const slotsGerenteFiltradosPorData = useMemo(() => {
     if (!gerenteSelecionadoAgenda) return [];
     const todosOsSlots = horariosDisponiveisGerentes[gerenteSelecionadoAgenda] || [];
