@@ -211,7 +211,8 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").update({ status: decisaoFinal }).eq("id", empresaItem.id);
       if (error) throw error;
 
-      const emailsAlvo = await obtener_emails_notificacao(e);
+      // CORRIGIDO: Removido o 'n' de obtener
+      const emailsAlvo = await obter_emails_notificacao(e);
       const corner = decisaoFinal === "Aprovado" ? "#059669" : "#ef4444";
       
       const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
@@ -234,7 +235,6 @@ export default function ComitePage() {
   };
 
   const processarVotoWeb = async (empresaItem: any) => {
-    // 🎯 TRAVA REAL DE ESCOPO COMERCIAL / OPERACIONAL: Se o usuário logado não for Master e não for Diretor, aborta imediatamente
     if (!isMaster && !isDiretor) {
       alert("🚫 ACESSO NEGADO: Apenas usuários com perfil ou cargo de 'Diretor' ou 'Master' podem assinar pareceres e registrar votos no comitê de crédito.");
       return;
@@ -248,7 +248,6 @@ export default function ComitePage() {
       setEnviandoVoto(true);
       const e = empresaItem.empresa_nome;
       
-      // Define a assinatura do voto baseado no login ou checkbox Master
       const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
 
       await supabase.from("votos").insert({ 
@@ -263,7 +262,8 @@ export default function ComitePage() {
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
-        const emailsAlvo = await obtener_emails_notificacao(e);
+        // CORRIGIDO: Removido o 'n' de obtener
+        const emailsAlvo = await obter_emails_notificacao(e);
         const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
         const corAta = opcaoVoto === "Aprovado" ? "#059669" : "#ef4444";
         const linesAta = (todosVotos || []).map(v => `<tr><td style='border:1px solid #ddd;padding:8px;'><b>${v.membro_nome}</b></td><td style='border:1px solid #ddd;padding:8px;'>${v.voto}</td><td style='border:1px solid #ddd;padding:8px;'>${v.justificativa}</td></tr>`).join("");
