@@ -27,6 +27,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 💰 FINANCEIRO
   { nome: "Painel de Indicadores (BI)", path: "/dashboard/powerbi", icone: "📊", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Financeiro", defaultMaster: true },
+  { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true }, // <-- Adicionado aqui!
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Financeiro", defaultMaster: true },
 
   // 📝 CADASTRO
