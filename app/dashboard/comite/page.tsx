@@ -211,7 +211,6 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").update({ status: decisaoFinal }).eq("id", empresaItem.id);
       if (error) throw error;
 
-      // CORRIGIDO: Removido o 'n' de obtener
       const emailsAlvo = await obter_emails_notificacao(e);
       const corner = decisaoFinal === "Aprovado" ? "#059669" : "#ef4444";
       
@@ -262,7 +261,6 @@ export default function ComitePage() {
         const { error } = await supabase.from("analises").update({ status: opcaoVoto }).eq("id", empresaItem.id);
         if (error) throw error;
         
-        // CORRIGIDO: Removido o 'n' de obtener
         const emailsAlvo = await obter_emails_notificacao(e);
         const { data: todosVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
         const corAta = opcaoVoto === "Aprovado" ? "#059669" : "#ef4444";
@@ -407,7 +405,11 @@ export default function ComitePage() {
           <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
             <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
               {htmlPreview ? (
-                <iframe srcDoc={htmlPreview} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
+                <iframe 
+                  srcDoc={htmlPreview} 
+                  className="w-full h-full border-0 bg-white" 
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" 
+                />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-500 italic text-sm gap-2">
                   <span className="animate-spin text-xl">⏳</span>
