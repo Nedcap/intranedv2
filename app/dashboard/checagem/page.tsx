@@ -104,7 +104,7 @@ const calcularDiasSLA = (d1: string | null, d2: string | null) => {
 const fM = (val: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
 const fMShort = (val: number) => {
   if (val >= 1000000) return `R$ ${(val / 1000000).toFixed(1)}M`;
-  if (val >= 1000) return `R$ ${(val / 1000).toFixed(1)}k`;
+  if (val >= 1000) return `R$ ${(val / 1000).toFixed(0)}k`;
   return `R$ ${val.toFixed(0)}`;
 };
 const fData = (iso: string | null) => {
@@ -268,7 +268,7 @@ export default function ChecagemPage() {
   };
 
   // ==========================================================================
-  // 🧮 CÁLCULOS DOS KPIS, GRÁFICO E AGREGAÇÃO
+  // 🧮 CÁLCULOS DOS KPIS E AGREGAÇÃO
   // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
@@ -289,35 +289,48 @@ export default function ChecagemPage() {
     };
   }, [titulos]);
 
-  // 📊 DADOS DO GRÁFICO DE EVOLUÇÃO DIÁRIA (APENAS DO MÊS DE REFERÊNCIA)
+  // 📈 GRÁFICO DE EVOLUÇÃO DIÁRIA (AGORA COM SCALES E TENDÊNCIAS)
   const chartEvolucao = useMemo(() => {
     const [anoRef, mesRef] = dataReferencia.split("-");
     const prefixoMes = `${anoRef}-${mesRef}`;
     
-    // Filtra só os que estão confirmados E foram confirmados (Dta Exp) neste mês
     const confirmadosNoMes = titulos.filter(t => t.status_confirmacao === "Confirmado" && t.atualizacao?.startsWith(prefixoMes));
     
-    const mapaDias: Record<string, number> = {};
+    const arrayDias: { dia: string; valor: number; evolucao: "UP" | "DOWN" | "NEUTRAL" }[] = [];
     const totalDiasMes = new Date(Number(anoRef), Number(mesRef), 0).getDate();
     
-    // Inicializa todos os dias do mês com 0
     for (let i = 1; i <= totalDiasMes; i++) {
-      mapaDias[String(i).padStart(2, "0")] = 0;
+      arrayDias.push({ dia: String(i).padStart(2, "0"), valor: 0, evolucao: "NEUTRAL" });
     }
 
-    // Soma os valores
     confirmadosNoMes.forEach(t => {
-      const dia = t.atualizacao!.split("-")[2]; // Pega o dia (YYYY-MM-DD)
-      if (mapaDias[dia] !== undefined) {
-        mapaDias[dia] += Number(t.valor_aberto) || 0;
+      const dia = t.atualizacao!.split("-")[2];
+      const idx = arrayDias.findIndex(d => d.dia === dia);
+      if (idx !== -1) {
+        arrayDias[idx].valor += Number(t.valor_aberto) || 0;
       }
     });
 
-    const maxValor = Math.max(...Object.values(mapaDias), 1); // Evita divisão por zero
-    return { dados: mapaDias, maxValor };
+    // Calcula a tendência em relação ao dia anterior com dados
+    let lastValor = 0;
+    for (let i = 0; i < arrayDias.length; i++) {
+      if (arrayDias[i].valor > 0) {
+        if (lastValor > 0) {
+          arrayDias[i].evolucao = arrayDias[i].valor > lastValor ? "UP" : "DOWN";
+        }
+        lastValor = arrayDias[i].valor;
+      }
+    }
+
+    const maxValor = Math.max(...arrayDias.map(d => d.valor), 1); 
+    
+    // Calcula Escala Y para exibir 4 linhas guias
+    const gridY = [maxValor, maxValor * 0.75, maxValor * 0.50, maxValor * 0.25, 0];
+
+    return { dados: arrayDias, maxValor, gridY };
   }, [titulos, dataReferencia]);
 
-  // 📄 TABELA ORDENÁVEL
+  // 📄 TABELA ORDENÁVEL E AGREGAÇÃO DE CEDENTES
   const cedentesAgregados = useMemo(() => {
     const mapa: Record<string, AgregacaoCedente> = {};
 
@@ -338,7 +351,6 @@ export default function ChecagemPage() {
 
     const array = Object.values(mapa);
     
-    // Algoritmo de Ordenação
     array.sort((a: any, b: any) => {
       if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === "asc" ? -1 : 1;
       if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === "asc" ? 1 : -1;
@@ -451,31 +463,84 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO DE BARRAS: EVOLUÇÃO DIÁRIA DO MÊS */}
+      {/* 📈 GRÁFICO DE BARRAS TURBINADO: EVOLUÇÃO DIÁRIA (VALORIZAÇÃO/ESCALA) */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col">
         <div className="mb-4 border-b border-slate-100 pb-2">
-          <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução de Confirmações (Volume R$)</h3>
-          <span className="text-[10px] font-bold text-slate-400">Total liquidado ou confirmado no mês de referência.</span>
+          <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
+          <span className="text-[10px] font-bold text-slate-400">Desempenho da equipe (Valores totais confirmados no dia - Referência: {fData(dataReferencia).split("/").slice(1).join("/")})</span>
         </div>
         
-        <div className="flex items-end gap-1 h-32 w-full mt-2">
-          {Object.entries(chartEvolucao.dados).map(([dia, valor]) => {
-            const altura = valor > 0 ? Math.max((valor / chartEvolucao.maxValor) * 100, 5) : 0; // Min 5% pra mostrar algo se > 0
-            return (
-              <div key={dia} className="flex-1 flex flex-col items-center gap-1 group relative">
-                {/* Tooltip Hover */}
-                <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                  Dia {dia}: {fM(valor)}
+        {/* GRÁFICO AREA */}
+        <div className="flex h-44 w-full mt-2 relative">
+          
+          {/* Escala Y (Valores na Esquerda) */}
+          <div className="w-14 flex flex-col justify-between items-end pr-2 text-[9px] font-mono font-bold text-slate-400 border-r border-slate-100 pb-5">
+            {chartEvolucao.gridY.map((gy, i) => (
+              <span key={i} className="leading-none">{fMShort(gy)}</span>
+            ))}
+          </div>
+
+          {/* Grid de Fundo */}
+          <div className="absolute inset-0 left-14 flex flex-col justify-between pointer-events-none pb-5">
+            {chartEvolucao.gridY.map((_, i) => (
+              <div key={i} className="w-full border-t border-slate-100 border-dashed h-0"></div>
+            ))}
+          </div>
+
+          {/* Barras e Eixo X */}
+          <div className="flex-1 flex items-end gap-1.5 pl-2 relative">
+            {chartEvolucao.dados.map((item, idx) => {
+              const altura = item.valor > 0 ? Math.max((item.valor / chartEvolucao.maxValor) * 100, 2) : 0; 
+              
+              let corBarra = "bg-slate-200";
+              let corFundo = "bg-slate-50";
+              let iconeTendencia = "";
+
+              if (item.valor > 0) {
+                if (item.evolucao === "UP") {
+                  corBarra = "bg-emerald-500 hover:bg-emerald-400";
+                  corFundo = "bg-emerald-50";
+                  iconeTendencia = "text-emerald-500";
+                } else if (item.evolucao === "DOWN") {
+                  corBarra = "bg-rose-500 hover:bg-rose-400";
+                  corFundo = "bg-rose-50";
+                  iconeTendencia = "text-rose-500";
+                } else {
+                  corBarra = "bg-blue-500 hover:bg-blue-400";
+                  corFundo = "bg-blue-50";
+                  iconeTendencia = "text-blue-500";
+                }
+              }
+
+              return (
+                <div key={idx} className="flex-1 flex flex-col items-center h-full relative group">
+                  {/* Tooltip Hover */}
+                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-20 pointer-events-none">
+                    Dia {item.dia}: {fM(item.valor)}
+                  </div>
+                  
+                  {/* Container da Barra para preencher altura total */}
+                  <div className={`w-full h-full flex flex-col justify-end ${corFundo} rounded-t-sm relative pb-5`}>
+                    
+                    {/* Seta de Tendência e Valor (Sobe e Desce conforme altura) */}
+                    {item.valor > 0 && (
+                      <div className="absolute w-full flex flex-col items-center justify-end z-10 transition-all duration-500" style={{ bottom: `calc(${altura}% + 20px)` }}>
+                        <span className={`text-[8px] font-black leading-none ${iconeTendencia}`}>
+                          {item.evolucao === "UP" ? "▲" : item.evolucao === "DOWN" ? "▼" : "—"}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* A Barra Colorida */}
+                    <div className={`w-full rounded-t-sm transition-all duration-500 ${corBarra}`} style={{ height: `${altura}%` }}></div>
+                  </div>
+
+                  {/* Label Dia Eixo X (Absoluto no fundo para ficar alinhado) */}
+                  <span className="text-[9px] font-black text-slate-400 absolute bottom-0 h-5 flex items-center justify-center">{item.dia}</span>
                 </div>
-                {/* Barra */}
-                <div className="w-full bg-emerald-100 rounded-t-sm flex items-end justify-center overflow-hidden transition-all h-full relative">
-                  <div className="w-full bg-emerald-500 rounded-t-sm transition-all duration-500 hover:bg-emerald-400" style={{ height: `${altura}%` }}></div>
-                </div>
-                {/* Label Dia */}
-                <span className="text-[9px] font-black text-slate-400">{dia}</span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -559,11 +624,11 @@ export default function ChecagemPage() {
                                     let slaClass = "text-slate-400";
                                     
                                     if (tit.status_confirmacao === "Confirmado") {
-                                      slaText = diasSla !== null ? `✅ Conf. em ${diasSla} dias` : "-";
-                                      slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-2";
+                                      slaText = diasSla !== null ? `✅ Conf. em ${diasSla} d` : "-";
+                                      slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5";
                                     } else {
-                                      slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto} dias` : "-";
-                                      slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-2" : "text-amber-700 font-bold bg-amber-50 rounded px-2";
+                                      slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto} d` : "-";
+                                      slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5";
                                     }
 
                                     return (
@@ -578,7 +643,7 @@ export default function ChecagemPage() {
                                             {tit.status_confirmacao}
                                           </span>
                                         </td>
-                                        <td className="p-2.5 text-center text-[10px]">
+                                        <td className="p-2.5 text-center text-[9px] whitespace-nowrap">
                                           <span className={slaClass}>{slaText}</span>
                                         </td>
                                         <td className="p-2.5 max-w-[200px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
