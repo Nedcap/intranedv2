@@ -23,8 +23,7 @@ interface AgregacaoCedente {
   total_aberto: number;
   confirmado: number;
   a_confirmar: number;
-  alto_risco: number;
-  baixado: number;
+  risco: number;
   outros: number;
   titulos: TituloChecagem[];
 }
@@ -60,13 +59,14 @@ const parseValorReal = (valor: any): number => {
   return isNaN(num) ? 0.0 : (isNeg ? -num : num);
 };
 
-const formatarDataExcel = (valorData: any): string => {
-  if (!valorData) return "-";
+const formatarDataExcel = (valorData: any): string | null => {
+  if (!valorData || valorData === "-") return null;
   if (typeof valorData === "number" && valorData > 30000 && valorData < 60000) {
     const data = new Date(Math.round((valorData - 25569) * 86400 * 1000));
     return data.toISOString().split("T")[0];
   }
   const txt = String(valorData).trim();
+  if (!txt) return null;
   if (txt.includes("/")) {
     const partes = txt.split("/");
     if (partes.length === 3) {
@@ -75,22 +75,28 @@ const formatarDataExcel = (valorData: any): string => {
       return `${y}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
     }
   }
-  return txt.split(" ")[0]; // Retorna YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(txt)) return txt.split(" ")[0];
+  return null; // Se não for data válida, manda nulo para não quebrar o banco
 };
 
-// Radar inteligente para padronizar os status malucos do sistema original
-const classificarStatus = (statusCru: string) => {
-  const s = String(statusCru).toUpperCase();
-  if (s.includes("CONFIRMADO")) return "Confirmado";
+// 🎯 Radar inteligente para extrair o Status de dentro do texto sujo das "Ocorrências"
+const classificarStatus = (ocorrenciaStr: string) => {
+  const s = String(ocorrenciaStr).toUpperCase();
+  // Ordem de leitura importa muito aqui!
+  if (s.includes("NÃO CONFIRMA") || s.includes("NAO CONFIRMA")) return "Não Confirma";
   if (s.includes("A CONFIRMAR")) return "A Confirmar";
-  if (s.includes("ALTO RISCO") || s.includes("FALSO") || s.includes("PROBLEMA")) return "Alto Risco";
+  if (s.includes("CONFIRMADO")) return "Confirmado";
+  if (s.includes("ALTO RISCO") || s.includes("FALSO")) return "Alto Risco";
+  if (s.includes("POLÍTICA") || s.includes("POLITICA")) return "Política";
+  if (s.includes("PROBLEMA")) return "Problema";
   if (s.includes("BAIXADO") || s.includes("LIQUIDADO") || s.includes("PAGO")) return "Baixado";
-  return "Outros / Sem Status";
+  
+  return "A Confirmar"; // Se não tem Rótulo nenhum, está A Confirmar
 };
 
 const fM = (val: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
-const fData = (iso: string) => {
-  if (!iso || iso === "-") return "-";
+const fData = (iso: string | null) => {
+  if (!iso) return "-";
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 };
@@ -118,7 +124,10 @@ export default function ChecagemPage() {
       }
 
       const { data, error } = await query;
-      if (error) throw error;
+      if (error) {
+        console.error("Erro no DB:", error);
+        throw error;
+      }
       setTitulos(data || []);
     } catch (err) {
       console.error(err);
@@ -145,16 +154,32 @@ export default function ChecagemPage() {
       reader.onload = async (e) => {
         let rawData: any[][] = [];
         
-        // Trata CSV (Padrão do QPROF) ou XLSX
         if (file.name.toLowerCase().endsWith(".csv")) {
           const text = e.target?.result as string;
-          const lines = text.split(/\r?\n/).filter(line => line.trim());
           let separador = ";";
-          if (!lines[0].includes(";") && lines[0].includes(",")) separador = ",";
-          rawData = lines.map(line => line.split(separador).map(cell => { 
-            let c = cell.trim(); 
-            return (c.startsWith('"') && c.endsWith('"')) ? c.slice(1, -1) : c; 
-          }));
+          // Validação rápida de separador
+          if (text.split("\n")[0].split(";").length < 5) separador = ",";
+          
+          const lines = text.split(/\r?\n/).filter(line => line.trim());
+          
+          // Parser de CSV manual para não quebrar com vírgulas ou aspas
+          rawData = lines.map(line => {
+            let inQuotes = false;
+            let current = "";
+            const row = [];
+            for (let i = 0; i < line.length; i++) {
+              if (line[i] === '"') {
+                inQuotes = !inQuotes;
+              } else if (line[i] === separador && !inQuotes) {
+                row.push(current.trim());
+                current = "";
+              } else {
+                current += line[i];
+              }
+            }
+            row.push(current.trim());
+            return row;
+          });
         } else {
           const data = e.target?.result;
           const workbook = XLSX.read(data, { type: "array" });
@@ -165,16 +190,18 @@ export default function ChecagemPage() {
         const loteUpload: any[] = [];
         
         if (tipoEmpresa === "SEC") {
-          const headerIdx = rawData.findIndex(row => row.some(cell => strClean(cell).includes("CEDENTE")));
+          const headerIdx = rawData.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE" || strClean(cell) === "NOMEDOCEDENTE"));
+          
           if (headerIdx !== -1) {
             const header = rawData[headerIdx].map(strClean);
-            const idxCed = header.findIndex(c => c.includes("CEDENTE"));
-            const idxSac = header.findIndex(c => c.includes("SACADO"));
-            const idxDoc = header.findIndex(c => c.includes("SEUNUMERO") || c.includes("DOCUMENTO"));
-            const idxVenc = header.findIndex(c => c.includes("VENCORIG") || c.includes("DTAVCTO"));
-            const idxAberto = header.findIndex(c => c.includes("VLRABERTO"));
-            const idxStatus = header.findIndex(c => c === "STATUS" || c === "ROTULO" || c === "SITUACAO");
-            const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS"));
+            
+            // Procura as colunas exatas ignorando as pegadinhas
+            const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL");
+            const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO");
+            const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO"));
+            const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
+            const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO"));
+            const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
 
             for (let i = headerIdx + 1; i < rawData.length; i++) {
               const row = rawData[i];
@@ -182,7 +209,9 @@ export default function ChecagemPage() {
               if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
 
               const vlrAberto = parseValorReal(row[idxAberto]);
-              if (vlrAberto <= 0) continue; // Só trazemos o que está aberto
+              if (vlrAberto <= 0) continue; 
+
+              const ocorrenciaTexto = idxOcorr !== -1 ? String(row[idxOcorr] || "").trim() : "";
 
               loteUpload.push({
                 data_referencia: dataReferencia,
@@ -192,40 +221,38 @@ export default function ChecagemPage() {
                 documento: idxDoc !== -1 ? String(row[idxDoc] || "").trim() : "-",
                 vencimento: formatarDataExcel(row[idxVenc]),
                 valor_aberto: vlrAberto,
-                status_confirmacao: classificarStatus(String(row[idxStatus] || "")),
-                ocorrencias: idxOcorr !== -1 ? String(row[idxOcorr] || "").trim() : ""
+                status_confirmacao: classificarStatus(ocorrenciaTexto), // O Segredo Mágico
+                ocorrencias: ocorrenciaTexto
               });
             }
           }
         } else {
-          // Lógica do FIDC futura (mantendo o esqueleto)
           alert("Mapeamento do FIDC em construção. Faça upload do SEC por enquanto.");
           setProcessandoUpload(false);
           return;
         }
 
         if (loteUpload.length > 0) {
-          // Deleta dados existentes desta empresa + data (para evitar duplicidade no re-upload)
           await supabase.from("checagem_titulos").delete().eq("data_referencia", dataReferencia).eq("empresa", tipoEmpresa);
           
-          // Insere em lotes de 500
           const chunkSize = 500;
           for (let i = 0; i < loteUpload.length; i += chunkSize) {
-            await supabase.from("checagem_titulos").insert(loteUpload.slice(i, i + chunkSize));
+            const { error } = await supabase.from("checagem_titulos").insert(loteUpload.slice(i, i + chunkSize));
+            if (error) throw error;
           }
           
-          alert(`✅ Importação concluída! ${loteUpload.length} títulos de ${tipoEmpresa} processados para a data ${fData(dataReferencia)}.`);
+          alert(`✅ Importação concluída! ${loteUpload.length} títulos da ${tipoEmpresa} processados na data ${fData(dataReferencia)}.`);
           carregarDados();
         } else {
-          alert("Nenhum título com saldo em aberto encontrado na planilha.");
+          alert("❌ Nenhum título com saldo em aberto foi encontrado. Verifique se o arquivo possui as colunas 'Cedente', 'Sacado', 'Vlr. Aberto' e 'Ocorrências'.");
         }
       };
       
-      if (file.name.toLowerCase().endsWith(".csv")) reader.readAsText(file, "latin1");
+      if (file.name.toLowerCase().endsWith(".csv")) reader.readAsText(file, "latin1"); // QPROF exporta em latin1
       else reader.readAsArrayBuffer(file);
       
     } catch (e: any) {
-      alert(`Erro no processamento: ${e.message}`);
+      alert(`❌ Erro crítico no processamento: ${e.message}`);
     } finally {
       setProcessandoUpload(false);
       event.target.value = "";
@@ -236,24 +263,24 @@ export default function ChecagemPage() {
   // 🧮 CÁLCULOS DOS KPIS E AGREGAÇÃO (VISÃO)
   // ==========================================================================
   const kpis = useMemo(() => {
-    let total = 0, confirmado = 0, aConfirmar = 0, altoRisco = 0, baixado = 0, outros = 0;
+    let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
 
     titulos.forEach(t => {
-      total += Number(t.valor_aberto);
-      if (t.status_confirmacao === "Confirmado") confirmado += Number(t.valor_aberto);
-      else if (t.status_confirmacao === "A Confirmar") aConfirmar += Number(t.valor_aberto);
-      else if (t.status_confirmacao === "Alto Risco") altoRisco += Number(t.valor_aberto);
-      else if (t.status_confirmacao === "Baixado") baixado += Number(t.valor_aberto);
-      else outros += Number(t.valor_aberto);
+      const v = Number(t.valor_aberto) || 0;
+      total += v;
+      if (t.status_confirmacao === "Confirmado") confirmado += v;
+      else if (t.status_confirmacao === "A Confirmar") aConfirmar += v;
+      else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) risco += v;
+      else outros += v; // Baixado, Política
     });
 
     const calcPerc = (val: number) => total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
 
     return { 
-      total, confirmado, aConfirmar, altoRisco, baixado, outros,
+      total, confirmado, aConfirmar, risco, outros,
       pConfirmado: calcPerc(confirmado),
       pAConfirmar: calcPerc(aConfirmar),
-      pAltoRisco: calcPerc(altoRisco)
+      pRisco: calcPerc(risco)
     };
   }, [titulos]);
 
@@ -262,15 +289,15 @@ export default function ChecagemPage() {
 
     titulos.forEach(t => {
       if (!mapa[t.cedente]) {
-        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, alto_risco: 0, baixado: 0, outros: 0, titulos: [] };
+        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, titulos: [] };
       }
       
-      const v = Number(t.valor_aberto);
+      const v = Number(t.valor_aberto) || 0;
       mapa[t.cedente].total_aberto += v;
+      
       if (t.status_confirmacao === "Confirmado") mapa[t.cedente].confirmado += v;
       else if (t.status_confirmacao === "A Confirmar") mapa[t.cedente].a_confirmar += v;
-      else if (t.status_confirmacao === "Alto Risco") mapa[t.cedente].alto_risco += v;
-      else if (t.status_confirmacao === "Baixado") mapa[t.cedente].baixado += v;
+      else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) mapa[t.cedente].risco += v;
       else mapa[t.cedente].outros += v;
 
       mapa[t.cedente].titulos.push(t);
@@ -281,6 +308,14 @@ export default function ChecagemPage() {
 
   const toggleLinha = (cedente: string) => {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
+  };
+
+  const badgeStatus = (status: string) => {
+    if (status === "Confirmado") return "bg-emerald-100 text-emerald-800 border-emerald-300";
+    if (status === "A Confirmar") return "bg-blue-100 text-blue-800 border-blue-300";
+    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300 animate-pulse";
+    if (status === "Política") return "bg-purple-100 text-purple-800 border-purple-300";
+    return "bg-slate-100 text-slate-600 border-slate-300";
   };
 
   return (
@@ -314,7 +349,7 @@ export default function ChecagemPage() {
               type="date" 
               value={dataReferencia}
               onChange={(e) => setDataReferencia(e.target.value)}
-              className="p-1.5 rounded border border-slate-300 text-xs font-bold text-blue-700 outline-none focus:border-blue-500"
+              className="p-1.5 rounded border border-slate-300 text-xs font-bold text-blue-700 outline-none focus:border-blue-500 cursor-pointer"
             />
           </div>
 
@@ -350,29 +385,29 @@ export default function ChecagemPage() {
         </div>
 
         {/* KPI: A Confirmar */}
-        <div className="bg-white border-l-4 border-amber-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
-          <span className="text-[10px] font-black uppercase text-amber-600 tracking-wider">⏳ A Confirmar</span>
+        <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+          <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider">⏳ A Confirmar</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.aConfirmar)}</span>
-          <div className="absolute right-4 top-4 text-amber-500 font-black text-lg">{kpis.pAConfirmar}%</div>
+          <div className="absolute right-4 top-4 text-blue-500 font-black text-lg">{kpis.pAConfirmar}%</div>
           <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-amber-400 h-full rounded-full" style={{ width: `${kpis.pAConfirmar}%` }}></div>
+            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${kpis.pAConfirmar}%` }}></div>
           </div>
         </div>
 
         {/* KPI: Alto Risco */}
         <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
-          <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Falso</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.altoRisco)}</span>
-          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg">{kpis.pAltoRisco}%</div>
+          <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Problema</span>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.risco)}</span>
+          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg">{kpis.pRisco}%</div>
           <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-rose-500 h-full rounded-full" style={{ width: `${kpis.pAltoRisco}%` }}></div>
+            <div className="bg-rose-500 h-full rounded-full" style={{ width: `${kpis.pRisco}%` }}></div>
           </div>
         </div>
 
         {/* KPI: Baixados/Outros */}
-        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
-          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">🗂️ Outros / Baixados</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.baixado + kpis.outros)}</span>
+        <div className="bg-white border-l-4 border-purple-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+          <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider">🗂️ Outros / Política</span>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.outros)}</span>
         </div>
       </div>
 
@@ -382,18 +417,18 @@ export default function ChecagemPage() {
           <thead>
             <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none">
               <th className="p-3 w-10 text-center">Abrir</th>
-              <th className="p-3 w-[300px]">Cedente / Assignor</th>
+              <th className="p-3 min-w-[250px]">Cedente / Assignor</th>
               <th className="p-3 text-right">Saldo Aberto (R$)</th>
               <th className="p-3 text-right text-emerald-600">Confirmado</th>
-              <th className="p-3 text-right text-amber-500">A Confirmar</th>
-              <th className="p-3 text-right text-rose-500">Alto Risco</th>
+              <th className="p-3 text-right text-blue-600">A Confirmar</th>
+              <th className="p-3 text-right text-rose-500">Riscos / Falso</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {carregando ? (
               <tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot de confirmações...</td></tr>
             ) : cedentesAgregados.length === 0 ? (
-              <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ({fData(dataReferencia)}).</td></tr>
+              <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ({fData(dataReferencia)}). Selecione uma data que contenha arquivos importados.</td></tr>
             ) : (
               cedentesAgregados.map((ced) => {
                 const isOpen = !!expandidos[ced.cedente];
@@ -409,11 +444,11 @@ export default function ChecagemPage() {
                           {isOpen ? "−" : "+"}
                         </button>
                       </td>
-                      <td className="p-2.5 text-[12px] font-black text-slate-800 uppercase truncate max-w-[280px]" title={ced.cedente}>{ced.cedente}</td>
+                      <td className="p-2.5 text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</td>
                       <td className="p-2.5 text-right font-mono font-bold text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
                       <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30">{fM(ced.confirmado)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-amber-600 bg-amber-50/30">{fM(ced.a_confirmar)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.alto_risco)}</td>
+                      <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30">{fM(ced.a_confirmar)}</td>
+                      <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.risco)}</td>
                     </tr>
 
                     {/* LINHA DETAIL (SACADOS DAQUELE CEDENTE) */}
@@ -424,32 +459,27 @@ export default function ChecagemPage() {
                             <table className="w-full text-[11px] text-left border-collapse">
                               <thead>
                                 <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900">
-                                  <th className="p-2.5 pl-4">Sacado / Devedor</th>
+                                  <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                   <th className="p-2.5 text-center">Nº Documento</th>
                                   <th className="p-2.5 text-center">Vencimento</th>
                                   <th className="p-2.5 text-right">Valor Aberto</th>
                                   <th className="p-2.5 text-center">Status Confirmação</th>
-                                  <th className="p-2.5">Ocorrências / Notas</th>
+                                  <th className="p-2.5 max-w-[300px]">Ocorrências (QPROF)</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                                 {ced.titulos.sort((a,b) => b.valor_aberto - a.valor_aberto).map(tit => (
                                   <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[200px] truncate" title={tit.sacado}>{tit.sacado}</td>
+                                    <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
                                     <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
                                     <td className="p-2.5 text-center font-mono">{fData(tit.vencimento)}</td>
-                                    <td className="p-2.5 text-right font-mono font-bold text-slate-800">{fM(tit.valor_aberto)}</td>
+                                    <td className="p-2.5 text-right font-mono font-black text-slate-800">{fM(tit.valor_aberto)}</td>
                                     <td className="p-2.5 text-center">
-                                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${
-                                        tit.status_confirmacao === "Confirmado" ? "bg-emerald-100 text-emerald-800 border-emerald-300" :
-                                        tit.status_confirmacao === "Alto Risco" ? "bg-rose-100 text-rose-800 border-rose-300 animate-pulse" :
-                                        tit.status_confirmacao === "A Confirmar" ? "bg-amber-100 text-amber-800 border-amber-300" :
-                                        "bg-slate-100 text-slate-600 border-slate-300"
-                                      }`}>
+                                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${badgeStatus(tit.status_confirmacao)}`}>
                                         {tit.status_confirmacao}
                                       </span>
                                     </td>
-                                    <td className="p-2.5 max-w-[250px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
+                                    <td className="p-2.5 max-w-[300px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
                                       {tit.ocorrencias || "-"}
                                     </td>
                                   </tr>
