@@ -16,6 +16,8 @@ interface TituloChecagem {
   valor_aberto: number;
   status_confirmacao: string;
   ocorrencias: string;
+  emissao: string | null;
+  atualizacao: string | null;
 }
 
 interface AgregacaoCedente {
@@ -35,7 +37,7 @@ const EMPRESAS = [
 ];
 
 // ============================================================================
-// 🧽 UTILS DE LIMPEZA E FORMATAÇÃO
+// 🧽 UTILS DE LIMPEZA E CÁLCULO
 // ============================================================================
 const strClean = (c: any) => {
   if (!c) return "";
@@ -65,7 +67,7 @@ const formatarDataExcel = (valorData: any): string | null => {
     const data = new Date(Math.round((valorData - 25569) * 86400 * 1000));
     return data.toISOString().split("T")[0];
   }
-  const txt = String(valorData).trim();
+  let txt = String(valorData).trim().split(" ")[0]; // Pega só a data, descarta hora 00:00:00
   if (!txt) return null;
   if (txt.includes("/")) {
     const partes = txt.split("/");
@@ -75,14 +77,12 @@ const formatarDataExcel = (valorData: any): string | null => {
       return `${y}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
     }
   }
-  if (/^\d{4}-\d{2}-\d{2}/.test(txt)) return txt.split(" ")[0];
-  return null; // Se não for data válida, manda nulo para não quebrar o banco
+  if (/^\d{4}-\d{2}-\d{2}/.test(txt)) return txt;
+  return null;
 };
 
-// 🎯 Radar inteligente para extrair o Status de dentro do texto sujo das "Ocorrências"
 const classificarStatus = (ocorrenciaStr: string) => {
   const s = String(ocorrenciaStr).toUpperCase();
-  // Ordem de leitura importa muito aqui!
   if (s.includes("NÃO CONFIRMA") || s.includes("NAO CONFIRMA")) return "Não Confirma";
   if (s.includes("A CONFIRMAR")) return "A Confirmar";
   if (s.includes("CONFIRMADO")) return "Confirmado";
@@ -90,11 +90,23 @@ const classificarStatus = (ocorrenciaStr: string) => {
   if (s.includes("POLÍTICA") || s.includes("POLITICA")) return "Política";
   if (s.includes("PROBLEMA")) return "Problema";
   if (s.includes("BAIXADO") || s.includes("LIQUIDADO") || s.includes("PAGO")) return "Baixado";
-  
-  return "A Confirmar"; // Se não tem Rótulo nenhum, está A Confirmar
+  return "A Confirmar";
+};
+
+const calcularDiasSLA = (d1: string | null, d2: string | null) => {
+  if (!d1 || !d2) return null;
+  const data1 = new Date(d1);
+  const data2 = new Date(d2);
+  const diffTime = Math.abs(data2.getTime() - data1.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
 const fM = (val: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+const fMShort = (val: number) => {
+  if (val >= 1000000) return `R$ ${(val / 1000000).toFixed(1)}M`;
+  if (val >= 1000) return `R$ ${(val / 1000).toFixed(1)}k`;
+  return `R$ ${val.toFixed(0)}`;
+};
 const fData = (iso: string | null) => {
   if (!iso) return "-";
   const [y, m, d] = iso.split("-");
@@ -109,7 +121,14 @@ export default function ChecagemPage() {
   const [titulos, setTitulos] = useState<TituloChecagem[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [processandoUpload, setProcessandoUpload] = useState(false);
+  
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
+  
+  // Controle de Ordenação da Tabela
+  const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
+    key: "total_aberto",
+    direction: "desc"
+  });
 
   // ==========================================================================
   // 📥 BUSCA DE DADOS (SNAPSHOT DIÁRIO)
@@ -118,16 +137,10 @@ export default function ChecagemPage() {
     setCarregando(true);
     try {
       let query = supabase.from("checagem_titulos").select("*").eq("data_referencia", dataReferencia);
-      
-      if (empresaAtiva !== "TODAS") {
-        query = query.eq("empresa", empresaAtiva);
-      }
+      if (empresaAtiva !== "TODAS") query = query.eq("empresa", empresaAtiva);
 
       const { data, error } = await query;
-      if (error) {
-        console.error("Erro no DB:", error);
-        throw error;
-      }
+      if (error) throw error;
       setTitulos(data || []);
     } catch (err) {
       console.error(err);
@@ -157,25 +170,17 @@ export default function ChecagemPage() {
         if (file.name.toLowerCase().endsWith(".csv")) {
           const text = e.target?.result as string;
           let separador = ";";
-          // Validação rápida de separador
           if (text.split("\n")[0].split(";").length < 5) separador = ",";
           
           const lines = text.split(/\r?\n/).filter(line => line.trim());
-          
-          // Parser de CSV manual para não quebrar com vírgulas ou aspas
           rawData = lines.map(line => {
             let inQuotes = false;
             let current = "";
             const row = [];
             for (let i = 0; i < line.length; i++) {
-              if (line[i] === '"') {
-                inQuotes = !inQuotes;
-              } else if (line[i] === separador && !inQuotes) {
-                row.push(current.trim());
-                current = "";
-              } else {
-                current += line[i];
-              }
+              if (line[i] === '"') inQuotes = !inQuotes;
+              else if (line[i] === separador && !inQuotes) { row.push(current.trim()); current = ""; } 
+              else { current += line[i]; }
             }
             row.push(current.trim());
             return row;
@@ -195,13 +200,16 @@ export default function ChecagemPage() {
           if (headerIdx !== -1) {
             const header = rawData[headerIdx].map(strClean);
             
-            // Procura as colunas exatas ignorando as pegadinhas
             const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL");
             const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO");
             const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO"));
             const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
             const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO"));
             const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
+            
+            // Novas colunas de Datas para o SLA
+            const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
+            const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
 
             for (let i = headerIdx + 1; i < rawData.length; i++) {
               const row = rawData[i];
@@ -221,8 +229,10 @@ export default function ChecagemPage() {
                 documento: idxDoc !== -1 ? String(row[idxDoc] || "").trim() : "-",
                 vencimento: formatarDataExcel(row[idxVenc]),
                 valor_aberto: vlrAberto,
-                status_confirmacao: classificarStatus(ocorrenciaTexto), // O Segredo Mágico
-                ocorrencias: ocorrenciaTexto
+                status_confirmacao: classificarStatus(ocorrenciaTexto),
+                ocorrencias: ocorrenciaTexto,
+                emissao: idxEmissao !== -1 ? formatarDataExcel(row[idxEmissao]) : null,
+                atualizacao: idxExp !== -1 ? formatarDataExcel(row[idxExp]) : null
               });
             }
           }
@@ -234,21 +244,19 @@ export default function ChecagemPage() {
 
         if (loteUpload.length > 0) {
           await supabase.from("checagem_titulos").delete().eq("data_referencia", dataReferencia).eq("empresa", tipoEmpresa);
-          
           const chunkSize = 500;
           for (let i = 0; i < loteUpload.length; i += chunkSize) {
             const { error } = await supabase.from("checagem_titulos").insert(loteUpload.slice(i, i + chunkSize));
             if (error) throw error;
           }
-          
           alert(`✅ Importação concluída! ${loteUpload.length} títulos da ${tipoEmpresa} processados na data ${fData(dataReferencia)}.`);
           carregarDados();
         } else {
-          alert("❌ Nenhum título com saldo em aberto foi encontrado. Verifique se o arquivo possui as colunas 'Cedente', 'Sacado', 'Vlr. Aberto' e 'Ocorrências'.");
+          alert("❌ Nenhum título com saldo em aberto foi encontrado.");
         }
       };
       
-      if (file.name.toLowerCase().endsWith(".csv")) reader.readAsText(file, "latin1"); // QPROF exporta em latin1
+      if (file.name.toLowerCase().endsWith(".csv")) reader.readAsText(file, "latin1");
       else reader.readAsArrayBuffer(file);
       
     } catch (e: any) {
@@ -260,22 +268,19 @@ export default function ChecagemPage() {
   };
 
   // ==========================================================================
-  // 🧮 CÁLCULOS DOS KPIS E AGREGAÇÃO (VISÃO)
+  // 🧮 CÁLCULOS DOS KPIS, GRÁFICO E AGREGAÇÃO
   // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
-
     titulos.forEach(t => {
       const v = Number(t.valor_aberto) || 0;
       total += v;
       if (t.status_confirmacao === "Confirmado") confirmado += v;
       else if (t.status_confirmacao === "A Confirmar") aConfirmar += v;
       else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) risco += v;
-      else outros += v; // Baixado, Política
+      else outros += v;
     });
-
     const calcPerc = (val: number) => total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
-
     return { 
       total, confirmado, aConfirmar, risco, outros,
       pConfirmado: calcPerc(confirmado),
@@ -284,6 +289,35 @@ export default function ChecagemPage() {
     };
   }, [titulos]);
 
+  // 📊 DADOS DO GRÁFICO DE EVOLUÇÃO DIÁRIA (APENAS DO MÊS DE REFERÊNCIA)
+  const chartEvolucao = useMemo(() => {
+    const [anoRef, mesRef] = dataReferencia.split("-");
+    const prefixoMes = `${anoRef}-${mesRef}`;
+    
+    // Filtra só os que estão confirmados E foram confirmados (Dta Exp) neste mês
+    const confirmadosNoMes = titulos.filter(t => t.status_confirmacao === "Confirmado" && t.atualizacao?.startsWith(prefixoMes));
+    
+    const mapaDias: Record<string, number> = {};
+    const totalDiasMes = new Date(Number(anoRef), Number(mesRef), 0).getDate();
+    
+    // Inicializa todos os dias do mês com 0
+    for (let i = 1; i <= totalDiasMes; i++) {
+      mapaDias[String(i).padStart(2, "0")] = 0;
+    }
+
+    // Soma os valores
+    confirmadosNoMes.forEach(t => {
+      const dia = t.atualizacao!.split("-")[2]; // Pega o dia (YYYY-MM-DD)
+      if (mapaDias[dia] !== undefined) {
+        mapaDias[dia] += Number(t.valor_aberto) || 0;
+      }
+    });
+
+    const maxValor = Math.max(...Object.values(mapaDias), 1); // Evita divisão por zero
+    return { dados: mapaDias, maxValor };
+  }, [titulos, dataReferencia]);
+
+  // 📄 TABELA ORDENÁVEL
   const cedentesAgregados = useMemo(() => {
     const mapa: Record<string, AgregacaoCedente> = {};
 
@@ -291,7 +325,6 @@ export default function ChecagemPage() {
       if (!mapa[t.cedente]) {
         mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, titulos: [] };
       }
-      
       const v = Number(t.valor_aberto) || 0;
       mapa[t.cedente].total_aberto += v;
       
@@ -303,8 +336,24 @@ export default function ChecagemPage() {
       mapa[t.cedente].titulos.push(t);
     });
 
-    return Object.values(mapa).sort((a, b) => b.total_aberto - a.total_aberto); // Ordena do maior pro menor saldo
-  }, [titulos]);
+    const array = Object.values(mapa);
+    
+    // Algoritmo de Ordenação
+    array.sort((a: any, b: any) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === "asc" ? -1 : 1;
+      if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return array;
+  }, [titulos, sortConfig]);
+
+  const handleSort = (key: keyof AgregacaoCedente) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc"
+    }));
+  };
 
   const toggleLinha = (cedente: string) => {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
@@ -324,7 +373,7 @@ export default function ChecagemPage() {
       {/* 🚀 HEADER & CONTROLES DE DATA / EMPRESA */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-5 rounded-xl shadow-xs border border-slate-200">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">✅ Controle de Checagem / Confirmações</h2>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">✅ Controle de Checagem</h2>
           <span className="text-xs text-slate-500 font-medium">Acompanhamento diário da qualidade e risco da carteira aberta.</span>
         </div>
         
@@ -368,13 +417,10 @@ export default function ChecagemPage() {
 
       {/* 📊 PAINEL DE KPIS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* KPI: Total Aberto */}
         <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800">
           <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider">Saldo Total em Aberto</span>
           <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
-
-        {/* KPI: Confirmado */}
         <div className="bg-white border-l-4 border-emerald-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.confirmado)}</span>
@@ -383,8 +429,6 @@ export default function ChecagemPage() {
             <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${kpis.pConfirmado}%` }}></div>
           </div>
         </div>
-
-        {/* KPI: A Confirmar */}
         <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider">⏳ A Confirmar</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.aConfirmar)}</span>
@@ -393,8 +437,6 @@ export default function ChecagemPage() {
             <div className="bg-blue-500 h-full rounded-full" style={{ width: `${kpis.pAConfirmar}%` }}></div>
           </div>
         </div>
-
-        {/* KPI: Alto Risco */}
         <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Problema</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.risco)}</span>
@@ -403,99 +445,161 @@ export default function ChecagemPage() {
             <div className="bg-rose-500 h-full rounded-full" style={{ width: `${kpis.pRisco}%` }}></div>
           </div>
         </div>
-
-        {/* KPI: Baixados/Outros */}
-        <div className="bg-white border-l-4 border-purple-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
-          <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider">🗂️ Outros / Política</span>
+        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">🗂️ Outros / Política</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.outros)}</span>
         </div>
       </div>
 
-      {/* 📄 TABELÃO MASTER-DETAIL */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none">
-              <th className="p-3 w-10 text-center">Abrir</th>
-              <th className="p-3 min-w-[250px]">Cedente / Assignor</th>
-              <th className="p-3 text-right">Saldo Aberto (R$)</th>
-              <th className="p-3 text-right text-emerald-600">Confirmado</th>
-              <th className="p-3 text-right text-blue-600">A Confirmar</th>
-              <th className="p-3 text-right text-rose-500">Riscos / Falso</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {carregando ? (
-              <tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot de confirmações...</td></tr>
-            ) : cedentesAgregados.length === 0 ? (
-              <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ({fData(dataReferencia)}). Selecione uma data que contenha arquivos importados.</td></tr>
-            ) : (
-              cedentesAgregados.map((ced) => {
-                const isOpen = !!expandidos[ced.cedente];
-                return (
-                  <tr key={ced.cedente} style={{ display: "contents" }}>
-                    {/* LINHA MASTER (CEDENTE) */}
-                    <tr className="bg-white hover:bg-blue-50/30 transition-colors">
-                      <td className="p-2.5 text-center border-l-4 border-transparent">
-                        <button 
-                          onClick={() => toggleLinha(ced.cedente)} 
-                          className="w-5 h-5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs transition-colors"
-                        >
-                          {isOpen ? "−" : "+"}
-                        </button>
-                      </td>
-                      <td className="p-2.5 text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30">{fM(ced.confirmado)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30">{fM(ced.a_confirmar)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.risco)}</td>
-                    </tr>
+      {/* 📈 GRÁFICO DE BARRAS: EVOLUÇÃO DIÁRIA DO MÊS */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col">
+        <div className="mb-4 border-b border-slate-100 pb-2">
+          <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução de Confirmações (Volume R$)</h3>
+          <span className="text-[10px] font-bold text-slate-400">Total liquidado ou confirmado no mês de referência.</span>
+        </div>
+        
+        <div className="flex items-end gap-1 h-32 w-full mt-2">
+          {Object.entries(chartEvolucao.dados).map(([dia, valor]) => {
+            const altura = valor > 0 ? Math.max((valor / chartEvolucao.maxValor) * 100, 5) : 0; // Min 5% pra mostrar algo se > 0
+            return (
+              <div key={dia} className="flex-1 flex flex-col items-center gap-1 group relative">
+                {/* Tooltip Hover */}
+                <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                  Dia {dia}: {fM(valor)}
+                </div>
+                {/* Barra */}
+                <div className="w-full bg-emerald-100 rounded-t-sm flex items-end justify-center overflow-hidden transition-all h-full relative">
+                  <div className="w-full bg-emerald-500 rounded-t-sm transition-all duration-500 hover:bg-emerald-400" style={{ height: `${altura}%` }}></div>
+                </div>
+                {/* Label Dia */}
+                <span className="text-[9px] font-black text-slate-400">{dia}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-                    {/* LINHA DETAIL (SACADOS DAQUELE CEDENTE) */}
-                    {isOpen && (
-                      <tr>
-                        <td colSpan={6} className="bg-slate-100/50 p-4 border-b border-slate-200">
-                          <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
-                            <table className="w-full text-[11px] text-left border-collapse">
-                              <thead>
-                                <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900">
-                                  <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
-                                  <th className="p-2.5 text-center">Nº Documento</th>
-                                  <th className="p-2.5 text-center">Vencimento</th>
-                                  <th className="p-2.5 text-right">Valor Aberto</th>
-                                  <th className="p-2.5 text-center">Status Confirmação</th>
-                                  <th className="p-2.5 max-w-[300px]">Ocorrências (QPROF)</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                                {ced.titulos.sort((a,b) => b.valor_aberto - a.valor_aberto).map(tit => (
-                                  <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
-                                    <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
-                                    <td className="p-2.5 text-center font-mono">{fData(tit.vencimento)}</td>
-                                    <td className="p-2.5 text-right font-mono font-black text-slate-800">{fM(tit.valor_aberto)}</td>
-                                    <td className="p-2.5 text-center">
-                                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${badgeStatus(tit.status_confirmacao)}`}>
-                                        {tit.status_confirmacao}
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 max-w-[300px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
-                                      {tit.ocorrencias || "-"}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+      {/* 📄 TABELÃO MASTER-DETAIL COM ORDENAÇÃO */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[900px]">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none">
+                <th className="p-3 w-10 text-center">Abrir</th>
+                <th className="p-3 min-w-[250px] cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort("cedente")}>
+                  Cedente / Assignor {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </th>
+                <th className="p-3 text-right cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort("total_aberto")}>
+                  Saldo Aberto (R$) {sortConfig.key === "total_aberto" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </th>
+                <th className="p-3 text-right text-emerald-600 cursor-pointer hover:bg-emerald-100 transition-colors" onClick={() => handleSort("confirmado")}>
+                  Confirmado {sortConfig.key === "confirmado" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </th>
+                <th className="p-3 text-right text-blue-600 cursor-pointer hover:bg-blue-100 transition-colors" onClick={() => handleSort("a_confirmar")}>
+                  A Confirmar {sortConfig.key === "a_confirmar" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </th>
+                <th className="p-3 text-right text-rose-500 cursor-pointer hover:bg-rose-100 transition-colors" onClick={() => handleSort("risco")}>
+                  Riscos / Falso {sortConfig.key === "risco" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {carregando ? (
+                <tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot de confirmações...</td></tr>
+              ) : cedentesAgregados.length === 0 ? (
+                <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ({fData(dataReferencia)}).</td></tr>
+              ) : (
+                cedentesAgregados.map((ced) => {
+                  const isOpen = !!expandidos[ced.cedente];
+                  return (
+                    <tr key={ced.cedente} style={{ display: "contents" }}>
+                      {/* LINHA MASTER (CEDENTE) */}
+                      <tr className="bg-white hover:bg-blue-50/30 transition-colors">
+                        <td className="p-2.5 text-center border-l-4 border-transparent">
+                          <button 
+                            onClick={() => toggleLinha(ced.cedente)} 
+                            className="w-5 h-5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs transition-colors"
+                          >
+                            {isOpen ? "−" : "+"}
+                          </button>
                         </td>
+                        <td className="p-2.5 text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30">{fM(ced.confirmado)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30">{fM(ced.a_confirmar)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.risco)}</td>
                       </tr>
-                    )}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+
+                      {/* LINHA DETAIL (SACADOS DAQUELE CEDENTE) */}
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={6} className="bg-slate-100/50 p-4 border-b border-slate-200">
+                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+                              <table className="w-full text-[11px] text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900">
+                                    <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
+                                    <th className="p-2.5 text-center">Nº Doc</th>
+                                    <th className="p-2.5 text-center">Emissão</th>
+                                    <th className="p-2.5 text-center">Vencimento</th>
+                                    <th className="p-2.5 text-right">Valor Aberto</th>
+                                    <th className="p-2.5 text-center">Status</th>
+                                    <th className="p-2.5 text-center bg-slate-700">SLA / Aging</th>
+                                    <th className="p-2.5 max-w-[200px]">Ocorrências (QPROF)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                                  {ced.titulos.sort((a,b) => b.valor_aberto - a.valor_aberto).map(tit => {
+                                    
+                                    // ⏱️ Lógica de SLA e Aging
+                                    const diasSla = calcularDiasSLA(tit.emissao, tit.atualizacao);
+                                    const diasAberto = calcularDiasSLA(tit.emissao, dataReferencia);
+                                    
+                                    let slaText = "-";
+                                    let slaClass = "text-slate-400";
+                                    
+                                    if (tit.status_confirmacao === "Confirmado") {
+                                      slaText = diasSla !== null ? `✅ Conf. em ${diasSla} dias` : "-";
+                                      slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-2";
+                                    } else {
+                                      slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto} dias` : "-";
+                                      slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-2" : "text-amber-700 font-bold bg-amber-50 rounded px-2";
+                                    }
+
+                                    return (
+                                      <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
+                                        <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
+                                        <td className="p-2.5 text-center font-mono text-slate-400">{fData(tit.emissao)}</td>
+                                        <td className="p-2.5 text-center font-mono">{fData(tit.vencimento)}</td>
+                                        <td className="p-2.5 text-right font-mono font-black text-slate-800">{fM(tit.valor_aberto)}</td>
+                                        <td className="p-2.5 text-center">
+                                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${badgeStatus(tit.status_confirmacao)}`}>
+                                            {tit.status_confirmacao}
+                                          </span>
+                                        </td>
+                                        <td className="p-2.5 text-center text-[10px]">
+                                          <span className={slaClass}>{slaText}</span>
+                                        </td>
+                                        <td className="p-2.5 max-w-[200px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
+                                          {tit.ocorrencias || "-"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
     </div>
