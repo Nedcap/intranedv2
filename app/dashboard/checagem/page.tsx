@@ -27,7 +27,7 @@ interface AgregacaoCedente {
   a_confirmar: number;
   risco: number;
   outros: number;
-  qtd_pendentes: number; // NOVO: Conta quantos títulos não estão confirmados
+  qtd_pendentes: number;
   titulos: TituloChecagem[];
 }
 
@@ -124,8 +124,6 @@ export default function ChecagemPage() {
   const [processandoUpload, setProcessandoUpload] = useState(false);
   
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
-  
-  // NOVO: Estado para gerenciar os filtros de cada linha expandida separadamente
   const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, status: string }>>({});
   
   const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
@@ -133,15 +131,11 @@ export default function ChecagemPage() {
     direction: "desc"
   });
 
-  // ==========================================================================
-  // 📥 BUSCA DE DADOS
-  // ==========================================================================
   const carregarDados = async () => {
     setCarregando(true);
     try {
       let query = supabase.from("checagem_titulos").select("*").eq("data_referencia", dataReferencia);
       if (empresaAtiva !== "TODAS") query = query.eq("empresa", empresaAtiva);
-
       const { data, error } = await query;
       if (error) throw error;
       setTitulos(data || []);
@@ -157,9 +151,6 @@ export default function ChecagemPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataReferencia, empresaAtiva]);
 
-  // ==========================================================================
-  // 📤 UPLOAD
-  // ==========================================================================
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, tipoEmpresa: "SEC" | "FIDC") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -268,9 +259,6 @@ export default function ChecagemPage() {
     }
   };
 
-  // ==========================================================================
-  // 🧮 CÁLCULOS E AGREGAÇÃO
-  // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -351,9 +339,6 @@ export default function ChecagemPage() {
     return array;
   }, [titulos, sortConfig]);
 
-  // ==========================================================================
-  // 🕹️ INTERAÇÕES DA UI
-  // ==========================================================================
   const handleSort = (key: keyof AgregacaoCedente) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
   };
@@ -362,7 +347,17 @@ export default function ChecagemPage() {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
   };
 
-  // Funções para gerenciar o filtro de cada detalhamento isoladamente
+  // Função útil para o relatório
+  const handleExpandirTudo = () => {
+    const novoEstado: Record<string, boolean> = {};
+    const jaEstaoTodosAbertos = Object.keys(expandidos).length === cedentesAgregados.length;
+    
+    if (!jaEstaoTodosAbertos) {
+      cedentesAgregados.forEach(c => novoEstado[c.cedente] = true);
+    }
+    setExpandidos(novoEstado);
+  };
+
   const setFiltroTexto = (cedente: string, texto: string) => {
     setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente], texto } }));
   };
@@ -373,13 +368,17 @@ export default function ChecagemPage() {
   const badgeStatus = (status: string) => {
     if (status === "Confirmado") return "bg-emerald-100 text-emerald-800 border-emerald-300";
     if (status === "A Confirmar") return "bg-blue-100 text-blue-800 border-blue-300";
-    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300 animate-pulse";
+    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300";
     if (status === "Política") return "bg-purple-100 text-purple-800 border-purple-300";
     return "bg-slate-100 text-slate-600 border-slate-300";
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 print:bg-white print:p-0 print:space-y-4">
+    // IMPORTANTE: Adicionado style printColorAdjust para forçar renderização das cores na impressora
+    <div 
+      className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 print:p-0 print:space-y-4 print:bg-white print:w-full print:max-w-none" 
+      style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}
+    >
       
       {/* 🖨️ CABEÇALHO EXCLUSIVO DE IMPRESSÃO (Fica oculto na tela normal) */}
       <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-4">
@@ -427,41 +426,44 @@ export default function ChecagemPage() {
               {processandoUpload ? "⏳ Lendo..." : "📥 Importar SEC"}
               <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "SEC")} />
             </label>
-            <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-lg text-[10px] uppercase border border-slate-900 shadow-sm flex items-center gap-2">
-              🖨️ Relatório
+            <button onClick={handleExpandirTudo} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-[10px] uppercase border border-slate-300 shadow-sm transition-colors">
+              {Object.keys(expandidos).length === cedentesAgregados.length ? "➖ Recolher Tudo" : "➕ Expandir Tudo"}
+            </button>
+            <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-lg text-[10px] uppercase border border-slate-900 shadow-sm flex items-center gap-2 transition-colors">
+              🖨️ Imprimir
             </button>
           </div>
         </div>
       </div>
 
       {/* 📊 PAINEL DE KPIS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:break-inside-avoid">
-        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800 print:border-2 print:border-slate-900 print:text-slate-900 print:bg-white">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:grid-cols-5 print:gap-2 print:break-inside-avoid">
+        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800 print:border-slate-300 print:text-slate-900 print:bg-slate-100 print:p-3">
           <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider print:text-slate-600">Saldo Total em Aberto</span>
-          <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
+          <span className="text-2xl font-black font-mono mt-1 truncate print:text-lg">{fM(kpis.total)}</span>
         </div>
-        <div className="bg-white border-l-4 border-emerald-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+        <div className="bg-white border-l-4 border-emerald-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
           <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.confirmado)}</span>
-          <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg">{kpis.pConfirmado}%</div>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.confirmado)}</span>
+          <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg print:text-sm">{kpis.pConfirmado}%</div>
         </div>
-        <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+        <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
           <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider">⏳ A Confirmar</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.aConfirmar)}</span>
-          <div className="absolute right-4 top-4 text-blue-500 font-black text-lg">{kpis.pAConfirmar}%</div>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.aConfirmar)}</span>
+          <div className="absolute right-4 top-4 text-blue-500 font-black text-lg print:text-sm">{kpis.pAConfirmar}%</div>
         </div>
-        <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+        <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
           <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Problema</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.risco)}</span>
-          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg">{kpis.pRisco}%</div>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.risco)}</span>
+          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg print:text-sm">{kpis.pRisco}%</div>
         </div>
-        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
+        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">🗂️ Outros / Política</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.outros)}</span>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.outros)}</span>
         </div>
       </div>
 
-      {/* 📈 GRÁFICO (Oculto na impressão para focar na tabela) */}
+      {/* 📈 GRÁFICO (Oculto na impressão para economizar espaço de folha) */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col print:hidden">
         <div className="mb-4 border-b border-slate-100 pb-2">
           <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
@@ -502,45 +504,43 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📄 TABELÃO MASTER-DETAIL "MASTIGADO" */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
+      {/* 📄 TABELÃO MASTER-DETAIL (Ajustado com print:overflow-visible para não cortar na impressora) */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs print:shadow-none print:border-none print:w-full">
+        <div className="overflow-x-auto print:overflow-visible print:w-full">
+          <table className="w-full text-left border-collapse min-w-[1000px] print:min-w-full">
             <thead>
-              <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none print:bg-slate-800 print:text-white">
+              <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none print:bg-slate-200 print:text-slate-800 print:border-slate-300">
                 <th className="p-3 w-10 text-center print:hidden">Abrir</th>
-                <th className="p-3 min-w-[250px] cursor-pointer hover:bg-slate-200 print:hover:bg-slate-800 transition-colors" onClick={() => handleSort("cedente")}>
+                <th className="p-3 min-w-[250px] cursor-pointer hover:bg-slate-200 print:hover:bg-slate-200 transition-colors" onClick={() => handleSort("cedente")}>
                   Cedente / Origem {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                 </th>
                 <th className="p-3 text-center w-[150px]">Status da Carteira</th>
-                <th className="p-3 text-right cursor-pointer hover:bg-slate-200 print:hover:bg-slate-800" onClick={() => handleSort("total_aberto")}>
+                <th className="p-3 text-right cursor-pointer hover:bg-slate-200 print:hover:bg-slate-200" onClick={() => handleSort("total_aberto")}>
                   Saldo Aberto {sortConfig.key === "total_aberto" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                 </th>
-                <th className="p-3 text-right text-emerald-600 print:text-emerald-300 cursor-pointer" onClick={() => handleSort("confirmado")}>
+                <th className="p-3 text-right text-emerald-600 print:text-emerald-700 cursor-pointer" onClick={() => handleSort("confirmado")}>
                   Confirmado
                 </th>
-                <th className="p-3 text-right text-blue-600 print:text-blue-300 cursor-pointer" onClick={() => handleSort("a_confirmar")}>
+                <th className="p-3 text-right text-blue-600 print:text-blue-700 cursor-pointer" onClick={() => handleSort("a_confirmar")}>
                   A Confirmar
                 </th>
-                <th className="p-3 text-right text-rose-500 print:text-rose-300 cursor-pointer" onClick={() => handleSort("risco")}>
+                <th className="p-3 text-right text-rose-500 print:text-rose-600 cursor-pointer" onClick={() => handleSort("risco")}>
                   Problemas
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 print:divide-slate-300">
               {carregando ? (
-                <tr><td colSpan={7} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot...</td></tr>
+                <tr><td colSpan={7} className="p-10 text-center text-slate-400 font-bold">Buscando snapshot...</td></tr>
               ) : cedentesAgregados.length === 0 ? (
                 <tr><td colSpan={7} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada.</td></tr>
               ) : (
                 cedentesAgregados.map((ced) => {
                   const isOpen = !!expandidos[ced.cedente];
                   
-                  // Lógica visual do "Termômetro da Carteira"
                   const percConfirmado = ced.total_aberto > 0 ? (ced.confirmado / ced.total_aberto) * 100 : 0;
                   const alertaPendente = ced.qtd_pendentes > 0;
 
-                  // Aplicando Filtro Interno (Para a Sub-tabela)
                   const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", status: "" };
                   const titulosFiltrados = ced.titulos.filter(t => {
                     const matchText = t.sacado.includes(filtroAtual.texto.toUpperCase().trim()) || t.documento.includes(filtroAtual.texto.trim());
@@ -551,8 +551,8 @@ export default function ChecagemPage() {
                   return (
                     <tr key={ced.cedente} style={{ display: "contents" }} className="print:break-inside-avoid">
                       
-                      {/* LINHA MASTER (VISÃO DIRETORIA) */}
-                      <tr className={`bg-white hover:bg-slate-50 transition-colors ${isOpen ? "bg-slate-50" : ""}`}>
+                      {/* LINHA MASTER */}
+                      <tr className={`bg-white hover:bg-slate-50 transition-colors ${isOpen ? "bg-slate-50 print:bg-slate-50" : ""}`}>
                         <td className="p-2.5 text-center print:hidden border-l-4 border-transparent">
                           <button 
                             onClick={() => toggleLinha(ced.cedente)} 
@@ -564,7 +564,6 @@ export default function ChecagemPage() {
                         <td className="p-2.5">
                           <div className="flex flex-col">
                             <span className="text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</span>
-                            {/* Termômetro Visual de Saúde do Cedente */}
                             <div className="w-full bg-slate-200 h-1 mt-1.5 rounded-full overflow-hidden flex">
                                <div className="bg-emerald-500 h-full" style={{ width: `${percConfirmado}%` }}></div>
                                <div className="bg-slate-200 h-full flex-1"></div>
@@ -574,30 +573,31 @@ export default function ChecagemPage() {
                         
                         <td className="p-2.5 text-center">
                           {alertaPendente ? (
-                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border border-rose-300 animate-pulse" : "bg-amber-100 text-amber-800 border border-amber-300"}`}>
+                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-amber-100 text-amber-800 border-amber-300"}`}>
                               {ced.qtd_pendentes} Pendente{ced.qtd_pendentes > 1 ? "s" : ""}
                             </span>
                           ) : (
-                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border-emerald-300 shadow-xs">
                               100% Ok
                             </span>
                           )}
                         </td>
                         
-                        <td className="p-2.5 text-right font-mono font-black text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30">{fM(ced.confirmado)}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30">{fM(ced.a_confirmar)}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.risco)}</td>
+                        <td className="p-2.5 text-right font-mono font-black text-slate-800 bg-slate-50/50 print:bg-transparent">{fM(ced.total_aberto)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30 print:bg-transparent">{fM(ced.confirmado)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30 print:bg-transparent">{fM(ced.a_confirmar)}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30 print:bg-transparent">{fM(ced.risco)}</td>
                       </tr>
 
-                      {/* LINHA DETAIL (VISÃO ANALISTA - SACADOS) */}
-                      {(isOpen || typeof window === 'undefined' ? false : document.body.classList.contains("print")) && isOpen && (
-                        <tr className="print:block">
-                          <td colSpan={7} className="bg-slate-100/50 p-4 border-b border-slate-200 print:p-1 print:bg-white">
+                      {/* LINHA DETAIL (Só aparece na tela ou na impressão se estiver "isOpen") */}
+                      {isOpen && (
+                        <tr>
+                          {/* ColSpan é 7 para ocupar todas as colunas da tela */}
+                          <td colSpan={7} className="bg-slate-100/50 p-4 border-b border-slate-200 print:p-2 print:bg-white print:border-b-2 print:border-slate-800">
                             
-                            {/* Barra de Filtro Interna (SÓ APARECE NA TELA, SOME NA IMPRESSÃO) */}
+                            {/* Barra de Filtro Interna (SOME NA IMPRESSÃO) */}
                             <div className="flex items-center gap-3 mb-3 bg-white p-2 rounded-lg border border-slate-200 shadow-xs print:hidden w-fit">
-                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider pl-1">🔍 Filtrar Sacados:</span>
+                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider pl-1">🔍 Filtrar:</span>
                               <input 
                                 type="text" 
                                 placeholder="Nome ou Nº Documento..." 
@@ -617,21 +617,21 @@ export default function ChecagemPage() {
                               </select>
                             </div>
 
-                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden print:border-none print:shadow-none">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-200 print:text-slate-800">
+                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700 print:border-slate-300">
                                     <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                     <th className="p-2.5 text-center">Nº Doc</th>
                                     <th className="p-2.5 text-center">Emissão</th>
                                     <th className="p-2.5 text-center">Vencimento</th>
                                     <th className="p-2.5 text-right">Valor Aberto</th>
                                     <th className="p-2.5 text-center">Status</th>
-                                    <th className="p-2.5 text-center bg-slate-700 print:bg-slate-300">SLA / Aging</th>
-                                    <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências (QPROF)</th>
+                                    <th className="p-2.5 text-center bg-slate-700 print:bg-slate-200">SLA / Aging</th>
+                                    <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências</th>
                                   </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                                <tbody className="divide-y divide-slate-100 print:divide-slate-200 font-medium text-slate-700">
                                   {titulosFiltrados.length === 0 ? (
                                      <tr><td colSpan={8} className="p-4 text-center text-slate-400">Nenhum título encontrado com esse filtro.</td></tr>
                                   ) : (
@@ -643,15 +643,15 @@ export default function ChecagemPage() {
                                       let slaClass = "text-slate-400";
                                       
                                       if (tit.status_confirmacao === "Confirmado") {
-                                        slaText = diasSla !== null ? `✅ Conf. em ${diasSla}d` : "-";
-                                        slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5";
+                                        slaText = diasSla !== null ? `✅ Conf. ${diasSla}d` : "-";
+                                        slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-emerald-300";
                                       } else {
-                                        slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto}d` : "-";
-                                        slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5";
+                                        slaText = diasAberto !== null ? `⏳ Pend. ${diasAberto}d` : "-";
+                                        slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-rose-300" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-amber-300";
                                       }
 
                                       return (
-                                        <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
+                                        <tr key={tit.id} className="hover:bg-slate-50 transition-colors print:break-inside-avoid">
                                           <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
                                           <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
                                           <td className="p-2.5 text-center font-mono text-slate-400">{fData(tit.emissao)}</td>
