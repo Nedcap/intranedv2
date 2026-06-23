@@ -4,19 +4,11 @@
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { normalizarPelaBaseUniversal, limparNome } from "@/lib/normalizador";
+import { normalizarPelaBaseUniversal, limparNome, BaseUniversal } from "@/lib/normalizador";
 
 // ============================================================================
 // 🧽 MOTOR SÍNCRONO DE LIMPEZA E CRUZAMENTO EM MEMÓRIA RAM
 // ============================================================================
-
-export interface BaseUniversal {
-  cnpj: string;
-  nome_oficial: string;
-  nome_fantasia: string;
-  nome_curto: string;
-  variacoes: string[];
-}
 
 // Limpa pontuações, acentos e espaços de cabeçalhos para não ter erro de leitura
 const strClean = (c: any) => {
@@ -28,50 +20,6 @@ const strClean = (c: any) => {
     .replace(/[\u0300-\u036f]/g, "") // Tira acentos
     .replace(/[^A-Z0-9]/g, ""); // Tira tudo que não for letra ou número (pontos, traços, espaços)
 };
-
-function limparNome(texto: any): string {
-  if (!texto) return "";
-  let n = String(texto).toUpperCase().trim();
-  
-  // 🔥 MATA O CÓDIGO INICIAL (ex: "1234 - ", "001_", "456.")
-  n = n.replace(/^\d+[\s\-\.\_]+/, ""); 
-  
-  n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
-  n = n.replace(/[^A-Z0-9\s]/g, " "); 
-  n = n.replace(/\b(LTDA|SA|S A|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, ""); 
-  return n.replace(/\s+/g, " ").trim();
-}
-
-function normalizarPelaBaseUniversal(nomeBruto: string, base: BaseUniversal[]): string {
-  const limpo = limparNome(nomeBruto);
-  if (!limpo) return "";
-
-  const match = base.find(b => {
-    const oficialLimpo = limparNome(b.nome_oficial);
-    if (oficialLimpo === limpo || oficialLimpo.includes(limpo) || limpo.includes(oficialLimpo)) return true;
-
-    if (b.nome_fantasia) {
-      const fantasiaLimpo = limparNome(b.nome_fantasia);
-      if (fantasiaLimpo === limpo || fantasiaLimpo.includes(limpo) || limpo.includes(fantasiaLimpo)) return true;
-    }
-
-    if (b.nome_curto) {
-      const curtoLimpo = limparNome(b.nome_curto);
-      if (curtoLimpo === limpo || curtoLimpo.includes(limpo) || limpo.includes(curtoLimpo)) return true;
-    }
-
-    if (b.variacoes && Array.isArray(b.variacoes)) {
-      for (const variacao of b.variacoes) {
-        const vLimpo = limparNome(variacao);
-        if (vLimpo === limpo || vLimpo.includes(limpo) || limpo.includes(vLimpo)) return true;
-      }
-    }
-
-    return false;
-  });
-
-  return match ? match.nome_oficial : limpo; 
-}
 
 function parseValorReal(valor: any): number {
   if (valor === null || valor === undefined || valor === "") return 0.0;
@@ -162,7 +110,8 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
     const rawCed = String(row[idxCedente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
     
-    const chave = normalizarPelaBaseUniversal(rawCed, base);
+    // Passando null como CNPJ pois a tabela não tem essa coluna
+    const chave = normalizarPelaBaseUniversal(rawCed, null, base);
     if (!chave) continue;
 
     records[chave] = {
@@ -189,7 +138,8 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
     const rawCed = String(row[idxCliente] || "");
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
 
-    const chave = normalizarPelaBaseUniversal(rawCed, base);
+    // Passando null como CNPJ pois a tabela não tem essa coluna
+    const chave = normalizarPelaBaseUniversal(rawCed, null, base);
     if (!chave) continue;
 
     records[chave] = {
@@ -395,7 +345,8 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
+    // Passando null como CNPJ pois a tabela não tem essa coluna
+    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, null, base);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
@@ -437,7 +388,8 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
-    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, base);
+    // Passando null como CNPJ pois a tabela não tem essa coluna
+    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, null, base);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
@@ -590,7 +542,8 @@ export default function ImportacaoPage() {
       // 2. GRAVAR EXTRATO FINANCEIRO E AGREGAR DASH VOP
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
-        const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, baseUniversalData);
+        // Passando null como CNPJ pois a tabela não tem essa coluna
+        const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, null, baseUniversalData);
         loteFinancas.push({
           empresa: item.empresa,
           data_operacao: converteDataParaISO(item.dataOp),
