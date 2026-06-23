@@ -98,7 +98,7 @@ const classificarStatus = (ocorrenciaStr: string) => {
 };
 
 const calcularDiasSLA = (d1: string | null, d2: string | null) => {
-  if (!d1 || !d2) return 0;
+  if (!d1 || !d2) return 0; // Devolve 0 para evitar quebras no sort
   const data1 = new Date(d1);
   const data2 = new Date(d2);
   const diffTime = Math.abs(data2.getTime() - data1.getTime());
@@ -127,9 +127,9 @@ export default function ChecagemPage() {
   const [processandoUpload, setProcessandoUpload] = useState(false);
   
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
-  const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, statusSelecionados: string[] }>>({});
   
-  // NOVO: Estado para controlar o Filtro Ativo via Clique nos Cards do Topo
+  // ✅ FILTROS BLINDADOS COM ARRAY VAZIO PADRÃO
+  const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, statusSelecionados: string[] }>>({});
   const [filtroStatusCard, setFiltroStatusCard] = useState<string | null>(null);
 
   const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
@@ -270,6 +270,9 @@ export default function ChecagemPage() {
     }
   };
 
+  // ==========================================================================
+  // 🧮 CÁLCULOS E AGREGAÇÃO
+  // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -342,7 +345,6 @@ export default function ChecagemPage() {
 
     let array = Object.values(mapa);
 
-    // NOVO: Se houver filtro de card ativo, exibe apenas os cedentes que possuem títulos com aquele status
     if (filtroStatusCard) {
       array = array.filter(ced => {
         if (filtroStatusCard === "CONFIRMADO") return ced.confirmado > 0;
@@ -362,7 +364,7 @@ export default function ChecagemPage() {
   }, [titulos, sortConfig, filtroStatusCard]);
 
   // ==========================================================================
-  // 🕹️ INTERAÇÕES DA UI & REGRAS DE INTERATIVIDADE DOS CARDS
+  // 🕹️ INTERAÇÕES DA UI
   // ==========================================================================
   const handleSort = (key: keyof AgregacaoCedente) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
@@ -382,16 +384,13 @@ export default function ChecagemPage() {
     setExpandidos(novoEstado);
   };
 
-  // NOVO: Função de clique nos Cards de KPI para Filtro Rápido Geral + Auto-Expandir
   const lidarCliqueCardKpi = (tipoFiltro: string) => {
     if (filtroStatusCard === tipoFiltro) {
-      // Se clicou no card ativo, desmarca e recolhe as abas
       setFiltroStatusCard(null);
       setExpandidos({});
     } else {
       setFiltroStatusCard(tipoFiltro);
       
-      // Auto-expande todas as linhas que restaram visíveis na triagem do card
       const novoEstadoExpandido: Record<string, boolean> = {};
       titulos.forEach(t => {
         if (tipoFiltro === "CONFIRMADO" && t.status_confirmacao === "Confirmado") novoEstadoExpandido[t.cedente] = true;
@@ -402,18 +401,25 @@ export default function ChecagemPage() {
     }
   };
 
+  // ✅ FILTROS SEGUROS
   const setFiltroTexto = (cedente: string, texto: string) => {
-    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente] || { texto: "", statusSelecionados: [] }, texto } }));
+    setFiltrosDetalhamento(prev => {
+      const existing = prev[cedente] || { texto: "", statusSelecionados: [] };
+      return { ...prev, [cedente]: { ...existing, texto } };
+    });
   };
   
   const setFiltroStatusDetalhamento = (cedente: string, statusSelecionados: string[]) => {
-    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente] || { texto: "" }, statusSelecionados } }));
+    setFiltrosDetalhamento(prev => {
+      const existing = prev[cedente] || { texto: "", statusSelecionados: [] };
+      return { ...prev, [cedente]: { ...existing, statusSelecionados } };
+    });
   };
 
   const badgeStatus = (status: string) => {
     if (status === "Confirmado") return "bg-emerald-100 text-emerald-800 border-emerald-300";
     if (status === "A Confirmar") return "bg-blue-100 text-blue-800 border-blue-300";
-    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300";
+    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300 animate-pulse";
     if (status === "Política") return "bg-purple-100 text-purple-800 border-purple-300";
     return "bg-slate-100 text-slate-600 border-slate-300";
   };
@@ -433,7 +439,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 🚀 HEADER CONTROLES (Oculto na impressão) */}
+      {/* 🚀 HEADER CONTROLES */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-5 rounded-xl shadow-xs border border-slate-200 print:hidden">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">✅ Controle de Checagem</h2>
@@ -487,7 +493,6 @@ export default function ChecagemPage() {
           <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
         
-        {/* Card Confirmados Clicável */}
         <button 
           onClick={() => lidarCliqueCardKpi("CONFIRMADO")}
           className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
@@ -502,7 +507,6 @@ export default function ChecagemPage() {
           </div>
         </button>
 
-        {/* Card A Confirmar Clicável */}
         <button 
           onClick={() => lidarCliqueCardKpi("PENDENTE")}
           className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
@@ -517,7 +521,6 @@ export default function ChecagemPage() {
           </div>
         </button>
 
-        {/* Card Alto Risco Problema Clicável */}
         <button 
           onClick={() => lidarCliqueCardKpi("RISCO")}
           className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
@@ -553,15 +556,19 @@ export default function ChecagemPage() {
           <div className="flex-1 flex items-end gap-1.5 pl-2 relative">
             {chartEvolucao.dados.map((item, idx) => {
               const altura = item.valor > 0 ? Math.max((item.valor / chartEvolucao.maxValor) * 100, 2) : 0; 
-              let colBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
+              
+              // ✅ CORREÇÃO DO TYPO AQUI: corBarra e corFundo escritos corretamente
+              let corBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
+              
               if (item.valor > 0) {
-                if (item.evolucao === "UP") { colBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
-                else if (item.evolucao === "DOWN") { colBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
-                else { colBarra = "bg-blue-500"; colFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
+                if (item.evolucao === "UP") { corBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
+                else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
+                else { corBarra = "bg-blue-500"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
               }
+              
               return (
                 <div key={idx} className="flex-1 flex items-end h-full relative group">
-                  <div className={`w-full rounded-t-sm transition-all duration-500 ${colBarra}`} style={{ height: `${altura}%` }}></div>
+                  <div className={`w-full rounded-t-sm transition-all duration-500 ${corBarra}`} style={{ height: `${altura}%` }}></div>
                   <span className="text-[9px] font-black text-slate-400 absolute bottom-0 h-5 flex items-center justify-center">{item.dia}</span>
                 </div>
               );
@@ -606,16 +613,15 @@ export default function ChecagemPage() {
                   const percConfirmado = ced.total_aberto > 0 ? (ced.confirmado / ced.total_aberto) * 100 : 0;
                   const alertaPendente = ced.qtd_pendentes > 0;
 
+                  // Lendo dados do filtro de forma blindada
                   const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", statusSelecionados: [] };
-                  
-                  // CORREÇÃO E ATUALIZAÇÃO DA ORDENAÇÃO: Inicia com o valor padrão "Aging" (valor_aberto) se não houver clique
+                  const statusSelArray = filtroAtual.statusSelecionados || [];
                   const subSort = subSortConfig[ced.cedente] || { key: "valor_aberto", direction: "desc" };
 
                   let titulosFiltrados = ced.titulos.filter(t => {
-                    const matchText = t.sacado.toUpperCase().includes(filtroAtual.texto.toUpperCase().trim()) || t.documento.includes(filtroAtual.texto.trim());
+                    const matchText = t.sacado.toUpperCase().includes((filtroAtual.texto || "").toUpperCase().trim()) || t.documento.includes((filtroAtual.texto || "").trim());
                     
-                    // Se houver filtro global de Card, amarra a sub-tabela a respeitar ele também
-                    let matchStatus = filtroAtual.statusSelecionados.length === 0 ? true : filtroAtual.statusSelecionados.includes(t.status_confirmacao);
+                    let matchStatus = statusSelArray.length === 0 ? true : statusSelArray.includes(t.status_confirmacao);
                     if (filtroStatusCard === "CONFIRMADO") matchStatus = t.status_confirmacao === "Confirmado";
                     if (filtroStatusCard === "PENDENTE") matchStatus = t.status_confirmacao === "A Confirmar";
                     if (filtroStatusCard === "RISCO") matchStatus = ["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao);
@@ -623,7 +629,6 @@ export default function ChecagemPage() {
                     return matchText && matchStatus;
                   });
 
-                  // EXECUTA A LÓGICA DE ORDENAÇÃO COMPLETA DA SUB-TABELA (INCLUINDO SLA / AGING)
                   titulosFiltrados.sort((a: any, b: any) => {
                     let valA: any = a[subSort.key];
                     let valB: any = b[subSort.key];
@@ -633,7 +638,6 @@ export default function ChecagemPage() {
                       valB = valB ? new Date(valB).getTime() : 0;
                     }
 
-                    // ⏱️ LÓGICA DE ORDENAÇÃO PELO SLA / AGING
                     if (subSort.key === "sla_aging") {
                       valA = a.status_confirmacao === "Confirmado" ? calcularDiasSLA(a.emissao, a.atualizacao) : calcularDiasSLA(a.emissao, dataReferencia);
                       valB = b.status_confirmacao === "Confirmado" ? calcularDiasSLA(b.emissao, b.atualizacao) : calcularDiasSLA(b.emissao, dataReferencia);
@@ -669,11 +673,11 @@ export default function ChecagemPage() {
                         
                         <td className="p-2.5 text-center">
                           {alertaPendente ? (
-                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border border-rose-300" : "bg-amber-100 text-amber-800 border border-amber-300"}`}>
+                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-amber-100 text-amber-800 border-amber-300"}`}>
                               {ced.qtd_pendentes} Pendente{ced.qtd_pendentes > 1 ? "s" : ""}
                             </span>
                           ) : (
-                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border-emerald-300 shadow-xs">
                               100% Ok
                             </span>
                           )}
@@ -697,7 +701,7 @@ export default function ChecagemPage() {
                                 <input 
                                   type="text" 
                                   placeholder="Sacado ou Documento..." 
-                                  value={filtroAtual.texto} 
+                                  value={filtroAtual.texto || ""} 
                                   onChange={(e) => setFiltroTexto(ced.cedente, e.target.value)} 
                                   className="p-1.5 border border-slate-300 rounded text-[11px] font-medium w-48 bg-slate-50 outline-none focus:border-blue-500" 
                                 />
@@ -706,18 +710,18 @@ export default function ChecagemPage() {
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l border-slate-200 pl-4">
                                 <span className="text-[10px] font-black text-slate-400 uppercase">🗂️ Filtrar Status:</span>
                                 {STATUS_OPCOES.map(st => {
-                                  const marcado = filtroAtual.statusSelecionados.includes(st);
+                                  const marcado = statusSelArray.includes(st);
                                   return (
                                     <label key={st} className="flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold text-slate-600">
                                       <input 
                                         type="checkbox" 
                                         checked={marcado}
-                                        disabled={!!filtroStatusCard} // Desabilita checkboxes individuais se o filtro master de card do topo estiver rodando
+                                        disabled={!!filtroStatusCard} 
                                         className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                                         onChange={() => {
                                           const lista = marcado 
-                                            ? filtroAtual.statusSelecionados.filter(s => s !== st)
-                                            : [...filtroAtual.statusSelecionados, st];
+                                            ? statusSelArray.filter(s => s !== st)
+                                            : [...statusSelArray, st];
                                           setFiltroStatusDetalhamento(ced.cedente, lista as any);
                                         }}
                                       />
@@ -728,7 +732,7 @@ export default function ChecagemPage() {
                               </div>
                             </div>
 
-                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden print:border-none print:shadow-none">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
                                   <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700">
@@ -756,7 +760,6 @@ export default function ChecagemPage() {
                                     
                                     <th className="p-2.5 text-center">Status</th>
                                     
-                                    {/* ⏱️ AGORA TOTALMENTE ORDENÁVEL PELO CLIQUE NO HEADER */}
                                     <th className="p-2.5 text-center bg-slate-700 print:bg-slate-200 cursor-pointer text-white print:text-slate-700 hover:bg-slate-600 print:hover:bg-slate-300" onClick={() => {
                                       const dir = subSort.key === "sla_aging" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "sla_aging", direction: dir } }));
