@@ -569,8 +569,13 @@ export default function ImportacaoPage() {
         carteiraMap.set(chave, { ...existente, cedente: chave, risco_fidc: val.risco, vencido_fidc: val.vencido });
       }
 
+      // CORREÇÃO: Montando o payload explicitly omitindo o ID
       const carteiraPayload = Array.from(carteiraMap.values()).map((row: any) => ({
-        ...row,
+        cedente: row.cedente,
+        risco_sec: row.risco_sec || 0,
+        vencido_sec: row.vencido_sec || 0,
+        risco_fidc: row.risco_fidc || 0,
+        vencido_fidc: row.vencido_fidc || 0,
         risco_consolidado: (row.risco_sec || 0) + (row.risco_fidc || 0),
         vencido_consolidado: (row.vencido_sec || 0) + (row.vencido_fidc || 0),
         atualizado_em: new Date().toISOString()
@@ -621,8 +626,12 @@ export default function ImportacaoPage() {
           }
         });
 
+        // CORREÇÃO: Montando o payload do VOP explicitamente omitindo o ID
         const vopPayload = Array.from(vopMap.values()).map((v: any) => ({
-          ...v, 
+          mes_ano: v.mes_ano,
+          cedente: v.cedente,
+          vop_sec: v.vop_sec || 0,
+          vop_fidc: v.vop_fidc || 0,
           vop_consolidado: (v.vop_sec || 0) + (v.vop_fidc || 0),
           atualizado_em: new Date().toISOString()
         }));
