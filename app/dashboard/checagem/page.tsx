@@ -27,6 +27,7 @@ interface AgregacaoCedente {
   a_confirmar: number;
   risco: number;
   outros: number;
+  qtd_pendentes: number; // NOVO: Conta quantos títulos não estão confirmados
   titulos: TituloChecagem[];
 }
 
@@ -67,7 +68,7 @@ const formatarDataExcel = (valorData: any): string | null => {
     const data = new Date(Math.round((valorData - 25569) * 86400 * 1000));
     return data.toISOString().split("T")[0];
   }
-  let txt = String(valorData).trim().split(" ")[0]; // Pega só a data, descarta hora 00:00:00
+  let txt = String(valorData).trim().split(" ")[0]; 
   if (!txt) return null;
   if (txt.includes("/")) {
     const partes = txt.split("/");
@@ -124,14 +125,16 @@ export default function ChecagemPage() {
   
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
   
-  // Controle de Ordenação da Tabela
+  // NOVO: Estado para gerenciar os filtros de cada linha expandida separadamente
+  const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, status: string }>>({});
+  
   const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
     key: "total_aberto",
     direction: "desc"
   });
 
   // ==========================================================================
-  // 📥 BUSCA DE DADOS (SNAPSHOT DIÁRIO)
+  // 📥 BUSCA DE DADOS
   // ==========================================================================
   const carregarDados = async () => {
     setCarregando(true);
@@ -155,7 +158,7 @@ export default function ChecagemPage() {
   }, [dataReferencia, empresaAtiva]);
 
   // ==========================================================================
-  // 📤 UPLOAD E PROCESSAMENTO DE PLANILHAS (QPROF SEC)
+  // 📤 UPLOAD
   // ==========================================================================
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, tipoEmpresa: "SEC" | "FIDC") => {
     const file = event.target.files?.[0];
@@ -206,8 +209,6 @@ export default function ChecagemPage() {
             const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
             const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO"));
             const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
-            
-            // Novas colunas de Datas para o SLA
             const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
             const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
 
@@ -268,7 +269,7 @@ export default function ChecagemPage() {
   };
 
   // ==========================================================================
-  // 🧮 CÁLCULOS DOS KPIS E AGREGAÇÃO
+  // 🧮 CÁLCULOS E AGREGAÇÃO
   // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
@@ -289,7 +290,6 @@ export default function ChecagemPage() {
     };
   }, [titulos]);
 
-  // 📈 GRÁFICO DE EVOLUÇÃO DIÁRIA (AGORA COM SCALES E TENDÊNCIAS)
   const chartEvolucao = useMemo(() => {
     const [anoRef, mesRef] = dataReferencia.split("-");
     const prefixoMes = `${anoRef}-${mesRef}`;
@@ -306,51 +306,42 @@ export default function ChecagemPage() {
     confirmadosNoMes.forEach(t => {
       const dia = t.atualizacao!.split("-")[2];
       const idx = arrayDias.findIndex(d => d.dia === dia);
-      if (idx !== -1) {
-        arrayDias[idx].valor += Number(t.valor_aberto) || 0;
-      }
+      if (idx !== -1) arrayDias[idx].valor += Number(t.valor_aberto) || 0;
     });
 
-    // Calcula a tendência em relação ao dia anterior com dados
     let lastValor = 0;
     for (let i = 0; i < arrayDias.length; i++) {
       if (arrayDias[i].valor > 0) {
-        if (lastValor > 0) {
-          arrayDias[i].evolucao = arrayDias[i].valor > lastValor ? "UP" : "DOWN";
-        }
+        if (lastValor > 0) arrayDias[i].evolucao = arrayDias[i].valor > lastValor ? "UP" : "DOWN";
         lastValor = arrayDias[i].valor;
       }
     }
 
     const maxValor = Math.max(...arrayDias.map(d => d.valor), 1); 
-    
-    // Calcula Escala Y para exibir 4 linhas guias
     const gridY = [maxValor, maxValor * 0.75, maxValor * 0.50, maxValor * 0.25, 0];
 
     return { dados: arrayDias, maxValor, gridY };
   }, [titulos, dataReferencia]);
 
-  // 📄 TABELA ORDENÁVEL E AGREGAÇÃO DE CEDENTES
   const cedentesAgregados = useMemo(() => {
     const mapa: Record<string, AgregacaoCedente> = {};
 
     titulos.forEach(t => {
       if (!mapa[t.cedente]) {
-        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, titulos: [] };
+        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, qtd_pendentes: 0, titulos: [] };
       }
       const v = Number(t.valor_aberto) || 0;
       mapa[t.cedente].total_aberto += v;
       
       if (t.status_confirmacao === "Confirmado") mapa[t.cedente].confirmado += v;
-      else if (t.status_confirmacao === "A Confirmar") mapa[t.cedente].a_confirmar += v;
-      else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) mapa[t.cedente].risco += v;
+      else if (t.status_confirmacao === "A Confirmar") { mapa[t.cedente].a_confirmar += v; mapa[t.cedente].qtd_pendentes += 1; }
+      else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) { mapa[t.cedente].risco += v; mapa[t.cedente].qtd_pendentes += 1; }
       else mapa[t.cedente].outros += v;
 
       mapa[t.cedente].titulos.push(t);
     });
 
     const array = Object.values(mapa);
-    
     array.sort((a: any, b: any) => {
       if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === "asc" ? -1 : 1;
       if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === "asc" ? 1 : -1;
@@ -360,15 +351,23 @@ export default function ChecagemPage() {
     return array;
   }, [titulos, sortConfig]);
 
+  // ==========================================================================
+  // 🕹️ INTERAÇÕES DA UI
+  // ==========================================================================
   const handleSort = (key: keyof AgregacaoCedente) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc"
-    }));
+    setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
   };
 
   const toggleLinha = (cedente: string) => {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
+  };
+
+  // Funções para gerenciar o filtro de cada detalhamento isoladamente
+  const setFiltroTexto = (cedente: string, texto: string) => {
+    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente], texto } }));
+  };
+  const setFiltroStatusDetalhamento = (cedente: string, status: string) => {
+    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente], status } }));
   };
 
   const badgeStatus = (status: string) => {
@@ -380,10 +379,19 @@ export default function ChecagemPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 print:bg-white print:p-0 print:space-y-4">
       
-      {/* 🚀 HEADER & CONTROLES DE DATA / EMPRESA */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-5 rounded-xl shadow-xs border border-slate-200">
+      {/* 🖨️ CABEÇALHO EXCLUSIVO DE IMPRESSÃO (Fica oculto na tela normal) */}
+      <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-4">
+        <h1 className="text-2xl font-black uppercase text-slate-900">Relatório Executivo de Checagem</h1>
+        <div className="flex justify-between mt-2 text-sm font-bold text-slate-600">
+          <span>Data Base: {fData(dataReferencia)}</span>
+          <span>Empresa: {EMPRESAS.find(e => e.id === empresaAtiva)?.nome}</span>
+        </div>
+      </div>
+
+      {/* 🚀 HEADER CONTROLES (Oculto na impressão) */}
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-5 rounded-xl shadow-xs border border-slate-200 print:hidden">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">✅ Controle de Checagem</h2>
           <span className="text-xs text-slate-500 font-medium">Acompanhamento diário da qualidade e risco da carteira aberta.</span>
@@ -405,57 +413,47 @@ export default function ChecagemPage() {
           </div>
 
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200 shrink-0">
-            <span className="text-xs font-black text-slate-400 uppercase ml-2">Foto Diária:</span>
+            <span className="text-xs font-black text-slate-400 uppercase ml-2">Foto:</span>
             <input 
               type="date" 
               value={dataReferencia}
               onChange={(e) => setDataReferencia(e.target.value)}
-              className="p-1.5 rounded border border-slate-300 text-xs font-bold text-blue-700 outline-none focus:border-blue-500 cursor-pointer"
+              className="p-1.5 rounded border border-slate-300 text-xs font-bold text-blue-700 outline-none cursor-pointer"
             />
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <label className={`px-4 py-2 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-black rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer border border-indigo-200 shadow-sm flex items-center gap-2 ${processandoUpload ? "opacity-50 pointer-events-none" : ""}`}>
+            <label className={`px-4 py-2 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-black rounded-lg text-[10px] uppercase cursor-pointer border border-indigo-200 shadow-sm flex items-center gap-2`}>
               {processandoUpload ? "⏳ Lendo..." : "📥 Importar SEC"}
               <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "SEC")} />
             </label>
-            <label className={`px-4 py-2 bg-purple-50 hover:bg-purple-600 hover:text-white text-purple-700 font-black rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer border border-purple-200 shadow-sm flex items-center gap-2 ${processandoUpload ? "opacity-50 pointer-events-none" : ""}`}>
-              {processandoUpload ? "⏳ Lendo..." : "📥 Importar FIDC"}
-              <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "FIDC")} />
-            </label>
+            <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-lg text-[10px] uppercase border border-slate-900 shadow-sm flex items-center gap-2">
+              🖨️ Relatório
+            </button>
           </div>
         </div>
       </div>
 
       {/* 📊 PAINEL DE KPIS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800">
-          <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider">Saldo Total em Aberto</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:break-inside-avoid">
+        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800 print:border-2 print:border-slate-900 print:text-slate-900 print:bg-white">
+          <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider print:text-slate-600">Saldo Total em Aberto</span>
           <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
         <div className="bg-white border-l-4 border-emerald-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.confirmado)}</span>
           <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg">{kpis.pConfirmado}%</div>
-          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${kpis.pConfirmado}%` }}></div>
-          </div>
         </div>
         <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider">⏳ A Confirmar</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.aConfirmar)}</span>
           <div className="absolute right-4 top-4 text-blue-500 font-black text-lg">{kpis.pAConfirmar}%</div>
-          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${kpis.pAConfirmar}%` }}></div>
-          </div>
         </div>
         <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Problema</span>
           <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.risco)}</span>
           <div className="absolute right-4 top-4 text-rose-500 font-black text-lg">{kpis.pRisco}%</div>
-          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-rose-500 h-full rounded-full" style={{ width: `${kpis.pRisco}%` }}></div>
-          </div>
         </div>
         <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">🗂️ Outros / Política</span>
@@ -463,66 +461,30 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO DE BARRAS TURBINADO: EVOLUÇÃO DIÁRIA (VALORIZAÇÃO/ESCALA) */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col">
+      {/* 📈 GRÁFICO (Oculto na impressão para focar na tabela) */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col print:hidden">
         <div className="mb-4 border-b border-slate-100 pb-2">
           <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
-          <span className="text-[10px] font-bold text-slate-400">Desempenho da equipe (Valores totais confirmados no dia - Referência: {fData(dataReferencia).split("/").slice(1).join("/")})</span>
         </div>
-        
-        {/* GRÁFICO AREA */}
         <div className="flex h-44 w-full mt-2 relative">
-          
-          {/* Escala Y (Valores na Esquerda) */}
           <div className="w-14 flex flex-col justify-between items-end pr-2 text-[9px] font-mono font-bold text-slate-400 border-r border-slate-100 pb-5">
-            {chartEvolucao.gridY.map((gy, i) => (
-              <span key={i} className="leading-none">{fMShort(gy)}</span>
-            ))}
+            {chartEvolucao.gridY.map((gy, i) => <span key={i} className="leading-none">{fMShort(gy)}</span>)}
           </div>
-
-          {/* Grid de Fundo */}
           <div className="absolute inset-0 left-14 flex flex-col justify-between pointer-events-none pb-5">
-            {chartEvolucao.gridY.map((_, i) => (
-              <div key={i} className="w-full border-t border-slate-100 border-dashed h-0"></div>
-            ))}
+            {chartEvolucao.gridY.map((_, i) => <div key={i} className="w-full border-t border-slate-100 border-dashed h-0"></div>)}
           </div>
-
-          {/* Barras e Eixo X */}
           <div className="flex-1 flex items-end gap-1.5 pl-2 relative">
             {chartEvolucao.dados.map((item, idx) => {
               const altura = item.valor > 0 ? Math.max((item.valor / chartEvolucao.maxValor) * 100, 2) : 0; 
-              
-              let corBarra = "bg-slate-200";
-              let corFundo = "bg-slate-50";
-              let iconeTendencia = "";
-
+              let corBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
               if (item.valor > 0) {
-                if (item.evolucao === "UP") {
-                  corBarra = "bg-emerald-500 hover:bg-emerald-400";
-                  corFundo = "bg-emerald-50";
-                  iconeTendencia = "text-emerald-500";
-                } else if (item.evolucao === "DOWN") {
-                  corBarra = "bg-rose-500 hover:bg-rose-400";
-                  corFundo = "bg-rose-50";
-                  iconeTendencia = "text-rose-500";
-                } else {
-                  corBarra = "bg-blue-500 hover:bg-blue-400";
-                  corFundo = "bg-blue-50";
-                  iconeTendencia = "text-blue-500";
-                }
+                if (item.evolucao === "UP") { corBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
+                else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
+                else { corBarra = "bg-blue-500"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
               }
-
               return (
                 <div key={idx} className="flex-1 flex flex-col items-center h-full relative group">
-                  {/* Tooltip Hover */}
-                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-20 pointer-events-none">
-                    Dia {item.dia}: {fM(item.valor)}
-                  </div>
-                  
-                  {/* Container da Barra para preencher altura total */}
                   <div className={`w-full h-full flex flex-col justify-end ${corFundo} rounded-t-sm relative pb-5`}>
-                    
-                    {/* Seta de Tendência e Valor (Sobe e Desce conforme altura) */}
                     {item.valor > 0 && (
                       <div className="absolute w-full flex flex-col items-center justify-end z-10 transition-all duration-500" style={{ bottom: `calc(${altura}% + 20px)` }}>
                         <span className={`text-[8px] font-black leading-none ${iconeTendencia}`}>
@@ -530,12 +492,8 @@ export default function ChecagemPage() {
                         </span>
                       </div>
                     )}
-
-                    {/* A Barra Colorida */}
                     <div className={`w-full rounded-t-sm transition-all duration-500 ${corBarra}`} style={{ height: `${altura}%` }}></div>
                   </div>
-
-                  {/* Label Dia Eixo X (Absoluto no fundo para ficar alinhado) */}
                   <span className="text-[9px] font-black text-slate-400 absolute bottom-0 h-5 flex items-center justify-center">{item.dia}</span>
                 </div>
               );
@@ -544,114 +502,176 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📄 TABELÃO MASTER-DETAIL COM ORDENAÇÃO */}
+      {/* 📄 TABELÃO MASTER-DETAIL "MASTIGADO" */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
-              <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none">
-                <th className="p-3 w-10 text-center">Abrir</th>
-                <th className="p-3 min-w-[250px] cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort("cedente")}>
-                  Cedente / Assignor {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+              <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none print:bg-slate-800 print:text-white">
+                <th className="p-3 w-10 text-center print:hidden">Abrir</th>
+                <th className="p-3 min-w-[250px] cursor-pointer hover:bg-slate-200 print:hover:bg-slate-800 transition-colors" onClick={() => handleSort("cedente")}>
+                  Cedente / Origem {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                 </th>
-                <th className="p-3 text-right cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort("total_aberto")}>
-                  Saldo Aberto (R$) {sortConfig.key === "total_aberto" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                <th className="p-3 text-center w-[150px]">Status da Carteira</th>
+                <th className="p-3 text-right cursor-pointer hover:bg-slate-200 print:hover:bg-slate-800" onClick={() => handleSort("total_aberto")}>
+                  Saldo Aberto {sortConfig.key === "total_aberto" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                 </th>
-                <th className="p-3 text-right text-emerald-600 cursor-pointer hover:bg-emerald-100 transition-colors" onClick={() => handleSort("confirmado")}>
-                  Confirmado {sortConfig.key === "confirmado" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                <th className="p-3 text-right text-emerald-600 print:text-emerald-300 cursor-pointer" onClick={() => handleSort("confirmado")}>
+                  Confirmado
                 </th>
-                <th className="p-3 text-right text-blue-600 cursor-pointer hover:bg-blue-100 transition-colors" onClick={() => handleSort("a_confirmar")}>
-                  A Confirmar {sortConfig.key === "a_confirmar" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                <th className="p-3 text-right text-blue-600 print:text-blue-300 cursor-pointer" onClick={() => handleSort("a_confirmar")}>
+                  A Confirmar
                 </th>
-                <th className="p-3 text-right text-rose-500 cursor-pointer hover:bg-rose-100 transition-colors" onClick={() => handleSort("risco")}>
-                  Riscos / Falso {sortConfig.key === "risco" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                <th className="p-3 text-right text-rose-500 print:text-rose-300 cursor-pointer" onClick={() => handleSort("risco")}>
+                  Problemas
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {carregando ? (
-                <tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot de confirmações...</td></tr>
+                <tr><td colSpan={7} className="p-10 text-center text-slate-400 font-bold animate-pulse">Buscando snapshot...</td></tr>
               ) : cedentesAgregados.length === 0 ? (
-                <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ({fData(dataReferencia)}).</td></tr>
+                <tr><td colSpan={7} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada.</td></tr>
               ) : (
                 cedentesAgregados.map((ced) => {
                   const isOpen = !!expandidos[ced.cedente];
+                  
+                  // Lógica visual do "Termômetro da Carteira"
+                  const percConfirmado = ced.total_aberto > 0 ? (ced.confirmado / ced.total_aberto) * 100 : 0;
+                  const alertaPendente = ced.qtd_pendentes > 0;
+
+                  // Aplicando Filtro Interno (Para a Sub-tabela)
+                  const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", status: "" };
+                  const titulosFiltrados = ced.titulos.filter(t => {
+                    const matchText = t.sacado.includes(filtroAtual.texto.toUpperCase().trim()) || t.documento.includes(filtroAtual.texto.trim());
+                    const matchStatus = filtroAtual.status === "" ? true : t.status_confirmacao === filtroAtual.status;
+                    return matchText && matchStatus;
+                  }).sort((a,b) => b.valor_aberto - a.valor_aberto);
+
                   return (
-                    <tr key={ced.cedente} style={{ display: "contents" }}>
-                      {/* LINHA MASTER (CEDENTE) */}
-                      <tr className="bg-white hover:bg-blue-50/30 transition-colors">
-                        <td className="p-2.5 text-center border-l-4 border-transparent">
+                    <tr key={ced.cedente} style={{ display: "contents" }} className="print:break-inside-avoid">
+                      
+                      {/* LINHA MASTER (VISÃO DIRETORIA) */}
+                      <tr className={`bg-white hover:bg-slate-50 transition-colors ${isOpen ? "bg-slate-50" : ""}`}>
+                        <td className="p-2.5 text-center print:hidden border-l-4 border-transparent">
                           <button 
                             onClick={() => toggleLinha(ced.cedente)} 
-                            className="w-5 h-5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs transition-colors"
+                            className="w-6 h-6 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 rounded-full font-black flex items-center justify-center border border-slate-300 shadow-sm cursor-pointer text-sm transition-all"
                           >
                             {isOpen ? "−" : "+"}
                           </button>
                         </td>
-                        <td className="p-2.5 text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
+                        <td className="p-2.5">
+                          <div className="flex flex-col">
+                            <span className="text-[12px] font-black text-slate-800 uppercase truncate max-w-[300px]" title={ced.cedente}>{ced.cedente}</span>
+                            {/* Termômetro Visual de Saúde do Cedente */}
+                            <div className="w-full bg-slate-200 h-1 mt-1.5 rounded-full overflow-hidden flex">
+                               <div className="bg-emerald-500 h-full" style={{ width: `${percConfirmado}%` }}></div>
+                               <div className="bg-slate-200 h-full flex-1"></div>
+                            </div>
+                          </div>
+                        </td>
+                        
+                        <td className="p-2.5 text-center">
+                          {alertaPendente ? (
+                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border border-rose-300 animate-pulse" : "bg-amber-100 text-amber-800 border border-amber-300"}`}>
+                              {ced.qtd_pendentes} Pendente{ced.qtd_pendentes > 1 ? "s" : ""}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                              100% Ok
+                            </span>
+                          )}
+                        </td>
+                        
+                        <td className="p-2.5 text-right font-mono font-black text-slate-800 bg-slate-50/50">{fM(ced.total_aberto)}</td>
                         <td className="p-2.5 text-right font-mono font-bold text-emerald-700 bg-emerald-50/30">{fM(ced.confirmado)}</td>
                         <td className="p-2.5 text-right font-mono font-bold text-blue-700 bg-blue-50/30">{fM(ced.a_confirmar)}</td>
                         <td className="p-2.5 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{fM(ced.risco)}</td>
                       </tr>
 
-                      {/* LINHA DETAIL (SACADOS DAQUELE CEDENTE) */}
-                      {isOpen && (
-                        <tr>
-                          <td colSpan={6} className="bg-slate-100/50 p-4 border-b border-slate-200">
+                      {/* LINHA DETAIL (VISÃO ANALISTA - SACADOS) */}
+                      {(isOpen || typeof window === 'undefined' ? false : document.body.classList.contains("print")) && isOpen && (
+                        <tr className="print:block">
+                          <td colSpan={7} className="bg-slate-100/50 p-4 border-b border-slate-200 print:p-1 print:bg-white">
+                            
+                            {/* Barra de Filtro Interna (SÓ APARECE NA TELA, SOME NA IMPRESSÃO) */}
+                            <div className="flex items-center gap-3 mb-3 bg-white p-2 rounded-lg border border-slate-200 shadow-xs print:hidden w-fit">
+                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider pl-1">🔍 Filtrar Sacados:</span>
+                              <input 
+                                type="text" 
+                                placeholder="Nome ou Nº Documento..." 
+                                value={filtroAtual.texto} 
+                                onChange={(e) => setFiltroTexto(ced.cedente, e.target.value)} 
+                                className="p-1 border border-slate-300 rounded text-[11px] font-medium w-48 bg-slate-50 outline-none focus:border-blue-500" 
+                              />
+                              <select 
+                                value={filtroAtual.status} 
+                                onChange={(e) => setFiltroStatusDetalhamento(ced.cedente, e.target.value)} 
+                                className="p-1 border border-slate-300 rounded text-[11px] font-bold bg-slate-50 outline-none cursor-pointer focus:border-blue-500"
+                              >
+                                <option value="">Todos os Status</option>
+                                <option value="Confirmado">Somente Confirmados</option>
+                                <option value="A Confirmar">A Confirmar / Pendentes</option>
+                                <option value="Não Confirma">Problemas / Não Confirma</option>
+                              </select>
+                            </div>
+
                             <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900">
+                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-200 print:text-slate-800">
                                     <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                     <th className="p-2.5 text-center">Nº Doc</th>
                                     <th className="p-2.5 text-center">Emissão</th>
                                     <th className="p-2.5 text-center">Vencimento</th>
                                     <th className="p-2.5 text-right">Valor Aberto</th>
                                     <th className="p-2.5 text-center">Status</th>
-                                    <th className="p-2.5 text-center bg-slate-700">SLA / Aging</th>
-                                    <th className="p-2.5 max-w-[200px]">Ocorrências (QPROF)</th>
+                                    <th className="p-2.5 text-center bg-slate-700 print:bg-slate-300">SLA / Aging</th>
+                                    <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências (QPROF)</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                                  {ced.titulos.sort((a,b) => b.valor_aberto - a.valor_aberto).map(tit => {
-                                    
-                                    // ⏱️ Lógica de SLA e Aging
-                                    const diasSla = calcularDiasSLA(tit.emissao, tit.atualizacao);
-                                    const diasAberto = calcularDiasSLA(tit.emissao, dataReferencia);
-                                    
-                                    let slaText = "-";
-                                    let slaClass = "text-slate-400";
-                                    
-                                    if (tit.status_confirmacao === "Confirmado") {
-                                      slaText = diasSla !== null ? `✅ Conf. em ${diasSla} d` : "-";
-                                      slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5";
-                                    } else {
-                                      slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto} d` : "-";
-                                      slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5";
-                                    }
+                                  {titulosFiltrados.length === 0 ? (
+                                     <tr><td colSpan={8} className="p-4 text-center text-slate-400">Nenhum título encontrado com esse filtro.</td></tr>
+                                  ) : (
+                                    titulosFiltrados.map(tit => {
+                                      const diasSla = calcularDiasSLA(tit.emissao, tit.atualizacao);
+                                      const diasAberto = calcularDiasSLA(tit.emissao, dataReferencia);
+                                      
+                                      let slaText = "-";
+                                      let slaClass = "text-slate-400";
+                                      
+                                      if (tit.status_confirmacao === "Confirmado") {
+                                        slaText = diasSla !== null ? `✅ Conf. em ${diasSla}d` : "-";
+                                        slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5";
+                                      } else {
+                                        slaText = diasAberto !== null ? `⏳ Pend. há ${diasAberto}d` : "-";
+                                        slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5";
+                                      }
 
-                                    return (
-                                      <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
-                                        <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
-                                        <td className="p-2.5 text-center font-mono text-slate-400">{fData(tit.emissao)}</td>
-                                        <td className="p-2.5 text-center font-mono">{fData(tit.vencimento)}</td>
-                                        <td className="p-2.5 text-right font-mono font-black text-slate-800">{fM(tit.valor_aberto)}</td>
-                                        <td className="p-2.5 text-center">
-                                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${badgeStatus(tit.status_confirmacao)}`}>
-                                            {tit.status_confirmacao}
-                                          </span>
-                                        </td>
-                                        <td className="p-2.5 text-center text-[9px] whitespace-nowrap">
-                                          <span className={slaClass}>{slaText}</span>
-                                        </td>
-                                        <td className="p-2.5 max-w-[200px] truncate text-slate-500 italic text-[10px]" title={tit.ocorrencias}>
-                                          {tit.ocorrencias || "-"}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
+                                      return (
+                                        <tr key={tit.id} className="hover:bg-slate-50 transition-colors">
+                                          <td className="p-2.5 pl-4 font-bold text-slate-800 max-w-[250px] truncate" title={tit.sacado}>{tit.sacado}</td>
+                                          <td className="p-2.5 text-center text-slate-500 font-mono">{tit.documento}</td>
+                                          <td className="p-2.5 text-center font-mono text-slate-400">{fData(tit.emissao)}</td>
+                                          <td className="p-2.5 text-center font-mono">{fData(tit.vencimento)}</td>
+                                          <td className="p-2.5 text-right font-mono font-black text-slate-800">{fM(tit.valor_aberto)}</td>
+                                          <td className="p-2.5 text-center">
+                                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-xs tracking-wider ${badgeStatus(tit.status_confirmacao)}`}>
+                                              {tit.status_confirmacao}
+                                            </span>
+                                          </td>
+                                          <td className="p-2.5 text-center text-[9px] whitespace-nowrap">
+                                            <span className={slaClass}>{slaText}</span>
+                                          </td>
+                                          <td className="p-2.5 max-w-[200px] truncate text-slate-500 italic text-[10px] print:hidden" title={tit.ocorrencias}>
+                                            {tit.ocorrencias || "-"}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
                                 </tbody>
                               </table>
                             </div>
