@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 export interface RotaSistema {
   nome: string;
   path: string;
@@ -27,7 +29,8 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 💰 FINANCEIRO
   { nome: "Painel de Indicadores (BI)", path: "/dashboard/powerbi", icone: "📊", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Financeiro", defaultMaster: true },
-  { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true }, // <-- Adicionado aqui!
+  { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true },
+  { nome: "Simulador de Rentabilidade", path: "/dashboard/simulador", icone: "🧮", categoria: "Financeiro", defaultMaster: true }, // <-- Adicionado com sucesso!
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Financeiro", defaultMaster: true },
 
   // 📝 CADASTRO
