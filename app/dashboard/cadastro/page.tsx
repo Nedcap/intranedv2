@@ -62,18 +62,22 @@ export default function CadastroPage() {
     setCedentes(novos);
   };
 
-  // Tratamento especial para Limite numérico com máscara visual amigável
-  const handleLimiteChange = (index: number, valorRaw: string) => {
-    // Mantém apenas números na persistência interna do estado
+  // Ajustado: Formata a entrada do usuário em texto mascarado dinâmico R$ compatível com a sua coluna text
+  const handleLimiteInputChange = (index: number, valorRaw: string) => {
     const apenasNumeros = valorRaw.replace(/\D/g, "");
-    const valorNumerico = apenasNumeros ? parseFloat(apenasNumeros) / 100 : 0;
-    handleInputChange(index, "limite", valorNumerico);
+    if (!apenasNumeros) {
+      handleInputChange(index, "limite", "");
+      return;
+    }
+    const valorNumerico = parseFloat(apenasNumeros) / 100;
+    const formatado = valorNumerico.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    handleInputChange(index, "limite", formatado);
   };
 
   const adicionarNovaLinha = () => {
     const novaLinha = {
       cedente: "", 
-      limite: 0,
+      limite: "",
       taxa: "",
       docs_ok: null,
       obs: "",
@@ -125,7 +129,7 @@ export default function CadastroPage() {
       for (const item of alvosEnvio) {
         const payload: any = {
           cedente: limparNome(item.cedente), 
-          limite: Number(item.limite) || 0, 
+          limite: item.limite || "", // Salva como string contendo a formatação para bater com o banco
           taxa: item.taxa || "", 
           docs_ok: item.docs_ok, 
           obs: item.obs || "",
@@ -149,8 +153,7 @@ export default function CadastroPage() {
       
       alert("🎉 Alterações gravadas com sucesso no banco!");
       setCedentesEmEdicaoDeNome({});
-      // Recarrega os dados para limpar os modificadores
-      const { data } = await supabase.from("cadastro_cedentes").select("*");
+      const { data } = await supabase.from("cadastro_cedentes").select("*").order("cedente", { ascending: true });
       if (data) setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
     } catch (err: any) { 
       console.error(err);
@@ -160,9 +163,7 @@ export default function CadastroPage() {
     }
   };
 
-  // ==========================================================================
-  // 🧮 KPIs OPERACIONAIS E REGRAS DE SLA
-  // ==========================================================================
+  // KPIs
   const analiseEsteira = useMemo(() => {
     let total = cedentes.length;
     let pendenteEnvio = 0;
@@ -179,7 +180,6 @@ export default function CadastroPage() {
         else if ((c.data_5 && !c.data_6) || (c.data_7 && !c.data_8)) aguardandoAssinatura++;
       }
 
-      // Cálculo de SLA (Aging Operacional do Envio até Assinatura)
       if (c.data_5 && c.data_6) {
         const d1 = new Date(c.data_5);
         const d2 = new Date(c.data_6);
@@ -193,7 +193,7 @@ export default function CadastroPage() {
     return { total, pendenteEnvio, aguardandoAssinatura, aptos, slaMedio };
   }, [cedentes]);
 
-  // Motor Síncrono de Filtro e Ordenação Dinâmica Combinados
+  // Filtro e Ordenação Combinados
   const cedentesProcessados = useMemo(() => {
     let resultado = cedentes.filter(c => {
       if (filtroStatus === "TODOS") return true;
@@ -205,16 +205,21 @@ export default function CadastroPage() {
       return true;
     });
 
-    // Aplica a ordenação solicitada nos cabeçalhos
     resultado.sort((a: any, b: any) => {
       let valA = a[sortConfig.key];
       let valB = b[sortConfig.key];
+
+      // Se for ordenação de limite text, converte temporariamente para número para ordenar com precisão matemática
+      if (sortConfig.key === "limite") {
+        valA = parseFloat(String(valA || "").replace(/\D/g, "")) || 0;
+        valB = parseFloat(String(valB || "").replace(/\D/g, "")) || 0;
+        return sortConfig.direction === "asc" ? valA - valB : valB - valA;
+      }
 
       if (typeof valA === "string") {
         return sortConfig.direction === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
       }
       
-      // Ordenação numérica (ex: Limite)
       valA = Number(valA) || 0;
       valB = Number(valB) || 0;
       return sortConfig.direction === "asc" ? valA - valB : valB - valA;
@@ -223,16 +228,10 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // Utilitários de Formatação Dinâmica
-  const formatarMoedaBRL = (valor: any) => {
-    const n = Number(valor) || 0;
-    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  };
-
   if (carregando) return <div className="p-8 text-center animate-pulse text-slate-500 font-bold">Carregando esteira operacional...</div>;
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700" style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
       
       {/* HEADER DA PÁGINA */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 gap-4">
@@ -258,7 +257,7 @@ export default function CadastroPage() {
         </div>
       </div>
 
-      {/* 📊 PAINEL DE METRICAS OPERACIONAIS */}
+      {/* PAINEL DE METRICAS OPERACIONAIS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <button 
           onClick={() => setFiltroStatus("TODOS")}
@@ -292,29 +291,23 @@ export default function CadastroPage() {
           <span className="text-2xl font-black font-mono mt-1">{analiseEsteira.aptos}</span>
         </button>
 
-        {/* Card Informativo Técnico de SLA */}
         <div className="p-4 rounded-xl border border-slate-200 bg-blue-50/50 border-l-4 border-l-blue-600 flex flex-col justify-center">
           <span className="text-[10px] font-black uppercase tracking-wider text-blue-600">⏱️ SLA Médio de Assinatura</span>
           <span className="text-2xl font-black font-mono mt-1 text-slate-800">{analiseEsteira.slaMedio} <span className="text-sm font-bold text-slate-500">dias</span></span>
         </div>
       </div>
 
-      {/* TABELA DINÂMICA DE ALTO RENDIMENTO */}
+      {/* TABELA DINÂMICA */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[1500px]">
           <thead>
             <tr className="bg-slate-100 border-b border-slate-200 font-bold uppercase text-slate-500 text-[11px] tracking-wider select-none">
-              
-              {/* CABEÇALHOS AGORA TOTALMENTE ORDENÁVEIS COM AVALIAÇÃO DINÂMICA */}
               <th onClick={() => handleSort("cedente")} className="p-3 pl-5 w-[300px] cursor-pointer hover:bg-slate-200 transition-colors">Cedente {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              
               {usuarioAtual?.perfil !== "comercial" && (
                 <th onClick={() => handleSort("comercial")} className="p-3 w-40 text-center text-blue-600 cursor-pointer hover:bg-slate-200">Comercial Resp. {sortConfig.key === "comercial" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
               )}
-              
               <th onClick={() => handleSort("limite")} className="p-3 text-center w-40 cursor-pointer hover:bg-slate-200">Limite {sortConfig.key === "limite" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
               <th onClick={() => handleSort("taxa")} className="p-3 text-center w-24 cursor-pointer hover:bg-slate-200">Taxa (%) {sortConfig.key === "taxa" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              
               <th className="p-3 text-center w-28">Docs Auditados</th>
               <th className="p-3 text-center w-44">Contrato Sec</th>
               <th className="p-3 text-center w-44">Contrato Fidc</th>
@@ -332,7 +325,6 @@ export default function CadastroPage() {
               return (
                 <tr key={identificadorUnico} className={`hover:bg-slate-50/50 transition-colors ${item._isNovo ? "bg-blue-50/20" : ""} ${item._isEditado && !item._isNovo ? "bg-amber-50/10" : ""}`}>
                   
-                  {/* Nome do Cedente Interativo com Botão de Edição */}
                   <td className="p-3 pl-5">
                     {isEditandoNome ? (
                       <input 
@@ -356,7 +348,6 @@ export default function CadastroPage() {
                     )}
                   </td>
 
-                  {/* Comercial Responsável */}
                   {usuarioAtual?.perfil !== "comercial" && (
                     <td className="p-2 text-center">
                        <input 
@@ -369,23 +360,21 @@ export default function CadastroPage() {
                     </td>
                   )}
 
-                  {/* Limite - Mascarado dinamicamente em Valor Real BRL */}
+                  {/* AJUSTE AQUI: O input agora lê a string direta do banco com R$ sem quebrar */}
                   <td className="p-2 text-center">
                     <input 
                       type="text" 
-                      value={item.limite ? formatarMoedaBRL(item.limite) : ""} 
-                      onChange={(e) => handleLimiteChange(index, e.target.value)} 
+                      value={item.limite || ""} 
+                      onChange={(e) => handleLimiteInputChange(index, e.target.value)} 
                       className="w-full p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono text-slate-700" 
                       placeholder="R$ 0,00" 
                     />
                   </td>
                   
-                  {/* Taxa */}
                   <td className="p-2 text-center">
                     <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} className="w-full p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono" placeholder="0,00%" />
                   </td>
 
-                  {/* Auditoria Docs */}
                   <td className="p-2 text-center">
                     <div className="flex gap-2 justify-center text-xs font-bold">
                       <label className="text-emerald-600 cursor-pointer flex items-center gap-1">
@@ -397,7 +386,6 @@ export default function CadastroPage() {
                     </div>
                   </td>
 
-                  {/* Contrato Securitizadora */}
                   <td className="p-2 text-center bg-slate-50/50">
                     <div className="flex flex-col gap-1 items-center">
                       <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${item.data_5 ? (item.data_6 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200") : "bg-rose-50 text-rose-700 border-rose-200"}`}>
@@ -410,7 +398,6 @@ export default function CadastroPage() {
                     </div>
                   </td>
 
-                  {/* Contrato FIDC */}
                   <td className="p-2 text-center bg-slate-50/50">
                     <div className="flex flex-col gap-1 items-center">
                       <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${item.data_7 ? (item.data_8 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200") : "bg-rose-50 text-rose-700 border-rose-200"}`}>
@@ -423,12 +410,10 @@ export default function CadastroPage() {
                     </div>
                   </td>
 
-                  {/* Cadastro Administrativo */}
                   <td className="p-2 text-center">
                     <input type="date" value={item.data_9 || ""} title="Cadastro no Sistema" onChange={(e) => handleInputChange(index, "data_9", e.target.value)} className="w-full p-1 border border-slate-200 rounded text-[11px] text-center outline-none font-bold text-slate-500 cursor-pointer" />
                   </td>
 
-                  {/* Status Final (Apto) */}
                   <td className="p-2 text-center bg-slate-50/20">
                     <div className="flex gap-2 justify-center text-xs font-bold">
                       <label className="text-emerald-600 cursor-pointer flex items-center gap-1" title="Apto">
@@ -440,7 +425,6 @@ export default function CadastroPage() {
                     </div>
                   </td>
 
-                  {/* Observações de Impasse */}
                   <td className="p-2 pr-5">
                     <textarea value={item.obs || ""} onChange={(e) => handleInputChange(index, "obs", e.target.value)} className="w-full p-1.5 border border-slate-200 rounded text-xs h-9 resize-none outline-none focus:border-blue-500 bg-transparent font-medium" placeholder="Ex: Aguardando assinatura eletrônica..." />
                   </td>
