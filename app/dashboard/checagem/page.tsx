@@ -28,7 +28,7 @@ interface AgregacaoCedente {
   risco: number;
   outros: number;
   qtd_pendentes: number;
-  max_dias_pendente: number; // NOVO: Guarda o título mais antigo sem confirmação para ordenar o master
+  max_dias_pendente: number;
   titulos: TituloChecagem[];
 }
 
@@ -127,17 +127,13 @@ export default function ChecagemPage() {
   const [processandoUpload, setProcessandoUpload] = useState(false);
   
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
-  
-  // 🕹️ ESTADOS DOS FILTROS CORRIGIDOS (Iniciados com valores padrões vazios/arrays para evitar quebras)
   const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, statusSelecionados: string[] }>>({});
   
-  // Controle de Ordenação Master (Cedentes)
   const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
     key: "total_aberto",
     direction: "desc"
   });
 
-  // Controle de Ordenação Sub-Tabela (Sacados) - NOVO
   const [subSortConfig, setSubSortConfig] = useState<Record<string, { key: keyof TituloChecagem; direction: "asc" | "desc" }>>({});
 
   const carregarDados = async () => {
@@ -160,9 +156,6 @@ export default function ChecagemPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataReferencia, empresaAtiva]);
 
-  // ==========================================================================
-  // 📤 UPLOAD
-  // ==========================================================================
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, tipoEmpresa: "SEC" | "FIDC") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -271,9 +264,6 @@ export default function ChecagemPage() {
     }
   };
 
-  // ==========================================================================
-  // 🧮 CÁLCULOS E AGREGAÇÃO
-  // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -331,7 +321,7 @@ export default function ChecagemPage() {
 
     titulos.forEach(t => {
       if (!mapa[t.cedente]) {
-        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, qtd_pendentes: 0, titulos: [] };
+        mapa[t.cedente] = { cedente: t.cedente, total_aberto: 0, confirmado: 0, a_confirmar: 0, risco: 0, outros: 0, qtd_pendentes: 0, max_dias_pendente: 0, titulos: [] };
       }
       const v = Number(t.valor_aberto) || 0;
       mapa[t.cedente].total_aberto += v;
@@ -365,12 +355,23 @@ export default function ChecagemPage() {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
   };
 
-  // Funções para gerenciar o filtro de cada detalhamento isoladamente
-  const setFiltroTexto = (cedente: string, texto: string) => {
-    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente] || { texto: "", status: "" }, texto } }));
+  // ✅ FUNÇÃO RESTAURADA: Essa daqui foi a que causou o erro no deploy
+  const handleExpandirTudo = () => {
+    const novoEstado: Record<string, boolean> = {};
+    const jaEstaoTodosAbertos = Object.keys(expandidos).length === cedentesAgregados.length;
+    
+    if (!jaEstaoTodosAbertos) {
+      cedentesAgregados.forEach(c => novoEstado[c.cedente] = true);
+    }
+    setExpandidos(novoEstado);
   };
-  const setFiltroStatusDetalhamento = (cedente: string, status: string) => {
-    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente], status } }));
+
+  const setFiltroTexto = (cedente: string, texto: string) => {
+    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente] || { texto: "", statusSelecionados: [] }, texto } }));
+  };
+  
+  const setFiltroStatusDetalhamento = (cedente: string, statusSelecionados: string[]) => {
+    setFiltrosDetalhamento(prev => ({ ...prev, [cedente]: { ...prev[cedente] || { texto: "" }, statusSelecionados } }));
   };
 
   const badgeStatus = (status: string) => {
@@ -382,7 +383,10 @@ export default function ChecagemPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 print:bg-white print:p-0 print:space-y-4">
+    <div 
+      className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 print:p-0 print:space-y-4 print:bg-white print:w-full print:max-w-none" 
+      style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}
+    >
       
       {/* 🖨️ CABEÇALHO EXCLUSIVO DE IMPRESSÃO */}
       <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-4">
@@ -544,23 +548,19 @@ export default function ChecagemPage() {
                   const percConfirmado = ced.total_aberto > 0 ? (ced.confirmado / ced.total_aberto) * 100 : 0;
                   const alertaPendente = ced.qtd_pendentes > 0;
 
-                  // Carrega as configurações de filtro de forma segura
                   const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", statusSelecionados: [] };
                   const subSort = subSortConfig[ced.cedente] || { key: "valor_aberto", direction: "desc" };
 
-                  // Processa filtros e ordenações internas
                   let titulosFiltrados = ced.titulos.filter(t => {
                     const matchText = t.sacado.toUpperCase().includes(filtroAtual.texto.toUpperCase().trim()) || t.documento.includes(filtroAtual.texto.trim());
                     const matchStatus = filtroAtual.statusSelecionados.length === 0 ? true : filtroAtual.statusSelecionados.includes(t.status_confirmacao);
                     return matchText && matchStatus;
                   });
 
-                  // Executa a ordenação solicitada na sub-tabela
                   titulosFiltrados.sort((a: any, b: any) => {
                     let valA = a[subSort.key];
                     let valB = b[subSort.key];
 
-                    // Tratamento especial para ordenação de datas de Emissão/Vencimento
                     if (["vencimento", "emissao"].includes(subSort.key)) {
                       valA = valA ? new Date(valA).getTime() : 0;
                       valB = valB ? new Date(valB).getTime() : 0;
@@ -596,11 +596,11 @@ export default function ChecagemPage() {
                         
                         <td className="p-2.5 text-center">
                           {alertaPendente ? (
-                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border border-rose-300" : "bg-amber-100 text-amber-800 border border-amber-300"}`}>
+                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-amber-100 text-amber-800 border-amber-300"}`}>
                               {ced.qtd_pendentes} Pendente{ced.qtd_pendentes > 1 ? "s" : ""}
                             </span>
                           ) : (
-                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border-emerald-300 shadow-xs">
                               100% Ok
                             </span>
                           )}
@@ -630,7 +630,6 @@ export default function ChecagemPage() {
                                 />
                               </div>
                               
-                              {/* SELEÇÃO MÚLTIPLA DE STATUS VIA CHECKBOXES */}
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l border-slate-200 pl-4">
                                 <span className="text-[10px] font-black text-slate-400 uppercase">🗂️ Filtrar Status:</span>
                                 {STATUS_OPCOES.map(st => {
@@ -662,7 +661,6 @@ export default function ChecagemPage() {
                                     <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                     <th className="p-2.5 text-center">Nº Doc</th>
                                     
-                                    {/* CABEÇALHOS AGORA TOTALMENTE ORDENÁVEIS COM INDICAÇÃO VISUAL */}
                                     <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
                                       const dir = subSort.key === "emissao" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "emissao", direction: dir } }));
