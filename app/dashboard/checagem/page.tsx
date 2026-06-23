@@ -98,7 +98,7 @@ const classificarStatus = (ocorrenciaStr: string) => {
 };
 
 const calcularDiasSLA = (d1: string | null, d2: string | null) => {
-  if (!d1 || !d2) return 0; // Devolve 0 para evitar quebras no sort
+  if (!d1 || !d2) return 0;
   const data1 = new Date(d1);
   const data2 = new Date(d2);
   const diffTime = Math.abs(data2.getTime() - data1.getTime());
@@ -127,8 +127,6 @@ export default function ChecagemPage() {
   const [processandoUpload, setProcessandoUpload] = useState(false);
   
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
-  
-  // ✅ FILTROS BLINDADOS COM ARRAY VAZIO PADRÃO
   const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, statusSelecionados: string[] }>>({});
   const [filtroStatusCard, setFiltroStatusCard] = useState<string | null>(null);
 
@@ -159,9 +157,6 @@ export default function ChecagemPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataReferencia, empresaAtiva]);
 
-  // ==========================================================================
-  // 📤 UPLOAD
-  // ==========================================================================
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, tipoEmpresa: "SEC" | "FIDC") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -270,9 +265,6 @@ export default function ChecagemPage() {
     }
   };
 
-  // ==========================================================================
-  // 🧮 CÁLCULOS E AGREGAÇÃO
-  // ==========================================================================
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -401,7 +393,6 @@ export default function ChecagemPage() {
     }
   };
 
-  // ✅ FILTROS SEGUROS
   const setFiltroTexto = (cedente: string, texto: string) => {
     setFiltrosDetalhamento(prev => {
       const existing = prev[cedente] || { texto: "", statusSelecionados: [] };
@@ -541,7 +532,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO */}
+      {/* 📈 GRÁFICO INTERATIVO RESTAURADO */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col print:hidden">
         <div className="mb-4 border-b border-slate-100 pb-2">
           <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
@@ -557,18 +548,31 @@ export default function ChecagemPage() {
             {chartEvolucao.dados.map((item, idx) => {
               const altura = item.valor > 0 ? Math.max((item.valor / chartEvolucao.maxValor) * 100, 2) : 0; 
               
-              // ✅ CORREÇÃO DO TYPO AQUI: corBarra e corFundo escritos corretamente
               let corBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
               
               if (item.valor > 0) {
-                if (item.evolucao === "UP") { corBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
-                else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
-                else { corBarra = "bg-blue-500"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
+                if (item.evolucao === "UP") { corBarra = "bg-emerald-500 hover:bg-emerald-400"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
+                else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500 hover:bg-rose-400"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
+                else { corBarra = "bg-blue-500 hover:bg-blue-400"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
               }
               
               return (
-                <div key={idx} className="flex-1 flex items-end h-full relative group">
-                  <div className={`w-full rounded-t-sm transition-all duration-500 ${corBarra}`} style={{ height: `${altura}%` }}></div>
+                <div key={idx} className="flex-1 flex flex-col items-center h-full relative group">
+                  {/* ✅ INTERATIVIDADE DO HOVER RESTAURADA: Reincorporada a tag de valor flutuante */}
+                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-20 pointer-events-none">
+                    Dia {item.dia}: {fM(item.valor)}
+                  </div>
+
+                  <div className={`w-full h-full flex flex-col justify-end ${corFundo} rounded-t-sm relative pb-5`}>
+                    {item.valor > 0 && (
+                      <div className="absolute w-full flex flex-col items-center justify-end z-10 transition-all duration-500" style={{ bottom: `calc(${altura}% + 20px)` }}>
+                        <span className={`text-[8px] font-black leading-none ${iconeTendencia}`}>
+                          {item.evolucao === "UP" ? "▲" : item.evolucao === "DOWN" ? "▼" : "—"}
+                        </span>
+                      </div>
+                    )}
+                    <div className={`w-full rounded-t-sm transition-all duration-500 cursor-pointer ${corBarra}`} title={`Dia ${item.dia}: ${fM(item.valor)}`} style={{ height: `${altura}%` }}></div>
+                  </div>
                   <span className="text-[9px] font-black text-slate-400 absolute bottom-0 h-5 flex items-center justify-center">{item.dia}</span>
                 </div>
               );
@@ -613,7 +617,6 @@ export default function ChecagemPage() {
                   const percConfirmado = ced.total_aberto > 0 ? (ced.confirmado / ced.total_aberto) * 100 : 0;
                   const alertaPendente = ced.qtd_pendentes > 0;
 
-                  // Lendo dados do filtro de forma blindada
                   const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", statusSelecionados: [] };
                   const statusSelArray = filtroAtual.statusSelecionados || [];
                   const subSort = subSortConfig[ced.cedente] || { key: "valor_aberto", direction: "desc" };
@@ -735,17 +738,17 @@ export default function ChecagemPage() {
                             <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden print:border-none print:shadow-none">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700">
+                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700 print:border-slate-300">
                                     <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                     <th className="p-2.5 text-center">Nº Doc</th>
                                     
-                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-200" onClick={() => {
+                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
                                       const dir = subSort.key === "emissao" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "emissao", direction: dir } }));
                                     }}>
                                       Emissão {subSort.key === "emissao" && (subSort.direction === "asc" ? "🔼" : "🔽")}
                                     </th>
-                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-200" onClick={() => {
+                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
                                       const dir = subSort.key === "vencimento" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "vencimento", direction: dir } }));
                                     }}>
