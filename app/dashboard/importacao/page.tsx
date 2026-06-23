@@ -322,6 +322,10 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
+// ============================================================================
+// ALTERAÇÃO AQUI: As funções processarCarteiraSec e processarCarteiraFidc
+// voltaram a usar apenas a função limparNome para a carteira.
+// ============================================================================
 const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { 
     const c = strClean(cell); 
@@ -345,8 +349,8 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    // Passando null como CNPJ pois a tabela não tem essa coluna
-    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, null, base);
+    // VOLTOU A USAR limparNome para Carteira Sec
+    const cedenteNormalizado = limparNome(cedente);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
@@ -388,8 +392,8 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
-    // Passando null como CNPJ pois a tabela não tem essa coluna
-    const cedenteNormalizado = normalizarPelaBaseUniversal(cedente, null, base);
+    // VOLTOU A USAR limparNome para Carteira FIDC
+    const cedenteNormalizado = limparNome(cedente);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
