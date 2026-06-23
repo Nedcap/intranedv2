@@ -14,6 +14,9 @@ export default function CadastroPage() {
   // Controle de Edição de Nome do Cedente (Trava de Segurança)
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
 
+  // NOVO: Controle de Expansão de Linhas para Revelação Progressiva
+  const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
+
   // Controle de Ordenação Master
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" }>({
     key: "cedente",
@@ -93,10 +96,16 @@ export default function CadastroPage() {
     
     setFiltroStatus("TODOS"); 
     setCedentes([novaLinha, ...cedentes]);
+    // Força a nova linha a nascer expandida para facilitar o preenchimento inicial
+    setLinhasExpandidas(prev => ({ ...prev, [`novo-0`]: true }));
   };
 
   const toggleEditarNome = (idOuIndex: string) => {
     setCedentesEmEdicaoDeNome(prev => ({ ...prev, [idOuIndex]: !prev[idOuIndex] }));
+  };
+
+  const toggleExpandirLinha = (idOuIndex: string) => {
+    setLinhasExpandidas(prev => ({ ...prev, [idOuIndex]: !prev[idOuIndex] }));
   };
 
   const handleSort = (key: string) => {
@@ -104,6 +113,19 @@ export default function CadastroPage() {
       key,
       direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc"
     }));
+  };
+
+  const handleExpandirTudo = () => {
+    const novoEstado: Record<string, boolean> = {};
+    const jaEstaoTodosAbertos = Object.keys(linhasExpandidas).length === cedentesProcessados.length;
+    
+    if (!jaEstaoTodosAbertos) {
+      cedentesProcessados.forEach((c, idx) => {
+        const key = c.id || `novo-${idx}`;
+        novoEstado[key] = true;
+      });
+    }
+    setLinhasExpandidas(novoEstado);
   };
 
   const salvarAlteracoes = async () => {
@@ -152,6 +174,7 @@ export default function CadastroPage() {
       
       alert("🎉 Alterações gravadas com sucesso no banco!");
       setCedentesEmEdicaoDeNome({});
+      setLinhasExpandidas({});
       const { data } = await supabase.from("cadastro_cedentes").select("*").order("cedente", { ascending: true });
       if (data) setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
     } catch (err: any) { 
@@ -162,6 +185,7 @@ export default function CadastroPage() {
     }
   };
 
+  // KPIs
   const analiseEsteira = useMemo(() => {
     let total = cedentes.length;
     let pendenteEnvio = 0;
@@ -191,6 +215,7 @@ export default function CadastroPage() {
     return { total, pendenteEnvio, aguardandoAssinatura, aptos, slaMedio };
   }, [cedentes]);
 
+  // Filtro e Ordenação Combinados
   const cedentesProcessados = useMemo(() => {
     let resultado = cedentes.filter(c => {
       if (filtroStatus === "TODOS") return true;
@@ -224,8 +249,6 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  if (carregando) return <div className="p-8 text-center animate-pulse text-slate-500 font-bold">Carregando esteira operacional...</div>;
-
   return (
     <div className="space-y-6 w-full mx-auto pb-10 text-[13px] font-sans text-slate-700 px-4 print:p-0" style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
       
@@ -255,190 +278,196 @@ export default function CadastroPage() {
 
       {/* PAINEL DE METRICAS OPERACIONAIS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <button 
-          onClick={() => setFiltroStatus("TODOS")}
-          className={`p-4 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-center ${filtroStatus === "TODOS" ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}
-        >
+        <button onClick={() => setFiltroStatus("TODOS")} className={`p-4 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-center ${filtroStatus === "TODOS" ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}>
           <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Geral</span>
           <span className="text-2xl font-black font-mono mt-1">{cedentes.length}</span>
         </button>
-
-        <button 
-          onClick={() => setFiltroStatus("PENDENTE_ENVIO")}
-          className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-rose-500 flex flex-col justify-center ${filtroStatus === "PENDENTE_ENVIO" ? "bg-rose-500 text-white border-rose-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}
-        >
-          <span className={`text-[10px] font-black uppercase tracking-wider ${filtroStatus === "PENDENTE_ENVIO" ? "text-rose-100" : "text-rose-600"}`}>🛑 Pendente Envio</span>
+        <button onClick={() => setFiltroStatus("PENDENTE_ENVIO")} className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-rose-500 flex flex-col justify-center ${filtroStatus === "PENDENTE_ENVIO" ? "bg-rose-500 text-white border-rose-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}>
+          <span className="text-[10px] font-black uppercase tracking-wider shadow-sm">🛑 Pendente Envio</span>
           <span className="text-2xl font-black font-mono mt-1">{analiseEsteira.pendenteEnvio}</span>
         </button>
-
-        <button 
-          onClick={() => setFiltroStatus("AGUARDANDO_ASSINATURA")}
-          className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-amber-500 flex flex-col justify-center ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "bg-amber-500 text-white border-amber-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}
-        >
-          <span className={`text-[10px] font-black uppercase tracking-wider ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "text-amber-100" : "text-amber-600"}`}>⏳ Em Assinatura</span>
+        <button onClick={() => setFiltroStatus("AGUARDANDO_ASSINATURA")} className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-amber-500 flex flex-col justify-center ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "bg-amber-500 text-white border-amber-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}>
+          <span className="text-[10px] font-black uppercase tracking-wider">⏳ Em Assinatura</span>
           <span className="text-2xl font-black font-mono mt-1">{analiseEsteira.aguardandoAssinatura}</span>
         </button>
-
-        <button 
-          onClick={() => setFiltroStatus("APTO")}
-          className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-emerald-500 flex flex-col justify-center ${filtroStatus === "APTO" ? "bg-emerald-500 text-white border-emerald-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}
-        >
-          <span className={`text-[10px] font-black uppercase tracking-wider ${filtroStatus === "APTO" ? "text-emerald-100" : "text-emerald-600"}`}>🎉 Apto a Operar</span>
+        <button onClick={() => setFiltroStatus("APTO")} className={`p-4 rounded-xl border text-left cursor-pointer transition-all border-l-4 border-l-emerald-500 flex flex-col justify-center ${filtroStatus === "APTO" ? "bg-emerald-500 text-white border-emerald-600 shadow-md" : "bg-white border-slate-200 hover:bg-slate-50"}`}>
+          <span className="text-[10px] font-black uppercase tracking-wider">🎉 Apto a Operar</span>
           <span className="text-2xl font-black font-mono mt-1">{analiseEsteira.aptos}</span>
         </button>
-
         <div className="p-4 rounded-xl border border-slate-200 bg-blue-50/50 border-l-4 border-l-blue-600 flex flex-col justify-center">
           <span className="text-[10px] font-black uppercase tracking-wider text-blue-600">⏱️ SLA Médio de Assinatura</span>
           <span className="text-2xl font-black font-mono mt-1 text-slate-800">{analiseEsteira.slaMedio} <span className="text-sm font-bold text-slate-500">dias</span></span>
         </div>
       </div>
 
-      {/* TABELA DINÂMICA RE-ESQUEMATIZADA */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto w-full">
-        <table className="w-full text-left border-collapse table-fixed min-w-[1550px]">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-[10px] tracking-wider select-none text-center h-12">
-              <th onClick={() => handleSort("cedente")} className="p-2 pl-4 text-left cursor-pointer hover:bg-slate-100 w-[18%]">Cedente {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              {usuarioAtual?.perfil !== "comercial" && (
-                <th onClick={() => handleSort("comercial")} className="p-2 text-blue-600 cursor-pointer hover:bg-slate-100 w-[8%]">Comercial {sortConfig.key === "comercial" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              )}
-              <th onClick={() => handleSort("limite")} className="p-2 cursor-pointer hover:bg-slate-100 w-[10%]">Limite {sortConfig.key === "limite" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              <th onClick={() => handleSort("taxa")} className="p-2 cursor-pointer hover:bg-slate-100 w-[6%]">Taxa (%) {sortConfig.key === "taxa" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
-              <th className="p-2 w-[6%]">Docs Ok</th>
-              <th className="p-2 bg-slate-100/50 w-[16%] border-x border-slate-200">Contrato Sec (Envio | Assinatura)</th>
-              <th className="p-2 bg-slate-100/50 w-[16%] border-r border-slate-200">Contrato Fidc (Envio | Assinatura)</th>
-              <th className="p-2 w-[8%]">Cad. Adm</th>
-              <th className="p-2 w-[5%]">Apto</th>
-              <th className="p-2 text-left pl-4 w-[15%]">Observações de Trava</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-            {cedentesProcessados.map((item) => {
-              const index = cedentes.findIndex(c => c === item);
-              const identificadorUnico = item.id || `novo-${index}`;
-              const isEditandoNome = !!cedentesEmEdicaoDeNome[identificadorUnico] || item._isNovo;
-              
-              return (
-                <tr key={identificadorUnico} className={`hover:bg-slate-50/40 transition-colors h-14 ${item._isNovo ? "bg-blue-50/20" : ""} ${item._isEditado && !item._isNovo ? "bg-amber-50/10" : ""}`}>
-                  
-                  {/* Nome do Cedente Compactado e Dinâmico */}
-                  <td className="p-2 pl-4">
-                    {isEditandoNome ? (
-                      <input 
-                        type="text" 
-                        placeholder="NOME DA EMPRESA" 
-                        value={item.cedente} 
-                        onChange={(e) => handleInputChange(index, "cedente", e.target.value.toUpperCase())} 
-                        className="w-full p-1 border border-blue-300 rounded outline-none focus:border-blue-600 font-black text-xs uppercase bg-white shadow-sm" 
-                        autoFocus={item._isNovo}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-between group w-full pr-1">
-                        <span className="font-bold text-slate-900 truncate max-w-[210px]" title={item.cedente}>{item.cedente}</span>
+      {/* TABELA MASTER-DETAIL CLEAN */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden w-full">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-[10px] tracking-wider select-none h-11 text-center">
+                <th className="w-12 p-2">
+                  <button onClick={handleExpandirTudo} title="Expandir/Recolher Tudo" className="w-6 h-6 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs">
+                    ↕️
+                  </button>
+                </th>
+                <th onClick={() => handleSort("cedente")} className="p-2 text-left cursor-pointer hover:bg-slate-100 pl-4">Cedente {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
+                {usuarioAtual?.perfil !== "comercial" && (
+                  <th onClick={() => handleSort("comercial")} className="p-2 text-blue-600 cursor-pointer hover:bg-slate-100 w-44">Comercial Resp. {sortConfig.key === "comercial" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
+                )}
+                <th onClick={() => handleSort("limite")} className="p-2 cursor-pointer hover:bg-slate-100 w-44">Limite {sortConfig.key === "limite" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
+                <th onClick={() => handleSort("taxa")} className="p-2 cursor-pointer hover:bg-slate-100 w-28">Taxa (%) {sortConfig.key === "taxa" && (sortConfig.direction === "asc" ? "▲" : "▼")}</th>
+                <th className="p-2 w-28">Docs Auditados</th>
+                <th className="p-2 w-24">Apto</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+              {cedentesProcessados.map((item) => {
+                const index = cedentes.findIndex(c => c === item);
+                const identificadorUnico = item.id || `novo-${index}`;
+                const isEditandoNome = !!cedentesEmEdicaoDeNome[identificadorUnico] || item._isNovo;
+                const isOpen = !!linhasExpandidas[identificadorUnico];
+
+                return (
+                  <tr key={identificadorUnico} style={{ display: "contents" }}>
+                    
+                    {/* LINHA MASTER (CLEAN - SEM DATAS POLUINDO) */}
+                    <tr className={`hover:bg-slate-50/50 transition-colors h-12 ${isOpen ? "bg-slate-50/70" : ""} ${item._isNovo ? "bg-blue-50/20" : ""}`}>
+                      <td className="p-2 text-center">
                         <button 
-                          onClick={() => toggleEditarNome(identificadorUnico)}
-                          className="opacity-0 group-hover:opacity-100 text-[9px] text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-1.5 py-0.5 rounded font-bold transition-all cursor-pointer shadow-xs whitespace-nowrap"
+                          onClick={() => toggleExpandirLinha(identificadorUnico)}
+                          className="w-5 h-5 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded border border-slate-300 shadow-xs flex items-center justify-center font-bold text-xs cursor-pointer"
                         >
-                          ✏️ Editar
+                          {isOpen ? "−" : "+"}
                         </button>
-                      </div>
+                      </td>
+                      <td className="p-2 pl-4">
+                        {isEditandoNome ? (
+                          <input 
+                            type="text" 
+                            placeholder="NOME DA EMPRESA" 
+                            value={item.cedente} 
+                            onChange={(e) => handleInputChange(index, "cedente", e.target.value.toUpperCase())} 
+                            className="w-full max-w-sm p-1 border border-blue-300 rounded font-black text-xs uppercase bg-white shadow-sm outline-none focus:border-blue-500" 
+                            autoFocus={item._isNovo}
+                          />
+                        ) : (
+                          <div className="flex items-center justify-between group max-w-sm">
+                            <span className="font-bold text-slate-900 truncate" title={item.cedente}>{item.cedente}</span>
+                            <button 
+                              onClick={() => toggleEditarNome(identificadorUnico)}
+                              className="opacity-0 group-hover:opacity-100 text-[9px] text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-1.5 py-0.5 rounded font-bold transition-all cursor-pointer shadow-xs ml-2"
+                            >
+                              ✏️ Editar
+                            </button>
+                          </div>
+                        )}
+                      </td>
+
+                      {usuarioAtual?.perfil !== "comercial" && (
+                        <td className="p-2 text-center">
+                           <input type="text" value={item.comercial || ""} onChange={(e) => handleInputChange(index, "comercial", e.target.value)} className="w-full max-w-[140px] p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold text-blue-700 bg-transparent" placeholder="Comercial" />
+                        </td>
+                      )}
+
+                      <td className="p-2 text-center">
+                        <input type="text" value={item.limite || ""} onChange={(e) => handleLimiteInputChange(index, e.target.value)} className="w-full max-w-[140px] p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono text-slate-700 bg-transparent" placeholder="R$ 0,00" />
+                      </td>
+                      
+                      <td className="p-2 text-center">
+                        <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} className="w-full max-w-[80px] p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono text-slate-600 bg-transparent" placeholder="0,00%" />
+                      </td>
+
+                      <td className="p-2 text-center">
+                        <div className="flex gap-2 justify-center text-xs font-bold">
+                          <label className="text-emerald-600 cursor-pointer flex items-center gap-0.5"><input type="radio" checked={item.docs_ok === true} onChange={() => handleInputChange(index, "docs_ok", true)} /> ✔</label>
+                          <label className="text-red-500 cursor-pointer flex items-center gap-0.5"><input type="radio" checked={item.docs_ok === false} onChange={() => handleInputChange(index, "docs_ok", false)} /> ✖</label>
+                        </div>
+                      </td>
+
+                      <td className="p-2 text-center">
+                        <div className="flex gap-2 justify-center text-xs font-bold">
+                          <label className="text-emerald-600 cursor-pointer flex items-center gap-0.5" title="Apto"><input type="radio" checked={item.apto === true} onChange={() => handleInputChange(index, "apto", true)} /> 🎉</label>
+                          <label className="text-red-500 cursor-pointer flex items-center gap-0.5" title="Travado"><input type="radio" checked={item.apto === false} onChange={() => handleInputChange(index, "apto", false)} /> 🛑</label>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* LINHA DETAIL (O PAINEL DA ESTEIRA OCULTA QUE SE ABRE NO CLIQUE) */}
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={usuarioAtual?.perfil !== "comercial" ? 7 : 6} className="bg-slate-100/60 p-4 border-b border-slate-200">
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                            
+                            {/* Bloco Securitizadora */}
+                            <div className="space-y-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100">
+                              <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                                <span className="font-black text-blue-700 text-[11px] uppercase tracking-wider">🏦 Fluxo Securitizadora</span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${item.data_5 ? (item.data_6 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800") : "bg-rose-100 text-rose-800"}`}>
+                                  {item.data_5 ? (item.data_6 ? "Contrato Assinado" : "Em Assinatura") : "Não Enviado"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">Data de Envio:</span>
+                                  <input type="date" value={item.data_5 || ""} onChange={(e) => handleInputChange(index, "data_5", e.target.value)} className="p-1.5 border border-slate-200 rounded text-xs font-mono font-bold text-slate-600 bg-white cursor-pointer outline-none focus:border-blue-500" />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">Data Assinatura:</span>
+                                  <input type="date" value={item.data_6 || ""} onChange={(e) => handleInputChange(index, "data_6", e.target.value)} className="p-1.5 border border-slate-200 rounded text-xs font-mono font-bold text-slate-600 bg-white cursor-pointer outline-none focus:border-blue-500" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Bloco FIDC */}
+                            <div className="space-y-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100">
+                              <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                                <span className="font-black text-purple-700 text-[11px] uppercase tracking-wider">🔮 Fluxo FIDC</span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${item.data_7 ? (item.data_8 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800") : "bg-rose-100 text-rose-800"}`}>
+                                  {item.data_7 ? (item.data_8 ? "Contrato Assinado" : "Em Assinatura") : "Não Enviado"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">Data de Envio:</span>
+                                  <input type="date" value={item.data_7 || ""} onChange={(e) => handleInputChange(index, "data_7", e.target.value)} className="p-1.5 border border-slate-200 rounded text-xs font-mono font-bold text-slate-600 bg-white cursor-pointer outline-none focus:border-blue-500" />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">Data Assinatura:</span>
+                                  <input type="date" value={item.data_8 || ""} onChange={(e) => handleInputChange(index, "data_8", e.target.value)} className="p-1.5 border border-slate-200 rounded text-xs font-mono font-bold text-slate-600 bg-white cursor-pointer outline-none focus:border-blue-500" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Bloco Administrativo & Observações */}
+                            <div className="space-y-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100 lg:col-span-1">
+                              <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 h-6">
+                                <span className="font-black text-slate-600 text-[11px] uppercase tracking-wider">⚙️ Configurações Internas</span>
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-3">
+                                <div className="flex flex-col gap-1 sm:w-1/3">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase whitespace-nowrap">Cadastro Adm:</span>
+                                  <input type="date" value={item.data_9 || ""} onChange={(e) => handleInputChange(index, "data_9", e.target.value)} className="p-1.5 border border-slate-200 rounded text-xs font-mono font-bold text-slate-600 bg-white cursor-pointer outline-none focus:border-blue-500 w-full" />
+                                </div>
+                                <div className="flex flex-col gap-1 flex-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">Observações de Trava / Impasse:</span>
+                                  <textarea value={item.obs || ""} onChange={(e) => handleInputChange(index, "obs", e.target.value)} className="w-full p-1 border border-slate-200 rounded text-xs h-[31px] resize-none outline-none focus:border-blue-500 bg-white font-medium text-slate-700 leading-tight" placeholder="Ex: No aguardo das certidões..." />
+                                </div>
+                              </div>
+                            </div>
+
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-
-                  {/* Comercial Responsável */}
-                  {usuarioAtual?.perfil !== "comercial" && (
-                    <td className="p-1 text-center">
-                       <input 
-                         type="text" 
-                         value={item.comercial || ""} 
-                         onChange={(e) => handleInputChange(index, "comercial", e.target.value)} 
-                         className="w-full p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold text-blue-700 bg-transparent truncate" 
-                         placeholder="Comercial"
-                       />
-                    </td>
-                  )}
-
-                  {/* Limite */}
-                  <td className="p-1 text-center">
-                    <input 
-                      type="text" 
-                      value={item.limite || ""} 
-                      onChange={(e) => handleLimiteInputChange(index, e.target.value)} 
-                      className="w-full p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono text-slate-700" 
-                      placeholder="R$ 0,00" 
-                    />
-                  </td>
-                  
-                  {/* Taxa */}
-                  <td className="p-1 text-center">
-                    <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} className="w-full p-1 border border-slate-200 rounded text-center text-xs outline-none focus:border-blue-500 font-bold font-mono text-slate-600" placeholder="0,00%" />
-                  </td>
-
-                  {/* Auditoria Docs */}
-                  <td className="p-1 text-center">
-                    <div className="flex gap-2 justify-center text-xs font-bold">
-                      <label className="text-emerald-600 cursor-pointer flex items-center gap-0.5">
-                        <input type="radio" checked={item.docs_ok === true} onChange={() => handleInputChange(index, "docs_ok", true)} className="scale-90" /> ✔
-                      </label>
-                      <label className="text-red-500 cursor-pointer flex items-center gap-0.5">
-                        <input type="radio" checked={item.docs_ok === false} onChange={() => handleInputChange(index, "docs_ok", false)} className="scale-90" /> ✖
-                      </label>
-                    </div>
-                  </td>
-
-                  {/* Contrato Securitizadora - Inputs de data com largura travada via CSS */}
-                  <td className="p-1 text-center bg-slate-50/30 border-x border-slate-100">
-                    <div className="flex flex-col gap-1 items-center justify-center">
-                      <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border leading-none scale-95 ${item.data_5 ? (item.data_6 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200") : "bg-rose-50 text-rose-700 border-rose-200"}`}>
-                        {item.data_5 ? (item.data_6 ? "Assinado" : "Aguardando") : "Não Enviado"}
-                      </span>
-                      <div className="flex items-center gap-1 justify-center">
-                        <input type="date" value={item.data_5 || ""} title="Data de Envio" onChange={(e) => handleInputChange(index, "data_5", e.target.value)} className="p-0.5 border border-slate-200 rounded text-[11px] font-mono font-bold text-slate-500 outline-none w-[102px] cursor-pointer" />
-                        <input type="date" value={item.data_6 || ""} title="Data de Assinatura" onChange={(e) => handleInputChange(index, "data_6", e.target.value)} className="p-0.5 border border-slate-200 rounded text-[11px] font-mono font-bold text-slate-500 outline-none w-[102px] cursor-pointer" />
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Contrato FIDC - Inputs de data com largura travada via CSS */}
-                  <td className="p-1 text-center bg-slate-50/30 border-r border-slate-100">
-                    <div className="flex flex-col gap-1 items-center justify-center">
-                      <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border leading-none scale-95 ${item.data_7 ? (item.data_8 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200") : "bg-rose-50 text-rose-700 border-rose-200"}`}>
-                        {item.data_7 ? (item.data_8 ? "Assinado" : "Aguardando") : "Não Enviado"}
-                      </span>
-                      <div className="flex items-center gap-1 justify-center">
-                        <input type="date" value={item.data_7 || ""} title="Data de Envio" onChange={(e) => handleInputChange(index, "data_7", e.target.value)} className="p-0.5 border border-slate-200 rounded text-[11px] font-mono font-bold text-slate-500 outline-none w-[102px] cursor-pointer" />
-                        <input type="date" value={item.data_8 || ""} title="Data de Assinatura" onChange={(e) => handleInputChange(index, "data_8", e.target.value)} className="p-0.5 border border-slate-200 rounded text-[11px] font-mono font-bold text-slate-500 outline-none w-[102px] cursor-pointer" />
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Cadastro Administrativo */}
-                  <td className="p-1 text-center">
-                    <input type="date" value={item.data_9 || ""} title="Cadastro no Sistema" onChange={(e) => handleInputChange(index, "data_9", e.target.value)} className="p-0.5 border border-slate-200 rounded text-[11px] font-mono font-bold text-slate-500 outline-none w-[105px] text-center cursor-pointer" />
-                  </td>
-
-                  {/* Status Final (Apto) */}
-                  <td className="p-1 text-center bg-slate-50/10">
-                    <div className="flex gap-1.5 justify-center text-xs font-bold">
-                      <label className="text-emerald-600 cursor-pointer flex items-center gap-0.5 scale-90" title="Apto">
-                        <input type="radio" checked={item.apto === true} onChange={() => handleInputChange(index, "apto", true)} /> 🎉
-                      </label>
-                      <label className="text-red-500 cursor-pointer flex items-center gap-0.5 scale-90" title="Travado">
-                        <input type="radio" checked={item.apto === false} onChange={() => handleInputChange(index, "apto", false)} /> 🛑
-                      </label>
-                    </div>
-                  </td>
-
-                  {/* Observações de Impasse */}
-                  <td className="p-1 pr-4">
-                    <textarea value={item.obs || ""} onChange={(e) => handleInputChange(index, "obs", e.target.value)} className="w-full p-1 border border-slate-200 rounded text-xs h-8 resize-none outline-none focus:border-blue-500 bg-transparent font-medium leading-tight" placeholder="Ex: Contrato em análise..." />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
+
     </div>
   );
 }
