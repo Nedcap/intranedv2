@@ -98,7 +98,7 @@ const classificarStatus = (ocorrenciaStr: string) => {
 };
 
 const calcularDiasSLA = (d1: string | null, d2: string | null) => {
-  if (!d1 || !d2) return null;
+  if (!d1 || !d2) return 0;
   const data1 = new Date(d1);
   const data2 = new Date(d2);
   const diffTime = Math.abs(data2.getTime() - data1.getTime());
@@ -129,12 +129,15 @@ export default function ChecagemPage() {
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
   const [filtrosDetalhamento, setFiltrosDetalhamento] = useState<Record<string, { texto: string, statusSelecionados: string[] }>>({});
   
+  // NOVO: Estado para controlar o Filtro Ativo via Clique nos Cards do Topo
+  const [filtroStatusCard, setFiltroStatusCard] = useState<string | null>(null);
+
   const [sortConfig, setSortConfig] = useState<{ key: keyof AgregacaoCedente; direction: "asc" | "desc" }>({
     key: "total_aberto",
     direction: "desc"
   });
 
-  const [subSortConfig, setSubSortConfig] = useState<Record<string, { key: keyof TituloChecagem; direction: "asc" | "desc" }>>({});
+  const [subSortConfig, setSubSortConfig] = useState<Record<string, { key: string; direction: "asc" | "desc" }>>({});
 
   const carregarDados = async () => {
     setCarregando(true);
@@ -156,6 +159,9 @@ export default function ChecagemPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataReferencia, empresaAtiva]);
 
+  // ==========================================================================
+  // 📤 UPLOAD
+  // ==========================================================================
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, tipoEmpresa: "SEC" | "FIDC") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -334,7 +340,18 @@ export default function ChecagemPage() {
       mapa[t.cedente].titulos.push(t);
     });
 
-    const array = Object.values(mapa);
+    let array = Object.values(mapa);
+
+    // NOVO: Se houver filtro de card ativo, exibe apenas os cedentes que possuem títulos com aquele status
+    if (filtroStatusCard) {
+      array = array.filter(ced => {
+        if (filtroStatusCard === "CONFIRMADO") return ced.confirmado > 0;
+        if (filtroStatusCard === "PENDENTE") return ced.a_confirmar > 0;
+        if (filtroStatusCard === "RISCO") return ced.risco > 0;
+        return true;
+      });
+    }
+
     array.sort((a: any, b: any) => {
       if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === "asc" ? -1 : 1;
       if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === "asc" ? 1 : -1;
@@ -342,10 +359,10 @@ export default function ChecagemPage() {
     });
 
     return array;
-  }, [titulos, sortConfig]);
+  }, [titulos, sortConfig, filtroStatusCard]);
 
   // ==========================================================================
-  // 🕹️ INTERAÇÕES DA UI
+  // 🕹️ INTERAÇÕES DA UI & REGRAS DE INTERATIVIDADE DOS CARDS
   // ==========================================================================
   const handleSort = (key: keyof AgregacaoCedente) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
@@ -355,7 +372,6 @@ export default function ChecagemPage() {
     setExpandidos(prev => ({ ...prev, [cedente]: !prev[cedente] }));
   };
 
-  // ✅ FUNÇÃO RESTAURADA: Essa daqui foi a que causou o erro no deploy
   const handleExpandirTudo = () => {
     const novoEstado: Record<string, boolean> = {};
     const jaEstaoTodosAbertos = Object.keys(expandidos).length === cedentesAgregados.length;
@@ -364,6 +380,26 @@ export default function ChecagemPage() {
       cedentesAgregados.forEach(c => novoEstado[c.cedente] = true);
     }
     setExpandidos(novoEstado);
+  };
+
+  // NOVO: Função de clique nos Cards de KPI para Filtro Rápido Geral + Auto-Expandir
+  const lidarCliqueCardKpi = (tipoFiltro: string) => {
+    if (filtroStatusCard === tipoFiltro) {
+      // Se clicou no card ativo, desmarca e recolhe as abas
+      setFiltroStatusCard(null);
+      setExpandidos({});
+    } else {
+      setFiltroStatusCard(tipoFiltro);
+      
+      // Auto-expande todas as linhas que restaram visíveis na triagem do card
+      const novoEstadoExpandido: Record<string, boolean> = {};
+      titulos.forEach(t => {
+        if (tipoFiltro === "CONFIRMADO" && t.status_confirmacao === "Confirmado") novoEstadoExpandido[t.cedente] = true;
+        if (tipoFiltro === "PENDENTE" && t.status_confirmacao === "A Confirmar") novoEstadoExpandido[t.cedente] = true;
+        if (tipoFiltro === "RISCO" && ["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) novoEstadoExpandido[t.cedente] = true;
+      });
+      setExpandidos(novoEstadoExpandido);
+    }
   };
 
   const setFiltroTexto = (cedente: string, texto: string) => {
@@ -377,7 +413,7 @@ export default function ChecagemPage() {
   const badgeStatus = (status: string) => {
     if (status === "Confirmado") return "bg-emerald-100 text-emerald-800 border-emerald-300";
     if (status === "A Confirmar") return "bg-blue-100 text-blue-800 border-blue-300";
-    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300 animate-pulse";
+    if (["Alto Risco", "Não Confirma", "Problema"].includes(status)) return "bg-rose-100 text-rose-800 border-rose-300";
     if (status === "Política") return "bg-purple-100 text-purple-800 border-purple-300";
     return "bg-slate-100 text-slate-600 border-slate-300";
   };
@@ -409,7 +445,7 @@ export default function ChecagemPage() {
             {EMPRESAS.map(emp => (
               <button
                 key={emp.id}
-                onClick={() => setEmpresaAtiva(emp.id)}
+                onClick={() => { setEmpresaAtiva(emp.id); setFiltroStatusCard(null); setExpandidos({}); }}
                 className={`px-4 py-2 rounded-md font-bold text-[11px] uppercase transition-all ${
                   empresaAtiva === emp.id ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-200"
                 }`}
@@ -444,30 +480,61 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📊 PAINEL DE KPIS */}
+      {/* 📊 PAINEL DE KPIS CLICÁVEIS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:grid-cols-5 print:gap-2 print:break-inside-avoid">
-        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800 print:border-slate-300 print:text-slate-900 print:bg-slate-100 print:p-3">
-          <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider print:text-slate-600">Saldo Total em Aberto</span>
-          <span className="text-2xl font-black font-mono mt-1 truncate print:text-lg">{fM(kpis.total)}</span>
+        <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800">
+          <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider">Saldo Total em Aberto</span>
+          <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
-        <div className="bg-white border-l-4 border-emerald-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
+        
+        {/* Card Confirmados Clicável */}
+        <button 
+          onClick={() => lidarCliqueCardKpi("CONFIRMADO")}
+          className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
+            filtroStatusCard === "CONFIRMADO" ? "bg-emerald-50 border-emerald-500 border-2 ring-2 ring-emerald-500/20" : "bg-white border-slate-200 border-l-4 border-l-emerald-500 hover:bg-slate-50"
+          }`}
+        >
           <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.confirmado)}</span>
-          <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg print:text-sm">{kpis.pConfirmado}%</div>
-        </div>
-        <div className="bg-white border-l-4 border-blue-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.confirmado)}</span>
+          <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg">{kpis.pConfirmado}%</div>
+          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
+            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${kpis.pConfirmado}%` }}></div>
+          </div>
+        </button>
+
+        {/* Card A Confirmar Clicável */}
+        <button 
+          onClick={() => lidarCliqueCardKpi("PENDENTE")}
+          className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
+            filtroStatusCard === "PENDENTE" ? "bg-blue-50 border-blue-500 border-2 ring-2 ring-blue-500/20" : "bg-white border-slate-200 border-l-4 border-l-blue-500 hover:bg-slate-50"
+          }`}
+        >
           <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider">⏳ A Confirmar</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.aConfirmar)}</span>
-          <div className="absolute right-4 top-4 text-blue-500 font-black text-lg print:text-sm">{kpis.pAConfirmar}%</div>
-        </div>
-        <div className="bg-white border-l-4 border-rose-500 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.aConfirmar)}</span>
+          <div className="absolute right-4 top-4 text-blue-500 font-black text-lg">{kpis.pAConfirmar}%</div>
+          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
+            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${kpis.pAConfirmar}%` }}></div>
+          </div>
+        </button>
+
+        {/* Card Alto Risco Problema Clicável */}
+        <button 
+          onClick={() => lidarCliqueCardKpi("RISCO")}
+          className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
+            filtroStatusCard === "RISCO" ? "bg-rose-50 border-rose-500 border-2 ring-2 ring-rose-500/20" : "bg-white border-slate-200 border-l-4 border-l-rose-500 hover:bg-slate-50"
+          }`}
+        >
           <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">🚨 Alto Risco / Problema</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.risco)}</span>
-          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg print:text-sm">{kpis.pRisco}%</div>
-        </div>
-        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden print:p-3">
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.risco)}</span>
+          <div className="absolute right-4 top-4 text-rose-500 font-black text-lg">{kpis.pRisco}%</div>
+          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
+            <div className="bg-rose-500 h-full rounded-full" style={{ width: `${kpis.pRisco}%` }}></div>
+          </div>
+        </button>
+
+        <div className="bg-white border-l-4 border-slate-400 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden">
           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">🗂️ Outros / Política</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1 print:text-lg">{fM(kpis.outros)}</span>
+          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.outros)}</span>
         </div>
       </div>
 
@@ -486,24 +553,15 @@ export default function ChecagemPage() {
           <div className="flex-1 flex items-end gap-1.5 pl-2 relative">
             {chartEvolucao.dados.map((item, idx) => {
               const altura = item.valor > 0 ? Math.max((item.valor / chartEvolucao.maxValor) * 100, 2) : 0; 
-              let corBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
+              let colBarra = "bg-slate-200", corFundo = "bg-slate-50", iconeTendencia = "";
               if (item.valor > 0) {
-                if (item.evolucao === "UP") { corBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
-                else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
-                else { corBarra = "bg-blue-500"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
+                if (item.evolucao === "UP") { colBarra = "bg-emerald-500"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
+                else if (item.evolucao === "DOWN") { colBarra = "bg-rose-500"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
+                else { colBarra = "bg-blue-500"; colFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
               }
               return (
-                <div key={idx} className="flex-1 flex flex-col items-center h-full relative group">
-                  <div className={`w-full h-full flex flex-col justify-end ${corFundo} rounded-t-sm relative pb-5`}>
-                    {item.valor > 0 && (
-                      <div className="absolute w-full flex flex-col items-center justify-end z-10 transition-all duration-500" style={{ bottom: `calc(${altura}% + 20px)` }}>
-                        <span className={`text-[8px] font-black leading-none ${iconeTendencia}`}>
-                          {item.evolucao === "UP" ? "▲" : item.evolucao === "DOWN" ? "▼" : "—"}
-                        </span>
-                      </div>
-                    )}
-                    <div className={`w-full rounded-t-sm transition-all duration-500 ${corBarra}`} style={{ height: `${altura}%` }}></div>
-                  </div>
+                <div key={idx} className="flex-1 flex items-end h-full relative group">
+                  <div className={`w-full rounded-t-sm transition-all duration-500 ${colBarra}`} style={{ height: `${altura}%` }}></div>
                   <span className="text-[9px] font-black text-slate-400 absolute bottom-0 h-5 flex items-center justify-center">{item.dia}</span>
                 </div>
               );
@@ -541,7 +599,7 @@ export default function ChecagemPage() {
               {carregando ? (
                 <tr><td colSpan={7} className="p-10 text-center text-slate-400 font-bold">Buscando snapshot...</td></tr>
               ) : cedentesAgregados.length === 0 ? (
-                <tr><td colSpan={7} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada.</td></tr>
+                <tr><td colSpan={7} className="p-10 text-center text-slate-400 italic">Nenhum dado importado para a data selecionada ou para o filtro ativo.</td></tr>
               ) : (
                 cedentesAgregados.map((ced) => {
                   const isOpen = !!expandidos[ced.cedente];
@@ -549,21 +607,36 @@ export default function ChecagemPage() {
                   const alertaPendente = ced.qtd_pendentes > 0;
 
                   const filtroAtual = filtrosDetalhamento[ced.cedente] || { texto: "", statusSelecionados: [] };
+                  
+                  // CORREÇÃO E ATUALIZAÇÃO DA ORDENAÇÃO: Inicia com o valor padrão "Aging" (valor_aberto) se não houver clique
                   const subSort = subSortConfig[ced.cedente] || { key: "valor_aberto", direction: "desc" };
 
                   let titulosFiltrados = ced.titulos.filter(t => {
                     const matchText = t.sacado.toUpperCase().includes(filtroAtual.texto.toUpperCase().trim()) || t.documento.includes(filtroAtual.texto.trim());
-                    const matchStatus = filtroAtual.statusSelecionados.length === 0 ? true : filtroAtual.statusSelecionados.includes(t.status_confirmacao);
+                    
+                    // Se houver filtro global de Card, amarra a sub-tabela a respeitar ele também
+                    let matchStatus = filtroAtual.statusSelecionados.length === 0 ? true : filtroAtual.statusSelecionados.includes(t.status_confirmacao);
+                    if (filtroStatusCard === "CONFIRMADO") matchStatus = t.status_confirmacao === "Confirmado";
+                    if (filtroStatusCard === "PENDENTE") matchStatus = t.status_confirmacao === "A Confirmar";
+                    if (filtroStatusCard === "RISCO") matchStatus = ["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao);
+
                     return matchText && matchStatus;
                   });
 
+                  // EXECUTA A LÓGICA DE ORDENAÇÃO COMPLETA DA SUB-TABELA (INCLUINDO SLA / AGING)
                   titulosFiltrados.sort((a: any, b: any) => {
-                    let valA = a[subSort.key];
-                    let valB = b[subSort.key];
+                    let valA: any = a[subSort.key];
+                    let valB: any = b[subSort.key];
 
                     if (["vencimento", "emissao"].includes(subSort.key)) {
                       valA = valA ? new Date(valA).getTime() : 0;
                       valB = valB ? new Date(valB).getTime() : 0;
+                    }
+
+                    // ⏱️ LÓGICA DE ORDENAÇÃO PELO SLA / AGING
+                    if (subSort.key === "sla_aging") {
+                      valA = a.status_confirmacao === "Confirmado" ? calcularDiasSLA(a.emissao, a.atualizacao) : calcularDiasSLA(a.emissao, dataReferencia);
+                      valB = b.status_confirmacao === "Confirmado" ? calcularDiasSLA(b.emissao, b.atualizacao) : calcularDiasSLA(b.emissao, dataReferencia);
                     }
 
                     if (valA < valB) return subSort.direction === "asc" ? -1 : 1;
@@ -596,11 +669,11 @@ export default function ChecagemPage() {
                         
                         <td className="p-2.5 text-center">
                           {alertaPendente ? (
-                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-amber-100 text-amber-800 border-amber-300"}`}>
+                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase shadow-xs ${ced.risco > 0 ? "bg-rose-100 text-rose-800 border border-rose-300" : "bg-amber-100 text-amber-800 border border-amber-300"}`}>
                               {ced.qtd_pendentes} Pendente{ced.qtd_pendentes > 1 ? "s" : ""}
                             </span>
                           ) : (
-                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border-emerald-300 shadow-xs">
+                            <span className="px-2 py-1 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
                               100% Ok
                             </span>
                           )}
@@ -617,7 +690,7 @@ export default function ChecagemPage() {
                         <tr>
                           <td colSpan={7} className="bg-slate-100/50 p-4 border-b border-slate-200 print:p-2 print:bg-white print:border-b-2 print:border-slate-800">
                             
-                            {/* CONTROLES AVANÇADOS (SOME NA IMPRESSÃO) */}
+                            {/* CONTROLES AVANÇADOS DA SUBTABELA */}
                             <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-xs print:hidden">
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-black text-slate-400 uppercase">🔍 Busca:</span>
@@ -639,6 +712,7 @@ export default function ChecagemPage() {
                                       <input 
                                         type="checkbox" 
                                         checked={marcado}
+                                        disabled={!!filtroStatusCard} // Desabilita checkboxes individuais se o filtro master de card do topo estiver rodando
                                         className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                                         onChange={() => {
                                           const lista = marcado 
@@ -654,26 +728,26 @@ export default function ChecagemPage() {
                               </div>
                             </div>
 
-                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden print:border-none print:shadow-none">
+                            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700 print:border-slate-300">
+                                  <tr className="bg-slate-800 text-slate-300 font-bold uppercase text-[9px] tracking-wider border-b border-slate-900 print:bg-slate-100 print:text-slate-700">
                                     <th className="p-2.5 pl-4 min-w-[200px]">Sacado / Devedor</th>
                                     <th className="p-2.5 text-center">Nº Doc</th>
                                     
-                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
+                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-200" onClick={() => {
                                       const dir = subSort.key === "emissao" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "emissao", direction: dir } }));
                                     }}>
                                       Emissão {subSort.key === "emissao" && (subSort.direction === "asc" ? "🔼" : "🔽")}
                                     </th>
-                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
+                                    <th className="p-2.5 text-center cursor-pointer hover:bg-slate-700 print:hover:bg-slate-200" onClick={() => {
                                       const dir = subSort.key === "vencimento" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "vencimento", direction: dir } }));
                                     }}>
                                       Vencimento {subSort.key === "vencimento" && (subSort.direction === "asc" ? "🔼" : "🔽")}
                                     </th>
-                                    <th className="p-2.5 text-right cursor-pointer hover:bg-slate-700 print:hover:bg-slate-100" onClick={() => {
+                                    <th className="p-2.5 text-right cursor-pointer hover:bg-slate-700 print:hover:bg-slate-200" onClick={() => {
                                       const dir = subSort.key === "valor_aberto" && subSort.direction === "asc" ? "desc" : "asc";
                                       setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "valor_aberto", direction: dir } }));
                                     }}>
@@ -681,7 +755,14 @@ export default function ChecagemPage() {
                                     </th>
                                     
                                     <th className="p-2.5 text-center">Status</th>
-                                    <th className="p-2.5 text-center bg-slate-700 print:bg-slate-200">SLA / Aging</th>
+                                    
+                                    {/* ⏱️ AGORA TOTALMENTE ORDENÁVEL PELO CLIQUE NO HEADER */}
+                                    <th className="p-2.5 text-center bg-slate-700 print:bg-slate-200 cursor-pointer text-white print:text-slate-700 hover:bg-slate-600 print:hover:bg-slate-300" onClick={() => {
+                                      const dir = subSort.key === "sla_aging" && subSort.direction === "asc" ? "desc" : "asc";
+                                      setSubSortConfig(prev => ({ ...prev, [ced.cedente]: { key: "sla_aging", direction: dir } }));
+                                    }}>
+                                      SLA / Aging {subSort.key === "sla_aging" && (subSort.direction === "asc" ? "🔼" : "🔽")}
+                                    </th>
                                     <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências</th>
                                   </tr>
                                 </thead>
@@ -697,10 +778,10 @@ export default function ChecagemPage() {
                                       let slaClass = "text-slate-400";
                                       
                                       if (tit.status_confirmacao === "Confirmado") {
-                                        slaText = diasSla !== null ? `✅ Conf. ${diasSla}d` : "-";
+                                        slaText = diasSla !== 0 ? `✅ Conf. ${diasSla}d` : "-";
                                         slaClass = "text-emerald-700 font-bold bg-emerald-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-emerald-300";
                                       } else {
-                                        slaText = diasAberto !== null ? `⏳ Pend. ${diasAberto}d` : "-";
+                                        slaText = diasAberto !== 0 ? `⏳ Pend. ${diasAberto}d` : "-";
                                         slaClass = (diasAberto && diasAberto > 15) ? "text-rose-700 font-bold bg-rose-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-rose-300" : "text-amber-700 font-bold bg-amber-50 rounded px-1.5 py-0.5 print:bg-transparent print:border print:border-amber-300";
                                       }
 
