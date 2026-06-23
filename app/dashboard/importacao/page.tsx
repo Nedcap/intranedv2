@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
+import { normalizarPelaBaseUniversal, limparNome } from "@/lib/normalizador";
 
 // ============================================================================
 // 🧽 MOTOR SÍNCRONO DE LIMPEZA E CRUZAMENTO EM MEMÓRIA RAM
