@@ -150,6 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 switch(cat) {
                   case "Geral": return "🏠";
                   case "Comercial": return "🎯";
+                  case "Consultas": return "🔎";
                   case "Crédito": return "⚖️";
                   case "Financeiro": return "💰";
                   case "Cadastro": return "📝";
