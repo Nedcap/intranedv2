@@ -18,6 +18,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Geral": true,
     "Comercial": false,
     "Crédito": false,
+    "Consultas": false, // <-- Categoria NOVA adicionada aqui!
     "Financeiro": false,
     "Cadastro": false,
     "Configurações": false,
@@ -73,6 +74,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Geral": linksPermitidos.filter(l => l.categoria === "Geral"),
     "Comercial": linksPermitidos.filter(l => l.categoria === "Comercial"),
     "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
+    "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"), // <-- Agrupador NOVO adicionado aqui!
     "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
     "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
     "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
@@ -150,7 +152,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 switch(cat) {
                   case "Geral": return "🏠";
                   case "Comercial": return "🎯";
-                  case "Consultas": return "🔎";
+                  case "Consultas": return "🔎"; // Ícone para o menu pai
                   case "Crédito": return "⚖️";
                   case "Financeiro": return "💰";
                   case "Cadastro": return "📝";
