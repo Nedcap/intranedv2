@@ -5,7 +5,7 @@ export interface RotaSistema {
   path: string;
   icone: string;
   // Tipagem atualizada com as novas categorias
-  categoria: "Geral" | "Comercial" | "Crédito" | "Financeiro" | "Cadastro" | "Configurações";
+  categoria: "Geral" | "Comercial" | "Crédito" | "Consultas" | "Financeiro" | "Cadastro" | "Configurações";
   defaultMaster: boolean;
 }
 
@@ -20,17 +20,20 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🛡️ CRÉDITO E RISCO
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Crédito", defaultMaster: true },
-  { nome: "Monitore Diário", path: "/dashboard/monitore-diario", icone: "🚨", categoria: "Crédito", defaultMaster: true },
-  { nome: "Monitore Histórico", path: "/dashboard/monitore-historico", icone: "📚", categoria: "Crédito", defaultMaster: true },
-  { nome: "Restritivos Sócios", path: "/dashboard/restritivos-socios", icone: "👥", categoria: "Crédito", defaultMaster: true },
   { nome: "Carteira Dinâmica", path: "/dashboard/carteira", icone: "📈", categoria: "Crédito", defaultMaster: true },
   { nome: "Estoque Cedentes", path: "/dashboard/estoque-cedentes", icone: "💼", categoria: "Crédito", defaultMaster: true },
+
+  // 🔎 CONSULTAS
+  { nome: "Lemitt", path: "/dashboard/lemitt", icone: "🔎", categoria: "Consultas", defaultMaster: true },
+  { nome: "Monitore Diário", path: "/dashboard/monitore-diario", icone: "🚨", categoria: "Consultas", defaultMaster: true },
+  { nome: "Monitore Histórico", path: "/dashboard/monitore-historico", icone: "📚", categoria: "Consultas", defaultMaster: true },
+  { nome: "Restritivos Sócios", path: "/dashboard/restritivos-socios", icone: "👥", categoria: "Consultas", defaultMaster: true },
 
   // 💰 FINANCEIRO
   { nome: "Painel de Indicadores (BI)", path: "/dashboard/powerbi", icone: "📊", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true },
-  { nome: "Simulador de Rentabilidade", path: "/dashboard/simulador", icone: "🧮", categoria: "Financeiro", defaultMaster: true }, // <-- Adicionado com sucesso!
+  { nome: "Simulador de Rentabilidade", path: "/dashboard/simulador", icone: "🧮", categoria: "Financeiro", defaultMaster: true },
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Financeiro", defaultMaster: true },
 
   // 📝 CADASTRO
