@@ -5,8 +5,6 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { simplificarNome } from "@/actions/dashboard-service";
 
-const RESEND_API_KEY = "re_WmeXNjdd_97NXwjjkUJc5prK4KfNF3xvA";
-
 // ============================================================================
 // 🧽 UTILS DE LIMPEZA E CÁLCULO
 // ============================================================================
@@ -70,8 +68,8 @@ export default function MonitoreDiarioPage() {
 
         setDados(filtrados.map(linha => {
           const match = resCadastro.data?.find(c => simplificarNome(c.cedente) === simplificarNome(linha.cedente));
-          const riscoConsolidado = match ? (parseFloat(match.risco_sec || 0) + parseFloat(match.risco_fidc || 0)) : 0;
-          return { ...linha, risco_aberto: riscoConsolidado };
+          const riscoConsolidated = match ? (parseFloat(match.risco_sec || 0) + parseFloat(match.risco_fidc || 0)) : 0;
+          return { ...linha, risco_aberto: riscoConsolidated };
         }));
       }
     } catch (err) { 
@@ -122,7 +120,7 @@ export default function MonitoreDiarioPage() {
         let blocoCodigo = "";
 
         for (const cod of codigosChave) {
-          const pos = linha.indexOf(cod);
+          const pos = inline.indexOf(cod);
           if (pos !== -1 && (idxBloco === -1 || pos < idxBloco)) {
             idxBloco = pos;
             blocoCodigo = cod;
@@ -281,31 +279,25 @@ export default function MonitoreDiarioPage() {
       }
 
       // ========================================================================
-      // 📧 DISPARO DE E-MAIL (RESEND)
+      // 📧 DISPARO DE E-MAIL (ACIONANDO A NOVA LOGICA CENTRALIZADA DA API)
       // ========================================================================
       if (resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
-        const { data: emailsDB } = await supabase.from("emails_monitore").select("email").eq("ativo", true);
-        const listaEmails = emailsDB?.map(e => e.email) || [];
 
-        if (listaEmails.length > 0) {
-          let textoHtml = "<h3>Resumo de Movimentações - Monitore Serasa</h3><ul>";
-          resumoGlobalDisparo.forEach(item => {
-            const cor = item.evolucao > 0 ? "#ef4444" : "#059669";
-            textoHtml += `<li><b>${item.cedente} (CNPJ: ${item.cnpj})</b>: <span style='color:${cor}'><b>R$ ${item.evolucao.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></span> <br><i>Motivo: ${item.resumo}</i></li><br>`;
-          });
-          textoHtml += "</ul><p>Acesse o sistema Ned Control para mais detalhes.</p>";
+        // Faz o acionamento simplificado passando as movimentações para a rota tratar
+        const respostaEmail = await fetch("/api/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tipo: "monitore",
+            resumoGlobalDisparo: resumoGlobalDisparo
+          })
+        });
 
-          await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              from: "Sistema Ned <sistema@nedcapital.com.br>",
-              to: listaEmails,
-              subject: `Alerta Monitore - ${new Date().toLocaleDateString("pt-BR")}`,
-              html: textoHtml
-            })
-          });
+        if (!respostaEmail.ok) {
+          const erroApi = await respostaEmail.json();
+          console.error("Erro retornado no disparo de e-mail centralizado:", erroApi);
+          throw new Error(erroApi.error || "Falha no disparo de e-mail");
         }
       }
 
