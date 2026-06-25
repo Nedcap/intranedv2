@@ -10,15 +10,14 @@ import { normalizarPelaBaseUniversal, limparNome, BaseUniversal } from "@/lib/no
 // 🧽 MOTOR SÍNCRONO DE LIMPEZA E CRUZAMENTO EM MEMÓRIA RAM
 // ============================================================================
 
-// Limpa pontuações, acentos e espaços de cabeçalhos para não ter erro de leitura
 const strClean = (c: any) => {
   if (!c) return "";
   return String(c)
     .trim()
     .toUpperCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Tira acentos
-    .replace(/[^A-Z0-9]/g, ""); // Tira tudo que não for letra ou número (pontos, traços, espaços)
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, ""); 
 };
 
 function parseValorReal(valor: any): number {
@@ -92,30 +91,32 @@ function checarSeVencido(dataStr: string): string {
 }
 
 // ============================================================================
-// 🤖 PROCESSADORES (INVENCÍVEIS A PONTUAÇÕES NAS COLUNAS)
+// 🤖 PROCESSADORES BLINDADOS
 // ============================================================================
 
+// 1.1 RISCO SEC
 const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return {};
   
   const header = raw[headerIdx].map(strClean);
   const idxCedente = header.indexOf("CEDENTE");
-  const idxLimUti = header.findIndex(c => c.includes("LIMUTI") || c.includes("UTI") || c.includes("RISCO"));
-  const idxVencidos = header.findIndex(c => c.includes("VENCIDOS"));
+  const idxLimUti = header.findIndex(c => c === "LIMUTI" || c === "LIMITEUTILIZADO" || c === "RISCO");
+  const idxVencidos = header.findIndex(c => c === "VENCIDOS" || c === "VENCIDO");
   
   const records: any = {};
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
-    const rawCed = String(row[idxCedente] || "");
+    if (!row || !row[idxCedente]) continue;
+
+    const rawCed = String(row[idxCedente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
     
-    // Passando null como CNPJ pois a tabela não tem essa coluna
     const chave = normalizarPelaBaseUniversal(rawCed, null, base);
     if (!chave) continue;
 
     records[chave] = {
-      cedenteOriginal: rawCed.trim(),
+      cedenteOriginal: rawCed,
       risco: parseValorReal(row[idxLimUti]),
       vencido: parseValorReal(row[idxVencidos])
     };
@@ -123,27 +124,35 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   return records;
 };
 
+// 1.2 RISCO FIDC
 const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CLIENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CLIENTE" || strClean(cell) === "CNPJCPF"));
   if (headerIdx === -1) return {};
   
   const header = raw[headerIdx].map(strClean);
   const idxCliente = header.indexOf("CLIENTE");
-  const idxUtilizado = header.indexOf("UTILIZADO");
+  const idxCnpj = header.findIndex(c => c.includes("CNPJ"));
+  const idxUtilizado = header.indexOf("UTILIZADO"); 
   const idxVencido = header.indexOf("VENCIDO");
 
   const records: any = {};
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
-    const rawCed = String(row[idxCliente] || "");
+    if (!row || !row[idxCliente]) continue;
+
+    const rawCed = String(row[idxCliente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
 
-    // Passando null como CNPJ pois a tabela não tem essa coluna
-    const chave = normalizarPelaBaseUniversal(rawCed, null, base);
+    let rawCnpj = null;
+    if (idxCnpj !== -1 && row[idxCnpj]) {
+      rawCnpj = String(row[idxCnpj]).replace(/\D/g, "");
+    }
+
+    const chave = normalizarPelaBaseUniversal(rawCed, rawCnpj, base);
     if (!chave) continue;
 
     records[chave] = {
-      cedenteOriginal: rawCed.trim(),
+      cedenteOriginal: rawCed,
       risco: parseValorReal(row[idxUtilizado]),
       vencido: parseValorReal(row[idxVencido])
     };
@@ -151,101 +160,123 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
   return records;
 };
 
+// 2.1 VOP SEC
 const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE" || strClean(cell) === "CPFCNPJ"));
   if (headerIdx === -1) return [];
   
   const header = raw[headerIdx].map(strClean);
   const idxCedente = header.indexOf("CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DTANEG") || c.includes("DATA"));
-  const idxValor = header.findIndex(c => c.includes("APROVADO") || c.includes("VLRAPROV"));
+  const idxCnpj = header.findIndex(c => c.includes("CPFCNPJ") || c === "CNPJ");
+  const idxData = header.findIndex(c => c === "DTANEG" || c === "DATANEGOCIACAO" || c === "DATA");
+  const idxValor = header.findIndex(c => c === "VLRAPROVADO" || c === "VALORAPROVADO" || c === "VLRFACE");
 
   const lancamentos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
-    const rawCed = String(row[idxCedente] || "");
+    if (!row || !row[idxCedente]) continue;
+    
+    const rawCed = String(row[idxCedente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL") || rawCed.toUpperCase() === "CEDENTE") continue;
+    
+    let rawCnpj = null;
+    if (idxCnpj !== -1 && row[idxCnpj]) {
+      rawCnpj = String(row[idxCnpj]).replace(/\D/g, "");
+    }
     
     const dataOp = formatarDataExcel(row[idxData]);
     const mesAno = formatarMesAno(dataOp);
     const valor = parseValorReal(row[idxValor]);
+    
     if (valor > 0) {
-      lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+      lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, cnpj: rawCnpj, vop: valor, desagio: 0, tarifas: 0, juros: 0 });
     }
   }
   return lancamentos;
 };
 
+// 2.2 VOP FIDC
 const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
   
   const header = raw[headerIdx].map(strClean);
-  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DATADAOPERACAO") || c.includes("DATAOPER") || c.includes("CRIACAO"));
-  const idxValor = header.findIndex(c => c.includes("VALORFACE") || c === "FACE");
+  const idxCedente = header.indexOf("NOMEDOCEDENTE");
+  const idxCnpj = header.findIndex(c => c.includes("CNPJ"));
+  const idxData = header.findIndex(c => c === "DATADAOPERACAO" || c === "DATAOPER");
+  const idxValor = header.indexOf("VALORFACE");
+  const idxStatus = header.indexOf("STATUSDAOPERACAO"); 
 
   const lancamentos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
-    const rawCed = String(row[idxCedente] || "");
+    if (!row || !row[idxCedente]) continue;
+    
+    const rawCed = String(row[idxCedente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+    
+    if (idxStatus !== -1) {
+      const statusOp = String(row[idxStatus]).trim().toUpperCase();
+      if (statusOp !== "FECHADA") continue;
+    }
+
+    let rawCnpj = null;
+    if (idxCnpj !== -1 && row[idxCnpj]) {
+      rawCnpj = String(row[idxCnpj]).replace(/\D/g, "");
+    }
     
     const dataOp = idxData !== -1 ? formatarDataExcel(row[idxData]) : "-";
     const mesAno = formatarMesAno(dataOp);
     const valor = parseValorReal(row[idxValor]);
+    
     if (valor > 0) {
-      lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: valor, desagio: 0, tarifas: 0, juros: 0 });
+      lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed, cnpj: rawCnpj, vop: valor, desagio: 0, tarifas: 0, juros: 0 });
     }
   }
   return lancamentos;
 };
 
+// 3.1 RECEITAS SEC
 const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
-  let headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "ADITIVO"));
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "ADITIVO"));
+  if (headerIdx === -1) return [];
+
+  const header = raw[headerIdx].map(strClean);
+  const idxAditivo = header.indexOf("ADITIVO");
+  const idxCliente = header.findIndex(c => c === "CLIENTE" || c === "CEDENTE");
+  const idxDesagio = header.indexOf("DIFERENCIAL"); 
+  const idxTaxa = header.indexOf("TAXASERVICO");
+  const idxDespesa = header.indexOf("DESPESAS");
+
   const lancamentos: any[] = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || !row[idxAditivo]) continue;
 
-  if (headerIdx !== -1) {
-    const header = raw[headerIdx].map(strClean);
-    const idxCedente = header.findIndex(c => c.includes("CLIENTE") || c.includes("CEDENTE"));
-    const idxAditivo = header.findIndex(c => c === "ADITIVO");
-    const idxDesagio = header.findIndex(c => c.includes("DIFERENCIAL") || c.includes("DESAGIO"));
-    const idxTaxa = header.findIndex(c => c.includes("TAXASERVICO") || c.includes("TARIFA"));
-    const idxDespesa = header.findIndex(c => c.includes("DESPESAS"));
+    let aditivo = String(row[idxAditivo]).trim();
+    if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
 
-    for (let i = headerIdx + 1; i < raw.length; i++) {
-      const row = raw[i];
-      let aditivo = String(row[idxAditivo] || "").trim();
-      if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
-      
-      if (aditivo.length >= 6 && /^\d+$/.test(aditivo)) {
-        const yy = aditivo.substring(0, 2); const mm = aditivo.substring(2, 4); const dd = aditivo.substring(4, 6);
-        if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-          const dataOp = `${dd}/${mm}/20${yy}`;
-          const mesAno = `${mm}/20${yy}`;
-          const rawCed = String(row[idxCedente] || "").trim();
-          if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
-          
-          const desagio = parseValorReal(row[idxDesagio]);
-          const tarifas = parseValorReal(row[idxTaxa]) + parseValorReal(row[idxDespesa]);
-          lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, vop: 0, desagio, tarifas, juros: 0 });
-        }
-      }
-    }
-  } else {
-    for (const row of raw) {
-      let aditivo = String(row[0] || "").trim();
-      if (aditivo.endsWith(".0")) aditivo = aditivo.slice(0, -2);
-      if (aditivo.length === 10 && /^\d+$/.test(aditivo)) {
-        const yy = aditivo.substring(0, 2); const mm = aditivo.substring(2, 4); const dd = aditivo.substring(4, 6);
-        if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-          const dataOp = `${dd}/${mm}/20${yy}`;
-          const mesAno = `${mm}/20${yy}`;
-          const rawCed = String(row[3] || row[5] || "").trim();
-          if (!rawCed || rawCed.toUpperCase().includes("TOTAL")) continue;
-          const desagio = parseValorReal(row[8] || row[12]);
-          const tarifas = parseValorReal(row[9]) + parseValorReal(row[10]);
-          lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, vop: 0, desagio, tarifas, juros: 0 });
+    if (aditivo.length >= 6 && /^\d+$/.test(aditivo)) {
+      const yy = aditivo.substring(0, 2);
+      const mm = aditivo.substring(2, 4);
+      const dd = aditivo.substring(4, 6);
+
+      if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
+        const dataOp = `${dd}/${mm}/20${yy}`;
+        const mesAno = `${mm}/20${yy}`;
+        
+        let rawCed = String(row[idxCliente] || "").trim();
+        if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+
+        rawCed = rawCed.replace(/^\d+\s*-\s*/, "").trim();
+
+        const desagio = idxDesagio !== -1 ? parseValorReal(row[idxDesagio]) : 0;
+        let tarifas = 0;
+        if (idxTaxa !== -1) tarifas += parseValorReal(row[idxTaxa]);
+        if (idxDespesa !== -1) tarifas += parseValorReal(row[idxDespesa]);
+
+        if (desagio > 0 || tarifas > 0) {
+          lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: rawCed, cnpj: null, vop: 0, desagio, tarifas, juros: 0 });
         }
       }
     }
@@ -253,68 +284,103 @@ const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
+// 3.2 RECEITAS FIDC
 const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
   
   const header = raw[headerIdx].map(strClean);
-  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
-  const idxData = header.findIndex(c => c.includes("DATADAOPER") || c.includes("DATAOPER") || c.includes("CRIACAO"));
-  const idxDesagio = header.findIndex(c => c === "DESAGIO" || c.includes("VALORDESAGIO") || c.includes("DESCONTO"));
+  const idxCedente = header.indexOf("NOMEDOCEDENTE");
+  const idxCnpj = header.findIndex(c => c.includes("CNPJ"));
+  const idxData = header.findIndex(c => c === "DATADAOPERACAO" || c === "DATAOPER");
+  const idxStatus = header.indexOf("STATUSDAOPERACAO");
   
-  const indicesTarifas = header.reduce((acc: number[], col, idx) => {
-    if (col.includes("DESPESA") || col.includes("TARIFA") || col.includes("TAXA")) acc.push(idx);
-    return acc;
-  }, []);
+  const idxDesagio = header.indexOf("DESAGIO");
+  const idxDespesaOp = header.indexOf("DESPESAOPERACAO");
+  const idxDespesaRec = header.indexOf("DESPESARECEBIVEL");
+  const idxDespesaSac = header.indexOf("DESPESASACADO");
 
   const lancamentos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
-    const rawCed = String(row[idxCedente] || "");
+    if (!row || !row[idxCedente]) continue;
+    
+    const rawCed = String(row[idxCedente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
+    
+    if (idxStatus !== -1) {
+      const statusOp = String(row[idxStatus]).trim().toUpperCase();
+      if (statusOp !== "FECHADA") continue;
+    }
+
+    let rawCnpj = null;
+    if (idxCnpj !== -1 && row[idxCnpj]) {
+      rawCnpj = String(row[idxCnpj]).replace(/\D/g, "");
+    }
     
     const dataOp = idxData !== -1 ? formatarDataExcel(row[idxData]) : "-";
     const mesAno = formatarMesAno(dataOp);
-    const desagio = parseValorReal(row[idxDesagio]);
+    const desagio = idxDesagio !== -1 ? parseValorReal(row[idxDesagio]) : 0;
     
     let tarifasConsolidadas = 0;
-    indicesTarifas.forEach(idxCol => { if (idxCol !== idxDesagio) tarifasConsolidadas += parseValorReal(row[idxCol]); });
+    if (idxDespesaOp !== -1) tarifasConsolidadas += parseValorReal(row[idxDespesaOp]);
+    if (idxDespesaRec !== -1) tarifasConsolidadas += parseValorReal(row[idxDespesaRec]);
+    if (idxDespesaSac !== -1) tarifasConsolidadas += parseValorReal(row[idxDespesaSac]);
 
     if (desagio > 0 || tarifasConsolidadas > 0) {
-      lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed.trim(), vop: 0, desagio, tarifas: tarifasConsolidadas, juros: 0 });
+      lancamentos.push({ empresa: "FIDC", dataOp, mesAno, cedenteOriginal: rawCed, cnpj: rawCnpj, vop: 0, desagio, tarifas: tarifasConsolidadas, juros: 0 });
     }
   }
   return lancamentos;
 };
 
+// 4.1 LIQUIDADOS SEC (JUROS ATRASO)
 const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
-  let colDtaBaixa = 12; let colEncargos = 15;
-  for (let i = 0; i < Math.min(30, raw.length); i++) {
+  let headerIdx = -1;
+  let colDtaBaixa = -1;
+  let colEncargos = -1;
+
+  for (let i = 0; i < raw.length; i++) {
     const rowStr = raw[i].map(x => strClean(x));
-    if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA")) {
+    if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA") || rowStr.includes("ENCARGOS")) {
+      headerIdx = i;
       colDtaBaixa = rowStr.findIndex(x => x.includes("DTABAIXA") || x.includes("DATABAIXA"));
       colEncargos = rowStr.findIndex(x => x.includes("ENCARGOS"));
       break;
     }
   }
+
+  if (headerIdx === -1 || colDtaBaixa === -1 || colEncargos === -1) return [];
+
   const lancamentos: any[] = [];
   let currentCedente = "";
-  for (const row of raw) {
+
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || row.length === 0) continue;
+
     const c0 = String(row[0] || "").trim();
-    if (/^\d+\s*-/.test(c0) && (!row[1] || String(row[1]).trim() === "")) { 
+    if (/^\d+\s*-/.test(c0)) { 
       currentCedente = c0.replace(/^\d+\s*-\s*/, "").trim(); 
       continue; 
     }
-    if (row.map(x => String(x).toUpperCase()).join(" ").includes("TOTAL")) continue;
-    const valorDataBruto = row[colDtaBaixa]; const valorEncargoBruto = row[colEncargos];
+
+    const linhaTexto = row.map(x => String(x).toUpperCase()).join(" ");
+    if (linhaTexto.includes("TOTAL") || linhaTexto.includes("MODALIDADE")) continue;
+
+    const valorDataBruto = row[colDtaBaixa];
+    const valorEncargoBruto = row[colEncargos];
+
     if (currentCedente && valorDataBruto && valorEncargoBruto) {
       const encargos = parseValorReal(valorEncargoBruto);
       if (encargos > 0) {
         const valStr = String(valorDataBruto).toUpperCase();
-        if (!valStr.includes("BAIXA") && !valStr.includes("NORMAL")) {
+        if (!valStr.includes("BAIXA") && !valStr.includes("DATA")) {
           const dataOp = formatarDataExcel(valorDataBruto);
           const mesAno = formatarMesAno(dataOp);
-          if (dataOp) lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: currentCedente, vop: 0, desagio: 0, tarifas: 0, juros: encargos });
+          if (dataOp && mesAno) {
+            lancamentos.push({ empresa: "SEC", dataOp, mesAno, cedenteOriginal: currentCedente, cnpj: null, vop: 0, desagio: 0, tarifas: 0, juros: encargos });
+          }
         }
       }
     }
@@ -322,30 +388,26 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// ============================================================================
-// PROCESSADORES DE CARTEIRA
-// ============================================================================
+// 5.1 CARTEIRA ABERTA SEC
 const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
-  const headerIdx = raw.findIndex(row => row.some(cell => { 
-    const c = strClean(cell); 
-    return c === "CEDENTE" || c === "RAZAOSOCIAL" || c.includes("CLIENTE"); 
-  }));
-  
+  const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
   
   const header = raw[headerIdx].map(strClean);
+  const idxCedente = header.indexOf("CEDENTE");
+  const idxSacado = header.indexOf("SACADO");
   
-  const idxCedente = header.findIndex(c => c === "CEDENTE" || c.includes("RAZAO") || c.includes("CLIENTE"));
-  const idxSacado = header.findIndex(c => c === "SACADO" || c.includes("NOMESACADO") || c.includes("SACADODEVEDOR"));
-  const idxNumTitulo = header.findIndex(c => c.includes("NOSSONUM") || c.includes("DOCUMENTO") || c.includes("TITULO"));
-  const idxVencimento = header.findIndex(c => c.includes("DTAVCTO") || c.includes("VENCIMENTO"));
-  const idxValorFace = header.findIndex(c => c.includes("VLRFACE") || c.includes("VALORFACE") || c.includes("FACE"));
-  const idxValorAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c.includes("ABERTO"));
+  const idxNumTitulo = header.findIndex(c => c === "SNUM" || c === "SEQTIT" || c === "NOSSONUM");
+  const idxVencimento = header.findIndex(c => c === "DTAVCTO" || c === "VENCIMENTO");
+  const idxValorFace = header.findIndex(c => c === "VLRFACE" || c === "VALORFACE");
+  const idxValorAberto = header.findIndex(c => c === "VLRABERTO" || c === "VALORABERTO");
 
   const titulos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
-    const row = raw[i]; 
-    const cedente = String(row[idxCedente] || "").trim();
+    const row = raw[i];
+    if (!row || !row[idxCedente]) continue;
+    
+    const cedente = String(row[idxCedente]).trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
     const cedenteNormalizado = limparNome(cedente);
@@ -359,55 +421,45 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
     const status = checarSeVencido(vencimento);
 
     if (valorAberto > 0) {
-      titulos.push({ 
-        cedente: cedenteNormalizado, 
-        sacado: sacado.toUpperCase(), 
-        numero_titulo: numeroTitulo, 
-        vencimento: converteDataParaISO(vencimento), 
-        valor_face: valorFace, 
-        valor_aberto: valorAberto, 
-        status 
-      });
+      titulos.push({ cedente: cedenteNormalizado, sacado: sacado.toUpperCase(), numero_titulo: numeroTitulo, vencimento: converteDataParaISO(vencimento), valor_face: valorFace, valor_aberto: valorAberto, status });
     }
   }
   return titulos;
 };
 
+// 5.2 CARTEIRA ABERTA FIDC
 const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
   
   const header = raw[headerIdx].map(strClean);
-  const idxCedente = header.findIndex(c => c.includes("NOMEDOCEDENTE") || c === "CEDENTE");
-  const idxSacado = header.findIndex(c => c.includes("NOMEDOSACADO") || c === "SACADO");
-  const idxVencimento = header.findIndex(c => c.includes("DATADEVENCIMENTO") || c === "VENCIMENTO");
-  const idxValorFace = header.findIndex(c => c.includes("VALORFACE") || c === "FACE");
-  const idxValorAberto = header.findIndex(c => c.includes("VALORABERTO") || c === "ABERTO");
+  const idxCedente = header.findIndex(c => c === "NOMEDOCEDENTE" || c === "CEDENTE");
+  const idxSacado = header.findIndex(c => c === "NOMEDOSACADO" || c === "SACADO");
+  
+  // Garante que pega a atualizada caso exista prorrogação
+  const idxVencimento = header.findIndex(c => c === "DATADEVENCIMENTOATUALIZADA" || c === "DATADEVENCIMENTOORIGINAL" || c === "VENCIMENTO");
+  const idxValorFace = header.findIndex(c => c === "VALORFACE" || c === "FACE");
+  const idxValorAberto = header.findIndex(c => c === "VALORABERTO" || c === "ABERTO");
 
   const titulos: any[] = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i]; 
-    const cedente = String(row[idxCedente] || "").trim();
+    if (!row || !row[idxCedente]) continue;
+
+    const cedente = String(row[idxCedente]).trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
     const cedenteNormalizado = limparNome(cedente);
     if (!cedenteNormalizado) continue;
 
     const sacado = String(row[idxSacado] || "").trim();
-    const vencimento = formatarDataExcel(row[idxVencimento]);
-    const valorFace = parseValorReal(row[idxValorFace]);
-    const valorAberto = parseValorReal(row[idxValorAberto]);
+    const vencimento = idxVencimento !== -1 ? formatarDataExcel(row[idxVencimento]) : "-";
+    const valorFace = idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0;
+    const valorAberto = idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0;
     const status = checarSeVencido(vencimento);
 
     if (valorAberto > 0) {
-      titulos.push({ 
-        cedente: cedenteNormalizado, 
-        sacado: sacado.toUpperCase(), 
-        vencimento: converteDataParaISO(vencimento), 
-        valor_face: valorFace, 
-        valor_aberto: valorAberto, 
-        status 
-      });
+      titulos.push({ cedente: cedenteNormalizado, sacado: sacado.toUpperCase(), vencimento: converteDataParaISO(vencimento), valor_face: valorFace, valor_aberto: valorAberto, status });
     }
   }
   return titulos;
@@ -549,7 +601,8 @@ export default function ImportacaoPage() {
       // ========================================================================
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
-        const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, null, baseUniversalData);
+        // Usa o CNPJ caso tenha sido extraído, senão vai pelo nome original
+        const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, item.cnpj || null, baseUniversalData);
         loteFinancas.push({
           empresa: item.empresa,
           data_operacao: converteDataParaISO(item.dataOp),
@@ -569,11 +622,8 @@ export default function ImportacaoPage() {
       for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
-        // 🎯 FIX: Descobre exatamente quais Meses e Empresas estão no upload atual
-        // Ex: Set { "SEC|05/2024", "FIDC|05/2024" }
         const periodosAfetados = new Set(loteFinancas.map(i => `${i.empresa}|${i.mes_ano}`));
 
-        // 🧹 LIMPEZA NO EXTRATO FINANCEIRO (Deleta apenas os meses que estamos subindo agora)
         for (const periodo of periodosAfetados) {
           const [empresa, mes_ano] = periodo.split("|");
           await supabase.from("extrato_financeiro")
@@ -582,14 +632,12 @@ export default function ImportacaoPage() {
             .eq("mes_ano", mes_ano);
         }
 
-        // Insere o extrato novo em chunks para evitar estouro de payload
         const chunkFinancas = 500;
         for (let i = 0; i < loteFinancas.length; i += chunkFinancas) {
           const { error: errExtrato } = await supabase.from("extrato_financeiro").insert(loteFinancas.slice(i, i + chunkFinancas));
           if (errExtrato) throw errExtrato;
         }
 
-        // 🧹 RECONSTRUÇÃO DO DASH VOP (Zera apenas a coluna afetada antes de somar)
         const { data: dbVop } = await supabase.from('dash_vop').select('*');
         const vopMap = new Map();
         
@@ -599,13 +647,11 @@ export default function ImportacaoPage() {
           
           vopMap.set(`${row.mes_ano}_${row.cedente}`, {
             ...row,
-            // Se estamos subindo SEC para esse mês, joga o saldo velho fora. Se não, mantêm o velho.
             vop_sec: zerarSec ? 0 : (row.vop_sec || 0),
             vop_fidc: zerarFidc ? 0 : (row.vop_fidc || 0)
           });
         });
 
-        // Agora somamos de forma segura! O vop do banco já foi limpo, então não haverá acumulação.
         loteFinancas.forEach(item => {
           if (item.vop > 0) {
             const key = `${item.mes_ano}_${item.cedente}`;
@@ -626,7 +672,6 @@ export default function ImportacaoPage() {
           atualizado_em: new Date().toISOString()
         }));
 
-        // Upsert do VOP em chunks para evitar Timeouts no banco
         const chunkVop = 500;
         for (let i = 0; i < vopPayload.length; i += chunkVop) {
           const { error: errVop } = await supabase.from("dash_vop").upsert(vopPayload.slice(i, i + chunkVop), { onConflict: "mes_ano,cedente" });
