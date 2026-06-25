@@ -52,43 +52,87 @@ export default function RestritivosSociosPage() {
     carregarSocios();
   }, []);
 
+  // ==========================================================================
+  // 🎨 UTILS DE FORMATAÇÃO VISUAL
+  // ==========================================================================
   const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
 
-  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Carregando restritivos de sócios...</div>;
+  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Varrendo histórico de restritivos de sócios...</div>;
 
   return (
-    <div className="space-y-4 max-w-[1600px] mx-auto pb-6 text-[13px]">
-      <div className="border-b border-slate-200 pb-2">
-        <h2 className="text-xl font-bold text-slate-800 tracking-tight">👥 Restritivos de Sócios</h2>
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
+      
+      {/* HEADER */}
+      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight uppercase">👥 Restritivos de Sócios</h2>
+          <span className="text-xs text-slate-500 font-medium">Monitoramento do quadro societário vinculado à carteira de cedentes.</span>
+        </div>
       </div>
-      <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+
+      {/* TABELA */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-[13px]">
+          <table className="w-full text-left border-collapse min-w-[1200px] text-[13px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-xs tracking-wider">
-                <th className="p-4">Sócio Monitorado</th>
-                <th className="p-3 text-right">PEFIN</th>
-                <th className="p-3 text-right">REFIN</th>
-                <th className="p-3 text-right">Protestos</th>
-                <th className="p-3 text-right">Ações Judiciais</th>
-                <th className="p-3 text-right">Dívidas Vencidas</th>
-                <th className="p-4 text-right">Saldo Total</th>
+              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-[10px] tracking-wider h-11">
+                <th className="p-4 w-72">Sócio Monitorado</th>
+                <th className="p-4 text-right">PEFIN</th>
+                <th className="p-4 text-right">REFIN</th>
+                <th className="p-4 text-right">Protestos</th>
+                <th className="p-4 text-right">Ações Judiciais</th>
+                <th className="p-4 text-right">Dívidas Vencidas</th>
+                <th className="p-4 text-right w-40">Saldo Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {socios.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center text-slate-400">Nenhum restritivo de sócio mapeado na sua carteira.</td></tr>
+                <tr>
+                  <td colSpan={7} className="p-10 text-center text-slate-400 font-bold italic">
+                    🎉 Nenhum apontamento restritivo mapeado no quadro societário da sua carteira.
+                  </td>
+                </tr>
               ) : (
                 socios.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50">
+                  <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                    
+                    {/* Sócio Monitorado */}
                     <td className="p-4">
-                      <div className="font-bold text-slate-900">{item.nome_socio}</div>
-                      <div className="text-slate-400 text-xs font-mono mt-0.5">Empresa Vínculo: {item.nome_empresa || "N/A"}</div>
+                      <div className="font-black text-slate-900 truncate max-w-[280px]" title={item.nome_socio}>
+                        {item.nome_socio}
+                      </div>
+                      <div className="text-slate-400 text-[11px] font-mono mt-0.5 truncate max-w-[280px]" title={item.nome_empresa}>
+                        Vínculo: {item.nome_empresa || "N/A"}
+                      </div>
                     </td>
-                    {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(key => (
-                      <td key={key} className={`p-3 text-right ${parseFloat(item[key]) > 0 ? "text-red-500 font-bold bg-red-50/20" : "text-slate-400 font-normal"}`}>{fM(item[key])}</td>
-                    ))}
-                    <td className={`p-4 text-right font-bold ${parseFloat(item.saldo_total) > 0 ? "text-red-600 bg-red-50/40" : "text-slate-800"}`}>{fM(item.saldo_total)}</td>
+                    
+                    {/* Colunas Dinâmicas de Apontamentos */}
+                    {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(key => {
+                      const valor = parseFloat(item[key]);
+                      const temApontamento = valor > 0;
+                      return (
+                        <td 
+                          key={key} 
+                          className={`p-4 text-right font-mono text-xs whitespace-nowrap ${
+                            temApontamento ? "text-rose-600 font-bold bg-rose-50/40" : "text-slate-300 font-normal"
+                          }`}
+                        >
+                          {fM(item[key])}
+                        </td>
+                      );
+                    })}
+                    
+                    {/* Saldo Total */}
+                    <td 
+                      className={`p-4 text-right font-mono text-xs whitespace-nowrap border-l border-slate-100 ${
+                        parseFloat(item.saldo_total) > 0 
+                          ? "text-rose-700 font-black bg-rose-50/60" 
+                          : "text-slate-500 font-bold bg-slate-50/50"
+                      }`}
+                    >
+                      {fM(item.saldo_total)}
+                    </td>
+                    
                   </tr>
                 ))
               )}
@@ -96,6 +140,7 @@ export default function RestritivosSociosPage() {
           </table>
         </div>
       </div>
+
     </div>
   );
 }

@@ -202,9 +202,13 @@ export default function AnaliseEstoqueCedentesPage() {
         }
 
         setStatusStatusTexto(`Injetando carga unificada de ${payloadParaInsercao.length} registros no banco...`);
-        const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao);
         
-        if (insertError) throw insertError;
+        // Inserção em lotes de 500 para não estourar payload do Supabase
+        const chunk = 500;
+        for (let i = 0; i < payloadParaInsercao.length; i += chunk) {
+          const { error: insertError } = await supabase.from("estoque_fidc").insert(payloadParaInsercao.slice(i, i + chunk));
+          if (insertError) throw insertError;
+        }
 
         alert(`🏁 Concluído com sucesso! ${payloadParaInsercao.length} registros sincronizados.`);
         await buscarEstoqueDoBanco();
@@ -277,72 +281,73 @@ export default function AnaliseEstoqueCedentesPage() {
   const formatarMoeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[12px] font-sans text-slate-700 p-4">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
       
       {/* HEADER PRINCIPAL */}
-      <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-4">
         <div>
-          <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">💼 Auditoria Gerencial de Estoque FIDC</h2>
-          <p className="text-xs text-slate-400">Consolidação de Massa Ponderada Absoluta com base no Valor Nominal.</p>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">💼 Auditoria Gerencial de Estoque</h2>
+          <span className="text-xs text-slate-500 font-medium">Consolidação de Massa Ponderada Absoluta com base no Valor Nominal.</span>
         </div>
-        <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg cursor-pointer transition-all flex items-center gap-2 shadow-xs uppercase tracking-wider text-[10px]">
-          📥 CARREGAR BASE OFICIAL (.CSV)
+        <label className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg cursor-pointer transition-all flex items-center gap-2 shadow-md uppercase tracking-wider text-xs disabled:opacity-50">
+          📥 Carregar Base Oficial (.CSV)
           <input type="file" accept=".csv" onChange={handleImportarEstoqueDestrutivo} className="hidden" disabled={carregando} />
         </label>
       </div>
 
       {/* 📊 CARDS DE RESUMO OPERACIONAL (MESA DE CESSÃO) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Estoque Nominal Total</span>
-          <div className="text-xl font-mono font-black text-slate-900 mt-1">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="bg-white border-l-4 border-l-slate-800 border-y border-r border-slate-200 p-6 rounded-xl shadow-xs">
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Estoque Nominal Total</span>
+          <div className="text-3xl font-mono font-black text-slate-900 truncate" title={formatarMoeda(totaisGerais.nominal)}>
             {formatarMoeda(totaisGerais.nominal)}
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">Soma absoluta de todos os ativos integrados.</p>
+          <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-semibold">Soma absoluta de ativos integrados</p>
         </div>
 
-        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
-          <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider">Taxa Média Ponderada Global</span>
-          <div className="text-xl font-mono font-black text-emerald-600 mt-1">
-            {totaisGerais.taxaMed.toFixed(4)}% <span className="text-xs font-sans font-normal text-slate-400">a.m.</span>
+        <div className="bg-white border-l-4 border-l-emerald-500 border-y border-r border-slate-200 p-6 rounded-xl shadow-xs">
+          <span className="text-[11px] font-black text-emerald-600 uppercase tracking-wider block mb-1">Taxa Média Ponderada</span>
+          <div className="text-3xl font-mono font-black text-emerald-700 truncate">
+            {totaisGerais.taxaMed.toFixed(4)}% <span className="text-base font-sans font-bold text-slate-400">a.m.</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">Massa de taxa dividida pelo peso do valor nominal.</p>
+          <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-semibold">Massa de taxa ÷ Peso Nominal</p>
         </div>
 
-        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-2xs">
-          <span className="text-[9px] font-black text-blue-700 uppercase tracking-wider">Prazo Médio Global</span>
-          <div className="text-xl font-mono font-black text-blue-700 mt-1">
-            {totaisGerais.prazoMed.toFixed(2)} <span className="text-xs font-sans font-normal text-slate-400">dias</span>
+        <div className="bg-white border-l-4 border-l-blue-600 border-y border-r border-slate-200 p-6 rounded-xl shadow-xs">
+          <span className="text-[11px] font-black text-blue-700 uppercase tracking-wider block mb-1">Prazo Médio Global</span>
+          <div className="text-3xl font-mono font-black text-blue-800 truncate">
+            {totaisGerais.prazoMed.toFixed(2)} <span className="text-base font-sans font-bold text-slate-400">dias</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">Prazo ponderado real decorrido no estoque.</p>
+          <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-semibold">Prazo real decorrido no estoque</p>
         </div>
       </div>
 
       {/* LOADING */}
       {carregando && (
-        <div className="p-6 font-bold text-center bg-amber-50 text-amber-800 rounded-xl border border-amber-200 animate-pulse">
+        <div className="p-8 font-bold text-center text-xs uppercase tracking-widest bg-slate-50 text-slate-500 rounded-xl border border-slate-200 animate-pulse shadow-inner">
           ⏳ {statusTexto || "Processando Matriz Dinâmica..."}
         </div>
       )}
 
       {/* 🔍 FILTROS E CONTRÔLES DE ORDENAÇÃO */}
-      {titulos.length > 0 && (
-        <div className="bg-white p-3 border border-slate-200 rounded-xl shadow-2xs flex flex-col md:flex-row gap-3 items-center">
-          <div className="w-full md:flex-1">
+      {!carregando && titulos.length > 0 && (
+        <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-xs flex flex-col md:flex-row gap-4 items-center">
+          <div className="relative w-full md:flex-1">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔎</span>
             <input 
               type="text" 
-              placeholder="🔍 Buscar por nome do cedente homologado..." 
+              placeholder="Buscar por nome do cedente homologado..." 
               value={busca} 
               onChange={(e) => setBusca(e.target.value)} 
-              className="w-full p-2 border border-slate-200 rounded-lg outline-none font-medium text-slate-800 bg-slate-50/50 focus:bg-white focus:border-slate-400 transition-all" 
+              className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-lg outline-none font-bold text-xs text-slate-800 bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm" 
             />
           </div>
-          <div className="w-full md:w-auto flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Ordenar:</span>
+          <div className="w-full md:w-auto flex items-center gap-3">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider whitespace-nowrap">Ordenar por:</span>
             <select 
               value={ordenacao} 
               onChange={(e) => setOrdenacao(e.target.value)}
-              className="p-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-700 outline-none cursor-pointer text-[11px]"
+              className="p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-slate-700 outline-none cursor-pointer text-xs focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
             >
               <option value="nominal_desc">Maior Valor Nominal</option>
               <option value="nominal_asc">Menor Valor Nominal</option>
@@ -356,77 +361,83 @@ export default function AnaliseEstoqueCedentesPage() {
       )}
 
       {/* LISTA GERENCIAL DE CEDENTES */}
-      <div className="space-y-2">
-        {filtradosEDecorados.length === 0 ? (
-          <div className="p-12 border border-dashed border-slate-300 rounded-xl text-center text-slate-400 font-medium bg-white">
-            Nenhum dado ativo no painel. Insira a base crua diária para consolidar as ponderações.
-          </div>
-        ) : (
-          filtradosEDecorados.map((item) => {
-            const isExpandido = cedenteExpandido === item.cedente;
+      {!carregando && (
+        <div className="space-y-3">
+          {filtradosEDecorados.length === 0 ? (
+            <div className="p-16 border-2 border-dashed border-slate-200 rounded-2xl text-center text-slate-400 font-bold bg-white">
+              Nenhum dado ativo no painel. Insira a base crua diária para consolidar as ponderações.
+            </div>
+          ) : (
+            filtradosEDecorados.map((item) => {
+              const isExpandido = cedenteExpandido === item.cedente;
 
-            return (
-              <div key={item.cedente} className={`bg-white border transition-all rounded-xl shadow-2xs overflow-hidden ${isExpandido ? "border-slate-900 ring-1 ring-slate-900/10" : "border-slate-200 hover:border-slate-300"}`}>
-                
-                <div onClick={() => setCedenteExpandido(isExpandido ? null : item.cedente)} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer bg-gradient-to-r from-white to-slate-50/10 select-none">
-                  <div>
-                    <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Cedente Parceiro</span>
-                    <h3 className="font-black text-slate-900 text-[13px] tracking-tight">{item.cedente}</h3>
+              return (
+                <div key={item.cedente} className={`bg-white border transition-all rounded-xl overflow-hidden ${isExpandido ? "border-blue-300 ring-4 ring-blue-50 shadow-md" : "border-slate-200 hover:border-blue-200 hover:shadow-md shadow-xs"}`}>
+                  
+                  {/* HEADER DO ACORDEÃO */}
+                  <div onClick={() => setCedenteExpandido(isExpandido ? null : item.cedente)} className={`p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 cursor-pointer select-none transition-colors ${isExpandido ? "bg-blue-50/30" : "hover:bg-slate-50/50"}`}>
+                    <div className="flex-1">
+                      <span className="text-[10px] uppercase font-black tracking-wider text-slate-400">Cedente Parceiro</span>
+                      <h3 className="font-black text-slate-900 text-sm tracking-tight uppercase truncate" title={item.cedente}>{item.cedente}</h3>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-6 xl:gap-8 text-left xl:text-right w-full xl:w-auto justify-between xl:justify-end">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block font-black uppercase tracking-wider">Valor Nominal</span>
+                        <span className="font-mono font-black text-slate-900 text-base">{formatarMoeda(item.valorNominalTotal)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-emerald-700 block font-black uppercase tracking-wider">Taxa Média</span>
+                        <span className="font-mono font-black text-emerald-700 text-base">{item.taxaMediaPonderada.toFixed(3)}%</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-blue-700 block font-black uppercase tracking-wider">Prazo Médio</span>
+                        <span className="font-mono font-black text-blue-800 text-base">{item.prazoMedioPonderado.toFixed(1)} <span className="text-xs font-sans">dias</span></span>
+                      </div>
+                      <div className={`text-slate-400 font-black text-lg transition-transform duration-300 ${isExpandido ? "rotate-180 text-blue-600" : ""}`}>
+                        ▼
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-8 text-right self-stretch sm:self-auto justify-between sm:justify-end">
-                    <div>
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">VALOR NOMINAL TOTAL</span>
-                      <span className="font-mono font-black text-slate-900 text-sm">{formatarMoeda(item.valorNominalTotal)}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-500 block font-bold uppercase">TAXA MÉDIA POND.</span>
-                      <span className="font-mono font-black text-emerald-600">{item.taxaMediaPonderada.toFixed(2)}% a.m.</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-500 block font-bold uppercase">PRAZO MÉDIO POND.</span>
-                      <span className="font-mono font-black text-blue-900">{item.prazoMedioPonderado.toFixed(2)} dias</span>
-                    </div>
-                    <div className="text-slate-400 font-bold px-1">{isExpandido ? "▲" : "▼"}</div>
-                  </div>
-                </div>
-
-                {isExpandido && (
-                  <div className="border-t border-slate-100 bg-slate-50/50 p-4">
-                    <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-slate-900 text-white text-[10px] font-black uppercase">
-                            <th className="p-2">Sacado</th>
-                            <th className="p-2 text-center">Nº Documento</th>
-                            <th className="p-2 text-center">Vencimento</th>
-                            <th className="p-2 text-center">Prazo Corrido (D3)</th>
-                            <th className="p-2 text-right">Valor Nominal (Y3)</th>
-                            <th className="p-2 text-right">Taxa Individual (C3)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
-                          {item.titulos.map((t, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="p-2 font-bold text-slate-900 truncate max-w-[280px]">{t.sacado}</td>
-                              <td className="p-2 text-center font-mono text-slate-400">{t.documento}</td>
-                              <td className="p-2 text-center text-slate-500">{t.vencimento}</td>
-                              <td className="p-2 text-center font-mono text-blue-900 font-bold">{t.prazoDias} dias</td>
-                              <td className="p-2 text-right font-mono text-slate-900">{formatarMoeda(t.valorNominal)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 font-bold">{(t.taxaFinalCalculada * 100).toFixed(2)}%</td>
+                  {/* TABELA DE TÍTULOS (EXPANDIDA) */}
+                  {isExpandido && (
+                    <div className="border-t border-blue-100 bg-slate-50 p-5">
+                      <div className="border border-slate-200 rounded-xl overflow-x-auto bg-white shadow-inner">
+                        <table className="w-full text-left border-collapse min-w-[1000px]">
+                          <thead>
+                            <tr className="bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider border-b border-slate-200">
+                              <th className="p-3 w-64">Sacado</th>
+                              <th className="p-3 text-center w-32">Nº Documento</th>
+                              <th className="p-3 text-center w-32">Vencimento</th>
+                              <th className="p-3 text-center w-32">Prazo Corrido (D3)</th>
+                              <th className="p-3 text-right w-40">Valor Nominal (Y3)</th>
+                              <th className="p-3 text-right w-40">Taxa Individual (C3)</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium text-slate-600">
+                            {item.titulos.map((t, idx) => (
+                              <tr key={idx} className="hover:bg-blue-50/40 transition-colors">
+                                <td className="p-3 font-bold text-slate-900 truncate max-w-[250px]" title={t.sacado}>{t.sacado}</td>
+                                <td className="p-3 text-center font-mono text-[11px] text-slate-500">{t.documento}</td>
+                                <td className="p-3 text-center text-slate-500 text-xs">{t.vencimento}</td>
+                                <td className="p-3 text-center font-mono text-blue-700 font-bold bg-blue-50/30 border-x border-slate-50">{t.prazoDias} dias</td>
+                                <td className="p-3 text-right font-mono text-slate-900 font-bold">{formatarMoeda(t.valorNominal)}</td>
+                                <td className="p-3 text-right font-mono text-emerald-600 font-black bg-emerald-50/30 border-l border-slate-50">{(t.taxaFinalCalculada * 100).toFixed(4)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-              </div>
-            );
-          })
-        )}
-      </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
     </div>
   );
