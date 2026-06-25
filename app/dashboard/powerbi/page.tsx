@@ -2,16 +2,12 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
-function simplificarNome(nome: string): string {
-  if (!nome) return "";
-  let n = nome.trim().toUpperCase();
-  n = n.replace(/\b(LTDA|SA|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, "");
-  return n.replace(/\s+/g, " ").trim();
-}
-
+// ============================================================================
+// 🧽 UTILS
+// ============================================================================
 function parseValorReal(valor: any): number {
   if (!valor) return 0;
   if (typeof valor === "number") return valor;
@@ -27,18 +23,6 @@ function formatarMesAno(str: string) {
     return `${partes[0].padStart(2, "0")}/${partes[1]}`;
   }
   return str;
-}
-
-function extrairMesAnoDeDataBR(dataStr: string): string {
-  if (!dataStr) return "";
-  const partes = dataStr.split("/");
-  if (partes.length === 3) {
-    return `${partes[1].padStart(2, "0")}/${partes[2]}`;
-  }
-  if (partes.length === 2) {
-    return `${partes[0].padStart(2, "0")}/${partes[1]}`;
-  }
-  return dataStr;
 }
 
 function parseDataSegura(dataStr: string) {
@@ -64,6 +48,11 @@ function calcularDiasUteis(dInicio: Date, dFim: Date) {
   return count;
 }
 
+const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
+
+// ============================================================================
+// 📊 COMPONENTE PRINCIPAL
+// ============================================================================
 export default function PowerBIPage() {
   const [analises, setAnalises] = useState<any[]>([]);
   const [dashCarteira, setDashCarteira] = useState<any[]>([]);
@@ -146,9 +135,7 @@ export default function PowerBIPage() {
 
       // 2. Extração Simultânea e Super Rápida (Supabase V2)
       const [resVop, resCarteira, resExtrato] = await Promise.all([
-        qVop,
-        qCarteira,
-        qExtrato
+        qVop, qCarteira, qExtrato
       ]);
 
       setDashVop(resVop.data || []);
@@ -193,81 +180,95 @@ export default function PowerBIPage() {
     setSincronizando(false);
   };
 
-  const filtroAtivo = (emp: string, m_a: string, ced: string) => {
-    const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
-    const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
-    const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced);
-    return bateEmpresa && bateMes && bateCedente;
-  };
+  // ==========================================================================
+  // ⚡ CÁLCULOS MEMOIZADOS (Alta Performance)
+  // ==========================================================================
+  const kpis = useMemo(() => {
+    let aprovadosMes = 0, recusadosMes = 0, somaDias = 0, qtdSla = 0;
+    let vopMensalSec = 0, vopMensalFidc = 0;
+    let vopVidaTodaSec = 0, vopVidaTodaFidc = 0;
+    let riscoSec = 0, riscoFidc = 0, vencidosSec = 0, vencidosFidc = 0;
+    let totalDesagio = 0, totalTarifas = 0, totalJurosMultas = 0;
+
+    const filtroAtivo = (emp: string, m_a: string, ced: string) => {
+      const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
+      const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
+      const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced);
+      return bateEmpresa && bateMes && bateCedente;
+    };
+
+    // 1. SLA / Comitê
+    analises.forEach(a => {
+      const dRec = parseDataSegura(a.data_recebimento);
+      if (dRec) {
+        const m_a = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
+        const bateMes = mesesSel.length === 0 || mesesSel.includes(m_a);
+        if (bateMes) {
+          if ((a.status || "").toLowerCase() === "aprovado") aprovadosMes++;
+          if (["reprovado", "recusado"].includes((a.status || "").toLowerCase())) recusadosMes++;
+          const dFim = parseDataSegura(a.criado_em || a.atualizado_em);
+          if (dFim) { somaDias += calcularDiasUteis(dRec, dFim); qtdSla++; }
+        }
+      }
+    });
+
+    // 2. VOP Mensal e Histórico Geral
+    dashVop.forEach(v => {
+      const isCedenteAtivo = cedentesSel.includes(v.cedente);
+      if (isCedenteAtivo) {
+        // Histórico (ignora o mês)
+        vopVidaTodaSec += parseValorReal(v.vop_sec);
+        vopVidaTodaFidc += parseValorReal(v.vop_fidc);
+
+        // Mensal (Filtra mês e empresa)
+        if (mesesSel.length === 0 || mesesSel.includes(formatarMesAno(v.mes_ano))) {
+          if (empresasSel.includes("SEC")) vopMensalSec += parseValorReal(v.vop_sec);
+          if (empresasSel.includes("FIDC")) vopMensalFidc += parseValorReal(v.vop_fidc);
+        }
+      }
+    });
+
+    // 3. Carteira Atual
+    dashCarteira.forEach(c => {
+      if (cedentesSel.includes(c.cedente)) {
+        if (empresasSel.includes("SEC")) { 
+          riscoSec += parseValorReal(c.risco_sec); 
+          vencidosSec += parseValorReal(c.vencido_sec); 
+        }
+        if (empresasSel.includes("FIDC")) { 
+          riscoFidc += parseValorReal(c.risco_fidc); 
+          vencidosFidc += parseValorReal(c.vencido_fidc); 
+        }
+      }
+    });
+
+    // 4. Receitas
+    dashReceitas.forEach(r => {
+      if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
+        totalDesagio += parseValorReal(r.desagio);
+        totalTarifas += parseValorReal(r.tarifas);
+        totalJurosMultas += parseValorReal(r.juros); 
+      }
+    });
+
+    const prazoMedioDias = qtdSla > 0 ? (somaDias / qtdSla).toFixed(1) : "0.0";
+    const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
+    const receitaTotalAcumulada = totalDesagio + totalTarifas + totalJurosMultas;
+
+    return {
+      aprovadosMes, recusadosMes, prazoMedioDias,
+      vopMensalSec, vopMensalFidc, vopVidaTodaSec, vopVidaTodaFidc, vopVidaTodaConsolidadoGeral,
+      riscoSec, riscoFidc, vencidosSec, vencidosFidc,
+      totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada
+    };
+  }, [analises, dashVop, dashCarteira, dashReceitas, empresasSel, mesesSel, cedentesSel]);
 
   const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === listaMeses.length ? "Todos" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
 
-  // ==========================================================================
-  // ⚡ CÁLCULOS E MAPEAMENTOS DOS CARDS
-  // ==========================================================================
-
-  let aprovadosMes = 0; let recusadosMes = 0; let somaDias = 0; let qtdSla = 0;
-  analises.forEach(a => {
-    const dRec = parseDataSegura(a.data_recebimento);
-    if (dRec) {
-      const m_a = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
-      const bateMes = mesesSel.length === 0 || mesesSel.includes(m_a);
-      if (bateMes) {
-        if ((a.status || "").toLowerCase() === "aprovado") aprovadosMes++;
-        if (["reprovado", "recusado"].includes((a.status || "").toLowerCase())) recusadosMes++;
-        const dFim = parseDataSegura(a.criado_em || a.atualizado_em);
-        if (dFim) { somaDias += calcularDiasUteis(dRec, dFim); qtdSla++; }
-      }
-    }
-  });
-  const prazoMedioDias = qtdSla > 0 ? (somaDias / qtdSla).toFixed(1) : "0.0";
-
-  let vopMensalSec = 0; let vopMensalFidc = 0;
-  dashVop.forEach(v => {
-    if (mesesSel.length === 0 || mesesSel.includes(formatarMesAno(v.mes_ano))) {
-      if (cedentesSel.includes(v.cedente)) {
-        if (empresasSel.includes("SEC")) vopMensalSec += parseValorReal(v.vop_sec);
-        if (empresasSel.includes("FIDC")) vopMensalFidc += parseValorReal(v.vop_fidc);
-      }
-    }
-  });
-
-  let vopVidaTodaSec = 0; let vopVidaTodaFidc = 0;
-  dashVop.forEach(v => {
-    if (cedentesSel.includes(v.cedente)) {
-      vopVidaTodaSec += parseValorReal(v.vop_sec);
-      vopVidaTodaFidc += parseValorReal(v.vop_fidc);
-    }
-  });
-  const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
-
-  let riscoSec = 0; let riscoFidc = 0; let vencidosSec = 0; let vencidosFidc = 0;
-  dashCarteira.forEach(c => {
-    if (cedentesSel.includes(c.cedente)) {
-      if (empresasSel.includes("SEC")) { 
-        riscoSec += parseValorReal(c.risco_sec); 
-        vencidosSec += parseValorReal(c.vencido_sec); 
-      }
-      if (empresasSel.includes("FIDC")) { 
-        riscoFidc += parseValorReal(c.risco_fidc); 
-        vencidosFidc += parseValorReal(c.vencido_fidc); 
-      }
-    }
-  });
-
-  let totalDesagio = 0; let totalTarifas = 0; let totalJurosMultas = 0;
-  dashReceitas.forEach(r => {
-    if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
-      totalDesagio += parseValorReal(r.desagio);
-      totalTarifas += parseValorReal(r.tarifas);
-      totalJurosMultas += parseValorReal(r.juros); 
-    }
-  });
-  const receitaTotalAcumulada = totalDesagio + totalTarifas + totalJurosMultas;
-
-  const cedentesFiltradosPelaBusca = listaCedentes.filter(ced =>
-    ced.toLowerCase().includes(termoBuscaCedente.toLowerCase())
-  );
+  // Filtro inteligente do Dropdown (Fora do Memo principal para não rodar cálculos matemáticos à toa)
+  const cedentesFiltradosPelaBusca = useMemo(() => {
+    return listaCedentes.filter(ced => ced.toLowerCase().includes(termoBuscaCedente.toLowerCase()));
+  }, [listaCedentes, termoBuscaCedente]);
 
   const todosFiltradosAtivos = cedentesFiltradosPelaBusca.length > 0 && cedentesFiltradosPelaBusca.every(c => cedentesSel.includes(c));
   const handleToggleTodosFiltrados = () => {
@@ -277,8 +278,6 @@ export default function PowerBIPage() {
       setCedentesSel(Array.from(new Set([...cedentesSel, ...cedentesFiltradosPelaBusca])));
     }
   };
-
-  const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
   if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Conectando ao Banco Central Ned Capital (Supabase)...</div>;
 
@@ -378,15 +377,15 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Aprovados</span>
-            <div className="text-3xl font-black text-emerald-600 mt-2">{aprovadosMes}</div>
+            <div className="text-3xl font-black text-emerald-600 mt-2">{kpis.aprovadosMes}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Recusados</span>
-            <div className="text-3xl font-black text-red-500 mt-2">{recusadosMes}</div>
+            <div className="text-3xl font-black text-red-500 mt-2">{kpis.recusadosMes}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Prazo Médio SLA</span>
-            <div className="text-3xl font-black text-blue-600 mt-2">{prazoMedioDias} {parseFloat(prazoMedioDias) === 1 ? "dia" : "dias"}</div>
+            <div className="text-3xl font-black text-blue-600 mt-2">{kpis.prazoMedioDias} {parseFloat(kpis.prazoMedioDias) === 1 ? "dia" : "dias"}</div>
           </div>
         </div>
       </div>
@@ -397,11 +396,11 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="bg-blue-50/50 border border-blue-100 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-blue-700 block">VOP Securitizadora ({labelMesFiltro})</span>
-            <div className="text-2xl font-black text-blue-700 mt-2 truncate">{fM(vopMensalSec)}</div>
+            <div className="text-2xl font-black text-blue-700 mt-2 truncate">{fM(kpis.vopMensalSec)}</div>
           </div>
           <div className="bg-blue-50/50 border border-blue-100 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-blue-700 block">VOP FIDC ({labelMesFiltro})</span>
-            <div className="text-2xl font-black text-blue-700 mt-2 truncate">{fM(vopMensalFidc)}</div>
+            <div className="text-2xl font-black text-blue-700 mt-2 truncate">{fM(kpis.vopMensalFidc)}</div>
           </div>
         </div>
       </div>
@@ -412,19 +411,19 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
           <div className="bg-emerald-50/40 border border-emerald-100 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-emerald-700 block">Deságio Retido ({labelMesFiltro})</span>
-            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(totalDesagio)}</div>
+            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(kpis.totalDesagio)}</div>
           </div>
           <div className="bg-emerald-50/40 border border-emerald-100 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-emerald-700 block">Tarifas / Despesas ({labelMesFiltro})</span>
-            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(totalTarifas)}</div>
+            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(kpis.totalTarifas)}</div>
           </div>
           <div className="bg-emerald-50/40 border border-emerald-100 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-emerald-700 block">Juros e Multa (Pgto Atraso)</span>
-            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(totalJurosMultas)}</div>
+            <div className="text-xl font-black text-emerald-700 mt-2 truncate">{fM(kpis.totalJurosMultas)}</div>
           </div>
           <div className="bg-emerald-950 text-emerald-100 border border-emerald-900 p-6 rounded-xl text-center shadow-xs font-bold">
             <span className="text-xs font-bold text-emerald-400 block uppercase tracking-wider">Receita Líquida (Total)</span>
-            <div className="text-xl font-black text-white mt-2 truncate">{fM(receitaTotalAcumulada)}</div>
+            <div className="text-xl font-black text-white mt-2 truncate">{fM(kpis.receitaTotalAcumulada)}</div>
           </div>
         </div>
       </div>
@@ -435,15 +434,15 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs bg-linear-to-b from-white to-slate-50/40">
             <span className="text-xs font-bold text-slate-500 block">VOP Consolidado Geral (Histórico)</span>
-            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(vopVidaTodaConsolidadoGeral)}</div>
+            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(kpis.vopVidaTodaConsolidadoGeral)}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs bg-linear-to-b from-white to-slate-50/40">
             <span className="text-xs font-bold text-slate-500 block">VOP Geral Sec (Histórico)</span>
-            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(vopVidaTodaSec)}</div>
+            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(kpis.vopVidaTodaSec)}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs bg-linear-to-b from-white to-slate-50/40">
             <span className="text-xs font-bold text-slate-500 block">VOP Geral FIDC (Histórico)</span>
-            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(vopVidaTodaFidc)}</div>
+            <div className="text-xl font-black text-slate-900 mt-2 truncate">{fM(kpis.vopVidaTodaFidc)}</div>
           </div>
         </div>
       </div>
@@ -454,15 +453,15 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Risco Total Consolidado</span>
-            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(riscoSec + riscoFidc)}</div>
+            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(kpis.riscoSec + kpis.riscoFidc)}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Risco Securitizadora</span>
-            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(riscoSec)}</div>
+            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(kpis.riscoSec)}</div>
           </div>
           <div className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-xs">
             <span className="text-xs font-bold text-slate-500 block">Risco FIDC</span>
-            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(riscoFidc)}</div>
+            <div className="text-2xl font-black text-slate-800 mt-2 truncate">{fM(kpis.riscoFidc)}</div>
           </div>
         </div>
       </div>
@@ -474,11 +473,11 @@ export default function PowerBIPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
             <div className="bg-red-50/30 border border-red-100 p-6 rounded-xl text-center shadow-xs">
               <span className="text-xs font-bold text-red-600 block">Vencidos Securitizadora</span>
-              <div className="text-2xl font-black text-red-600 mt-2 truncate">{fM(vencidosSec)}</div>
+              <div className="text-2xl font-black text-red-600 mt-2 truncate">{fM(kpis.vencidosSec)}</div>
             </div>
             <div className="bg-red-50/30 border border-red-100 p-6 rounded-xl text-center shadow-xs">
               <span className="text-xs font-bold text-red-600 block">Vencidos FIDC</span>
-              <div className="text-2xl font-black text-red-600 mt-2 truncate">{fM(vencidosFidc)}</div>
+              <div className="text-2xl font-black text-red-600 mt-2 truncate">{fM(kpis.vencidosFidc)}</div>
             </div>
           </div>
         </div>

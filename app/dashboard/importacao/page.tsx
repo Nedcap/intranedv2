@@ -323,8 +323,7 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
 };
 
 // ============================================================================
-// ALTERAÇÃO AQUI: As funções processarCarteiraSec e processarCarteiraFidc
-// voltaram a usar apenas a função limparNome para a carteira.
+// PROCESSADORES DE CARTEIRA
 // ============================================================================
 const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => { 
@@ -349,7 +348,6 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL") || cedente.toUpperCase() === "CEDENTE") continue;
     
-    // VOLTOU A USAR limparNome para Carteira Sec
     const cedenteNormalizado = limparNome(cedente);
     if (!cedenteNormalizado) continue;
 
@@ -392,7 +390,6 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
     const cedente = String(row[idxCedente] || "").trim();
     if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
     
-    // VOLTOU A USAR limparNome para Carteira FIDC
     const cedenteNormalizado = limparNome(cedente);
     if (!cedenteNormalizado) continue;
 
@@ -512,7 +509,10 @@ export default function ImportacaoPage() {
     setProcessando(true);
     setStatusMsg("🚀 Consolidando e Transmitindo dados para o Supabase V2...");
     try {
+      
+      // ========================================================================
       // 1. GRAVAR RISCO (DASH CARTEIRA)
+      // ========================================================================
       const { data: dbCarteira } = await supabase.from('dash_carteira').select('*');
       const carteiraMap = new Map();
       dbCarteira?.forEach(row => carteiraMap.set(row.cedente, row));
@@ -526,7 +526,6 @@ export default function ImportacaoPage() {
         carteiraMap.set(chave, { ...existente, cedente: chave, risco_fidc: val.risco, vencido_fidc: val.vencido });
       }
 
-      // CORREÇÃO: Montando o payload explicitly omitindo o ID
       const carteiraPayload = Array.from(carteiraMap.values()).map((row: any) => ({
         cedente: row.cedente,
         risco_sec: row.risco_sec || 0,
@@ -539,14 +538,17 @@ export default function ImportacaoPage() {
       }));
 
       if (carteiraPayload.length > 0) {
-        const { error } = await supabase.from("dash_carteira").upsert(carteiraPayload, { onConflict: "cedente" });
-        if (error) throw error;
+        const chunk = 500;
+        for (let i = 0; i < carteiraPayload.length; i += chunk) {
+          await supabase.from("dash_carteira").upsert(carteiraPayload.slice(i, i + chunk), { onConflict: "cedente" });
+        }
       }
 
-      // 2. GRAVAR EXTRATO FINANCEIRO E AGREGAR DASH VOP
+      // ========================================================================
+      // 2. GRAVAR EXTRATO FINANCEIRO E AGREGAR DASH VOP (COM LIMPEZA INTELIGENTE)
+      // ========================================================================
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
-        // Passando null como CNPJ pois a tabela não tem essa coluna
         const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, null, baseUniversalData);
         loteFinancas.push({
           empresa: item.empresa,
@@ -567,24 +569,54 @@ export default function ImportacaoPage() {
       for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
-        const { error: errExtrato } = await supabase.from("extrato_financeiro").insert(loteFinancas);
-        if (errExtrato) throw errExtrato;
+        // 🎯 FIX: Descobre exatamente quais Meses e Empresas estão no upload atual
+        // Ex: Set { "SEC|05/2024", "FIDC|05/2024" }
+        const periodosAfetados = new Set(loteFinancas.map(i => `${i.empresa}|${i.mes_ano}`));
 
+        // 🧹 LIMPEZA NO EXTRATO FINANCEIRO (Deleta apenas os meses que estamos subindo agora)
+        for (const periodo of periodosAfetados) {
+          const [empresa, mes_ano] = periodo.split("|");
+          await supabase.from("extrato_financeiro")
+            .delete()
+            .eq("empresa", empresa)
+            .eq("mes_ano", mes_ano);
+        }
+
+        // Insere o extrato novo em chunks para evitar estouro de payload
+        const chunkFinancas = 500;
+        for (let i = 0; i < loteFinancas.length; i += chunkFinancas) {
+          const { error: errExtrato } = await supabase.from("extrato_financeiro").insert(loteFinancas.slice(i, i + chunkFinancas));
+          if (errExtrato) throw errExtrato;
+        }
+
+        // 🧹 RECONSTRUÇÃO DO DASH VOP (Zera apenas a coluna afetada antes de somar)
         const { data: dbVop } = await supabase.from('dash_vop').select('*');
         const vopMap = new Map();
-        dbVop?.forEach(row => vopMap.set(`${row.mes_ano}_${row.cedente}`, row));
+        
+        dbVop?.forEach(row => {
+          const zerarSec = periodosAfetados.has(`SEC|${row.mes_ano}`);
+          const zerarFidc = periodosAfetados.has(`FIDC|${row.mes_ano}`);
+          
+          vopMap.set(`${row.mes_ano}_${row.cedente}`, {
+            ...row,
+            // Se estamos subindo SEC para esse mês, joga o saldo velho fora. Se não, mantêm o velho.
+            vop_sec: zerarSec ? 0 : (row.vop_sec || 0),
+            vop_fidc: zerarFidc ? 0 : (row.vop_fidc || 0)
+          });
+        });
 
+        // Agora somamos de forma segura! O vop do banco já foi limpo, então não haverá acumulação.
         loteFinancas.forEach(item => {
           if (item.vop > 0) {
             const key = `${item.mes_ano}_${item.cedente}`;
             if (!vopMap.has(key)) vopMap.set(key, { mes_ano: item.mes_ano, cedente: item.cedente, vop_sec: 0, vop_fidc: 0 });
+            
             const obj = vopMap.get(key);
             if (item.empresa === 'SEC') obj.vop_sec += item.vop;
             if (item.empresa === 'FIDC') obj.vop_fidc += item.vop;
           }
         });
 
-        // CORREÇÃO: Montando o payload do VOP explicitamente omitindo o ID
         const vopPayload = Array.from(vopMap.values()).map((v: any) => ({
           mes_ano: v.mes_ano,
           cedente: v.cedente,
@@ -594,13 +626,17 @@ export default function ImportacaoPage() {
           atualizado_em: new Date().toISOString()
         }));
 
-        if (vopPayload.length > 0) {
-          const { error: errVop } = await supabase.from("dash_vop").upsert(vopPayload, { onConflict: "mes_ano,cedente" });
+        // Upsert do VOP em chunks para evitar Timeouts no banco
+        const chunkVop = 500;
+        for (let i = 0; i < vopPayload.length; i += chunkVop) {
+          const { error: errVop } = await supabase.from("dash_vop").upsert(vopPayload.slice(i, i + chunkVop), { onConflict: "mes_ano,cedente" });
           if (errVop) throw errVop;
         }
       }
 
+      // ========================================================================
       // 3. GRAVAR CARTEIRA DETALHADA EM ABERTO (FOTOS DIÁRIAS)
+      // ========================================================================
       if (dadosFinais.carteira.sec.length > 0) {
         await supabase.from("carteira_sec").delete().neq("id", "00000000-0000-0000-0000-000000000000");
         const chunk = 500;
