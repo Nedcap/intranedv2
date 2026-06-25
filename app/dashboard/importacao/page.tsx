@@ -39,10 +39,14 @@ function parseValorReal(valor: any): number {
 
 function formatarDataExcel(valorData: any): string {
   if (!valorData) return "";
-  if (typeof valorData === "number" && valorData > 30000 && valorData < 60000) {
-    const data = new Date(Math.round((valorData - 25569) * 86400 * 1000));
+  
+  // 🎯 FIX: Converte strings numéricas (ex: "46127.0") para número real para forçar a conversão de data Excel
+  const numVal = Number(valorData);
+  if (!isNaN(numVal) && numVal > 30000 && numVal < 60000) {
+    const data = new Date(Math.round((numVal - 25569) * 86400 * 1000));
     return data.toLocaleDateString("pt-BR", { timeZone: "UTC" });
   }
+
   const txt = String(valorData).trim();
   if (txt.includes("-")) {
     const partes = txt.split("-");
@@ -131,7 +135,6 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
   
   const header = raw[headerIdx].map(strClean);
   const idxCliente = header.indexOf("CLIENTE");
-  const idxCnpj = header.findIndex(c => c.includes("CNPJ"));
   const idxUtilizado = header.indexOf("UTILIZADO"); 
   const idxVencido = header.indexOf("VENCIDO");
 
@@ -143,12 +146,8 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
     const rawCed = String(row[idxCliente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
 
-    let rawCnpj = null;
-    if (idxCnpj !== -1 && row[idxCnpj]) {
-      rawCnpj = String(row[idxCnpj]).replace(/\D/g, "");
-    }
-
-    const chave = normalizarPelaBaseUniversal(rawCed, rawCnpj, base);
+    // 🎯 FIX: Voltámos a passar null no CNPJ para que a Base Universal faça o cruzamento tolerante (por nome)
+    const chave = normalizarPelaBaseUniversal(rawCed, null, base);
     if (!chave) continue;
 
     records[chave] = {
@@ -336,37 +335,38 @@ const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
 
 // 4.1 LIQUIDADOS SEC (JUROS ATRASO)
 const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
-  let headerIdx = -1;
-  let colDtaBaixa = -1;
-  let colEncargos = -1;
+  let colDtaBaixa = 12;
+  let colEncargos = 15;
 
-  for (let i = 0; i < raw.length; i++) {
+  // Localiza as posições corretas das colunas no ficheiro
+  for (let i = 0; i < Math.min(30, raw.length); i++) {
     const rowStr = raw[i].map(x => strClean(x));
-    if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA") || rowStr.includes("ENCARGOS")) {
-      headerIdx = i;
+    if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA")) {
       colDtaBaixa = rowStr.findIndex(x => x.includes("DTABAIXA") || x.includes("DATABAIXA"));
       colEncargos = rowStr.findIndex(x => x.includes("ENCARGOS"));
       break;
     }
   }
 
-  if (headerIdx === -1 || colDtaBaixa === -1 || colEncargos === -1) return [];
-
   const lancamentos: any[] = [];
   let currentCedente = "";
 
-  for (let i = headerIdx + 1; i < raw.length; i++) {
+  // 🎯 FIX: Varre o ficheiro a partir da linha 0, pois o Cedente aparece ANTES do cabeçalho
+  for (let i = 0; i < raw.length; i++) {
     const row = raw[i];
     if (!row || row.length === 0) continue;
 
-    const c0 = String(row[0] || "").trim();
-    if (/^\d+\s*-/.test(c0)) { 
-      currentCedente = c0.replace(/^\d+\s*-\s*/, "").trim(); 
+    // Busca a primeira célula preenchida da linha
+    const firstCell = String(row.find(cell => cell !== null && cell !== undefined && String(cell).trim() !== "") || "").trim();
+
+    // Deteta a linha do Cedente (Ex: "12 - STOCK TECH S.A.")
+    if (/^\d+\s*-/.test(firstCell)) { 
+      currentCedente = firstCell.replace(/^\d+\s*-\s*/, "").trim(); 
       continue; 
     }
 
     const linhaTexto = row.map(x => String(x).toUpperCase()).join(" ");
-    if (linhaTexto.includes("TOTAL") || linhaTexto.includes("MODALIDADE")) continue;
+    if (linhaTexto.includes("TOTAL") || linhaTexto.includes("MODALIDADE") || linhaTexto.includes("PÁG") || linhaTexto.includes("SACADO")) continue;
 
     const valorDataBruto = row[colDtaBaixa];
     const valorEncargoBruto = row[colEncargos];
@@ -436,7 +436,6 @@ const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
   const idxCedente = header.findIndex(c => c === "NOMEDOCEDENTE" || c === "CEDENTE");
   const idxSacado = header.findIndex(c => c === "NOMEDOSACADO" || c === "SACADO");
   
-  // Garante que pega a atualizada caso exista prorrogação
   const idxVencimento = header.findIndex(c => c === "DATADEVENCIMENTOATUALIZADA" || c === "DATADEVENCIMENTOORIGINAL" || c === "VENCIMENTO");
   const idxValorFace = header.findIndex(c => c === "VALORFACE" || c === "FACE");
   const idxValorAberto = header.findIndex(c => c === "VALORABERTO" || c === "ABERTO");
