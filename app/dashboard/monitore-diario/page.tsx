@@ -120,7 +120,8 @@ export default function MonitoreDiarioPage() {
         let blocoCodigo = "";
 
         for (const cod of codigosChave) {
-          const pos = inline.indexOf(cod);
+          // 🎯 FIX: Corrigido o erro de digitação de "inline" para "linha"
+          const pos = linha.indexOf(cod);
           if (pos !== -1 && (idxBloco === -1 || pos < idxBloco)) {
             idxBloco = pos;
             blocoCodigo = cod;
@@ -279,12 +280,11 @@ export default function MonitoreDiarioPage() {
       }
 
       // ========================================================================
-      // 📧 DISPARO DE E-MAIL (ACIONANDO A NOVA LOGICA CENTRALIZADA DA API)
+      // 📧 DISPARO DE E-MAIL (VIA ROTA INTERNA /API/EMAIL)
       // ========================================================================
       if (resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
-
-        // Faz o acionamento simplificado passando as movimentações para a rota tratar
+        
         const respostaEmail = await fetch("/api/email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
