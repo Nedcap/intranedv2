@@ -42,11 +42,10 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`);
   }
 
-// ====================================================================
+  // ====================================================================
   // 2. SE TEM 'CODE' -> Google autorizou, vamos pegar os tokens!
   // ====================================================================
   try {
-    // Se o state vier vazio ou "anonimo", tentamos salvar de um jeito seguro
     const stateEmail = searchParams.get("state") || "anonimo";
     const redirectUri = `${SITE_URL}/api/auth/google`;
 
@@ -68,11 +67,11 @@ export async function GET(request: Request) {
       throw new Error(tokens.error_description || "Erro ao obter tokens");
     }
 
-    // 🌟 SALVANDO CORRETAMENTE USANDO O INSTANCE DO TOPO DO ARQUIVO
+    // 🌟 SALVANDO CORRETAMENTE NO SUPABASE
     const { error: upsertError } = await supabase
       .from("usuarios_integracoes")
       .upsert({
-        email_usuario: stateEmail.toLowerCase().trim(), // Força minúsculo e sem espaços
+        email_usuario: stateEmail.toLowerCase().trim(), 
         gmail_access_token: tokens.access_token,
         gmail_refresh_token: tokens.refresh_token || null, 
         gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
@@ -91,3 +90,4 @@ export async function GET(request: Request) {
     console.error("❌ Erro no callback do Google OAuth:", error);
     return NextResponse.redirect(`${SITE_URL}/dashboard/monitor-email?error=${encodeURIComponent(error.message)}`);
   }
+}
