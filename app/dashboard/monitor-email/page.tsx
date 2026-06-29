@@ -102,7 +102,7 @@ export default function CaixaInteligentePage() {
       emailUsuario = user.email || user.nome;
     }
 
-    window.location.href = `/api/auth/google?user=${encodeURIComponent(emailUsuario)}`;
+    window.location.href = `/api/auth/google?user=${encodeURIComponent(emailUsuario)}&t=${Date.now()}`;
   };
 
   // ==========================================================================
