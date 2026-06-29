@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 
 // 🚨 O MATA-CACHE DO NEXT.JS! Impede que ele grave redirecionamentos velhos.
 export const dynamic = "force-dynamic"; 
@@ -66,7 +67,18 @@ export async function GET(request: Request) {
       throw new Error(tokens.error_description || "Erro ao obter tokens");
     }
 
-    console.log(`✅ Tokens obtidos com sucesso para o usuário: ${stateEmail}`);
+    // 🌟 SALVANDO OS TOKENS NO SUPABASE
+    await supabase
+      .from("usuarios_integracoes")
+      .upsert({
+        email_usuario: stateEmail, 
+        gmail_access_token: tokens.access_token,
+        gmail_refresh_token: tokens.refresh_token || null, 
+        gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+        atualizado_em: new Date().toISOString()
+      }, { onConflict: "email_usuario" });
+
+    console.log(`✅ Tokens salvos com sucesso no Supabase para o usuário: ${stateEmail}`);
 
     // Redireciona de volta para a tela certa do Kanban!
     return NextResponse.redirect(`${SITE_URL}/dashboard/monitor-email?success=gmail`);

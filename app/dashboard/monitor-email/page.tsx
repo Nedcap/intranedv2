@@ -20,30 +20,32 @@ interface EmailCard {
 export default function CaixaInteligentePage() {
   const [emails, setEmails] = useState<EmailCard[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
   
-  // Controle de Autenticação
   const [gmailConectado, setGmailConectado] = useState(false);
   const [outlookConectado, setOutlookConectado] = useState(false);
   
-  // Efeitos Drag and Drop e Animações
   const [arrastandoId, setArrastandoId] = useState<string | null>(null);
   const [incinerandoId, setIncinerandoId] = useState<string | null>(null); 
   
-  // Resposta Rápida
   const [emailRespondendo, setEmailRespondendo] = useState<string | null>(null);
   const [textoResposta, setTextoResposta] = useState("");
   const [enviando, setEnviando] = useState(false);
 
+  const obterUsuarioLogado = () => {
+    if (typeof window === "undefined") return "";
+    const userStr = localStorage.getItem("intraned_user");
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      return user.email || user.nome; 
+    }
+    return "";
+  };
+
   const carregarCaixaFantasma = async () => {
     setCarregando(true);
     try {
-      const userStr = localStorage.getItem("intraned_user");
-      let usuarioLogado = "";
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        usuarioLogado = user.email || user.nome; 
-      }
-
+      const usuarioLogado = obterUsuarioLogado();
       if (!usuarioLogado) return;
 
       const { data, error } = await supabase
@@ -70,10 +72,35 @@ export default function CaixaInteligentePage() {
     }
   };
 
+  const sincronizarEmailsReais = async () => {
+    const usuarioLogado = obterUsuarioLogado();
+    if (!usuarioLogado) return alert("Usuário não identificado.");
+    
+    setSincronizando(true);
+    try {
+      const res = await fetch("/api/gmail/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userEmail: usuarioLogado })
+      });
+      const resultado = await res.json();
+      
+      if (resultado.error) {
+        alert(`Aviso: ${resultado.error}. Conecte o Gmail primeiro.`);
+      } else {
+        await carregarCaixaFantasma(); 
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao rodar monitor de sincronização.");
+    } finally {
+      setSincronizando(false);
+    }
+  };
+
   useEffect(() => {
     carregarCaixaFantasma();
 
-    // Checa se o usuário acabou de voltar da tela de login do Google
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "gmail") {
       setGmailConectado(true);
@@ -86,9 +113,6 @@ export default function CaixaInteligentePage() {
     }
   }, []);
 
-// ==========================================================================
-  // 🔌 MOTORES DE INTEGRAÇÃO (OAUTH) - BYPASS DE CACHE
-  // ==========================================================================
   const autenticarProvedor = (provedor: "GMAIL" | "OUTLOOK") => {
     if (provedor === "OUTLOOK") {
       alert("Outlook será configurado no próximo passo!");
@@ -96,33 +120,16 @@ export default function CaixaInteligentePage() {
     }
 
     const clientId = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
+    const emailUsuario = obterUsuarioLogado() || "anonimo";
 
-    // 🚨 O TIRA-TEIMA: Avisa na hora se a chave estiver ruim!
-    if (!clientId || !clientId.includes(".apps.googleusercontent.com")) {
-      alert("❌ ERRO NO .ENV: O seu NEXT_PUBLIC_GOOGLE_CLIENT_ID está vazio ou incompleto! Ele precisa terminar com .apps.googleusercontent.com");
-      return;
-    }
-
-    const userStr = localStorage.getItem("intraned_user");
-    let emailUsuario = "anonimo";
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      emailUsuario = user.email || user.nome;
-    }
-
-    // Monta a URL de login direto no navegador (Ignora o servidor e força o seletor)
-    const redirectUri = `${window.location.origin}/api/auth/google`;
+    const redirectUri = `https://intraned.nedcapital.com.br/api/auth/google`;
     const scopes = "https://www.googleapis.com/auth/gmail.modify";
 
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(emailUsuario)}&access_type=offline&prompt=select_account`;
 
-    // Dispara pro Google
     window.location.href = authUrl;
   };
 
-  // ==========================================================================
-  // 🔄 MOTORES DE AÇÃO DOS CARDS
-  // ==========================================================================
   const mudarStatusEmail = async (id: string, novoStatus: string) => {
     try {
       if (novoStatus === "LIXO") {
@@ -130,11 +137,15 @@ export default function CaixaInteligentePage() {
         setTimeout(async () => {
           setEmails(prev => prev.filter(e => e.id !== id));
           setIncinerandoId(null);
-          // await supabase.from("caixa_inteligente").update({ status: "LIXO" }).eq("id", id);
-        }, 600); // Reduzi o tempo pra bater com a nova animação (600ms)
+          if (!id.startsWith("fake-")) {
+            await supabase.from("caixa_inteligente").update({ status: "LIXO" }).eq("id", id);
+          }
+        }, 600);
       } else {
         setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
-        // await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
+        if (!id.startsWith("fake-")) {
+          await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -163,26 +174,18 @@ export default function CaixaInteligentePage() {
   };
 
   const abrirNoNavegadorNativo = (email: EmailCard) => {
-    let url = "";
-    if (email.provedor === "GMAIL") {
-      url = `https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`;
-    } else {
-      url = `https://outlook.office.com/mail/deeplink?viewmessage&itemid=${email.mensagem_id}`;
-    }
+    let url = email.provedor === "GMAIL" 
+      ? `https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`
+      : `https://outlook.office.com/mail/deeplink?viewmessage&itemid=${email.mensagem_id}`;
     window.open(url, "_blank");
   };
 
-  // ==========================================================================
-  // 🔥 DRAG AND DROP & ANIMAÇÕES
-  // ==========================================================================
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setArrastandoId(id);
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); 
-  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
 
   const handleDrop = async (e: React.DragEvent, novaColuna: string) => {
     e.preventDefault();
@@ -191,9 +194,6 @@ export default function CaixaInteligentePage() {
     setArrastandoId(null);
   };
 
-  // ==========================================================================
-  // 🎨 RENDERIZAÇÃO DAS COLUNAS (KANBAN)
-  // ==========================================================================
   const renderColuna = (titulo: string, icone: string, statusFiltro: string, corBorda: string, isIncinerador = false) => {
     const filtrados = isIncinerador ? emails.filter(e => e.id === incinerandoId) : emails.filter(e => e.status === statusFiltro);
 
@@ -232,7 +232,6 @@ export default function CaixaInteligentePage() {
                   isIncinerando ? "animate-fire absolute w-[90%] pointer-events-none z-50 border-rose-300 bg-rose-50" : "border-slate-200 hover:shadow-md hover:border-blue-300 relative"
                 }`}
               >
-                {/* CABEÇALHO DO CARD */}
                 <div className={`flex justify-between items-start gap-2 ${isIncinerando ? "opacity-50" : ""}`}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -250,12 +249,10 @@ export default function CaixaInteligentePage() {
                   {email.tem_anexo && <span className="bg-slate-100 text-slate-600 p-1.5 rounded-lg border border-slate-200 text-xs">📎</span>}
                 </div>
 
-                {/* CORPO DO E-MAIL (SNIPPET) */}
                 <p className={`text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed ${isIncinerando ? "opacity-50" : ""}`}>
                   {email.snippet}
                 </p>
 
-                {/* ÁREA DE RESPOSTA RÁPIDA */}
                 {!isIncinerando && emailRespondendo === email.id && (
                   <div className="bg-blue-50/50 border border-blue-100 p-2 rounded-lg flex flex-col gap-2 mt-1">
                     <textarea 
@@ -275,7 +272,6 @@ export default function CaixaInteligentePage() {
                   </div>
                 )}
 
-                {/* BOTÕES DE AÇÃO */}
                 {!isIncinerando && (
                   <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-1 opacity-100 xl:opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="flex gap-1">
@@ -311,8 +307,6 @@ export default function CaixaInteligentePage() {
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
-      
-      {/* HEADER E CONECTORES */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">📬 TriageMail Corporativo</h2>
@@ -320,6 +314,14 @@ export default function CaixaInteligentePage() {
         </div>
         
         <div className="flex gap-3">
+          <button 
+            onClick={sincronizarEmailsReais} 
+            disabled={sincronizando || carregando}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-2"
+          >
+            {sincronizando ? "🔄 Monitorando..." : "🔄 Sincronizar Caixa"}
+          </button>
+
           <button onClick={() => autenticarProvedor("GMAIL")} className={`px-4 py-2 font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-2 border ${gmailConectado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200"}`}>
             <span className="text-sm">📧</span> {gmailConectado ? "Gmail Conectado" : "Conectar Gmail"}
           </button>
@@ -341,7 +343,6 @@ export default function CaixaInteligentePage() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        /* 🗑️ Animação Limpa de Lixeira */
         @keyframes toss {
           0% { transform: scale(1) translateY(0) rotate(0deg); opacity: 1; }
           20% { transform: scale(1.05) translateY(-10px) rotate(2deg); opacity: 0.9; }
