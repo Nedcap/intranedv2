@@ -42,11 +42,12 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`);
   }
 
-  // ====================================================================
+// ====================================================================
   // 2. SE TEM 'CODE' -> Google autorizou, vamos pegar os tokens!
   // ====================================================================
   try {
-    const stateEmail = searchParams.get("state") || "Usuario_Anonimo";
+    // Se o state vier vazio ou "anonimo", tentamos salvar de um jeito seguro
+    const stateEmail = searchParams.get("state") || "anonimo";
     const redirectUri = `${SITE_URL}/api/auth/google`;
 
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -67,24 +68,26 @@ export async function GET(request: Request) {
       throw new Error(tokens.error_description || "Erro ao obter tokens");
     }
 
-    // 🌟 SALVANDO OS TOKENS NO SUPABASE
-    await supabase
+    // 🌟 SALVANDO CORRETAMENTE USANDO O INSTANCE DO TOPO DO ARQUIVO
+    const { error: upsertError } = await supabase
       .from("usuarios_integracoes")
       .upsert({
-        email_usuario: stateEmail, 
+        email_usuario: stateEmail.toLowerCase().trim(), // Força minúsculo e sem espaços
         gmail_access_token: tokens.access_token,
         gmail_refresh_token: tokens.refresh_token || null, 
         gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
         atualizado_em: new Date().toISOString()
       }, { onConflict: "email_usuario" });
 
+    if (upsertError) {
+      throw new Error(`Erro ao inserir no Supabase: ${upsertError.message}`);
+    }
+
     console.log(`✅ Tokens salvos com sucesso no Supabase para o usuário: ${stateEmail}`);
 
-    // Redireciona de volta para a tela certa do Kanban!
     return NextResponse.redirect(`${SITE_URL}/dashboard/monitor-email?success=gmail`);
 
   } catch (error: any) {
     console.error("❌ Erro no callback do Google OAuth:", error);
     return NextResponse.redirect(`${SITE_URL}/dashboard/monitor-email?error=${encodeURIComponent(error.message)}`);
   }
-}
