@@ -171,3 +171,4 @@ f743fce63a3fd497e0ae940da44ec6a70107662f 912fe998846ea43d894f4002bfbcd628972fe1d
 ce796a7c21e5147a227270e198608004fbed98d4 75ae7506e1aae785f4206c92e8d8f2e7c9787d42 Alyson <sistema@nedcapital.com.br> 1782739612 -0300	commit: fix: contornando bloqueio de auth e middleware
 75ae7506e1aae785f4206c92e8d8f2e7c9787d42 59b7e6eed8661316eaa89e7e142391770a51aa92 Alyson <sistema@nedcapital.com.br> 1782740038 -0300	commit: fix: contornando bloqueio de auth e middleware
 59b7e6eed8661316eaa89e7e142391770a51aa92 75ae7506e1aae785f4206c92e8d8f2e7c9787d42 Alyson <sistema@nedcapital.com.br> 1782740119 -0300	reset: moving to HEAD~1
+75ae7506e1aae785f4206c92e8d8f2e7c9787d42 045f834d82e919f391aedeabcbd7f0c1ed361554 Alyson <sistema@nedcapital.com.br> 1782740148 -0300	commit: fix: contornando bloqueio de auth e middleware
