@@ -1,0 +1,173 @@
+0000000000000000000000000000000000000000 a66da8ef53028788fd21d4ba798fed3fe060d4dd Alyson <sistema@nedcapital.com.br> 1781552015 -0300	commit (initial): 🚀 Iniciando a IntraNed V2 100% limpa e segura
+a66da8ef53028788fd21d4ba798fed3fe060d4dd 6cff06f3afdb908f89fc7a73281c731d908246e2 Alyson <sistema@nedcapital.com.br> 1781552370 -0300	commit: ⚙️ Refatorando lógica do Dashboard para o Service
+6cff06f3afdb908f89fc7a73281c731d908246e2 a7134253e3ef9572cba64d8776adf77da0575f77 Alyson <sistema@nedcapital.com.br> 1781607489 -0300	commit: 🔮 Correção definitiva: Carteira integrada à API segura GViz
+a7134253e3ef9572cba64d8776adf77da0575f77 a1c7e7950c6ff89f19c4721f29c2501d274bf3e9 Alyson <sistema@nedcapital.com.br> 1781607669 -0300	commit: 🔮 Correção definitiva: Carteira integrada à API segura GViz
+a1c7e7950c6ff89f19c4721f29c2501d274bf3e9 1405145a3f7d6924a62ae0e1cd076a3c61fae731 Alyson <sistema@nedcapital.com.br> 1781608489 -0300	commit: ⚙️ Centralizando o fluxo do comitê com busca por ID
+1405145a3f7d6924a62ae0e1cd076a3c61fae731 f6f7e681cefc3529665130bed21ff933b4a09c3c Alyson <sistema@nedcapital.com.br> 1781610372 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+f6f7e681cefc3529665130bed21ff933b4a09c3c 93a22a389b710dbbe26f37acb8947e7695d10546 Alyson <sistema@nedcapital.com.br> 1781610514 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+93a22a389b710dbbe26f37acb8947e7695d10546 5b2fc7910c8e9292e833faf0f20a898b95738a0e Alyson <sistema@nedcapital.com.br> 1781610761 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+5b2fc7910c8e9292e833faf0f20a898b95738a0e 89d95e65c7209177dcba803e337aeffe91c510bf Alyson <sistema@nedcapital.com.br> 1781610929 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+89d95e65c7209177dcba803e337aeffe91c510bf 64c3396488315a1207c4b0c230423ddfa5aa1338 Alyson <sistema@nedcapital.com.br> 1781611265 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+64c3396488315a1207c4b0c230423ddfa5aa1338 88a5b22e668bb158ec06268a3c61364ab58b2f8c Alyson <sistema@nedcapital.com.br> 1781611460 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+88a5b22e668bb158ec06268a3c61364ab58b2f8c 99a158269c84df1944e491a6194d18031cd3d166 Alyson <sistema@nedcapital.com.br> 1781611640 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+99a158269c84df1944e491a6194d18031cd3d166 3e8b1c7990164624f70bb38d01db50a164fe8460 Alyson <sistema@nedcapital.com.br> 1781611782 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+3e8b1c7990164624f70bb38d01db50a164fe8460 7bd4155ddf8364a1c1a30b48b742f3c77b61c110 Alyson <sistema@nedcapital.com.br> 1781612223 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+7bd4155ddf8364a1c1a30b48b742f3c77b61c110 690ce70cbcd8b94172cdb239229ba0204d977c96 Alyson <sistema@nedcapital.com.br> 1781612433 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+690ce70cbcd8b94172cdb239229ba0204d977c96 34c795945be33aaa35145d54823e7006ee6990d4 Alyson <sistema@nedcapital.com.br> 1781613751 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+34c795945be33aaa35145d54823e7006ee6990d4 2d6a933485ea0ed264cad227c6fc274647745f79 Alyson <sistema@nedcapital.com.br> 1781614003 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+2d6a933485ea0ed264cad227c6fc274647745f79 65919d6bfe9712077e849b09fa73c863ea711658 Alyson <sistema@nedcapital.com.br> 1781614500 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+65919d6bfe9712077e849b09fa73c863ea711658 1a9d13f2f5642cd144c80ba44ccbbe595559b2a1 Alyson <sistema@nedcapital.com.br> 1781614690 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+1a9d13f2f5642cd144c80ba44ccbbe595559b2a1 aa0485923bfa5d14f0f8bc9cb928295fa55148bb Alyson <sistema@nedcapital.com.br> 1781615014 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+aa0485923bfa5d14f0f8bc9cb928295fa55148bb 513d1127afcfffa4eade5548e301b575cf3b12fb Alyson <sistema@nedcapital.com.br> 1781615426 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+513d1127afcfffa4eade5548e301b575cf3b12fb 3aeae89314d93f78d832a6e3bc8d22e55010d96f Alyson <sistema@nedcapital.com.br> 1781615542 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+3aeae89314d93f78d832a6e3bc8d22e55010d96f fd280108590876a8f0bd1a1df6950969b7081278 Alyson <sistema@nedcapital.com.br> 1781615645 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+fd280108590876a8f0bd1a1df6950969b7081278 988b89ba0f8223ced6320afec4ff43503007e1e0 Alyson <sistema@nedcapital.com.br> 1781615683 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+988b89ba0f8223ced6320afec4ff43503007e1e0 9496966217a9204e893b71f63c08981499e2f430 Alyson <sistema@nedcapital.com.br> 1781615803 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+9496966217a9204e893b71f63c08981499e2f430 e2b4aea140fe7771cd5b69f21aa014fb64d19649 Alyson <sistema@nedcapital.com.br> 1781615995 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+e2b4aea140fe7771cd5b69f21aa014fb64d19649 1e893552231fc6ee994ebfb75ac0f66a42b1a846 Alyson <sistema@nedcapital.com.br> 1781616188 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+1e893552231fc6ee994ebfb75ac0f66a42b1a846 58d407f156857ba03174a335788b84aac5772233 Alyson <sistema@nedcapital.com.br> 1781616504 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+58d407f156857ba03174a335788b84aac5772233 1a3aa77d97a45d39dfc2e7e4462b54bccfb78023 Alyson <sistema@nedcapital.com.br> 1781616752 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+1a3aa77d97a45d39dfc2e7e4462b54bccfb78023 a06d79eb3b0b8ff9a486595e91da4277ad5a043a Alyson <sistema@nedcapital.com.br> 1781617593 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+a06d79eb3b0b8ff9a486595e91da4277ad5a043a 4cda8928ea04f32b4fe986f23448d8e7e7d0cf19 Alyson <sistema@nedcapital.com.br> 1781617804 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+4cda8928ea04f32b4fe986f23448d8e7e7d0cf19 3358589e202eefc4bf415110e1ff5241806eeb8e Alyson <sistema@nedcapital.com.br> 1781618057 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+3358589e202eefc4bf415110e1ff5241806eeb8e 76d5930db0b0b7ace97660a6615365a7fb118def Alyson <sistema@nedcapital.com.br> 1781618337 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+76d5930db0b0b7ace97660a6615365a7fb118def da6cbcbbbd639f33b92bd35e43fca31baf808180 Alyson <sistema@nedcapital.com.br> 1781618450 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+da6cbcbbbd639f33b92bd35e43fca31baf808180 903da44350f530b4491c5662f8b11c11b8722b44 Alyson <sistema@nedcapital.com.br> 1781618648 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+903da44350f530b4491c5662f8b11c11b8722b44 664540c4459968402b548337a7857e38a8930007 Alyson <sistema@nedcapital.com.br> 1781618775 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+664540c4459968402b548337a7857e38a8930007 c92052be66c36aeede07e031f573d9b0c341f435 Alyson <sistema@nedcapital.com.br> 1781619471 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+c92052be66c36aeede07e031f573d9b0c341f435 b51f2366b6383f6838d0ee06d4e8edb5bb9dd2be Alyson <sistema@nedcapital.com.br> 1781619606 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+b51f2366b6383f6838d0ee06d4e8edb5bb9dd2be 49f4a91949f9d8554a174407547063582307c3f7 Alyson <sistema@nedcapital.com.br> 1781619761 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+49f4a91949f9d8554a174407547063582307c3f7 f8031d8da08e268e52ce52baee7c1d9ccdbe3650 Alyson <sistema@nedcapital.com.br> 1781619912 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+f8031d8da08e268e52ce52baee7c1d9ccdbe3650 2f1a04f99794fbe7723fce0650738a893a618627 Alyson <sistema@nedcapital.com.br> 1781620169 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+2f1a04f99794fbe7723fce0650738a893a618627 54c9e4f55a6cd6901e8ac639c48bdd34c20b06eb Alyson <sistema@nedcapital.com.br> 1781620444 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+54c9e4f55a6cd6901e8ac639c48bdd34c20b06eb c099e65429b516e8b22c76d8a1600a92a0acc80c Alyson <sistema@nedcapital.com.br> 1781620709 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+c099e65429b516e8b22c76d8a1600a92a0acc80c 914bf64f496184ebb7cc10812a84ff95a08f3849 Alyson <sistema@nedcapital.com.br> 1781620891 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+914bf64f496184ebb7cc10812a84ff95a08f3849 43cd7293f5e2538ee513e47b0dedafba5994c963 Alyson <sistema@nedcapital.com.br> 1781621239 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+43cd7293f5e2538ee513e47b0dedafba5994c963 7f2d3a5d53003f755010e202cd5a7bcf0fbdd884 Alyson <sistema@nedcapital.com.br> 1781621336 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+7f2d3a5d53003f755010e202cd5a7bcf0fbdd884 7f68ded0061906d2859dccf3f08ea41a49f0aa48 Alyson <sistema@nedcapital.com.br> 1781621451 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+7f68ded0061906d2859dccf3f08ea41a49f0aa48 21db7ff1e154a274d7e5b0b582bd6c83ad2ff1d3 Alyson <sistema@nedcapital.com.br> 1781621702 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+21db7ff1e154a274d7e5b0b582bd6c83ad2ff1d3 f4f8d7747ae8797e29689decb93df6ee8f6b5c76 Alyson <sistema@nedcapital.com.br> 1781622916 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+f4f8d7747ae8797e29689decb93df6ee8f6b5c76 e8123e8e2d84cdab445fa2963d0c71a52f3d1409 Alyson <sistema@nedcapital.com.br> 1781629821 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+e8123e8e2d84cdab445fa2963d0c71a52f3d1409 58402e0a6556285c806ac2a7886a2491cc3e211e Alyson <sistema@nedcapital.com.br> 1781630250 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+58402e0a6556285c806ac2a7886a2491cc3e211e 244495f0f598c40e8f67d07a171aa2d09799985f Alyson <sistema@nedcapital.com.br> 1781630577 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+244495f0f598c40e8f67d07a171aa2d09799985f 60fd6cafbda843b6fa07c88cacb7377f7e65ba40 Alyson <sistema@nedcapital.com.br> 1781630812 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+60fd6cafbda843b6fa07c88cacb7377f7e65ba40 73f464090462c0e89153a2bd92defae020b8c1af Alyson <sistema@nedcapital.com.br> 1781635633 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+73f464090462c0e89153a2bd92defae020b8c1af 6f16412c6c0246680695288558f7455ed2d5afc7 Alyson <sistema@nedcapital.com.br> 1781635766 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+6f16412c6c0246680695288558f7455ed2d5afc7 9329247173aa018e50507993d6d6b1d29a38a3e9 Alyson <sistema@nedcapital.com.br> 1781635860 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+9329247173aa018e50507993d6d6b1d29a38a3e9 ae938109df2b80a6d7c4f5a680cc112a3c4d6282 Alyson <sistema@nedcapital.com.br> 1781636088 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+ae938109df2b80a6d7c4f5a680cc112a3c4d6282 68d1869548820b0525f2f024033fb7a705aedbb6 Alyson <sistema@nedcapital.com.br> 1781636310 -0300	commit: 🚀 DEPLOY PRODUÇÃO: Notificador realtime reinjetado no layout global
+68d1869548820b0525f2f024033fb7a705aedbb6 4c561b5c84d9552df645ce2472a26d2123187eb7 Alyson <sistema@nedcapital.com.br> 1781636900 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+4c561b5c84d9552df645ce2472a26d2123187eb7 dd2a15f207f603021894851c6c40f53501779a18 Alyson <sistema@nedcapital.com.br> 1781637056 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+dd2a15f207f603021894851c6c40f53501779a18 3b0371409d0d7a1ac839da9a5970aef51dc1fca4 Alyson <sistema@nedcapital.com.br> 1781637238 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+3b0371409d0d7a1ac839da9a5970aef51dc1fca4 39ff558f26926e4e7899a93a8f73f36a0a7f8d84 Alyson <sistema@nedcapital.com.br> 1781637419 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+39ff558f26926e4e7899a93a8f73f36a0a7f8d84 b56f90f87e9f97543ac6ceeaaf238ca6fd17b344 Alyson <sistema@nedcapital.com.br> 1781637830 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+b56f90f87e9f97543ac6ceeaaf238ca6fd17b344 1897b9573bb605163a7e26053bb7d8786e379b2d Alyson <sistema@nedcapital.com.br> 1781637957 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+1897b9573bb605163a7e26053bb7d8786e379b2d cbe8eca85c8ddf8a0a7dc3f8d0039eaab68bfb69 Alyson <sistema@nedcapital.com.br> 1781638106 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+cbe8eca85c8ddf8a0a7dc3f8d0039eaab68bfb69 c6d334cb3fdf5f8651ba0fbd18ea03169ab8d736 Alyson <sistema@nedcapital.com.br> 1781638269 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+c6d334cb3fdf5f8651ba0fbd18ea03169ab8d736 a893e0574c89bbd2f791f370dbcf373dccf41120 Alyson <sistema@nedcapital.com.br> 1781638600 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+a893e0574c89bbd2f791f370dbcf373dccf41120 26b94b2fcef76acdd149239a921a69afa7a6d2aa Alyson <sistema@nedcapital.com.br> 1781693492 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+26b94b2fcef76acdd149239a921a69afa7a6d2aa 176efba269842c7e895bb9668c7998d9da67bf7d Alyson <sistema@nedcapital.com.br> 1781693593 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+176efba269842c7e895bb9668c7998d9da67bf7d da607ab48bd554f6036fda2b0dec7ce6a0fe114c Alyson <sistema@nedcapital.com.br> 1781693912 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+da607ab48bd554f6036fda2b0dec7ce6a0fe114c 02c269a46667098c950e19f66bee6c2038916183 Alyson <sistema@nedcapital.com.br> 1781695113 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+02c269a46667098c950e19f66bee6c2038916183 0f1653a645c0bae76a10a53568a857efeaec2bf7 Alyson <sistema@nedcapital.com.br> 1781696211 -0300	commit: fix: alinhando calculo de taxa e prazos com a tabela dinamica do excel
+0f1653a645c0bae76a10a53568a857efeaec2bf7 fddfb658b7acfcb6be8ac3eedc8517a0115a5c46 Alyson <sistema@nedcapital.com.br> 1781697438 -0300	commit: fix: mapeamento flexivel de colunas crm
+fddfb658b7acfcb6be8ac3eedc8517a0115a5c46 62a1b6ab21bffd676e67ed057838a0ee9f34de5f Alyson <sistema@nedcapital.com.br> 1781697668 -0300	commit: debug: forcando exibicao completa de leads
+62a1b6ab21bffd676e67ed057838a0ee9f34de5f 7d403f6c3a3862b8ef9203544e11be50f966f853 Alyson <sistema@nedcapital.com.br> 1781698554 -0300	commit: fix: contornando bloqueio de auth e middleware
+7d403f6c3a3862b8ef9203544e11be50f966f853 c6f8c378cc62622f742c154eed6f168760bf3c34 Alyson <sistema@nedcapital.com.br> 1781698858 -0300	commit: fix: contornando bloqueio de auth e middleware
+c6f8c378cc62622f742c154eed6f168760bf3c34 9b55ac7625a5b74f5f5adad65e7b87c61f0411cd Alyson <sistema@nedcapital.com.br> 1781699957 -0300	commit: fix: contornando bloqueio de auth e middleware
+9b55ac7625a5b74f5f5adad65e7b87c61f0411cd f9f9942dc7962319a007302042203f92d34385e3 Alyson <sistema@nedcapital.com.br> 1781701951 -0300	commit: fix: contornando bloqueio de auth e middleware
+f9f9942dc7962319a007302042203f92d34385e3 d8a9f7dd8b53b299ab2ac85907e93e939669eed9 Alyson <sistema@nedcapital.com.br> 1781702089 -0300	commit: fix: contornando bloqueio de auth e middleware
+d8a9f7dd8b53b299ab2ac85907e93e939669eed9 8874ede3a1734367d9f0c22217f3c192e8245dc8 Alyson <sistema@nedcapital.com.br> 1781702216 -0300	commit: fix: contornando bloqueio de auth e middleware
+8874ede3a1734367d9f0c22217f3c192e8245dc8 8c8ad2f4212050790cb676443a5b48e59b4e7a9c Alyson <sistema@nedcapital.com.br> 1781702386 -0300	commit: fix: contornando bloqueio de auth e middleware
+8c8ad2f4212050790cb676443a5b48e59b4e7a9c f8095c9020dc48cfe22875778338fe0f3ce632df Alyson <sistema@nedcapital.com.br> 1781702805 -0300	commit: fix: contornando bloqueio de auth e middleware
+f8095c9020dc48cfe22875778338fe0f3ce632df c8e3117ab53c12d45640dcc612ee41b55094cfc8 Alyson <sistema@nedcapital.com.br> 1781704179 -0300	commit: fix: contornando bloqueio de auth e middleware
+c8e3117ab53c12d45640dcc612ee41b55094cfc8 b531520a30031d2075657249511b1e98a0116a2d Alyson <sistema@nedcapital.com.br> 1781704420 -0300	commit: fix: contornando bloqueio de auth e middleware
+b531520a30031d2075657249511b1e98a0116a2d 35d2ca5a2e94daeee789a5a96faabe28ff546172 Alyson <sistema@nedcapital.com.br> 1781705015 -0300	commit: fix: contornando bloqueio de auth e middleware
+35d2ca5a2e94daeee789a5a96faabe28ff546172 2c2d4fc9a17e3e1b2ff2da4f0d348eef7a827e22 Alyson <sistema@nedcapital.com.br> 1781705403 -0300	commit: fix: contornando bloqueio de auth e middleware
+2c2d4fc9a17e3e1b2ff2da4f0d348eef7a827e22 3bf210951a03907d3dcdbc94991b676f4fb18192 Alyson <sistema@nedcapital.com.br> 1781705661 -0300	commit: fix: contornando bloqueio de auth e middleware
+3bf210951a03907d3dcdbc94991b676f4fb18192 86f09dbe227093ad37f1f69ba2cd6c6d322c886e Alyson <sistema@nedcapital.com.br> 1781705870 -0300	commit: fix: contornando bloqueio de auth e middleware
+86f09dbe227093ad37f1f69ba2cd6c6d322c886e 4161b59817aff8dce2823e6b65cc99e7476dbba4 Alyson <sistema@nedcapital.com.br> 1781706112 -0300	commit: fix: contornando bloqueio de auth e middleware
+4161b59817aff8dce2823e6b65cc99e7476dbba4 302289a2f71ef4faf87cae981892e146dce18f75 Alyson <sistema@nedcapital.com.br> 1781706381 -0300	commit: fix: contornando bloqueio de auth e middleware
+302289a2f71ef4faf87cae981892e146dce18f75 20c480fcf88060f91db3deb8c71dd84e138027b0 Alyson <sistema@nedcapital.com.br> 1781714277 -0300	commit: fix: contornando bloqueio de auth e middleware
+20c480fcf88060f91db3deb8c71dd84e138027b0 fdc77aec6354151a3b1887f0ba67a59e822a89c8 Alyson <sistema@nedcapital.com.br> 1781714741 -0300	commit: fix: contornando bloqueio de auth e middleware
+fdc77aec6354151a3b1887f0ba67a59e822a89c8 713cfbf4cf5fdee524c39cfcf2bc7075f91255cf Alyson <sistema@nedcapital.com.br> 1781714969 -0300	commit: fix: contornando bloqueio de auth e middleware
+713cfbf4cf5fdee524c39cfcf2bc7075f91255cf c9b9df7ae7d0590073234c766ad29aa96dd893e3 Alyson <sistema@nedcapital.com.br> 1781715168 -0300	commit: fix: contornando bloqueio de auth e middleware
+c9b9df7ae7d0590073234c766ad29aa96dd893e3 592bd6485fa1f5444e26c57c790ef59d04d19c73 Alyson <sistema@nedcapital.com.br> 1781719596 -0300	commit: fix: contornando bloqueio de auth e middleware
+592bd6485fa1f5444e26c57c790ef59d04d19c73 30385c7d40b9b373a9f47ab0d53a4a04cb99286f Alyson <sistema@nedcapital.com.br> 1781719782 -0300	commit: fix: contornando bloqueio de auth e middleware
+30385c7d40b9b373a9f47ab0d53a4a04cb99286f eb7f8846783cbbc396cac4c72b663bf116690d77 Alyson <sistema@nedcapital.com.br> 1781720097 -0300	commit: fix: contornando bloqueio de auth e middleware
+eb7f8846783cbbc396cac4c72b663bf116690d77 4a0b1c996113d46bd301d342f00827e309034812 Alyson <sistema@nedcapital.com.br> 1781720372 -0300	commit: fix: contornando bloqueio de auth e middleware
+4a0b1c996113d46bd301d342f00827e309034812 fc87843f62b02a0336098582a796730b38e0a018 Alyson <sistema@nedcapital.com.br> 1781720538 -0300	commit: fix: contornando bloqueio de auth e middleware
+fc87843f62b02a0336098582a796730b38e0a018 552a131a0d1620f838fefca994a6ddfa4f0a1057 Alyson <sistema@nedcapital.com.br> 1781720795 -0300	commit: fix: contornando bloqueio de auth e middleware
+552a131a0d1620f838fefca994a6ddfa4f0a1057 77b8dbe15c7b3eff40ff9835c3d3a3478e115405 Alyson <sistema@nedcapital.com.br> 1781721107 -0300	commit: fix: contornando bloqueio de auth e middleware
+77b8dbe15c7b3eff40ff9835c3d3a3478e115405 fe74c0adc8b9a474881118fea09a50f75c5f71ad Alyson <sistema@nedcapital.com.br> 1781721212 -0300	commit: fix: contornando bloqueio de auth e middleware
+fe74c0adc8b9a474881118fea09a50f75c5f71ad 6945b5a7af8c363ba819cc61e3805f923dbbe781 Alyson <sistema@nedcapital.com.br> 1781721340 -0300	commit: fix: contornando bloqueio de auth e middleware
+6945b5a7af8c363ba819cc61e3805f923dbbe781 dcca47e186aca48bd30eaf7e799ccfea0d9f90e4 Alyson <sistema@nedcapital.com.br> 1781721484 -0300	commit: fix: contornando bloqueio de auth e middleware
+dcca47e186aca48bd30eaf7e799ccfea0d9f90e4 7ed2e1a3a43d895a88513004cebf1f1e436e1f44 Alyson <sistema@nedcapital.com.br> 1781721720 -0300	commit: fix: contornando bloqueio de auth e middleware
+7ed2e1a3a43d895a88513004cebf1f1e436e1f44 8d663103587b0acdb8e7a6a4b5326ae2dcf5a8d3 Alyson <sistema@nedcapital.com.br> 1781722347 -0300	commit: fix: contornando bloqueio de auth e middleware
+8d663103587b0acdb8e7a6a4b5326ae2dcf5a8d3 9f5c22c37b23c801f9858fb577a3b484e3d794b6 Alyson <sistema@nedcapital.com.br> 1781722863 -0300	commit: fix: contornando bloqueio de auth e middleware
+9f5c22c37b23c801f9858fb577a3b484e3d794b6 c2d24bb0176d30d980aacd45ac39eac23b0609ff Alyson <sistema@nedcapital.com.br> 1781779448 -0300	commit: fix: contornando bloqueio de auth e middleware
+c2d24bb0176d30d980aacd45ac39eac23b0609ff ce986cf94d660df1c7faed861a91ac3a4c277015 Alyson <sistema@nedcapital.com.br> 1781780679 -0300	commit: fix: contornando bloqueio de auth e middleware
+ce986cf94d660df1c7faed861a91ac3a4c277015 615845d70318ffd5b68e4d349ff4c447ea18a2ee Alyson <sistema@nedcapital.com.br> 1781780949 -0300	commit: fix: contornando bloqueio de auth e middleware
+615845d70318ffd5b68e4d349ff4c447ea18a2ee b2fc29a1c9c4e1f6bb8d3fc9f3245d50261c8368 Alyson <sistema@nedcapital.com.br> 1781781414 -0300	commit: fix: contornando bloqueio de auth e middleware
+b2fc29a1c9c4e1f6bb8d3fc9f3245d50261c8368 680d3486be3da5eb8b5eca420fba42c7cd06b3bb Alyson <sistema@nedcapital.com.br> 1781782416 -0300	commit: fix: contornando bloqueio de auth e middleware
+680d3486be3da5eb8b5eca420fba42c7cd06b3bb 0d4e692e6c37e98cf741ef7098cd9d242e7f6b3d Alyson <sistema@nedcapital.com.br> 1781785236 -0300	commit: fix: contornando bloqueio de auth e middleware
+0d4e692e6c37e98cf741ef7098cd9d242e7f6b3d 9b0de19d34a6934946b0847be8d20e1a934c4237 Alyson <sistema@nedcapital.com.br> 1781785748 -0300	commit: fix: contornando bloqueio de auth e middleware
+9b0de19d34a6934946b0847be8d20e1a934c4237 1a5aae5f866e2c3c34ddee02a534bb7f9ca7c706 Alyson <sistema@nedcapital.com.br> 1781786716 -0300	commit: fix: contornando bloqueio de auth e middleware
+1a5aae5f866e2c3c34ddee02a534bb7f9ca7c706 4efcfd4d02d049d343549ba9503a35e7a5917381 Alyson <sistema@nedcapital.com.br> 1781789176 -0300	commit: fix: contornando bloqueio de auth e middleware
+4efcfd4d02d049d343549ba9503a35e7a5917381 260efbfde41b98360cf52e6a8243990ae3e6c355 Alyson <sistema@nedcapital.com.br> 1781791408 -0300	commit: fix: contornando bloqueio de auth e middleware
+260efbfde41b98360cf52e6a8243990ae3e6c355 00db4e4ab44652af1f5fa4952c8038a468a31782 Alyson <sistema@nedcapital.com.br> 1781791975 -0300	commit: fix: contornando bloqueio de auth e middleware
+00db4e4ab44652af1f5fa4952c8038a468a31782 6b91d009b6b2028c9854521562c3406c7bc6cff7 Alyson <sistema@nedcapital.com.br> 1781792250 -0300	commit: fix: contornando bloqueio de auth e middleware
+6b91d009b6b2028c9854521562c3406c7bc6cff7 6aaf3ca866441dfd8fe878b320cb63047d8b134f Alyson <sistema@nedcapital.com.br> 1781792606 -0300	commit: fix: contornando bloqueio de auth e middleware
+6aaf3ca866441dfd8fe878b320cb63047d8b134f 9d57062e5b6bec82c3b3cb82b479de471731ff2b Alyson <sistema@nedcapital.com.br> 1781795871 -0300	commit: fix: contornando bloqueio de auth e middleware
+9d57062e5b6bec82c3b3cb82b479de471731ff2b 1c45fca7674711ad88928e1ef293c3209ea2068b Alyson <sistema@nedcapital.com.br> 1781796745 -0300	commit: fix: contornando bloqueio de auth e middleware
+1c45fca7674711ad88928e1ef293c3209ea2068b c78bf6ae491a0ef37970218c597ac204d989d640 Alyson <sistema@nedcapital.com.br> 1781807777 -0300	commit: fix: contornando bloqueio de auth e middleware
+c78bf6ae491a0ef37970218c597ac204d989d640 24cef8c7323a7b2d4ff235dd1886cd5ba9214045 Alyson <sistema@nedcapital.com.br> 1781807975 -0300	commit: fix: contornando bloqueio de auth e middleware
+24cef8c7323a7b2d4ff235dd1886cd5ba9214045 833e3630b066350191386ed5eb4cbd7b0c80cbfb Alyson <sistema@nedcapital.com.br> 1781809152 -0300	commit: fix: contornando bloqueio de auth e middleware
+833e3630b066350191386ed5eb4cbd7b0c80cbfb 90eae82cad0004c3fd10e6143cdc14d43ce5af5d Alyson <sistema@nedcapital.com.br> 1781809464 -0300	commit: fix: contornando bloqueio de auth e middleware
+90eae82cad0004c3fd10e6143cdc14d43ce5af5d 284de0f008f582b0b955e7dc61e619a03dad94d4 Alyson <sistema@nedcapital.com.br> 1781809758 -0300	commit: fix: contornando bloqueio de auth e middleware
+284de0f008f582b0b955e7dc61e619a03dad94d4 138f2873a04924425dabc1d0c0a069a7dbeebfad Alyson <sistema@nedcapital.com.br> 1782141621 -0300	commit: fix: contornando bloqueio de auth e middleware
+138f2873a04924425dabc1d0c0a069a7dbeebfad 9a1c6102671545708d669bb93a0d3bfe9039dff3 Alyson <sistema@nedcapital.com.br> 1782155840 -0300	commit: fix: contornando bloqueio de auth e middleware
+9a1c6102671545708d669bb93a0d3bfe9039dff3 55504302cf2d46fba7666a154bda315d07a6b4e5 Alyson <sistema@nedcapital.com.br> 1782156226 -0300	commit: fix: contornando bloqueio de auth e middleware
+55504302cf2d46fba7666a154bda315d07a6b4e5 a63f990b35af167a14b74831d37f111973224e20 Alyson <sistema@nedcapital.com.br> 1782157001 -0300	commit: fix: contornando bloqueio de auth e middleware
+a63f990b35af167a14b74831d37f111973224e20 08098a89b60327adb7cf51e395b3f4245ca14895 Alyson <sistema@nedcapital.com.br> 1782157282 -0300	commit: fix: contornando bloqueio de auth e middleware
+08098a89b60327adb7cf51e395b3f4245ca14895 982aff30debc83be1de035ed56e9cc6d484ceb06 Alyson <sistema@nedcapital.com.br> 1782213401 -0300	commit: fix: contornando bloqueio de auth e middleware
+982aff30debc83be1de035ed56e9cc6d484ceb06 1e8c6b3223d4f6ec3762fb030b794ad90a48a67f Alyson <sistema@nedcapital.com.br> 1782214804 -0300	commit: fix: contornando bloqueio de auth e middleware
+1e8c6b3223d4f6ec3762fb030b794ad90a48a67f 8bf512d74d8cddfd8b6fef6794f3ff68ce0071c9 Alyson <sistema@nedcapital.com.br> 1782215201 -0300	commit: fix: contornando bloqueio de auth e middleware
+8bf512d74d8cddfd8b6fef6794f3ff68ce0071c9 623148a1a1c47bbeb2fab732b0d20afd325900ef Alyson <sistema@nedcapital.com.br> 1782216032 -0300	commit: fix: contornando bloqueio de auth e middleware
+623148a1a1c47bbeb2fab732b0d20afd325900ef d26fcfa14f8fb89cf2ae20aea2970e9778455da8 Alyson <sistema@nedcapital.com.br> 1782216565 -0300	commit: fix: contornando bloqueio de auth e middleware
+d26fcfa14f8fb89cf2ae20aea2970e9778455da8 a447645289481648637bd780ba5504dc085ae245 Alyson <sistema@nedcapital.com.br> 1782216753 -0300	commit: fix: contornando bloqueio de auth e middleware
+a447645289481648637bd780ba5504dc085ae245 daa2392ce8788cf61de6037c99dcc7f162c2eb12 Alyson <sistema@nedcapital.com.br> 1782217561 -0300	commit: fix: contornando bloqueio de auth e middleware
+daa2392ce8788cf61de6037c99dcc7f162c2eb12 ec5f2c862daea3b9352535ceb9ef6d47399610af Alyson <sistema@nedcapital.com.br> 1782217695 -0300	commit: fix: contornando bloqueio de auth e middleware
+ec5f2c862daea3b9352535ceb9ef6d47399610af 77d3a4ce9a85e4a81af2a20eff2526f501ff1416 Alyson <sistema@nedcapital.com.br> 1782218027 -0300	commit: fix: contornando bloqueio de auth e middleware
+77d3a4ce9a85e4a81af2a20eff2526f501ff1416 116f4d47c1273e68824f2b9152a087e8a0ec2bc9 Alyson <sistema@nedcapital.com.br> 1782218183 -0300	commit: fix: contornando bloqueio de auth e middleware
+116f4d47c1273e68824f2b9152a087e8a0ec2bc9 3b1823ad57b710f86358d3be7e7c1331b423887e Alyson <sistema@nedcapital.com.br> 1782218507 -0300	commit: fix: contornando bloqueio de auth e middleware
+3b1823ad57b710f86358d3be7e7c1331b423887e e431dc71084ff606cdde2b7e3c20cde17de145fb Alyson <sistema@nedcapital.com.br> 1782218816 -0300	commit: fix: contornando bloqueio de auth e middleware
+e431dc71084ff606cdde2b7e3c20cde17de145fb b602914528867164e6e05caffdb7953e9637d6d2 Alyson <sistema@nedcapital.com.br> 1782225728 -0300	commit: fix: contornando bloqueio de auth e middleware
+b602914528867164e6e05caffdb7953e9637d6d2 257707b168997e49f3739f6f5f9f9f07a6092f4a Alyson <sistema@nedcapital.com.br> 1782226106 -0300	commit: fix: contornando bloqueio de auth e middleware
+257707b168997e49f3739f6f5f9f9f07a6092f4a 51f4bb1303ab7e055004f081fb999b89302e21f8 Alyson <sistema@nedcapital.com.br> 1782226357 -0300	commit: fix: contornando bloqueio de auth e middleware
+51f4bb1303ab7e055004f081fb999b89302e21f8 b74aa15c5e3a262ad6f65f54b29921020830730c Alyson <sistema@nedcapital.com.br> 1782226533 -0300	commit: fix: contornando bloqueio de auth e middleware
+b74aa15c5e3a262ad6f65f54b29921020830730c 4d4fe2b29979a77c58c6109df7021d2f76b48bd4 Alyson <sistema@nedcapital.com.br> 1782226937 -0300	commit: fix: contornando bloqueio de auth e middleware
+4d4fe2b29979a77c58c6109df7021d2f76b48bd4 dd34c2b5869d718982d355b20fdf4479cd773c31 Alyson <sistema@nedcapital.com.br> 1782304740 -0300	commit: fix: contornando bloqueio de auth e middleware
+dd34c2b5869d718982d355b20fdf4479cd773c31 4310ef919999fb90a6d48884ff74b51c0db836c4 Alyson <sistema@nedcapital.com.br> 1782305213 -0300	commit: fix: contornando bloqueio de auth e middleware
+4310ef919999fb90a6d48884ff74b51c0db836c4 d42b28b360a4d9b869d8b9433c927625c1d61cc1 Alyson <sistema@nedcapital.com.br> 1782305279 -0300	commit: fix: contornando bloqueio de auth e middleware
+d42b28b360a4d9b869d8b9433c927625c1d61cc1 f6459dfcca04386c27afc6fb40e5fbab4f35516b Alyson <sistema@nedcapital.com.br> 1782305540 -0300	commit: fix: contornando bloqueio de auth e middleware
+f6459dfcca04386c27afc6fb40e5fbab4f35516b eb332c4b855553a753ee2c94ce35de9d981a743a Alyson <sistema@nedcapital.com.br> 1782305657 -0300	commit: fix: contornando bloqueio de auth e middleware
+eb332c4b855553a753ee2c94ce35de9d981a743a 843006b7cfc9c9e9876fbd9a8e0b218690198e58 Alyson <sistema@nedcapital.com.br> 1782387886 -0300	commit: fix: contornando bloqueio de auth e middleware
+843006b7cfc9c9e9876fbd9a8e0b218690198e58 dc0e8d3726e5317cfea0366261bf1b26d1a09853 Alyson <sistema@nedcapital.com.br> 1782388906 -0300	commit: fix: contornando bloqueio de auth e middleware
+dc0e8d3726e5317cfea0366261bf1b26d1a09853 2d7d270a5f4de34c6c12dd5e7b3c2768ccbc200c Alyson <sistema@nedcapital.com.br> 1782392049 -0300	commit: fix: contornando bloqueio de auth e middleware
+2d7d270a5f4de34c6c12dd5e7b3c2768ccbc200c 5f862d73fc1160aa64e9d9137c0f1460ace7cf7e Alyson <sistema@nedcapital.com.br> 1782392369 -0300	commit: fix: contornando bloqueio de auth e middleware
+5f862d73fc1160aa64e9d9137c0f1460ace7cf7e 2e20a851a2579daa70e2201657f315280e8c2a97 Alyson <sistema@nedcapital.com.br> 1782412088 -0300	commit: fix: contornando bloqueio de auth e middleware
+2e20a851a2579daa70e2201657f315280e8c2a97 ae8616f8ab199ec6821ead85c067393233502460 Alyson <sistema@nedcapital.com.br> 1782481794 -0300	commit: fix: contornando bloqueio de auth e middleware
+ae8616f8ab199ec6821ead85c067393233502460 8b6dcfa261f6e6e9de0770c7eb31088b7ee7451d Alyson <sistema@nedcapital.com.br> 1782481874 -0300	commit: fix: contornando bloqueio de auth e middleware
+8b6dcfa261f6e6e9de0770c7eb31088b7ee7451d 5ce7cb50cd43c0a998a0c26b9a243d3e2c0b658d Alyson <sistema@nedcapital.com.br> 1782732206 -0300	commit: fix: contornando bloqueio de auth e middleware
+5ce7cb50cd43c0a998a0c26b9a243d3e2c0b658d 8aed31e72fb7dc5d7eb81da6c2783f7a6ff90bff Alyson <sistema@nedcapital.com.br> 1782732334 -0300	commit: fix: contornando bloqueio de auth e middleware
+8aed31e72fb7dc5d7eb81da6c2783f7a6ff90bff 455e1790ad2cca2a6dc1df52e22c25c1d61ecc77 Alyson <sistema@nedcapital.com.br> 1782733843 -0300	commit: fix: contornando bloqueio de auth e middleware
+455e1790ad2cca2a6dc1df52e22c25c1d61ecc77 f30dfb6ebfb850e9d51fa1677b3ba383b99b8301 Alyson <sistema@nedcapital.com.br> 1782734013 -0300	commit: fix: contornando bloqueio de auth e middleware
+f30dfb6ebfb850e9d51fa1677b3ba383b99b8301 61225ce3024d9b7f7a3ff91b8dc0ba8c1c9ac3ec Alyson <sistema@nedcapital.com.br> 1782734233 -0300	commit: fix: contornando bloqueio de auth e middleware
+61225ce3024d9b7f7a3ff91b8dc0ba8c1c9ac3ec 282cf6896ebe61362acd453f42156596e1e5db28 Alyson <sistema@nedcapital.com.br> 1782734521 -0300	commit: fix: contornando bloqueio de auth e middleware
+282cf6896ebe61362acd453f42156596e1e5db28 f743fce63a3fd497e0ae940da44ec6a70107662f Alyson <sistema@nedcapital.com.br> 1782739075 -0300	commit: fix: contornando bloqueio de auth e middleware
+f743fce63a3fd497e0ae940da44ec6a70107662f 912fe998846ea43d894f4002bfbcd628972fe1d4 Alyson <sistema@nedcapital.com.br> 1782739236 -0300	commit: fix: contornando bloqueio de auth e middleware
+912fe998846ea43d894f4002bfbcd628972fe1d4 ce796a7c21e5147a227270e198608004fbed98d4 Alyson <sistema@nedcapital.com.br> 1782739405 -0300	commit: fix: contornando bloqueio de auth e middleware
+ce796a7c21e5147a227270e198608004fbed98d4 75ae7506e1aae785f4206c92e8d8f2e7c9787d42 Alyson <sistema@nedcapital.com.br> 1782739612 -0300	commit: fix: contornando bloqueio de auth e middleware
+75ae7506e1aae785f4206c92e8d8f2e7c9787d42 59b7e6eed8661316eaa89e7e142391770a51aa92 Alyson <sistema@nedcapital.com.br> 1782740038 -0300	commit: fix: contornando bloqueio de auth e middleware
+59b7e6eed8661316eaa89e7e142391770a51aa92 75ae7506e1aae785f4206c92e8d8f2e7c9787d42 Alyson <sistema@nedcapital.com.br> 1782740119 -0300	reset: moving to HEAD~1
