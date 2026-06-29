@@ -4,32 +4,28 @@ import { NextResponse } from "next/server";
 const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 
-// Redireciona para o Google
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const userEmail = searchParams.get("user"); // Passamos o e-mail do intraned_user
+  const userEmail = searchParams.get("user"); 
 
-  // 1. Se não tem código, gera a URL de login do Google e manda o cara pra lá
   if (!code) {
     const redirectUri = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/auth/google`;
-    
-    // Escopos necessários: ler, enviar e gerenciar (lixeira/arquivar)
     const scopes = ["https://www.googleapis.com/auth/gmail.modify"];
-    
-    // Salva o e-mail do usuário no "state" do Google para sabermos quem está logando quando voltar
     const state = userEmail || "anonimo";
 
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${CLIENT_ID}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&response_type=code` +
-      `&scope=${encodeURIComponent(scopes.join(" "))}` +
-      `&state=${state}` +
-      `&access_type=offline` + // Garante o Refresh Token para não expirar o login
-      `&prompt=select_account%20consent`; // 🎯 O SEGREDO TÁ AQUI: Obriga o seletor de contas a aparecer!
+    // 🎯 Forma blindada de montar a URL com o select_account
+    const authParams = new URLSearchParams({
+      client_id: CLIENT_ID!,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: scopes.join(" "),
+      state: state,
+      access_type: "offline",
+      prompt: "select_account" // Força o seletor!
+    });
 
-    return NextResponse.redirect(googleAuthUrl);
+    return NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`);
   }
 
   // 2. Se o Google devolveu o código, vamos trocar pelo Token Real de Acesso
