@@ -102,7 +102,6 @@ export default function CaixaInteligentePage() {
       emailUsuario = user.email || user.nome;
     }
 
-    // Manda para a rota da nossa API que vai gerar o link do Google
     window.location.href = `/api/auth/google?user=${encodeURIComponent(emailUsuario)}`;
   };
 
@@ -117,7 +116,7 @@ export default function CaixaInteligentePage() {
           setEmails(prev => prev.filter(e => e.id !== id));
           setIncinerandoId(null);
           // await supabase.from("caixa_inteligente").update({ status: "LIXO" }).eq("id", id);
-        }, 1000);
+        }, 600); // Reduzi o tempo pra bater com a nova animação (600ms)
       } else {
         setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
         // await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
@@ -194,7 +193,7 @@ export default function CaixaInteligentePage() {
             <span>{icone} {titulo}</span>
             {!isIncinerador && <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[10px]">{filtrados.length}</span>}
           </h3>
-          {isIncinerador && <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Arraste para cá e resolva.</p>}
+          {isIncinerador && <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Arraste para cá e arquive.</p>}
         </div>
         
         <div className={`flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar ${isIncinerador ? "flex items-center justify-center relative" : ""}`}>
@@ -215,12 +214,11 @@ export default function CaixaInteligentePage() {
                 draggable={!isIncinerando}
                 onDragStart={(e) => handleDragStart(e, email.id)}
                 className={`bg-white border rounded-xl p-4 shadow-sm transition-all flex flex-col gap-3 group cursor-grab active:cursor-grabbing ${
-                  isIncinerando ? "animate-fire pointer-events-none absolute w-full max-w-[90%]" : "border-slate-200 hover:shadow-md hover:border-blue-300"
+                  isIncinerando ? "animate-fire absolute w-[90%] pointer-events-none z-50 border-rose-300 bg-rose-50" : "border-slate-200 hover:shadow-md hover:border-blue-300 relative"
                 }`}
               >
-
                 {/* CABEÇALHO DO CARD */}
-                <div className={`flex justify-between items-start gap-2 ${isIncinerando ? "opacity-30 blur-sm" : ""}`}>
+                <div className={`flex justify-between items-start gap-2 ${isIncinerando ? "opacity-50" : ""}`}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${email.provedor === "GMAIL" ? "bg-red-50 text-red-600 border-red-100" : "bg-blue-50 text-blue-600 border-blue-100"}`}>
@@ -238,7 +236,7 @@ export default function CaixaInteligentePage() {
                 </div>
 
                 {/* CORPO DO E-MAIL (SNIPPET) */}
-                <p className={`text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed ${isIncinerando ? "opacity-30 blur-sm" : ""}`}>
+                <p className={`text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed ${isIncinerando ? "opacity-50" : ""}`}>
                   {email.snippet}
                 </p>
 
@@ -330,17 +328,13 @@ export default function CaixaInteligentePage() {
         
         /* 🗑️ Animação Limpa de Lixeira */
         @keyframes toss {
-        0% { transform: scale(1) translateY(0) rotate(0deg); opacity: 1; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-        20% { transform: scale(1.05) translateY(-10px) rotate(2deg); opacity: 0.9; }
-        100% { transform: scale(0.3) translateY(150px) rotate(-15deg); opacity: 0; box-shadow: none; }
+          0% { transform: scale(1) translateY(0) rotate(0deg); opacity: 1; }
+          20% { transform: scale(1.05) translateY(-10px) rotate(2deg); opacity: 0.9; }
+          100% { transform: scale(0.3) translateY(150px) rotate(-15deg); opacity: 0; }
         }
         .animate-fire {
-        animation: toss 0.6s forwards cubic-bezier(0.4, 0, 0.2, 1);
-        transform-origin: center bottom;
-        pointer-events: none;
-        }
-        .animate-fire {
-          animation: disintegrate 1s forwards ease-in-out;
+          animation: toss 0.6s forwards cubic-bezier(0.4, 0, 0.2, 1);
+          transform-origin: center bottom;
         }
       `}} />
     </div>
