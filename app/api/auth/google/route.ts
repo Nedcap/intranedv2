@@ -1,0 +1,68 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
+
+const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+
+// Redireciona para o Google
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get("code");
+  const userEmail = searchParams.get("user"); // Passamos o e-mail do intraned_user
+
+  // 1. Se não tem código, gera a URL de login do Google e manda o cara pra lá
+  if (!code) {
+    const redirectUri = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/auth/google`;
+    
+    // Escopos necessários: ler, enviar e gerenciar (lixeira/arquivar)
+    const scopes = ["https://www.googleapis.com/auth/gmail.modify"];
+    
+    // Salva o e-mail do usuário no "state" do Google para sabermos quem está logando quando voltar
+    const state = userEmail || "anonimo";
+
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent(scopes.join(" "))}` +
+      `&state=${state}` +
+      `&access_type=offline` + // Garante o Refresh Token para não expirar o login
+      `&prompt=consent`;
+
+    return NextResponse.redirect(googleAuthUrl);
+  }
+
+  // 2. Se o Google devolveu o código, vamos trocar pelo Token Real de Acesso
+  try {
+    const stateEmail = searchParams.get("state") || "";
+    const redirectUri = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/auth/google`;
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: CLIENT_ID!,
+        client_secret: CLIENT_SECRET!,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    const tokens = await tokenResponse.json();
+
+    if (tokens.error) throw new Error(tokens.error_description || "Erro ao obter tokens");
+
+    // Guarda os tokens criptografados ou direto numa tabela de credenciais vinculada ao usuário
+    // Para simplificar o MVP, vamos atualizar o status de conectado do usuário ou disparar o webhook de sync inicial
+    console.log(`Tokens obtidos com sucesso para o usuário: ${stateEmail}`, tokens);
+
+    // Manda o usuário de volta para a página da caixa de e-mails com uma flag de sucesso
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/dashboard/caixa-email?success=gmail`);
+
+  } catch (error: any) {
+    console.error("Erro no callback do Google OAuth:", error);
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/dashboard/caixa-email?error=${encodeURIComponent(error.message)}`);
+  }
+}
