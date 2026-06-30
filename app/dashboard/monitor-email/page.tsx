@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface EmailCard {
@@ -38,6 +38,13 @@ export default function CaixaInteligentePage() {
   const [emailRespondendo, setEmailRespondendo] = useState<string | null>(null);
   const [textoResposta, setTextoResposta] = useState("");
   const [enviando, setEnviando] = useState(false);
+
+  // Guardar a referência da conta ativa para o setInterval não ler estado desatualizado
+  const contaAtivaRef = useRef(contaAtiva);
+
+  useEffect(() => {
+    contaAtivaRef.current = contaAtiva;
+  }, [contaAtiva]);
 
   const obterUsuarioLogado = () => {
     if (typeof window === "undefined") return "";
@@ -87,9 +94,9 @@ export default function CaixaInteligentePage() {
     }
   };
 
-  // 🔄 SINCRONIZADOR SILENCIOSO AUTOMÁTICO (Sem popups irritantes)
-  const rodarSincronizadorDaAba = async (abaParaSincronizar = contaAtiva) => {
-    if (!abaParaSincronizar) return;
+  // 🔄 SINCRONIZADOR SILENCIOSO EM SEGUNDO PLANO
+  const rodarSincronizadorDaAba = async (abaParaSincronizar = contaAtivaRef.current) => {
+    if (!abaParaSincronizar || sincronizando) return;
     setSincronizando(true);
     try {
       await fetch("/api/gmail/sync", {
@@ -97,17 +104,26 @@ export default function CaixaInteligentePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userEmail: obterUsuarioLogado(), contaAtiva: abaParaSincronizar })
       });
-      await carregarCardsDaContaAtiva(false); // Atualiza os cards sem travar a tela com esqueleto de loading
+      // Recarrega sem travar a tela
+      const usuarioLogado = obterUsuarioLogado();
+      const { data } = await supabase
+        .from("caixa_inteligente")
+        .select("*")
+        .eq("dono_da_caixa", usuarioLogado)
+        .eq("caixa_origem", abaParaSincronizar)
+        .not("status", "in", '("LIXO", "RESOLVIDO")')
+        .order("data_recebimento", { ascending: false });
+
+      setEmails(data || []);
     } catch (err) {
-      console.error("Erro na sincronização em background:", err);
+      console.error("Erro na sincronização automática:", err);
     } finally {
       setSincronizando(false);
     }
   };
 
   const buscarHistoricoPorData = async () => {
-    if (!dataInicio) return;
-    if (!contaAtiva) return;
+    if (!dataInicio || !contaAtiva) return;
     setSincronizando(true);
     try {
       const res = await fetch("/api/gmail/sync", {
@@ -182,26 +198,29 @@ export default function CaixaInteligentePage() {
     }
   };
 
-  // Carrega a estrutura inicial do app ao montar a tela
   useEffect(() => {
     carregarAbasEContas();
-    
-    // Limpa qualquer vestígio de erro da URL silenciosamente sem dar alerts
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("error")) {
-      console.error("Erro de conexão retornado do Google:", params.get("error"));
-    }
-    window.history.replaceState({}, document.title, window.location.pathname);
   }, []);
 
-  // 🌟 O CORAÇÃO DA AUTOMAÇÃO FLUIDA: 
-  // Sempre que o usuário clica em outra aba, ele puxa o banco local e dispara a sincronização automática em background
+  // 🌟 GATILHO DE MUDANÇA DE ABA
   useEffect(() => {
     if (contaAtiva) {
       carregarCardsDaContaAtiva(true);
       rodarSincronizadorDaAba(contaAtiva);
     }
   }, [contaAtiva]);
+
+  // ⏱️ GATILHO DE CRONÔMETRO AUTOMÁTICO (Vigia a cada 30 segundos)
+  useEffect(() => {
+    const intervalo = setInterval(() => {
+      if (contaAtivaRef.current) {
+        console.log(`[Vigilante] Sincronizando automático para: ${contaAtivaRef.current}`);
+        rodarSincronizadorDaAba(contaAtivaRef.current);
+      }
+    }, 30000); // Mude para 10000 se quiser testar cravado de 10 em 10 segundos
+
+    return () => clearInterval(intervalo);
+  }, []);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setArrastandoId(id);
@@ -318,14 +337,24 @@ export default function CaixaInteligentePage() {
         <div className="flex justify-between items-center">
           <div>
             <h2 className="text-sm font-black text-slate-800 uppercase">Aba Ativa: <span className="text-blue-600">{contaAtiva || "Nenhuma"}</span></h2>
-            <p className="text-slate-400 text-[10px]">Gerenciamento e monitoramento automático.</p>
+            <p className="text-slate-400 text-[10px]">Sincronização inteligente ativada.</p>
           </div>
-          {/* 🌟 INDICADOR VISUAL DISCRETO DE BACKGROUND SYNC */}
-          {sincronizando && (
-            <span className="text-[10px] font-black text-blue-600 bg-blue-50 border border-blue-100 px-2 py-1 rounded-md animate-pulse">
-              🔄 Buscando e-mails novos do Gmail...
-            </span>
-          )}
+          
+          {/* O VOLTADO DO BOTÃO DE CHECAGEM + ANIMAÇÃO DE BACKUP */}
+          <div className="flex items-center gap-2">
+            {sincronizando && (
+              <span className="text-[10px] font-black text-blue-600 bg-blue-50 border border-blue-100 px-2 py-1 rounded-md animate-pulse">
+                🔄 Atualizando...
+              </span>
+            )}
+            <button 
+              onClick={() => rodarSincronizadorDaAba(contaAtiva)} 
+              disabled={sincronizando || !contaAtiva} 
+              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg uppercase text-[10px] disabled:opacity-50"
+            >
+              Puxar E-mails Novos
+            </button>
+          </div>
         </div>
 
         {/* PROCURAR LOCAIS E HISTÓRICO POR DATA */}
