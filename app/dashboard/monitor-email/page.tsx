@@ -26,11 +26,9 @@ export default function CaixaInteligentePage() {
   const [carregando, setCarregando] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
   
-  // Filtros locais de busca na tela
   const [buscaRemetente, setBuscaRemetente] = useState("");
   const [buscaAssunto, setBuscaAssunto] = useState("");
 
-  // Filtro inteligente de histórico (Datas no Gmail)
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [historicoBuscado, setHistoricoBuscado] = useState<EmailCard[]>([]);
@@ -68,9 +66,9 @@ export default function CaixaInteligentePage() {
     }
   };
 
-  const carregarCardsDaContaAtiva = async () => {
+  const carregarCardsDaContaAtiva = async (mostrarCarregando = true) => {
     if (!contaAtiva) return setEmails([]);
-    setCarregando(true);
+    if (mostrarCarregando) setCarregando(true);
     try {
       const usuarioLogado = obterUsuarioLogado();
       const { data } = await supabase
@@ -85,30 +83,31 @@ export default function CaixaInteligentePage() {
     } catch (err) {
       console.error(err);
     } finally {
-      setCarregando(false);
+      if (mostrarCarregando) setCarregando(false);
     }
   };
 
-  const rodarSincronizadorDaAba = async () => {
-    if (!contaAtiva) return alert("Selecione ou adicione uma conta ativa.");
+  // 🔄 SINCRONIZADOR SILENCIOSO AUTOMÁTICO (Sem popups irritantes)
+  const rodarSincronizadorDaAba = async (abaParaSincronizar = contaAtiva) => {
+    if (!abaParaSincronizar) return;
     setSincronizando(true);
     try {
       await fetch("/api/gmail/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: obterUsuarioLogado(), contaAtiva })
+        body: JSON.stringify({ userEmail: obterUsuarioLogado(), contaAtiva: abaParaSincronizar })
       });
-      await carregarCardsDaContaAtiva();
+      await carregarCardsDaContaAtiva(false); // Atualiza os cards sem travar a tela com esqueleto de loading
     } catch (err) {
-      console.error(err);
+      console.error("Erro na sincronização em background:", err);
     } finally {
       setSincronizando(false);
     }
   };
 
   const buscarHistoricoPorData = async () => {
-    if (!dataInicio) return alert("Selecione ao menos a data inicial.");
-    if (!contaAtiva) return alert("Selecione uma conta de e-mail ativa antes.");
+    if (!dataInicio) return;
+    if (!contaAtiva) return;
     setSincronizando(true);
     try {
       const res = await fetch("/api/gmail/sync", {
@@ -122,11 +121,10 @@ export default function CaixaInteligentePage() {
         })
       });
       const dados = await res.json();
-      if (dados.error) throw new Error(dados.error);
       setHistoricoBuscado(dados.messages || []);
       setAbrindoHistorico(true);
-    } catch (err: any) {
-      alert(`Erro: ${err.message}`);
+    } catch (err) {
+      console.error(err);
     } finally {
       setSincronizando(false);
     }
@@ -135,9 +133,8 @@ export default function CaixaInteligentePage() {
   const importarEmailSelecionado = async (email: EmailCard) => {
     try {
       await supabase.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
-      alert("E-mail importado com sucesso!");
       setHistoricoBuscado(prev => prev.filter(e => e.mensagem_id !== email.mensagem_id));
-      await carregarCardsDaContaAtiva();
+      await carregarCardsDaContaAtiva(false);
     } catch (err) {
       console.error(err);
     }
@@ -161,12 +158,11 @@ export default function CaixaInteligentePage() {
       const resultado = await res.json();
       if (resultado.error) throw new Error(resultado.error);
 
-      alert("🚀 Resposta enviada direto pelo Gmail!");
       setTextoResposta("");
       setEmailRespondendo(null);
       await mudarStatusEmail(email.id, "RESOLVIDO");
-    } catch (err: any) {
-      alert(`Falha no envio: ${err.message}`);
+    } catch (err) {
+      console.error("Falha no envio:", err);
     } finally {
       setEnviando(false);
     }
@@ -186,15 +182,25 @@ export default function CaixaInteligentePage() {
     }
   };
 
+  // Carrega a estrutura inicial do app ao montar a tela
   useEffect(() => {
     carregarAbasEContas();
+    
+    // Limpa qualquer vestígio de erro da URL silenciosamente sem dar alerts
     const params = new URLSearchParams(window.location.search);
-    if (params.get("success") === "gmail") alert(`Conta ${params.get("conta")} vinculada!`);
-    if (params.get("error")) alert(`❌ Erro de Segurança: ${params.get("error")}`);
+    if (params.get("error")) {
+      console.error("Erro de conexão retornado do Google:", params.get("error"));
+    }
+    window.history.replaceState({}, document.title, window.location.pathname);
   }, []);
 
+  // 🌟 O CORAÇÃO DA AUTOMAÇÃO FLUIDA: 
+  // Sempre que o usuário clica em outra aba, ele puxa o banco local e dispara a sincronização automática em background
   useEffect(() => {
-    carregarCardsDaContaAtiva();
+    if (contaAtiva) {
+      carregarCardsDaContaAtiva(true);
+      rodarSincronizadorDaAba(contaAtiva);
+    }
   }, [contaAtiva]);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -225,55 +231,58 @@ export default function CaixaInteligentePage() {
           </h3>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-          {listaColuna.length === 0 && (
+          {carregando ? (
+            <div className="text-center p-6 text-slate-400 font-bold text-xs">Carregando dados...</div>
+          ) : listaColuna.length === 0 ? (
             <div className="text-center p-6 text-slate-400 font-bold text-xs italic">Sem e-mails aqui.</div>
-          )}
-          {listaColuna.map(email => (
-            <div key={email.id} draggable onDragStart={(e) => handleDragStart(e, email.id)} className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs flex flex-col gap-2 cursor-grab active:cursor-grabbing hover:border-slate-300">
-              <div className="flex justify-between items-start gap-1">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[8px] font-black uppercase px-1 rounded bg-red-50 text-red-600 border border-red-100">{email.provedor}</span>
-                    <span className="font-bold text-slate-800 text-xs truncate">{email.remetente_nome}</span>
+          ) : (
+            listaColuna.map(email => (
+              <div key={email.id} draggable onDragStart={(e) => handleDragStart(e, email.id)} className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs flex flex-col gap-2 cursor-grab active:cursor-grabbing hover:border-slate-300">
+                <div className="flex justify-between items-start gap-1">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[8px] font-black uppercase px-1 rounded bg-red-50 text-red-600 border border-red-100">{email.provedor}</span>
+                      <span className="font-bold text-slate-800 text-xs truncate">{email.remetente_nome}</span>
+                    </div>
+                    <h4 className="font-extrabold text-slate-900 text-xs line-clamp-1">{email.assunto}</h4>
                   </div>
-                  <h4 className="font-extrabold text-slate-900 text-xs line-clamp-1">{email.assunto}</h4>
-                </div>
-                <div className="flex gap-1.5 items-center">
-                  <button onClick={() => mudarStatusEmail(email.id, email.status === "BANDEIRA" ? "PENDENTE" : "BANDEIRA")} className="text-xs p-0.5 rounded hover:bg-slate-100" title="Alternar Acompanhamento">
-                    {email.status === "BANDEIRA" ? "🚩" : "🏳️"}
-                  </button>
-                  <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="text-xs p-0.5 rounded text-rose-600 hover:bg-rose-50" title="Excluir Card">🗑️</button>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-500 line-clamp-2 leading-tight">{email.snippet}</p>
-
-              {emailRespondendo === email.id && (
-                <div className="bg-blue-50/50 border border-blue-100 p-2 rounded flex flex-col gap-2">
-                  <textarea 
-                    rows={3}
-                    placeholder="Escreva a resposta corporativa..."
-                    value={textoResposta}
-                    onChange={(e) => setTextoResposta(e.target.value)}
-                    className="w-full text-xs p-1.5 rounded border border-blue-200 outline-none resize-none"
-                  />
-                  <div className="flex justify-end gap-1.5">
-                    <button onClick={() => { setEmailRespondendo(null); setTextoResposta(""); }} className="text-[10px] font-bold text-slate-500 uppercase">Sair</button>
-                    <button onClick={() => enviarRespostaGmailReal(email)} disabled={enviando} className="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded uppercase">
-                      {enviando ? "Enviando..." : "📤 Enviar Agora"}
+                  <div className="flex gap-1.5 items-center">
+                    <button onClick={() => mudarStatusEmail(email.id, email.status === "BANDEIRA" ? "PENDENTE" : "BANDEIRA")} className="text-xs p-0.5 rounded hover:bg-slate-100" title="Alternar Acompanhamento">
+                      {email.status === "BANDEIRA" ? "🚩" : "🏳️"}
                     </button>
+                    <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="text-xs p-0.5 rounded text-rose-600 hover:bg-rose-50" title="Excluir Card">🗑️</button>
                   </div>
                 </div>
-              )}
+                <p className="text-[11px] text-slate-500 line-clamp-2 leading-tight">{email.snippet}</p>
 
-              <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[10px]">
-                <span className="text-slate-400 font-medium">{new Date(email.data_recebimento).toLocaleDateString()}</span>
-                <div className="flex gap-2">
-                  <button onClick={() => setEmailRespondendo(emailRespondendo === email.id ? null : email.id)} className="text-blue-600 font-bold hover:underline">💬 Responder</button>
-                  <button onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`, "_blank")} className="text-slate-500 font-bold hover:underline">🌐 Link</button>
+                {emailRespondendo === email.id && (
+                  <div className="bg-blue-50/50 border border-blue-100 p-2 rounded flex flex-col gap-2">
+                    <textarea 
+                      rows={3}
+                      placeholder="Escreva a resposta corporativa..."
+                      value={textoResposta}
+                      onChange={(e) => setTextoResposta(e.target.value)}
+                      className="w-full text-xs p-1.5 rounded border border-blue-200 outline-none resize-none"
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button onClick={() => { setEmailRespondendo(null); setTextoResposta(""); }} className="text-[10px] font-bold text-slate-500 uppercase">Sair</button>
+                      <button onClick={() => enviarRespostaGmailReal(email)} disabled={enviando} className="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded uppercase">
+                        {enviando ? "Enviando..." : "📤 Enviar Agora"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[10px]">
+                  <span className="text-slate-400 font-medium">{new Date(email.data_recebimento).toLocaleDateString()}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setEmailRespondendo(emailRespondendo === email.id ? null : email.id)} className="text-blue-600 font-bold hover:underline">💬 Responder</button>
+                    <button onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`, "_blank")} className="text-slate-500 font-bold hover:underline">🌐 Link</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     );
@@ -282,7 +291,7 @@ export default function CaixaInteligentePage() {
   return (
     <div className="space-y-4 max-w-[1600px] mx-auto pb-10 text-xs font-sans text-slate-700">
       
-      {/* BARRA DE SELEÇÃO DE ABAS MULTICONTAS */}
+      {/* SELEÇÃO DE ABAS MULTICONTAS */}
       <div className="flex justify-between items-center bg-white border border-slate-200 p-2 rounded-xl shadow-2xs overflow-x-auto gap-2">
         <div className="flex gap-1 items-center">
           {contasConectadas.length === 0 ? (
@@ -306,14 +315,17 @@ export default function CaixaInteligentePage() {
 
       {/* CONTROLE FILTROS E HISTÓRICO */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs flex flex-col gap-3">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <div className="flex justify-between items-center">
           <div>
             <h2 className="text-sm font-black text-slate-800 uppercase">Aba Ativa: <span className="text-blue-600">{contaAtiva || "Nenhuma"}</span></h2>
-            <p className="text-slate-400 text-[10px]">Gerenciamento e monitoramento ativo desta caixa.</p>
+            <p className="text-slate-400 text-[10px]">Gerenciamento e monitoramento automático.</p>
           </div>
-          <button onClick={rodarSincronizadorDaAba} disabled={sincronizando || !contaAtiva} className="px-3 py-1.5 bg-slate-900 text-white font-black rounded-lg uppercase text-[10px]">
-            {sincronizando ? "🔄 Sincronizando..." : "🔄 Sincronizar Aba"}
-          </button>
+          {/* 🌟 INDICADOR VISUAL DISCRETO DE BACKGROUND SYNC */}
+          {sincronizando && (
+            <span className="text-[10px] font-black text-blue-600 bg-blue-50 border border-blue-100 px-2 py-1 rounded-md animate-pulse">
+              🔄 Buscando e-mails novos do Gmail...
+            </span>
+          )}
         </div>
 
         {/* PROCURAR LOCAIS E HISTÓRICO POR DATA */}
