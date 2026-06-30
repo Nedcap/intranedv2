@@ -198,7 +198,7 @@ export default function CaixaInteligentePage() {
   const adicionarNovaContaGoogle = () => {
     const clientId = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
     const redirectUri = `https://intraned.nedcapital.com.br/api/auth/google`;
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email")}&state=${encodeURIComponent(obterUsuarioLogado())}&access_type=offline&prompt=select_account`;
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email")}&state=${encodeURIComponent(obterUsuarioLogado())}&access_type=offline&prompt=consent`;
   };
 
   const mudarStatusEmail = async (id: string, novoStatus: string) => {

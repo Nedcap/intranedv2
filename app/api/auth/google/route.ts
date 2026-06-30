@@ -26,7 +26,6 @@ export async function GET(request: Request) {
   // ====================================================================
   if (!code) {
     const redirectUri = `${SITE_URL}/api/auth/google`;
-    // Adicionado o escopo de email para podermos validar se é corporativo ou não
     const scopes = [
       "https://www.googleapis.com/auth/gmail.modify", 
       "https://www.googleapis.com/auth/userinfo.email"
@@ -40,7 +39,7 @@ export async function GET(request: Request) {
       scope: scopes.join(" "),
       state: state,
       access_type: "offline",
-      prompt: "select_account"
+      prompt: "consent" // 🌟 Garante que o Google sempre peça permissão e mande o refresh_token
     });
 
     return NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`);
@@ -82,17 +81,26 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${SITE_URL}/dashboard/monitor-email?error=${encodeURIComponent("Contas particulares @gmail.com não são permitidas. Use o e-mail institucional!")}`);
     }
 
-    // 🌟 SALVANDO A CONEXÃO MÚLTIPLA NO SUPABASE
+    // 🌟 MONTAGEM INTELIGENTE DOS DADOS PARA O SUPABASE
+    // Criamos o objeto básico que sempre vai atualizar
+    const dadosIntegracao: any = {
+      email_usuario: stateEmailOwner.toLowerCase().trim(), 
+      gmail_conta_conectada: gmailConectado,
+      gmail_access_token: tokens.access_token,
+      gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+      atualizado_em: new Date().toISOString()
+    };
+
+    // 🛡️ SÓ grava o refresh_token se o Google de fato o enviou agora.
+    // Se o Google não mandar (porque é um re-login), mantemos o que já está no banco intacto!
+    if (tokens.refresh_token) {
+      dadosIntegracao.gmail_refresh_token = tokens.refresh_token;
+    }
+
+    // Executa o upsert mesclando os dados sem sobrescrever o refresh_token antigo com null
     const { error: upsertError } = await supabase
       .from("usuarios_integracoes")
-      .upsert({
-        email_usuario: stateEmailOwner.toLowerCase().trim(), 
-        gmail_conta_conectada: gmailConectado,
-        gmail_access_token: tokens.access_token,
-        gmail_refresh_token: tokens.refresh_token || null, 
-        gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-        atualizado_em: new Date().toISOString()
-      }, { onConflict: "email_usuario, gmail_conta_conectada" });
+      .upsert(dadosIntegracao, { onConflict: "email_usuario, gmail_conta_conectada" });
 
     if (upsertError) {
       throw new Error(`Erro ao inserir no Supabase: ${upsertError.message}`);
