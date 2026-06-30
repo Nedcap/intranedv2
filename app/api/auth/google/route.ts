@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const CLIENT_ID = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
   
   const secretParteA = "GOCSPX-";
-  const secretParteB = "_oqBOTA_O_RESTO_DA_SUA_CHAVE_AQUI"; 
+  const secretParteB = "_oqRbHrrLU0Kev2yG5lRFU64l0ze"; 
   const CLIENT_SECRET = `${secretParteA}${secretParteB}`;
 
   if (!code) {
