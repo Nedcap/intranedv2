@@ -157,7 +157,7 @@ export default function CaixaInteligentePage() {
   };
 
   const enviarRespostaGmailReal = async (email: EmailCard) => {
-    if (!textoResposta.trim()) return;
+    if (!textoResposta.trim() || enviando) return; // 🛡️ Evita múltiplos cliques se já estiver enviando
     setEnviando(true);
     try {
       const res = await fetch("/api/gmail/send", {
@@ -171,16 +171,27 @@ export default function CaixaInteligentePage() {
           textoResposta
         })
       });
+
+      // Se a rota falhar (ex: 500 ou 400), precisamos pegar o erro aqui
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro do servidor (${res.status})`);
+      }
+
       const resultado = await res.json();
       if (resultado.error) throw new Error(resultado.error);
 
+      // ✨ SE DEU CERTO: Limpa e move para Resolvido
       setTextoResposta("");
       setEmailRespondendo(null);
       await mudarStatusEmail(email.id, "RESOLVIDO");
-    } catch (err) {
-      console.error("Falha no envio:", err);
+      
+    } catch (err: any) {
+      console.error("❌ Falha crítica no envio:", err);
+      // Como não queremos alert(), vamos printar o erro direto na tela de resposta pro desenvolvedor ver o que quebrou!
+      setTextoResposta(prev => `${prev}\n\n[⚠️ ERRO AO ENVIAR: ${err.message}]`);
     } finally {
-      setEnviando(false);
+      setEnviando(false); // 🔓 DESTREVA O BOTÃO INDEPENDENTE DE DAR CERTO OU ERRADO!
     }
   };
 
