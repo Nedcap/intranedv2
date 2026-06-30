@@ -13,7 +13,7 @@ interface EmailCard {
   assunto: string;
   snippet: string;
   tem_anexo: boolean;
-  status: "PENDENTE" | "LIDO" | "RESOLVIDO" | "LIXO";
+  status: "PENDENTE" | "LIDO" | "BANDEIRA" | "RESOLVIDO" | "LIXO";
   data_recebimento: string;
 }
 
@@ -21,13 +21,20 @@ export default function CaixaInteligentePage() {
   const [emails, setEmails] = useState<EmailCard[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
-  
+
+  // Filtros locais de busca
+  const [buscaRemetente, setBuscaRemetente] = useState("");
+  const [buscaAssunto, setBuscaAssunto] = useState("");
+
+  // Filtro inteligente de histórico (Datas)
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+  const [historicoBuscado, setHistoricoBuscado] = useState<EmailCard[]>([]);
+  const [abrindoHistorico, setAbrindoHistorico] = useState(false);
+
   const [gmailConectado, setGmailConectado] = useState(false);
   const [outlookConectado, setOutlookConectado] = useState(false);
-  
   const [arrastandoId, setArrastandoId] = useState<string | null>(null);
-  const [incinerandoId, setIncinerandoId] = useState<string | null>(null); 
-  
   const [emailRespondendo, setEmailRespondendo] = useState<string | null>(null);
   const [textoResposta, setTextoResposta] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -37,12 +44,12 @@ export default function CaixaInteligentePage() {
     const userStr = localStorage.getItem("intraned_user");
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user.email || user.nome; 
+      return user.email || user.nome;
     }
     return "";
   };
 
-  const carregarCaixaFantasma = async () => {
+  const carregarDadosDoSupabase = async () => {
     setCarregando(true);
     try {
       const usuarioLogado = obterUsuarioLogado();
@@ -52,140 +59,115 @@ export default function CaixaInteligentePage() {
         .from("caixa_inteligente")
         .select("*")
         .eq("dono_da_caixa", usuarioLogado)
-        .not("status", "in", '("LIXO", "RESOLVIDO")') 
+        .not("status", "in", '("LIXO", "RESOLVIDO")')
         .order("data_recebimento", { ascending: false });
 
       if (error) throw error;
-      
-      if (!data || data.length === 0) {
-        setEmails([
-          { id: "fake-1", mensagem_id: "1", provedor: "GMAIL", remetente_nome: "Elon Musk", remetente_email: "elon@tesla.com", assunto: "Compra da Ned Capital", snippet: "Oi, vi o painel de vocês e quero comprar a empresa por 1 bilhão. O que acham?", tem_anexo: false, status: "PENDENTE", data_recebimento: new Date().toISOString() },
-          { id: "fake-2", mensagem_id: "2", provedor: "OUTLOOK", remetente_nome: "Contabilidade", remetente_email: "docs@contabilidade.com", assunto: "Nota Fiscal Mês Atual", snippet: "Segue em anexo a nota fiscal de serviços referente ao mês atual para pagamento.", tem_anexo: true, status: "LIDO", data_recebimento: new Date().toISOString() }
-        ]);
-      } else {
-        setEmails(data);
-      }
+      setEmails(data || []);
     } catch (err) {
-      console.error("Erro ao carregar e-mails:", err);
+      console.error(err);
     } finally {
       setCarregando(false);
     }
   };
 
-  const sincronizarEmailsReais = async () => {
+  const sincronizarCaixaAtual = async () => {
     const usuarioLogado = obterUsuarioLogado();
-    if (!usuarioLogado) return alert("Usuário não identificado.");
-    
+    if (!usuarioLogado) return alert("Sessão inválida.");
     setSincronizando(true);
     try {
-      const res = await fetch("/api/gmail/sync", {
+      await fetch("/api/gmail/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userEmail: usuarioLogado })
       });
-      const resultado = await res.json();
-      
-      if (resultado.error) {
-        alert(`Aviso: ${resultado.error}. Conecte o Gmail primeiro.`);
-      } else {
-        await carregarCaixaFantasma(); 
-      }
+      await carregarDadosDoSupabase();
     } catch (err) {
       console.error(err);
-      alert("Erro ao rodar monitor de sincronização.");
     } finally {
       setSincronizando(false);
     }
   };
 
-  useEffect(() => {
-    carregarCaixaFantasma();
-
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("success") === "gmail") {
-      setGmailConectado(true);
-      alert("✅ Gmail integrado com sucesso à sua conta NedHub!");
-      window.history.replaceState({}, document.title, window.location.pathname);
+  const buscarHistoricoPorData = async () => {
+    if (!dataInicio) return alert("Selecione ao menos a data inicial.");
+    const usuarioLogado = obterUsuarioLogado();
+    setSincronizando(true);
+    try {
+      const res = await fetch("/api/gmail/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userEmail: usuarioLogado, dataInicio, dataFim })
+      });
+      const dados = await res.json();
+      if (dados.error) throw new Error(dados.error);
+      setHistoricoBuscado(dados.messages || []);
+      setAbrindoHistorico(true);
+    } catch (err: any) {
+      alert(`Erro: ${err.message}`);
+    } finally {
+      setSincronizando(false);
     }
-    if (params.get("error")) {
-      alert(`❌ Falha na conexão: ${params.get("error")}`);
-      window.history.replaceState({}, document.title, window.location.pathname);
+  };
+
+  const importarEmailSelecionado = async (email: EmailCard) => {
+    try {
+      await supabase.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
+      alert("E-mail importado para o Kanban!");
+      setHistoricoBuscado(prev => prev.filter(e => e.mensagem_id !== email.mensagem_id));
+      await carregarDadosDoSupabase();
+    } catch (err) {
+      console.error(err);
     }
-  }, []);
-
-  const autenticarProvedor = (provedor: "GMAIL" | "OUTLOOK") => {
-    if (provedor === "OUTLOOK") {
-      alert("Outlook será configurado no próximo passo!");
-      return;
-    }
-
-    const clientId = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
-    const emailUsuario = obterUsuarioLogado() || "anonimo";
-
-    const redirectUri = `https://intraned.nedcapital.com.br/api/auth/google`;
-    const scopes = "https://www.googleapis.com/auth/gmail.modify";
-
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(emailUsuario)}&access_type=offline&prompt=select_account`;
-
-    window.location.href = authUrl;
   };
 
   const mudarStatusEmail = async (id: string, novoStatus: string) => {
-    try {
-      if (novoStatus === "LIXO") {
-        setIncinerandoId(id);
-        setTimeout(async () => {
-          setEmails(prev => prev.filter(e => e.id !== id));
-          setIncinerandoId(null);
-          if (!id.startsWith("fake-")) {
-            await supabase.from("caixa_inteligente").update({ status: "LIXO" }).eq("id", id);
-          }
-        }, 600);
-      } else {
-        setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
-        if (!id.startsWith("fake-")) {
-          await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao mover e-mail.");
+    // Sem setTimeout ou animações - atualização direta e limpa
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
+    if (!id.startsWith("fake-")) {
+      await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
+    }
+    if (novoStatus === "LIXO" || novoStatus === "RESOLVIDO") {
+      setEmails(prev => prev.filter(e => e.id !== id));
     }
   };
 
-  const enviarRespostaRapida = async (email: EmailCard) => {
+  const enviarRespostaGmailReal = async (email: EmailCard) => {
     if (!textoResposta.trim()) return;
-    
     setEnviando(true);
     try {
-      console.log(`Enviando para ${email.remetente_email}: ${textoResposta}`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      alert("🚀 Resposta enviada com sucesso!");
+      const res = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userEmail: obterUsuarioLogado(),
+          mensagemId: email.mensagem_id,
+          para: email.remetente_email,
+          assunto: email.assunto,
+          textoResposta
+        })
+      });
+      const resultado = await res.json();
+      if (resultado.error) throw new Error(resultado.error);
+
+      alert("🚀 Resposta enviada direto pelo Gmail!");
       setTextoResposta("");
       setEmailRespondendo(null);
-      mudarStatusEmail(email.id, "RESOLVIDO");
-    } catch (err) {
-      console.error(err);
-      alert("Falha ao enviar resposta.");
+      await mudarStatusEmail(email.id, "RESOLVIDO");
+    } catch (err: any) {
+      alert(`Falha no envio: ${err.message}`);
     } finally {
       setEnviando(false);
     }
   };
 
-  const abrirNoNavegadorNativo = (email: EmailCard) => {
-    let url = email.provedor === "GMAIL" 
-      ? `https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`
-      : `https://outlook.office.com/mail/deeplink?viewmessage&itemid=${email.mensagem_id}`;
-    window.open(url, "_blank");
-  };
+  useEffect(() => {
+    carregarDadosDoSupabase();
+  }, []);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setArrastandoId(id);
-    e.dataTransfer.effectAllowed = "move";
   };
-
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
 
   const handleDrop = async (e: React.DragEvent, novaColuna: string) => {
     e.preventDefault();
@@ -194,164 +176,170 @@ export default function CaixaInteligentePage() {
     setArrastandoId(null);
   };
 
-  const renderColuna = (titulo: string, icone: string, statusFiltro: string, corBorda: string, isIncinerador = false) => {
-    const filtrados = isIncinerador ? emails.filter(e => e.id === incinerandoId) : emails.filter(e => e.status === statusFiltro);
+  // Aplica os filtros locais da busca
+  const emailsFiltrados = emails.filter(e => {
+    const bateRemetente = e.remetente_nome.toLowerCase().includes(buscaRemetente.toLowerCase()) || e.remetente_email.toLowerCase().includes(buscaRemetente.toLowerCase());
+    const bateAssunto = e.assunto.toLowerCase().includes(buscaAssunto.toLowerCase());
+    return bateRemetente && bateAssunto;
+  });
+
+  const renderColuna = (titulo: string, icone: string, statusFiltro: string, corBorda: string) => {
+    const listaColuna = emailsFiltrados.filter(e => e.status === statusFiltro);
 
     return (
       <div 
-        onDragOver={handleDragOver}
+        onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => handleDrop(e, statusFiltro)}
-        className={`flex-1 bg-slate-100/50 border border-slate-200 rounded-2xl flex flex-col h-[75vh] transition-all ${isIncinerador ? "hover:bg-rose-50/50 hover:border-rose-300" : ""}`}
+        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl flex flex-col h-[70vh]"
       >
-        <div className={`p-4 border-b border-slate-200 bg-white rounded-t-2xl shadow-sm border-t-4 ${corBorda}`}>
-          <h3 className="font-black text-slate-800 uppercase tracking-wider text-xs flex items-center justify-between">
+        <div className={`p-3 border-b border-slate-200 bg-white rounded-t-xl shadow-xs border-t-4 ${corBorda}`}>
+          <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs flex items-center justify-between">
             <span>{icone} {titulo}</span>
-            {!isIncinerador && <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[10px]">{filtrados.length}</span>}
+            <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px]">{listaColuna.length}</span>
           </h3>
-          {isIncinerador && <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Arraste para cá e arquive.</p>}
         </div>
         
-        <div className={`flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar ${isIncinerador ? "flex items-center justify-center relative" : ""}`}>
-          {!isIncinerador && filtrados.length === 0 && (
-            <div className="text-center p-6 text-slate-400 font-bold text-xs italic opacity-70">Nenhum e-mail.</div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+          {listaColuna.length === 0 && (
+            <div className="text-center p-6 text-slate-400 font-bold text-xs italic">Sem e-mails aqui.</div>
           )}
 
-          {isIncinerador && !incinerandoId && (
-            <div className="text-6xl opacity-10 grayscale select-none pointer-events-none">🗑️</div>
-          )}
-
-          {filtrados.map(email => {
-            const isIncinerando = incinerandoId === email.id;
-
-            return (
-              <div 
-                key={email.id} 
-                draggable={!isIncinerando}
-                onDragStart={(e) => handleDragStart(e, email.id)}
-                className={`bg-white border rounded-xl p-4 shadow-sm transition-all flex flex-col gap-3 group cursor-grab active:cursor-grabbing ${
-                  isIncinerando ? "animate-fire absolute w-[90%] pointer-events-none z-50 border-rose-300 bg-rose-50" : "border-slate-200 hover:shadow-md hover:border-blue-300 relative"
-                }`}
-              >
-                <div className={`flex justify-between items-start gap-2 ${isIncinerando ? "opacity-50" : ""}`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${email.provedor === "GMAIL" ? "bg-red-50 text-red-600 border-red-100" : "bg-blue-50 text-blue-600 border-blue-100"}`}>
-                        {email.provedor}
-                      </span>
-                      <span className="font-bold text-slate-900 text-xs truncate" title={email.remetente_nome || email.remetente_email}>
-                        {email.remetente_nome || email.remetente_email}
-                      </span>
-                    </div>
-                    <h4 className="font-black text-slate-800 text-sm leading-tight line-clamp-2">
-                      {email.assunto}
-                    </h4>
+          {listaColuna.map(email => (
+            <div 
+              key={email.id} 
+              draggable
+              onDragStart={(e) => handleDragStart(e, email.id)}
+              className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col gap-2 cursor-grab active:cursor-grabbing hover:border-slate-300 transition-colors"
+            >
+              <div className="flex justify-between items-start gap-1">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[8px] font-black uppercase px-1 rounded bg-red-50 text-red-600 border border-red-100">{email.provedor}</span>
+                    <span className="font-bold text-slate-800 text-xs truncate">{email.remetente_nome}</span>
                   </div>
-                  {email.tem_anexo && <span className="bg-slate-100 text-slate-600 p-1.5 rounded-lg border border-slate-200 text-xs">📎</span>}
+                  <h4 className="font-extrabold text-slate-900 text-xs line-clamp-1">{email.assunto}</h4>
                 </div>
-
-                <p className={`text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed ${isIncinerando ? "opacity-50" : ""}`}>
-                  {email.snippet}
-                </p>
-
-                {!isIncinerando && emailRespondendo === email.id && (
-                  <div className="bg-blue-50/50 border border-blue-100 p-2 rounded-lg flex flex-col gap-2 mt-1">
-                    <textarea 
-                      autoFocus
-                      rows={3}
-                      placeholder="Escreva sua resposta rápida aqui..."
-                      value={textoResposta}
-                      onChange={(e) => setTextoResposta(e.target.value)}
-                      className="w-full text-xs p-2 rounded border border-blue-200 outline-none focus:ring-2 focus:ring-blue-300 resize-none font-medium"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => { setEmailRespondendo(null); setTextoResposta(""); }} className="px-3 py-1 text-[10px] font-bold text-slate-500 hover:text-slate-700 uppercase tracking-wider">Cancelar</button>
-                      <button onClick={() => enviarRespostaRapida(email)} disabled={enviando} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black rounded uppercase tracking-wider shadow-xs transition-colors">
-                        {enviando ? "⏳..." : "📤 Enviar"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {!isIncinerando && (
-                  <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-1 opacity-100 xl:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="flex gap-1">
-                      {statusFiltro !== "PENDENTE" && (
-                        <button onClick={() => mudarStatusEmail(email.id, "PENDENTE")} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-black uppercase tracking-wider transition-colors" title="Mover para Pendentes">⏪</button>
-                      )}
-                      {statusFiltro === "PENDENTE" && (
-                        <button onClick={() => mudarStatusEmail(email.id, "LIDO")} className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded text-[10px] font-black uppercase tracking-wider transition-colors" title="Marcar como Em Andamento">▶ Ler</button>
-                      )}
-                    </div>
-                    
-                    <div className="flex gap-1">
-                      <button onClick={() => setEmailRespondendo(emailRespondendo === email.id ? null : email.id)} className="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-wider transition-colors shadow-xs">
-                        💬 Resp
-                      </button>
-                      <button onClick={() => abrirNoNavegadorNativo(email)} className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded text-[10px] font-black uppercase tracking-wider transition-colors shadow-xs" title="Abrir no Webmail Oficial">
-                        🌐 Abrir
-                      </button>
-                      <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[10px] font-black uppercase tracking-wider transition-colors" title="Mover para a Lixeira e Ocultar">
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                )}
-
+                <div className="flex gap-1">
+                  {/* Botões de Mudar Estado Rápidos */}
+                  {email.status !== "BANDEIRA" ? (
+                    <button onClick={() => mudarStatusEmail(email.id, "BANDEIRA")} className="text-xs p-0.5 hover:bg-slate-100 rounded" title="Marcar Acompanhamento">🏳️</button>
+                  ) : (
+                    <button onClick={() => mudarStatusEmail(email.id, "PENDENTE")} className="text-xs p-0.5 hover:bg-slate-100 rounded" title="Remover Acompanhamento">🚩</button>
+                  )}
+                  <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="text-xs p-0.5 hover:bg-rose-100 rounded text-rose-600" title="Incinerar Card">🗑️</button>
+                </div>
               </div>
-            );
-          })}
+
+              <p className="text-[11px] text-slate-500 line-clamp-2 leading-tight">{email.snippet}</p>
+
+              {emailRespondendo === email.id && (
+                <div className="bg-blue-50/50 border border-blue-100 p-2 rounded flex flex-col gap-2">
+                  <textarea 
+                    rows={3}
+                    placeholder="Escreva a resposta corporativa..."
+                    value={textoResposta}
+                    onChange={(e) => setTextoResposta(e.target.value)}
+                    className="w-full text-xs p-1.5 rounded border border-blue-200 outline-none resize-none"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <button onClick={() => { setEmailRespondendo(null); setTextoResposta(""); }} className="text-[10px] font-bold text-slate-500 uppercase">Sair</button>
+                    <button onClick={() => enviarRespostaGmailReal(email)} disabled={enviando} className="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded uppercase">
+                      {enviando ? "Enviando..." : "📤 Enviar Agora"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[10px]">
+                <span className="text-slate-400 font-medium">{new Date(email.data_recebimento).toLocaleDateString()}</span>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setEmailRespondendo(emailRespondendo === email.id ? null : email.id)} className="text-blue-600 font-bold hover:underline">💬 Responder</button>
+                  <button onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`, "_blank")} className="text-slate-500 font-bold hover:underline">🌐 Link</button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-4">
-        <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">📬 TriageMail Corporativo</h2>
-          <span className="text-xs text-slate-500 font-medium">Arraste os e-mails para atualizar o status. Jogue no incinerador para arquivar.</span>
-        </div>
-        
-        <div className="flex gap-3">
+    <div className="space-y-4 max-w-[1600px] mx-auto pb-10 text-xs font-sans text-slate-700">
+      
+      {/* SEÇÃO DE CONTROLE PRINCIPAL */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+          <div>
+            <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">📬 TriageMail Inteligente</h2>
+            <p className="text-slate-400 text-[11px] font-medium">Monitore, responda e filtre sua caixa sem sobrecarga visual.</p>
+          </div>
           <button 
-            onClick={sincronizarEmailsReais} 
-            disabled={sincronizando || carregando}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-2"
+            onClick={sincronizarCaixaAtual} 
+            disabled={sincronizando}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg uppercase tracking-wider transition-colors"
           >
-            {sincronizando ? "🔄 Monitorando..." : "🔄 Sincronizar Caixa"}
+            {sincronizando ? "🔄 Sincronizando..." : "🔄 Atualizar Monitor"}
           </button>
+        </div>
 
-          <button onClick={() => autenticarProvedor("GMAIL")} className={`px-4 py-2 font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-2 border ${gmailConectado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200"}`}>
-            <span className="text-sm">📧</span> {gmailConectado ? "Gmail Conectado" : "Conectar Gmail"}
-          </button>
-          <button onClick={() => autenticarProvedor("OUTLOOK")} className={`px-4 py-2 font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-2 border ${outlookConectado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200"}`}>
-            <span className="text-sm">📨</span> {outlookConectado ? "Outlook Conectado" : "Conectar Outlook"}
-          </button>
+        {/* BARRA DE FILTROS LOCAIS */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-150">
+          <div className="flex flex-col gap-1">
+            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtrar Remetente</span>
+            <input type="text" value={buscaRemetente} onChange={(e) => setBuscaRemetente(e.target.value)} placeholder="Nome ou e-mail..." className="p-1.5 rounded border border-slate-200 outline-none bg-white text-xs" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtrar Assunto</span>
+            <input type="text" value={buscaAssunto} onChange={(e) => setBuscaAssunto(e.target.value)} placeholder="Palavra-chave..." className="p-1.5 rounded border border-slate-200 outline-none bg-white text-xs" />
+          </div>
+          
+          {/* FILTRO INTELIGENTE DE BUSCA NO HISTÓRICO GMAIL */}
+          <div className="flex flex-col gap-1 md:col-span-2 border-l border-slate-200 pl-3">
+            <span className="font-black text-blue-600 text-[10px] uppercase">🔍 Puxar Histórico da Caixa (Por Período)</span>
+            <div className="flex gap-2 items-center">
+              <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="p-1.5 rounded border border-slate-200 outline-none text-xs bg-white flex-1" />
+              <span className="text-slate-400 font-bold">até</span>
+              <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="p-1.5 rounded border border-slate-200 outline-none text-xs bg-white flex-1" />
+              <button onClick={buscarHistoricoPorData} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded uppercase">Buscar</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-6 w-full">
+      {/* MODAL / SELETOR DE IMPORTAÇÃO DE HISTÓRICO */}
+      {abrindoHistorico && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <h3 className="font-black text-amber-800 uppercase tracking-wider text-xs">📬 E-mails encontrados na sua conta ({historicoBuscado.length}) - Escolha quais quer importar</h3>
+            <button onClick={() => setAbrindoHistorico(false)} className="text-amber-600 font-black hover:underline uppercase text-[10px]">Fechar Histórico</button>
+          </div>
+          <div className="max-h-[25vh] overflow-y-auto space-y-2 custom-scrollbar">
+            {historicoBuscado.length === 0 && <p className="text-slate-400 font-bold italic text-center py-2">Nenhum e-mail retornado nesse período.</p>}
+            {historicoBuscado.map(h => (
+              <div key={h.mensagem_id} className="bg-white border border-amber-100 rounded-lg p-2 flex justify-between items-center gap-4 shadow-2xs">
+                <div className="min-w-0">
+                  <span className="font-bold text-slate-800 text-xs">{h.remetente_nome}</span> - <span className="font-medium text-slate-500">{h.assunto}</span>
+                  <p className="text-[10px] text-slate-400 truncate">{h.snippet}</p>
+                </div>
+                <button onClick={() => importarEmailSelecionado(h)} className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-[9px] rounded whitespace-nowrap">📥 Importar Card</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* PAINEL KANBAN ATUALIZADO */}
+      <div className="flex flex-col md:flex-row gap-4 w-full">
         {renderColuna("Caixa de Entrada", "📥", "PENDENTE", "border-t-blue-500")}
-        {renderColuna("Em Andamento", "⏳", "LIDO", "border-t-amber-500")}
-        {renderColuna("Incinerador", "🔥", "LIXO", "border-t-rose-600", true)}
+        {renderColuna("Em Atendimento", "⏳", "LIDO", "border-t-amber-500")}
+        {renderColuna("Acompanhamento (Bandeira)", "🚩", "BANDEIRA", "border-t-purple-600")}
       </div>
 
       <style dangerouslySetContent={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        @keyframes toss {
-          0% { transform: scale(1) translateY(0) rotate(0deg); opacity: 1; }
-          20% { transform: scale(1.05) translateY(-10px) rotate(2deg); opacity: 0.9; }
-          100% { transform: scale(0.3) translateY(150px) rotate(-15deg); opacity: 0; }
-        }
-        .animate-fire {
-          animation: toss 0.6s forwards cubic-bezier(0.4, 0, 0.2, 1);
-          transform-origin: center bottom;
-        }
       `}} />
     </div>
   );
