@@ -157,7 +157,7 @@ export default function CaixaInteligentePage() {
   };
 
   const enviarRespostaGmailReal = async (email: EmailCard) => {
-    if (!textoResposta.trim() || enviando) return; // 🛡️ Evita múltiplos cliques se já estiver enviando
+    if (!textoResposta.trim() || enviando) return;
     setEnviando(true);
     try {
       const res = await fetch("/api/gmail/send", {
@@ -165,6 +165,7 @@ export default function CaixaInteligentePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userEmail: obterUsuarioLogado(),
+          contaAtiva, // 🌟 ESSA LINHA AQUI QUE PRECISA ESTAR PRESENTE!
           mensagemId: email.mensagem_id,
           para: email.remetente_email,
           assunto: email.assunto,
