@@ -8,6 +8,7 @@ interface EmailCard {
   id: string;
   mensagem_id: string;
   provedor: "GMAIL" | "OUTLOOK";
+  caixa_origem: string; 
   remetente_nome: string;
   remetente_email: string;
   assunto: string;
@@ -19,21 +20,22 @@ interface EmailCard {
 
 export default function CaixaInteligentePage() {
   const [emails, setEmails] = useState<EmailCard[]>([]);
+  const [contasConectadas, setContasConectadas] = useState<string[]>([]);
+  const [contaAtiva, setContaAtiva] = useState<string>("");
+  
   const [carregando, setCarregando] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
-
-  // Filtros locais de busca
+  
+  // Filtros locais de busca na tela
   const [buscaRemetente, setBuscaRemetente] = useState("");
   const [buscaAssunto, setBuscaAssunto] = useState("");
 
-  // Filtro inteligente de histórico (Datas)
+  // Filtro inteligente de histórico (Datas no Gmail)
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [historicoBuscado, setHistoricoBuscado] = useState<EmailCard[]>([]);
   const [abrindoHistorico, setAbrindoHistorico] = useState(false);
 
-  const [gmailConectado, setGmailConectado] = useState(false);
-  const [outlookConectado, setOutlookConectado] = useState(false);
   const [arrastandoId, setArrastandoId] = useState<string | null>(null);
   const [emailRespondendo, setEmailRespondendo] = useState<string | null>(null);
   const [textoResposta, setTextoResposta] = useState("");
@@ -49,20 +51,36 @@ export default function CaixaInteligentePage() {
     return "";
   };
 
-  const carregarDadosDoSupabase = async () => {
+  const carregarAbasEContas = async () => {
+    const usuarioLogado = obterUsuarioLogado();
+    if (!usuarioLogado) return;
+
+    const { data } = await supabase
+      .from("usuarios_integracoes")
+      .select("gmail_conta_conectada")
+      .eq("email_usuario", usuarioLogado);
+
+    const lista = data?.map(d => d.gmail_conta_conectada) || [];
+    setContasConectadas(lista);
+    
+    if (lista.length > 0 && !contaAtiva) {
+      setContaAtiva(lista[0]); 
+    }
+  };
+
+  const carregarCardsDaContaAtiva = async () => {
+    if (!contaAtiva) return setEmails([]);
     setCarregando(true);
     try {
       const usuarioLogado = obterUsuarioLogado();
-      if (!usuarioLogado) return;
-
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("caixa_inteligente")
         .select("*")
         .eq("dono_da_caixa", usuarioLogado)
+        .eq("caixa_origem", contaAtiva)
         .not("status", "in", '("LIXO", "RESOLVIDO")')
         .order("data_recebimento", { ascending: false });
 
-      if (error) throw error;
       setEmails(data || []);
     } catch (err) {
       console.error(err);
@@ -71,17 +89,16 @@ export default function CaixaInteligentePage() {
     }
   };
 
-  const sincronizarCaixaAtual = async () => {
-    const usuarioLogado = obterUsuarioLogado();
-    if (!usuarioLogado) return alert("Sessão inválida.");
+  const rodarSincronizadorDaAba = async () => {
+    if (!contaAtiva) return alert("Selecione ou adicione uma conta ativa.");
     setSincronizando(true);
     try {
       await fetch("/api/gmail/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: usuarioLogado })
+        body: JSON.stringify({ userEmail: obterUsuarioLogado(), contaAtiva })
       });
-      await carregarDadosDoSupabase();
+      await carregarCardsDaContaAtiva();
     } catch (err) {
       console.error(err);
     } finally {
@@ -91,13 +108,18 @@ export default function CaixaInteligentePage() {
 
   const buscarHistoricoPorData = async () => {
     if (!dataInicio) return alert("Selecione ao menos a data inicial.");
-    const usuarioLogado = obterUsuarioLogado();
+    if (!contaAtiva) return alert("Selecione uma conta de e-mail ativa antes.");
     setSincronizando(true);
     try {
       const res = await fetch("/api/gmail/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: usuarioLogado, dataInicio, dataFim })
+        body: JSON.stringify({ 
+          userEmail: obterUsuarioLogado(), 
+          contaAtiva, 
+          dataInicio, 
+          dataFim 
+        })
       });
       const dados = await res.json();
       if (dados.error) throw new Error(dados.error);
@@ -113,22 +135,11 @@ export default function CaixaInteligentePage() {
   const importarEmailSelecionado = async (email: EmailCard) => {
     try {
       await supabase.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
-      alert("E-mail importado para o Kanban!");
+      alert("E-mail importado com sucesso!");
       setHistoricoBuscado(prev => prev.filter(e => e.mensagem_id !== email.mensagem_id));
-      await carregarDadosDoSupabase();
+      await carregarCardsDaContaAtiva();
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const mudarStatusEmail = async (id: string, novoStatus: string) => {
-    // Sem setTimeout ou animações - atualização direta e limpa
-    setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
-    if (!id.startsWith("fake-")) {
-      await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
-    }
-    if (novoStatus === "LIXO" || novoStatus === "RESOLVIDO") {
-      setEmails(prev => prev.filter(e => e.id !== id));
     }
   };
 
@@ -161,9 +172,30 @@ export default function CaixaInteligentePage() {
     }
   };
 
+  const adicionarNovaContaGoogle = () => {
+    const clientId = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
+    const redirectUri = `https://intraned.nedcapital.com.br/api/auth/google`;
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email")}&state=${encodeURIComponent(obterUsuarioLogado())}&access_type=offline&prompt=select_account`;
+  };
+
+  const mudarStatusEmail = async (id: string, novoStatus: string) => {
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, status: novoStatus as any } : e));
+    await supabase.from("caixa_inteligente").update({ status: novoStatus }).eq("id", id);
+    if (novoStatus === "LIXO" || novoStatus === "RESOLVIDO") {
+      setEmails(prev => prev.filter(e => e.id !== id));
+    }
+  };
+
   useEffect(() => {
-    carregarDadosDoSupabase();
+    carregarAbasEContas();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("success") === "gmail") alert(`Conta ${params.get("conta")} vinculada!`);
+    if (params.get("error")) alert(`❌ Erro de Segurança: ${params.get("error")}`);
   }, []);
+
+  useEffect(() => {
+    carregarCardsDaContaAtiva();
+  }, [contaAtiva]);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setArrastandoId(id);
@@ -176,7 +208,6 @@ export default function CaixaInteligentePage() {
     setArrastandoId(null);
   };
 
-  // Aplica os filtros locais da busca
   const emailsFiltrados = emails.filter(e => {
     const bateRemetente = e.remetente_nome.toLowerCase().includes(buscaRemetente.toLowerCase()) || e.remetente_email.toLowerCase().includes(buscaRemetente.toLowerCase());
     const bateAssunto = e.assunto.toLowerCase().includes(buscaAssunto.toLowerCase());
@@ -185,32 +216,20 @@ export default function CaixaInteligentePage() {
 
   const renderColuna = (titulo: string, icone: string, statusFiltro: string, corBorda: string) => {
     const listaColuna = emailsFiltrados.filter(e => e.status === statusFiltro);
-
     return (
-      <div 
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => handleDrop(e, statusFiltro)}
-        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl flex flex-col h-[70vh]"
-      >
-        <div className={`p-3 border-b border-slate-200 bg-white rounded-t-xl shadow-xs border-t-4 ${corBorda}`}>
+      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, statusFiltro)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl flex flex-col h-[65vh]">
+        <div className={`p-3 border-b border-slate-200 bg-white rounded-t-xl border-t-4 ${corBorda}`}>
           <h3 className="font-black text-slate-700 uppercase tracking-wider text-xs flex items-center justify-between">
             <span>{icone} {titulo}</span>
             <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px]">{listaColuna.length}</span>
           </h3>
         </div>
-        
-        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
           {listaColuna.length === 0 && (
             <div className="text-center p-6 text-slate-400 font-bold text-xs italic">Sem e-mails aqui.</div>
           )}
-
           {listaColuna.map(email => (
-            <div 
-              key={email.id} 
-              draggable
-              onDragStart={(e) => handleDragStart(e, email.id)}
-              className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col gap-2 cursor-grab active:cursor-grabbing hover:border-slate-300 transition-colors"
-            >
+            <div key={email.id} draggable onDragStart={(e) => handleDragStart(e, email.id)} className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs flex flex-col gap-2 cursor-grab active:cursor-grabbing hover:border-slate-300">
               <div className="flex justify-between items-start gap-1">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-0.5">
@@ -219,17 +238,13 @@ export default function CaixaInteligentePage() {
                   </div>
                   <h4 className="font-extrabold text-slate-900 text-xs line-clamp-1">{email.assunto}</h4>
                 </div>
-                <div className="flex gap-1">
-                  {/* Botões de Mudar Estado Rápidos */}
-                  {email.status !== "BANDEIRA" ? (
-                    <button onClick={() => mudarStatusEmail(email.id, "BANDEIRA")} className="text-xs p-0.5 hover:bg-slate-100 rounded" title="Marcar Acompanhamento">🏳️</button>
-                  ) : (
-                    <button onClick={() => mudarStatusEmail(email.id, "PENDENTE")} className="text-xs p-0.5 hover:bg-slate-100 rounded" title="Remover Acompanhamento">🚩</button>
-                  )}
-                  <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="text-xs p-0.5 hover:bg-rose-100 rounded text-rose-600" title="Incinerar Card">🗑️</button>
+                <div className="flex gap-1.5 items-center">
+                  <button onClick={() => mudarStatusEmail(email.id, email.status === "BANDEIRA" ? "PENDENTE" : "BANDEIRA")} className="text-xs p-0.5 rounded hover:bg-slate-100" title="Alternar Acompanhamento">
+                    {email.status === "BANDEIRA" ? "🚩" : "🏳️"}
+                  </button>
+                  <button onClick={() => mudarStatusEmail(email.id, "LIXO")} className="text-xs p-0.5 rounded text-rose-600 hover:bg-rose-50" title="Excluir Card">🗑️</button>
                 </div>
               </div>
-
               <p className="text-[11px] text-slate-500 line-clamp-2 leading-tight">{email.snippet}</p>
 
               {emailRespondendo === email.id && (
@@ -252,7 +267,7 @@ export default function CaixaInteligentePage() {
 
               <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[10px]">
                 <span className="text-slate-400 font-medium">{new Date(email.data_recebimento).toLocaleDateString()}</span>
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                   <button onClick={() => setEmailRespondendo(emailRespondendo === email.id ? null : email.id)} className="text-blue-600 font-bold hover:underline">💬 Responder</button>
                   <button onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${email.mensagem_id}`, "_blank")} className="text-slate-500 font-bold hover:underline">🌐 Link</button>
                 </div>
@@ -267,55 +282,72 @@ export default function CaixaInteligentePage() {
   return (
     <div className="space-y-4 max-w-[1600px] mx-auto pb-10 text-xs font-sans text-slate-700">
       
-      {/* SEÇÃO DE CONTROLE PRINCIPAL */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col gap-4">
+      {/* BARRA DE SELEÇÃO DE ABAS MULTICONTAS */}
+      <div className="flex justify-between items-center bg-white border border-slate-200 p-2 rounded-xl shadow-2xs overflow-x-auto gap-2">
+        <div className="flex gap-1 items-center">
+          {contasConectadas.length === 0 ? (
+            <span className="text-slate-400 font-bold p-2 italic">Nenhum e-mail corporativo integrado...</span>
+          ) : (
+            contasConectadas.map(conta => (
+              <button 
+                key={conta} 
+                onClick={() => setContaAtiva(conta)}
+                className={`px-3 py-1.5 rounded-lg font-black transition-colors ${contaAtiva === conta ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 hover:bg-slate-200 text-slate-600"}`}
+              >
+                📬 {conta}
+              </button>
+            ))
+          )}
+        </div>
+        <button onClick={adicionarNovaContaGoogle} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-lg uppercase whitespace-nowrap text-[10px]">
+          ➕ Conectar Novo E-mail
+        </button>
+      </div>
+
+      {/* CONTROLE FILTROS E HISTÓRICO */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs flex flex-col gap-3">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
           <div>
-            <h2 className="text-base font-black text-slate-800 uppercase tracking-tight">📬 TriageMail Inteligente</h2>
-            <p className="text-slate-400 text-[11px] font-medium">Monitore, responda e filtre sua caixa sem sobrecarga visual.</p>
+            <h2 className="text-sm font-black text-slate-800 uppercase">Aba Ativa: <span className="text-blue-600">{contaAtiva || "Nenhuma"}</span></h2>
+            <p className="text-slate-400 text-[10px]">Gerenciamento e monitoramento ativo desta caixa.</p>
           </div>
-          <button 
-            onClick={sincronizarCaixaAtual} 
-            disabled={sincronizando}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg uppercase tracking-wider transition-colors"
-          >
-            {sincronizando ? "🔄 Sincronizando..." : "🔄 Atualizar Monitor"}
+          <button onClick={rodarSincronizadorDaAba} disabled={sincronizando || !contaAtiva} className="px-3 py-1.5 bg-slate-900 text-white font-black rounded-lg uppercase text-[10px]">
+            {sincronizando ? "🔄 Sincronizando..." : "🔄 Sincronizar Aba"}
           </button>
         </div>
 
-        {/* BARRA DE FILTROS LOCAIS */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-150">
+        {/* PROCURAR LOCAIS E HISTÓRICO POR DATA */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
           <div className="flex flex-col gap-1">
-            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtrar Remetente</span>
-            <input type="text" value={buscaRemetente} onChange={(e) => setBuscaRemetente(e.target.value)} placeholder="Nome ou e-mail..." className="p-1.5 rounded border border-slate-200 outline-none bg-white text-xs" />
+            <span className="font-bold text-slate-500 text-[9px] uppercase">Filtrar Remetente</span>
+            <input type="text" value={buscaRemetente} onChange={(e) => setBuscaRemetente(e.target.value)} placeholder="Nome ou e-mail..." className="p-1.5 rounded border border-slate-200 bg-white text-xs outline-none" />
           </div>
           <div className="flex flex-col gap-1">
-            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtrar Assunto</span>
-            <input type="text" value={buscaAssunto} onChange={(e) => setBuscaAssunto(e.target.value)} placeholder="Palavra-chave..." className="p-1.5 rounded border border-slate-200 outline-none bg-white text-xs" />
+            <span className="font-bold text-slate-500 text-[9px] uppercase">Filtrar Assunto</span>
+            <input type="text" value={buscaAssunto} onChange={(e) => setBuscaAssunto(e.target.value)} placeholder="Palavra-chave..." className="p-1.5 rounded border border-slate-200 bg-white text-xs outline-none" />
           </div>
           
-          {/* FILTRO INTELIGENTE DE BUSCA NO HISTÓRICO GMAIL */}
           <div className="flex flex-col gap-1 md:col-span-2 border-l border-slate-200 pl-3">
-            <span className="font-black text-blue-600 text-[10px] uppercase">🔍 Puxar Histórico da Caixa (Por Período)</span>
+            <span className="font-black text-blue-600 text-[9px] uppercase">🔍 Buscar Histórico da Caixa por Período</span>
             <div className="flex gap-2 items-center">
-              <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="p-1.5 rounded border border-slate-200 outline-none text-xs bg-white flex-1" />
+              <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="p-1.5 rounded border border-slate-200 text-xs bg-white flex-1 outline-none" />
               <span className="text-slate-400 font-bold">até</span>
-              <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="p-1.5 rounded border border-slate-200 outline-none text-xs bg-white flex-1" />
-              <button onClick={buscarHistoricoPorData} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded uppercase">Buscar</button>
+              <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="p-1.5 rounded border border-slate-200 text-xs bg-white flex-1 outline-none" />
+              <button onClick={buscarHistoricoPorData} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded uppercase text-[10px]">Buscar</button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODAL / SELETOR DE IMPORTAÇÃO DE HISTÓRICO */}
+      {/* SELETOR DE IMPORTAÇÃO */}
       {abrindoHistorico && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
           <div className="flex justify-between items-center">
-            <h3 className="font-black text-amber-800 uppercase tracking-wider text-xs">📬 E-mails encontrados na sua conta ({historicoBuscado.length}) - Escolha quais quer importar</h3>
-            <button onClick={() => setAbrindoHistorico(false)} className="text-amber-600 font-black hover:underline uppercase text-[10px]">Fechar Histórico</button>
+            <h3 className="font-black text-amber-800 uppercase tracking-wider text-xs">📬 E-mails encontrados ({historicoBuscado.length}) - Escolha quais quer trazer para o Kanban</h3>
+            <button onClick={() => setAbrindoHistorico(false)} className="text-amber-600 font-black hover:underline uppercase text-[10px]">Fechar</button>
           </div>
           <div className="max-h-[25vh] overflow-y-auto space-y-2 custom-scrollbar">
-            {historicoBuscado.length === 0 && <p className="text-slate-400 font-bold italic text-center py-2">Nenhum e-mail retornado nesse período.</p>}
+            {historicoBuscado.length === 0 && <p className="text-slate-400 font-bold italic text-center py-2">Nenhum e-mail retornado.</p>}
             {historicoBuscado.map(h => (
               <div key={h.mensagem_id} className="bg-white border border-amber-100 rounded-lg p-2 flex justify-between items-center gap-4 shadow-2xs">
                 <div className="min-w-0">
@@ -329,11 +361,11 @@ export default function CaixaInteligentePage() {
         </div>
       )}
 
-      {/* PAINEL KANBAN ATUALIZADO */}
+      {/* KANBAN */}
       <div className="flex flex-col md:flex-row gap-4 w-full">
         {renderColuna("Caixa de Entrada", "📥", "PENDENTE", "border-t-blue-500")}
         {renderColuna("Em Atendimento", "⏳", "LIDO", "border-t-amber-500")}
-        {renderColuna("Acompanhamento (Bandeira)", "🚩", "BANDEIRA", "border-t-purple-600")}
+        {renderColuna("Acompanhamento 🚩", "🚩", "BANDEIRA", "border-t-purple-600")}
       </div>
 
       <style dangerouslySetContent={{__html: `

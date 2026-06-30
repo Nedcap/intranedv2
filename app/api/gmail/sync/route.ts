@@ -6,45 +6,44 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { userEmail, dataInicio, dataFim } = await request.json();
+    const { userEmail, contaAtiva, dataInicio, dataFim } = await request.json();
 
-    if (!userEmail) {
-      return NextResponse.json({ error: "Usuário não identificado" }, { status: 400 });
+    if (!userEmail || !contaAtiva) {
+      return NextResponse.json({ error: "Parâmetros insuficientes" }, { status: 400 });
     }
 
+    // Busca especificamente as chaves da conta da aba selecionada
     const { data: integracao, error: dbError } = await supabase
       .from("usuarios_integracoes")
       .select("*")
       .eq("email_usuario", userEmail)
+      .eq("gmail_conta_conectada", contaAtiva)
       .single();
 
     if (dbError || !integracao || !integracao.gmail_access_token) {
-      return NextResponse.json({ error: "Gmail não conectado" }, { status: 404 });
+      return NextResponse.json({ error: "Conta de e-mail não autenticada." }, { status: 404 });
     }
 
-    // Monta a query do Gmail baseada em filtros de data se existirem
     let gmailQuery = "in:inbox";
     if (dataInicio) {
       const dataFormatadaIni = new Date(dataInicio).toISOString().split('T')[0].replace(/-/g, '/');
       gmailQuery += ` after:${dataFormatadaIni}`;
     } else {
-      gmailQuery += " is:unread"; // Se não for busca de histórico, pega só os não lidos
+      gmailQuery += " is:unread";
     }
-    
     if (dataFim) {
       const dataFormatadaFim = new Date(dataFim).toISOString().split('T')[0].replace(/-/g, '/');
       gmailQuery += ` before:${dataFormatadaFim}`;
     }
 
     const gmailListRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(gmailQuery)}&maxResults=20`,
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(gmailQuery)}&maxResults=25`,
       { headers: { Authorization: `Bearer ${integracao.gmail_access_token}` } }
     );
-
     const gmailListData = await gmailListRes.json();
 
     if (!gmailListData.messages || gmailListData.messages.length === 0) {
-      return NextResponse.json({ messages: [], message: "Nenhum e-mail encontrado para este período." });
+      return NextResponse.json({ messages: [], message: "Nada novo." });
     }
 
     const emailsColetados = [];
@@ -72,6 +71,7 @@ export async function POST(request: Request) {
       emailsColetados.push({
         mensagem_id: msg.id,
         dono_da_caixa: userEmail,
+        caixa_origem: contaAtiva, // Vincula o card à aba da conta de origem
         provedor: "GMAIL",
         remetente_nome,
         remetente_email,
@@ -83,20 +83,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // Se for uma busca de histórico pura por data, apenas devolvemos para a tela escolher o que importar
     if (dataInicio) {
       return NextResponse.json({ messages: emailsColetados });
     }
 
-    // Se for sincronização padrão, faz o upsert direto
     for (const email of emailsColetados) {
       await supabase.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
     }
 
-    return NextResponse.json({ success: true, message: "Caixa atualizada!" });
-
+    return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error(error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
