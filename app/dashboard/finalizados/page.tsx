@@ -208,7 +208,7 @@ export default function FinalizadosPage() {
     }
   };
 
-  const激活modoConsultaFoco = async (empresa: any) => {
+  const ativarModoConsultaFoco = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setModoFocoComite(true);
     const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
