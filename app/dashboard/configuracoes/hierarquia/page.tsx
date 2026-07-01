@@ -101,7 +101,7 @@ export default function GerenciarHierarquiaPage() {
           if (error) throw error;
         }
       }
-      alert("🎉 Organograma atualizado e salvo com sucesso!");
+      alert("🎉 Organograma em árvore salvo com sucesso!");
       await carregarDadosHierarquia();
     } catch (err: any) {
       alert(`❌ Erro ao salvar: ${err.message}`);
@@ -110,27 +110,35 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🌲 COMPONENTE RECURSIVO HORIZONTAL (GERADOR DE RAMOS)
+  // 🌲 COMPONENTE RECURSIVO HORIZONTAL CORRIGIDO COM ESTILOS INLINE INVIOLÁVEIS
   const RenderizarFilhosOrganograma = ({ liderId }: { liderId: string | null }) => {
     const filhos = usuariosSistema.filter(u => hierarquiaLocal[u.id] === liderId);
     if (filhos.length === 0) return null;
 
     return (
-      <ul className="flex justify-center gap-x-8 pt-8 relative before:content-[''] before:absolute before:top-0 before:left-1/2 before:-translate-x-1/2 before:w-[2px] before:h-8 before:bg-slate-300">
+      <div 
+        className="flex justify-center items-start gap-x-10 pt-8 relative"
+        style={{ paddingPosition: 'top' }}
+      >
+        {/* Linha vertical que desce do pai para o centro do bloco de filhos */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-300"></div>
+
         {filhos.map((sub, idx) => {
           const temFilhos = usuariosSistema.some(u => hierarquiaLocal[u.id] === sub.id);
           return (
-            <li 
+            <div 
               key={sub.id} 
-              className="relative px-2 text-center flex flex-col items-center shrink-0"
+              className="relative flex flex-col items-center shrink-0"
               style={{
+                // Força o desenho da barra horizontal de conexão entre os irmãos de nível
                 backgroundImage: `linear-gradient(to right, ${idx === 0 ? 'transparent' : '#cbd5e1'} 50%, ${idx === filhos.length - 1 ? 'transparent' : '#cbd5e1'} 50%)`,
                 backgroundPosition: 'top',
                 backgroundSize: '100% 2px',
-                backgroundRepeat: 'no-repeat'
+                backgroundRepeat: 'no-repeat',
+                paddingTop: '16px'
               }}
             >
-              {/* Linha vertical que entra no topo do card */}
+              {/* Linha vertical curta que entra direto no topo deste card específico */}
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-300"></div>
 
               {/* CARD EXECUTIVO DO COLABORADOR */}
@@ -139,9 +147,7 @@ export default function GerenciarHierarquiaPage() {
                 onDragStart={(e) => handleDragStart(e, sub.id)}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, sub.id)}
-                className={`relative mt-4 flex flex-col w-[240px] bg-white border-2 border-slate-200 p-3.5 rounded-2xl shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all select-none text-left z-10 ${
-                  temFilhos ? "after:content-[''] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:w-[2px] after:h-4 after:bg-slate-300 after:translate-y-full" : ""
-                }`}
+                className="relative flex flex-col w-[240px] bg-white border-2 border-slate-200 p-4 rounded-2xl shadow-sm hover:border-blue-500 hover:shadow-md transition-all select-none text-left z-10 cursor-grab active:cursor-grabbing"
               >
                 <div className="flex items-center gap-2.5">
                   <div className={`h-6 w-6 rounded-full flex items-center justify-center font-black text-[9px] uppercase ${
@@ -165,14 +171,19 @@ export default function GerenciarHierarquiaPage() {
                     {sub.cargo || "Comercial"}
                   </span>
                 </div>
+
+                {/* Linha vertical que desce por baixo do card SE ele tiver filhos */}
+                {temFilhos && (
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-300 translate-y-full"></div>
+                )}
               </div>
 
-              {/* Descida recursiva horizontal */}
+              {/* Descida recursiva de ramos */}
               <RenderizarFilhosOrganograma liderId={sub.id} />
-            </li>
+            </div>
           );
         })}
-      </ul>
+      </div>
     );
   };
 
@@ -209,7 +220,7 @@ export default function GerenciarHierarquiaPage() {
         </div>
 
         {/* CONTÊINER GERAL DA ÁRVORE */}
-        <div className="flex justify-center gap-x-12 pt-4 m-auto w-max min-w-full">
+        <div className="flex justify-center items-start gap-x-12 pt-4 m-auto w-max min-w-full">
           {raizesDaArvore.map((root) => {
             const temFilhos = usuariosSistema.some(u => hierarquiaLocal[u.id] === root.id);
             return (
@@ -221,9 +232,7 @@ export default function GerenciarHierarquiaPage() {
                   onDragStart={(e) => handleDragStart(e, root.id)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, root.id)}
-                  className={`relative flex flex-col w-[240px] bg-white border-2 border-slate-300 p-3.5 rounded-2xl shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all text-left z-10 ${
-                    temFilhos ? "after:content-[''] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:w-[2px] after:h-8 after:bg-slate-300 after:translate-y-full" : ""
-                  }`}
+                  className="relative flex flex-col w-[240px] bg-white border-2 border-slate-300 p-3.5 rounded-2xl shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all text-left z-10"
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center font-black text-[9px] uppercase">
@@ -241,9 +250,14 @@ export default function GerenciarHierarquiaPage() {
                       {root.cargo || "Diretor"}
                     </span>
                   </div>
+
+                  {/* Linha vertical que desce do card raiz principal */}
+                  {temFilhos && (
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-300 translate-y-full"></div>
+                  )}
                 </div>
 
-                {/* Renderização os galhos abaixo da raiz */}
+                {/* Renderização dos galhos abaixo da raiz */}
                 <RenderizarFilhosOrganograma liderId={root.id} />
               </div>
             );
