@@ -17,10 +17,10 @@ export default function GerenciarHierarquiaPage() {
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   
-  // 🗺️ O mapa de relações local id_usuario -> lider_id
+  // Mapa de relações local id_usuario -> lider_id
   const [hierarquiaLocal, setHierarquiaLocal] = useState<Record<string, string | null>>({});
   
-  // 🎯 Estado que guarda o usuário selecionado para ser movido
+  // Estado que guarda o usuário selecionado para ser movido
   const [usuarioSelecionadoId, setUsuarioSelecionadoId] = useState<string | null>(null);
 
   const carregarDadosHierarquia = async () => {
@@ -57,9 +57,7 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosHierarquia();
   }, []);
 
-  // ⚡ LÓGICA DE SELEÇÃO E MOVIMENTAÇÃO POR CLIQUE (Subititui o Drag and Drop problemático)
   const selecionarParaMover = (id: string) => {
-    // Se clicar no mesmo cara, cancela a seleção
     if (usuarioSelecionadoId === id) {
       setUsuarioSelecionadoId(null);
     } else {
@@ -69,36 +67,31 @@ export default function GerenciarHierarquiaPage() {
 
   const executarMovimentacao = (novoLiderId: string | null) => {
     if (!usuarioSelecionadoId) return;
-
-    // Evita fazer o cara responder a ele mesmo
     if (usuarioSelecionadoId === novoLiderId) {
       setUsuarioSelecionadoId(null);
       return;
     }
 
-    // Evita loops infinitos na árvore
+    // Validador de loop infinito na árvore (Grafo sem circularidade)
     let verificador = novoLiderId;
     while (verificador) {
       if (verificador === usuarioSelecionadoId) {
-        alert("⛔ Operação inválida: Um líder corporativo não pode ser subordinado de sua própria equipe!");
+        alert("⛔ Operação inválida: Um líder não pode ser subordinado de alguém que já responde a ele!");
         setUsuarioSelecionadoId(null);
         return;
       }
       verificador = hierarquiaLocal[verificador] || null;
     }
 
-    // Move o usuário selecionado para baixo do novo líder clicado
     setHierarquiaLocal(prev => ({
       ...prev,
       [usuarioSelecionadoId]: novoLiderId
     }));
-
-    // Limpa a seleção após mover
     setUsuarioSelecionadoId(null);
   };
 
   const desvincularUsuario = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation(); // Impede o clique de selecionar o card
+    e.stopPropagation();
     setHierarquiaLocal(prev => ({ ...prev, [id]: null }));
     if (usuarioSelecionadoId === id) setUsuarioSelecionadoId(null);
   };
@@ -126,7 +119,7 @@ export default function GerenciarHierarquiaPage() {
           if (error) throw error;
         }
       }
-      alert("🎉 Estrutura de organograma atualizada e salva com sucesso!");
+      alert("🎉 Organograma salvo com sucesso!");
       await carregarDadosHierarquia();
     } catch (err: any) {
       alert(`❌ Erro ao salvar: ${err.message}`);
@@ -135,15 +128,15 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🌲 COMPONENTE RECURSIVO HORIZONTAL (GERADOR DE RAMOS VIA CLIQUE)
+  // 🌲 GERADOR RECURSIVO INFINITO DE RAMIFICAÇÕES (Corrigido e alinhado)
   const RenderizarFilhosOrganograma = ({ liderId }: { liderId: string | null }) => {
     const filhos = usuariosSistema.filter(u => hierarquiaLocal[u.id] === liderId);
     if (filhos.length === 0) return null;
 
     return (
-      <div className="flex justify-center items-start gap-x-8 pt-8 relative">
-        {/* Linha vertical conectora superior */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-300"></div>
+      <div className="flex justify-center items-start gap-x-8 pt-8 relative w-full">
+        {/* Linha vertical que desce do pai para conectar com os filhos */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-200"></div>
 
         {filhos.map((sub, idx) => {
           const temFilhos = usuariosSistema.some(u => hierarquiaLocal[u.id] === sub.id);
@@ -154,22 +147,24 @@ export default function GerenciarHierarquiaPage() {
               key={sub.id} 
               className="relative flex flex-col items-center shrink-0"
               style={{
-                backgroundImage: `linear-gradient(to right, ${idx === 0 ? 'transparent' : '#cbd5e1'} 50%, ${idx === filhos.length - 1 ? 'transparent' : '#cbd5e1'} 50%)`,
+                backgroundImage: `linear-gradient(to right, ${idx === 0 ? 'transparent' : '#e2e8f0'} 50%, ${idx === filhos.length - 1 ? 'transparent' : '#e2e8f0'} 50%)`,
                 backgroundPosition: 'top',
                 backgroundSize: '100% 2px',
                 backgroundRepeat: 'no-repeat',
                 paddingTop: '16px'
               }}
             >
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-300"></div>
+              {/* Linha vertical curta no topo de cada filho */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-200"></div>
 
-              {/* CARD EXPANDIDO */}
+              {/* CARD DE SUBORDINADO (PERMITE SUBORDINAÇÃO INFINITA AGORA) */}
               <div
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (usuarioSelecionadoId) {
-                    executarMovimentacao(sub.id); // Aloca o selecionado sob este líder
+                    executarMovimentacao(sub.id); // Aloca quem está selecionado abaixo de mim
                   } else {
-                    selecionarParaMover(sub.id); // Seleciona este cara para mover
+                    selecionarParaMover(sub.id); // Me seleciona para eu ser movido
                   }
                 }}
                 className={`relative flex flex-col w-[230px] bg-white border-2 p-3.5 rounded-2xl shadow-xs transition-all text-left z-10 cursor-pointer select-none ${
@@ -200,16 +195,17 @@ export default function GerenciarHierarquiaPage() {
                     sub.cargo === 'Master' || sub.cargo === 'Diretor' ? 'bg-purple-50 text-purple-600 border border-purple-100' :
                     sub.cargo === 'Gerente' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
                   }`}>
-                    {sub.cargo || "Comercial"}
+                    {sub.cargo || "Operacional"}
                   </span>
                 </div>
 
+                {/* Se eu tiver filhos, puxo a linha vertical contínua para baixo */}
                 {temFilhos && (
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-300 translate-y-full"></div>
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-200 translate-y-full"></div>
                 )}
               </div>
 
-              {/* Descida recursiva */}
+              {/* 🔄 CHAMADA RECURSIVA CHAVE: Permite que este filho também seja pai de outra camada abaixo dele */}
               <RenderizarFilhosOrganograma liderId={sub.id} />
             </div>
           );
@@ -231,7 +227,7 @@ export default function GerenciarHierarquiaPage() {
           <p className="text-xs text-slate-400">Clique em um colaborador na lista da esquerda e depois clique em cima do líder desejado na árvore no centro.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={carregarDadosHierarquia} disabled={carregando || salvando} className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 font-bold uppercase text-[10px] rounded-lg tracking-wider shadow-xs transition-all">
+          <button onClick={carregarDadosHierarquia} disabled={carregando || salvando} className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 font-bold uppercase text-[10px] rounded-lg tracking-wider transition-all">
             🔄 Descartar Alterações
           </button>
           <button onClick={salvarEstruturaHierarquia} disabled={carregando || salvando} className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-md transition-all">
@@ -259,7 +255,7 @@ export default function GerenciarHierarquiaPage() {
                   onClick={() => selecionarParaMover(user.id)}
                   className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer transition-all select-none ${
                     selecionado 
-                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 animate-pulse text-white" 
+                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 text-white animate-pulse" 
                       : "bg-slate-800 border-slate-700/60 text-slate-200 hover:border-slate-500"
                   }`}
                 >
@@ -286,7 +282,6 @@ export default function GerenciarHierarquiaPage() {
         <div 
           className="flex-1 bg-white border border-slate-200 rounded-2xl p-8 overflow-auto shadow-inner relative flex flex-col"
           onClick={() => {
-            // Se o cara tem um usuário selecionado e clica direto no fundo branco, ele vira um Topo Absoluto (Líder Raiz)
             if (usuarioSelecionadoId) executarMovimentacao(null);
           }}
         >
@@ -307,11 +302,11 @@ export default function GerenciarHierarquiaPage() {
                   {/* CARD RAIZ PRINCIPAL */}
                   <div
                     onClick={(e) => {
-                      e.stopPropagation(); // Impede o clique de propagar pro fundo branco
+                      e.stopPropagation();
                       if (usuarioSelecionadoId) {
-                        executarMovimentacao(root.id); // Coloca quem tava selecionado abaixo desse cara
+                        executarMovimentacao(root.id);
                       } else {
-                        selecionarParaMover(root.id); // Seleciona este cara para mover
+                        selecionarParaMover(root.id);
                       }
                     }}
                     className={`relative flex flex-col w-[230px] bg-white border-2 p-3.5 rounded-2xl shadow-sm transition-all text-left z-10 cursor-pointer ${
@@ -341,11 +336,11 @@ export default function GerenciarHierarquiaPage() {
                     </div>
 
                     {temFilhos && (
-                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-300 translate-y-full"></div>
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-200 translate-y-full"></div>
                     )}
                   </div>
 
-                  {/* Renderiza as ramificações dos subordinados */}
+                  {/* 🔄 Renderiza os subordinados diretos e ativa a cascata recursiva infinita para as próximas subcamadas */}
                   <RenderizarFilhosOrganograma liderId={root.id} />
                 </div>
               );
