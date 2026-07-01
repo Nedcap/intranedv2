@@ -34,6 +34,25 @@ function simplificarNome(nome: string): string {
   return n.replace(/\s+/g, " ").trim();
 }
 
+// 🌲 Função de varredura profunda de equipe (Grafo/Multi-Líderes)
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
+
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
+
 export default function FinalizadosPage() {
   const [historico, setHistorico] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -105,7 +124,7 @@ export default function FinalizadosPage() {
     } catch (err) { console.error(err); }
   };
 
-  // 🎯 FUNÇÃO AJUSTADA E FILTRADA PARA HISTÓRICO COMERCIAL
+  // 🎯 FUNÇÃO AJUSTADA COM INTELIGÊNCIA DE REDE HIERÁRQUICA
   const carregarHistorico = async () => {
     try {
       setCarregando(true);
@@ -116,16 +135,32 @@ export default function FinalizadosPage() {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-        // 🛡️ Se for comercial, força o filtro na raiz trazendo apenas o que bater com o nome dele
-        if (cargoUser === "comercial" && user.nome) {
-          query = query.eq("comercial", user.nome);
+        // 🛡️ Se NÃO FOR MASTER OU DIRETOR, aplica o filtro de hierarquia
+        if (cargoUser !== "master" && cargoUser !== "diretor") {
+          
+          // Busca todos os usuários para ler a árvore de equipe
+          const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+          
+          if (todosUsuarios) {
+            // Descobre todo mundo que está abaixo do usuário logado na árvore
+            const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
+            
+            const nomesPermitidos = todosUsuarios
+              .filter(u => idsPermitidos.includes(u.id))
+              .map(u => u.nome);
+
+            // Filtra a consulta puxando as análises de qualquer membro da equipe dele
+            query = query.in("comercial", nomesPermitidos);
+          } else {
+            // Fallback de segurança se falhar a busca da tabela de usuários
+            query = query.eq("comercial", user.nome);
+          }
         }
       }
       
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
-        // Filtra para exibir apenas os status que representam conclusões/arquivamentos fofos
         const filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase().trim();
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
@@ -343,7 +378,7 @@ export default function FinalizadosPage() {
   };
 
   function modoConsultaFocoAtivarModo(item: any) {
-    激活modoConsultaFoco(item);
+    ativarModoConsultaFoco(item);
   }
 
   // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO
