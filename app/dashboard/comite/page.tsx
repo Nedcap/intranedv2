@@ -355,17 +355,25 @@ export default function ComitePage() {
 
   const ativarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
-    setEditandoEmpresaExpandida(empresa.id);
+    setEditandoEmpresaExpandida(empresa.id); // Garante que o ID certo mude o estado
     setModoFocoComite(true);
     
-    const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
-    if (data) setChatMsgs(data);
+    try {
+      const { data } = await supabase
+        .from("chat_comite")
+        .select("*")
+        .eq("empresa_nome", empresa.empresa_nome)
+        .order("id", { ascending: true });
+      if (data) setChatMsgs(data);
+    } catch (err) {
+      console.error("Erro ao carregar chat:", err);
+    }
   };
 
   const desativarModoLupaExecutiva = () => {
     setModoFocoComite(false);
     setEmpresaFocoAtivo(null);
-    setEditandoEmpresaExpandida(null);
+    setEditandoEmpresaExpandida(null); // Reseta o estado limpando a memória
     setChatMsgs([]);
   };
 
