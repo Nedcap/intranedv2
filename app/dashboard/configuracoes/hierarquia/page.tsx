@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface UsuarioSistema {
@@ -9,7 +9,7 @@ interface UsuarioSistema {
   nome: string;
   email: string;
   cargo: string;
-  permissoes: Record<string, any>;
+  permissoes: Record<string, any>; // JSONB real do banco
 }
 
 export default function GerenciarHierarquiaPage() {
@@ -23,6 +23,8 @@ export default function GerenciarHierarquiaPage() {
   const carregarDadosHierarquia = async () => {
     try {
       setCarregando(true);
+      
+      // Busca os colaboradores lendo EXATAMENTE as colunas que existem na tabela 'usuarios'
       const { data: dbUsuarios, error: errUsuarios } = await supabase
         .from("usuarios")
         .select("id, nome, email, cargo, permissoes")
@@ -31,6 +33,7 @@ export default function GerenciarHierarquiaPage() {
       if (errUsuarios) throw errUsuarios;
       
       if (dbUsuarios) {
+        // Garante que permissões seja sempre um objeto JSON válido
         const mapeados = dbUsuarios.map(u => ({
           ...u,
           permissoes: typeof u.permissoes === 'object' && u.permissoes !== null ? u.permissoes : {}
@@ -146,7 +149,7 @@ export default function GerenciarHierarquiaPage() {
             <div
               draggable
               onDragStart={(e) => handleDragStart(e, sub.id)}
-              className="inline-flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-xs cursor-grab active:cursor-grabbing hover:border-blue-400 hover:shadow-md transition-all min-w-[280px] bg-linear-to-r hover:from-blue-50/20"
+              className="inline-flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-xs cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all min-w-[280px]"
             >
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-600 font-bold text-[10px] uppercase">
                 {sub.nome.substring(0, 2)}
@@ -196,7 +199,7 @@ export default function GerenciarHierarquiaPage() {
             disabled={carregando || salvando}
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-md transition-all disabled:opacity-50"
           >
-            {salvando ? "⏳ Gravando Matriz..." : "💾 Salvar Árvor"}
+            {salvando ? "⏳ Gravando Matriz..." : "💾 Salvar Árvore"}
           </button>
         </div>
       </div>
@@ -233,7 +236,7 @@ export default function GerenciarHierarquiaPage() {
                 <div
                   draggable
                   onDragStart={(e) => handleDragStart(e, root.id)}
-                  className="inline-flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-xs cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all min-w-[280px] bg-linear-to-r hover:from-blue-50/20"
+                  className="inline-flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-xs cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all min-w-[280px]"
                 >
                   <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white font-black text-[10px] uppercase">
                     {root.nome.substring(0, 2)}
