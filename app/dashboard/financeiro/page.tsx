@@ -8,6 +8,7 @@ interface Pagamento {
   id: string;
   isNovo?: boolean;
   isRecorrente?: boolean;
+  dias_replicacao?: string; // 👈 NOVO CAMPO: Para replicar no mesmo mês
   empresa: string;
   mes_ano: string;
   data_vencimento: string;
@@ -92,7 +93,8 @@ export default function FinanceiroCalendarioPage() {
         setPagamentos(pags.map(p => ({
           ...p,
           status: p.status === "A Vencer" || p.status === "Atrasado" ? "PREVISTO" : p.status, 
-          dados_customizados: p.dados_customizados || {}
+          dados_customizados: p.dados_customizados || {},
+          dias_replicacao: "" // Inicializa limpo
         })));
       } else {
         setPagamentos([]);
@@ -162,6 +164,7 @@ export default function FinanceiroCalendarioPage() {
       id: crypto.randomUUID(),
       isNovo: true,
       isRecorrente: false,
+      dias_replicacao: "", // 👈 Inicializa o campo
       empresa: empresaAtiva === "TODAS" ? "SEC" : empresaAtiva, 
       mes_ano: mesAtivo,
       data_vencimento: diaSelecionado,
@@ -246,7 +249,8 @@ export default function FinanceiroCalendarioPage() {
 
       setPagamentos(payloadLimpo);
 
-      const arrayUpdate = payloadLimpo.filter(p => !p.isNovo).map(({ isNovo, isRecorrente, ...rest }) => rest);
+      // 👈 SEGURANÇA: Remover dias_replicacao antes de ir pro banco no upsert
+      const arrayUpdate = payloadLimpo.filter(p => !p.isNovo).map(({ isNovo, isRecorrente, dias_replicacao, ...rest }) => rest);
       
       if (arrayUpdate.length > 0) {
         await supabase.from("financeiro_pagamentos").upsert(arrayUpdate, { onConflict: "id" });
@@ -266,7 +270,8 @@ export default function FinanceiroCalendarioPage() {
       const payload = [];
 
       for (const p of pagamentosDoDia) {
-        const { isNovo, isRecorrente, ...rest } = p;
+        // 👈 Tira os campos temporários para não quebrar o insert do Supabase
+        const { isNovo, isRecorrente, dias_replicacao, ...rest } = p;
         
         rest.descricao = normalizarTexto(rest.descricao);
         rest.categoria = normalizarTexto(rest.categoria);
@@ -277,8 +282,38 @@ export default function FinanceiroCalendarioPage() {
           });
         }
 
+        // 1. Salva a linha do dia atual
         payload.push(rest);
 
+        // ==========================================
+        // 🔄 NOVA LÓGICA: REPLICAR PARA DIAS DO MÊS
+        // ==========================================
+        if (dias_replicacao && dias_replicacao.trim() !== "") {
+          const dias = dias_replicacao
+            .split(',')
+            .map(d => parseInt(d.trim()))
+            .filter(d => !isNaN(d) && d >= 1 && d <= 31);
+          
+          const diasUnicos = Array.from(new Set(dias));
+
+          for (const diaNum of diasUnicos) {
+            const novaData = `${rest.mes_ano}-${String(diaNum).padStart(2, '0')}`;
+            
+            // Só cria se for diferente do dia base
+            if (novaData !== rest.data_vencimento) { 
+              payload.push({
+                ...rest,
+                id: crypto.randomUUID(),
+                data_vencimento: novaData,
+                status: "PREVISTO" // Clones nascem previstos
+              });
+            }
+          }
+        }
+
+        // ==========================================
+        // 🔄 LÓGICA ANTIGA: REPLICAR MESES (RECORRENTE)
+        // ==========================================
         if (isRecorrente) {
           for (let m = 1; m <= 11; m++) {
             const novaData = adicionarMeses(rest.data_vencimento, m);
@@ -368,7 +403,6 @@ export default function FinanceiroCalendarioPage() {
 
       {/* 🗓️ CALENDÁRIO VISUAL */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-5">
-        {/* Barra de Ferramentas Auxiliar */}
         <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">Cronograma de Contas</span>
           <button 
@@ -403,7 +437,6 @@ export default function FinanceiroCalendarioPage() {
                 const valorDia = pagsNoDia.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
                 const isHoje = dataString === hojeStr;
                 
-                // 🎯 AQUI: Lógica de notificação mantida
                 const hasAtraso = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento < hojeStr);
                 const hasAlerta = pagsNoDia.some(p => p.status !== "PAGO" && p.data_vencimento >= hojeStr && p.data_vencimento <= dataMais2Str);
 
@@ -415,14 +448,12 @@ export default function FinanceiroCalendarioPage() {
                   <div 
                     key={dia} 
                     onClick={() => setDiaSelecionado(dataString)}
-                    // 🎯 FIX: Removido o "overflow-hidden" da div principal para que as bolinhas não sejam cortadas
                     className={`h-[150px] relative border rounded-xl p-3 flex flex-col gap-2.5 cursor-pointer transition-all ${
                       isHoje 
                         ? "border-blue-300 ring-2 ring-blue-100 bg-blue-50/20 shadow-sm" 
                         : "border-slate-200 bg-white hover:border-blue-300 hover:shadow-md"
                     }`}
                   >
-                    {/* 🔴 Bolinhas de Alerta Fixadas - Trazidas para dentro das margens seguras */}
                     {hasAtraso && <div className="absolute top-2.5 right-2.5 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Existem contas em atraso neste dia!"></div>}
                     {!hasAtraso && hasAlerta && <div className="absolute top-2.5 right-2.5 w-3.5 h-3.5 bg-amber-400 rounded-full border-2 border-white shadow-sm animate-bounce z-10" title="Vencimentos previstos para hoje/amanhã!"></div>}
 
@@ -437,7 +468,6 @@ export default function FinanceiroCalendarioPage() {
                       )}
                     </div>
 
-                    {/* Div interna para controlar o overflow apenas das pílulas de pagamentos */}
                     <div className="flex flex-col gap-1.5 flex-1 overflow-hidden">
                       {visiblePags.map(p => (
                         <div key={p.id} className={`text-[9px] font-black uppercase tracking-wide px-2 py-1.5 rounded truncate border flex items-center gap-1.5 shadow-xs transition-colors ${
@@ -500,7 +530,7 @@ export default function FinanceiroCalendarioPage() {
 
             <div className="flex-1 overflow-auto bg-slate-100/50 p-5 custom-scrollbar">
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <table className="w-full text-left border-collapse min-w-[1100px]">
+                <table className="w-full text-left border-collapse min-w-[1200px]">
                   <thead>
                     <tr className="bg-slate-50 text-slate-500 font-black uppercase text-[10px] tracking-wider select-none border-b border-slate-200">
                       <th className="p-3 border-r border-slate-200 w-36 text-center">Status</th>
@@ -510,13 +540,17 @@ export default function FinanceiroCalendarioPage() {
                       <th className="p-3 border-r border-slate-200 w-44">Categoria</th>
                       <th className="p-3 border-r border-slate-200 w-40 text-right">Valor (R$)</th>
                       {colunasDinamicas.map(col => <th key={col} className="p-3 border-r border-slate-200 w-40 bg-purple-50 text-purple-700 truncate" title={col}>{col}</th>)}
+                      
+                      {/* 👈 NOVA COLUNA: REPLICAR DIAS */}
+                      <th className="p-3 border-r border-slate-200 w-36 text-center bg-indigo-50 text-indigo-700" title="Dias extras neste mês (ex: 12, 15, 20)">Replicar (Dias)</th>
+                      
                       <th className="p-3 border-r border-slate-200 w-28 text-center bg-blue-50 text-blue-700" title="Repetir nos próximos 11 meses">Recorrente?</th>
                       <th className="p-3 border-slate-200 w-20 text-center text-rose-500">Excluir</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {pagamentosDoDia.length === 0 ? (
-                      <tr><td colSpan={10 + colunasDinamicas.length} className="p-12 text-center text-slate-400 font-bold italic">Nenhum pagamento registrado para o dia {diaSelecionado.split("-").reverse().join("/")}.</td></tr>
+                      <tr><td colSpan={11 + colunasDinamicas.length} className="p-12 text-center text-slate-400 font-bold italic">Nenhum pagamento registrado para o dia {diaSelecionado.split("-").reverse().join("/")}.</td></tr>
                     ) : (
                       pagamentosDoDia.map((pag) => (
                         <tr key={pag.id} className={`hover:bg-slate-50/50 transition-colors ${pag.isNovo ? 'bg-emerald-50/20' : ''}`}>
@@ -594,6 +628,19 @@ export default function FinanceiroCalendarioPage() {
                               />
                             </td>
                           ))}
+                          
+                          {/* 👈 NOVO INPUT: REPLICAR DIAS */}
+                          <td className="p-2 border-r border-slate-100 bg-indigo-50/20 text-center">
+                            <input 
+                              type="text" 
+                              placeholder="Ex: 10, 15"
+                              value={pag.dias_replicacao || ""} 
+                              onChange={(e) => atualizarCelula(pag.id, "dias_replicacao", e.target.value)}
+                              className="w-full p-2 text-[11px] outline-none bg-transparent text-slate-700 focus:bg-white focus:ring-2 ring-indigo-100 rounded-md border border-transparent hover:border-indigo-200 transition-all text-center font-mono placeholder:text-slate-300"
+                              title="Digite os dias deste mês separados por vírgula. Ex: 05, 12, 19"
+                            />
+                          </td>
+
                           <td className="p-2 border-r border-slate-100 text-center bg-blue-50/30">
                             <input 
                               type="checkbox" 
