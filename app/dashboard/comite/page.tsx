@@ -9,8 +9,8 @@ export default function ComitePage() {
   const [empresasAnalise, setEmpresasAnalise] = useState<any[]>([]); 
   const [carregando, setCarregando] = useState(true);
   
-  // 🎛️ CONTROLES DE FOCO E EXPANSÃO INTEGRADA
-  const [idEmpresaExpandida, setEditandoEmpresaExpandida] = useState<string | null>(null);
+  // 🎛️ CONTROLES DE FOCO E EXPANSÃO INTEGRADA (Padronizado e Simplificado)
+  const [idEmpresaExpandida, setIdEmpresaExpandida] = useState<string | null>(null);
   const [modoFocoComite, setModoFocoComite] = useState(false);
   const [empresaFocoAtivo, setEmpresaFocoAtivo] = useState<any>(null);
 
@@ -288,7 +288,6 @@ export default function ComitePage() {
     }
   };
 
-  // Ajustado para garantir que o lead criado puxe o nome exato do comercial logado
   const handleCriarAnalise = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nomeNovaEmpresa.trim()) return;
@@ -351,11 +350,12 @@ export default function ComitePage() {
     } finally { setCarregando(false); }
   };
 
-  const borderClass = "border border-slate-800"; // fallback style token
+  const borderClass = "border border-slate-800"; 
 
-  const ativarModoLupaExecutiva = async (empresa: any) => {
+  // 🏛️ ATIVAÇÃO DO MODO COMITÊ EXECUTIVO CORRIGIDO
+  const activarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
-    setEditandoEmpresaExpandida(empresa.id); // Garante que o ID certo mude o estado
+    setIdEmpresaExpandida(empresa.id); // Altera a variável monitorada no useEffect
     setModoFocoComite(true);
     
     try {
@@ -373,7 +373,7 @@ export default function ComitePage() {
   const desativarModoLupaExecutiva = () => {
     setModoFocoComite(false);
     setEmpresaFocoAtivo(null);
-    setEditandoEmpresaExpandida(null); // Reseta o estado limpando a memória
+    setIdEmpresaExpandida(null); 
     setChatMsgs([]);
   };
 
@@ -388,7 +388,7 @@ export default function ComitePage() {
     setNovaMsg("");
   };
 
-  // 🔮 MODO COMITÊ TELA CHEIA ATIVO
+  // 🔮 MODO COMITÊ TELA CHEIA ATIVO (Verifica o estado correto sem quebrar)
   if (modoFocoComite && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
     const htmlPreview = htmlPreviewsInline[empresaFocoAtivo.id];
