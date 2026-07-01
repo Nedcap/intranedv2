@@ -16,6 +16,13 @@ export default function LoginPage() {
   const [emailRecuperar, setEmailRecuperar] = useState("");
   const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false);
 
+  // 🔒 Estados para Primeiro Acesso / Troca de Senha Obrigatória
+  const [exigirNovaSenha, setExigirNovaSenha] = useState(false);
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmarNovaSenha, setConfirmarNovaSenha] = useState("");
+  const [trocandoSenha, setTrocandoSenha] = useState(false);
+  const [usuarioTemporario, setUsuarioTemporario] = useState<any>(null);
+
   useEffect(() => {
     const logado = localStorage.getItem("intraned_user");
     if (logado) router.push("/dashboard");
@@ -29,29 +36,43 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
-      const { data, error } = await supabase
-        .from("usuarios")
-        .select("*")
-        .eq("email", emailTratado)
-        .maybeSingle();
+      // 1. 🔑 Autentica de verdade usando o sistema nativo e criptografado do Supabase
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: emailTratado,
+        password: senha.trim(),
+      });
 
-      if (error) throw error;
-
-      const senhaBanco = data ? String(data.senha || data.senha_hash || "").trim() : "";
-      const senhaDigitada = senha.trim();
-
-      if (!data || senhaBanco !== senhaDigitada) {
+      if (authError) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
         return;
       }
 
+      // 2. 📑 Puxa o perfil complementar da sua tabela pública
+      const { data: perfil, error: perfilError } = await supabase
+        .from("usuarios")
+        .select("*")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      if (perfilError || !perfil) {
+        throw new Error("Perfil de usuário não localizado no banco.");
+      }
+
+      // 3. 🚨 Verifica se é o primeiro acesso dele
+      if (perfil.primeiro_acesso === true) {
+        setUsuarioTemporario(perfil);
+        setExigirNovaSenha(true); // Abre o modal de nova senha e barra o redirecionamento
+        setCarregando(false);
+        return;
+      }
+
+      // 4. 🚀 Login normal caso não seja o primeiro acesso
       localStorage.setItem("intraned_user", JSON.stringify({
-        id: data.id,
-        nome: data.nome,
-        email: data.email,
-        cargo: data.cargo || data.perfil || "Colaborador",
-        perfil: data.perfil || data.cargo || "user",
-        permissoes: data.permissoes || data.abas_permitidas || []
+        id: perfil.id,
+        nome: perfil.nome,
+        email: perfil.email,
+        cargo: perfil.cargo || "Colaborador",
+        permissoes: perfil.permissoes || {}
       }));
 
       router.push("/dashboard");
@@ -63,14 +84,64 @@ export default function LoginPage() {
     }
   };
 
+  // 🛠️ Função que atualiza a senha de forma criptografada e desliga o primeiro acesso
+  const salvarNovaSenhaPrimeiroAcesso = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!novaSenha.trim() || !confirmarNovaSenha.trim()) return;
+
+    if (novaSenha.trim().length < 6) {
+      alert("A senha precisa ter no mínimo 6 caracteres.");
+      return;
+    }
+
+    if (novaSenha.trim() !== confirmarNovaSenha.trim()) {
+      alert("As senhas inseridas não conferem.");
+      return;
+    }
+
+    try {
+      setTrocandoSenha(true);
+
+      // 1. 🔐 Atualiza a senha no cofre de autenticação (criptografia nativa em hash)
+      const { error: authUpdateError } = await supabase.auth.updateUser({
+        password: novaSenha.trim()
+      });
+
+      if (authUpdateError) throw authUpdateError;
+
+      // 2. 🏳️ Desmarca o 'primeiro_acesso' para false na tabela pública
+      const { error: tabelaError } = await supabase
+        .from("usuarios")
+        .update({ primeiro_acesso: false })
+        .eq("id", usuarioTemporario.id);
+
+      if (tabelaError) throw tabelaError;
+
+      // 3. 💾 Cria a sessão definitiva e manda pro painel
+      localStorage.setItem("intraned_user", JSON.stringify({
+        id: usuarioTemporario.id,
+        nome: usuarioTemporario.nome,
+        email: usuarioTemporario.email,
+        cargo: usuarioTemporario.cargo || "Colaborador",
+        permissoes: usuarioTemporario.permissoes || {}
+      }));
+
+      alert("🎉 Senha corporativa redefinida com sucesso! Bem-vindo.");
+      router.push("/dashboard");
+    } catch (err: any) {
+      console.error(err);
+      alert(`Erro ao salvar nova senha: ${err.message}`);
+    } finally {
+      setTrocandoSenha(false);
+    }
+  };
+
   const dispararRecuperacaoDeSenha = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emailRecuperar.trim()) return;
 
     try {
       setEnviandoRecuperacao(true);
-      
-      // Conecta diretamente na rota de API de recuperação interna que envia o Resend
       const res = await fetch("/api/recuperar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -78,17 +149,14 @@ export default function LoginPage() {
       });
 
       const resultado = await res.json();
+      if (!res.ok) throw new Error(resultado.error || "Falha ao solicitar");
 
-      if (!res.ok) {
-        throw new Error(resultado.error || "Falha ao processar solicitação");
-      }
-
-      alert("📧 Se o e-mail informado estiver cadastrado, as instruções de redefinição serão enviadas em instantes!");
+      alert("📧 Se o e-mail informado estiver cadastrado, as instruções serão enviadas!");
       setAbrirAbasRecuperar(false);
       setEmailRecuperar("");
     } catch (err: any) {
       console.error(err);
-      alert(`❌ Erro no envio: ${err.message}. Garanta que as chaves de ambiente estão configuradas na Vercel.`);
+      alert(`❌ Erro no envio: ${err.message}`);
     } finally {
       setEnviandoRecuperacao(false);
     }
@@ -98,24 +166,18 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans text-[13px]">
       <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
         
-        {/* CABEÇALHO COM LOGO ALINHADA E TEXTO CENTRALIZADO */}
+        {/* CABEÇALHO */}
         <div className="flex flex-col items-center select-none text-center">
           <div className="relative w-fit mx-auto flex items-center h-8 pl-1">
-            <img 
-              src="/favicon.ico" 
-              alt="Ned Capital" 
-              className="absolute -left-7 h-7 w-auto object-contain shrink-0" 
-            />
+            <img src="/favicon.ico" alt="Ned Capital" className="absolute -left-7 h-7 w-auto object-contain shrink-0" />
             <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
               Intra<span className="text-blue-500">Ned</span>
             </h1>
           </div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2.5 w-full">
-            Controle & Gestão
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2.5 w-full">Controle & Gestão</p>
         </div>
 
-        {/* FORMULÁRIO DE LOGIN DE ACESSO */}
+        {/* FORMULÁRIO DE LOGIN */}
         <form onSubmit={tratarLogin} className="space-y-4 pt-2">
           <div className="flex flex-col space-y-1">
             <label className="font-bold text-slate-700">E-mail:</label>
@@ -144,7 +206,7 @@ export default function LoginPage() {
           <button 
             type="submit"
             disabled={carregando}
-            className="w-full p-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg transition-colors cursor-pointer uppercase tracking-wider text-xs shadow-md disabled:opacity-50"
+            className="w-full p-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg transition-colors uppercase tracking-wider text-xs shadow-md disabled:opacity-50"
           >
             {carregando ? "Autenticando..." : "Entrar no Sistema"}
           </button>
@@ -154,25 +216,70 @@ export default function LoginPage() {
           <button 
             type="button"
             onClick={() => setAbrirAbasRecuperar(true)}
-            className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0 outline-none"
+            className="text-blue-600 hover:underline font-bold text-xs cursor-pointer bg-transparent border-0"
           >
             Esqueceu sua senha? Recuperar acesso
           </button>
         </div>
-
       </div>
 
-      {/* MODAL INTEGRADO DE RECUPERAÇÃO DE ACESSO REAL VIA RESEND API */}
+      {/* 🚨 MODAL IMPEDING: PRIMEIRO ACESSO - CADASTRO DE NOVA SENHA */}
+      {exigirNovaSenha && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="text-center">
+              <h3 className="font-black text-slate-950 text-base uppercase tracking-tight">🔒 Primeiro Acesso Detectado</h3>
+              <p className="text-slate-500 text-[11px] mt-1">Por questões de conformidade e segurança da Ned Capital, altere a senha provisória inicial para continuar.</p>
+            </div>
+            
+            <form onSubmit={salvarNovaSenhaPrimeiroAcesso} className="space-y-4">
+              <div className="flex flex-col space-y-1">
+                <label className="font-bold text-slate-700">Nova Senha Corporativa:</label>
+                <input 
+                  type="password"
+                  required
+                  placeholder="Mínimo 6 caracteres"
+                  value={novaSenha}
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  className="p-2.5 border border-slate-200 rounded-lg outline-none font-semibold text-slate-800 focus:border-blue-500 bg-slate-50"
+                />
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="font-bold text-slate-700">Confirme a Nova Senha:</label>
+                <input 
+                  type="password"
+                  required
+                  placeholder="Repita a senha digitada acima"
+                  value={confirmarNovaSenha}
+                  onChange={(e) => setConfirmarNovaSenha(e.target.value)}
+                  className="p-2.5 border border-slate-200 rounded-lg outline-none font-semibold text-slate-800 focus:border-blue-500 bg-slate-50"
+                />
+              </div>
+
+              <button 
+                type="submit"
+                disabled={trocandoSenha}
+                className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md"
+              >
+                {trocandoSenha ? "⏳ Criptografando & Atualizando..." : "Definir Senha Definitiva"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE RECUPERAÇÃO */}
       {abrirAbasRecuperar && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-sm bg-white rounded-xl shadow-2xl border border-slate-200 p-6 space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-900 text-sm">🔒 Recuperar Acesso</h3>
-              <button type="button" onClick={() => setAbrirAbasRecuperar(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕</button>
+              <button type="button" onClick={() => setAbrirAbasRecuperar(false)} className="text-slate-400 font-bold text-xs">✕</button>
             </div>
             <form onSubmit={dispararRecuperacaoDeSenha} className="space-y-4">
               <div className="flex flex-col space-y-1">
-                <label className="font-bold text-slate-600 text-xs">Informe seu e-mail corporativo:</label>
+                <label className="font-bold text-slate-600 text-xs">Informe seu e-mail:</label>
                 <input 
                   type="email"
                   required
@@ -182,18 +289,13 @@ export default function LoginPage() {
                   className="p-2 border border-slate-200 rounded-lg outline-none font-semibold text-xs focus:border-blue-500 bg-slate-50"
                 />
               </div>
-              <button 
-                type="submit"
-                disabled={enviandoRecuperacao}
-                className="w-full p-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs tracking-tight transition-all disabled:opacity-50"
-              >
-                {enviandoRecuperacao ? "⏳ Solicitando Token..." : "Enviar E-mail de Recuperação"}
+              <button type="submit" disabled={enviandoRecuperacao} className="w-full p-2 bg-slate-900 text-white font-bold rounded-lg text-xs transition-all disabled:opacity-50">
+                {enviandoRecuperacao ? "⏳ Solicitando..." : "Enviar E-mail de Recuperação"}
               </button>
             </form>
           </div>
         </div>
       )}
-
     </div>
   );
 }
