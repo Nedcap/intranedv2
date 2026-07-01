@@ -124,7 +124,6 @@ export default function GerenciarHierarquiaPage() {
               key={sub.id} 
               className="relative px-2 text-center flex flex-col items-center shrink-0"
               style={{
-                // Estilização das linhas horizontais que conectam os ramos irmãos
                 backgroundImage: `linear-gradient(to right, ${idx === 0 ? 'transparent' : '#cbd5e1'} 50%, ${idx === filhos.length - 1 ? 'transparent' : '#cbd5e1'} 50%)`,
                 backgroundPosition: 'top',
                 backgroundSize: '100% 2px',
@@ -202,7 +201,7 @@ export default function GerenciarHierarquiaPage() {
       <div 
         className="flex-1 w-full bg-white border border-slate-200 rounded-2xl p-8 overflow-auto shadow-inner min-h-[600px] flex flex-col select-none"
         onDragOver={handleDragOver}
-        onDrop={(e) => handleDrop(e, null)} // Soltar no fundo limpa o líder (vai pro Topo)
+        onDrop={(e) => handleDrop(e, null)}
       >
         <div className="text-left mb-6 border-b border-slate-100 pb-3 shrink-0">
           <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block mb-1">👑 Topo Absoluto / Nível Superior Sem Filtros</span>
@@ -244,10 +243,11 @@ export default function GerenciarHierarquiaPage() {
                   </div>
                 </div>
 
-                {/* Renderização dos galhos abaixo da raiz */}
+                {/* Renderização os galhos abaixo da raiz */}
                 <RenderizarFilhosOrganograma liderId={root.id} />
               </div>
-            ))}
+            );
+          })}
 
           {usuariosSistema.length === 0 && !carregando && (
             <p className="text-slate-400 italic text-center py-20 m-auto">Nenhum operador localizado no banco de dados.</p>
