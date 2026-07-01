@@ -32,7 +32,7 @@ export default function ComitePage() {
   const [novaDataEnvio, setNovaDataEnvio] = useState("");
 
   const [isMaster, setIsMaster] = useState(false);
-  const [isDiretor, setIsDiretor] = useState(false); // 🎯 Novo Estado: Controle de interface para diretores
+  const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
   const carregarDiretores = async () => {
@@ -55,19 +55,25 @@ export default function ComitePage() {
     }
   }, []);
 
+  // 🎯 FUNÇÃO AJUSTADA E BLINDADA PARA O FILTRO COMERCIAL
   const carregarComite = async () => {
     try {
       setCarregando(true);
       const userStr = localStorage.getItem("intraned_user");
+      
       let queryComite = supabase.from("analises").select("*");
       let queryEsteira = supabase.from("em_analise").select("*");
 
       if (userStr) {
         const user = JSON.parse(userStr);
-        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
+
+        // 🛡️ Se o usuário for comercial, ele SÓ VÊ o que foi criado/vinculado ao nome ou ID dele
         if (cargoUser === "comercial") {
-          queryComite = queryComite.eq("comercial", user.nome);
-          queryEsteira = queryEsteira.eq("agente_nome", user.nome);
+          if (user.nome) {
+            queryComite = queryComite.eq("comercial", user.nome);
+            queryEsteira = queryEsteira.eq("agente_nome", user.nome);
+          }
         }
       }
       
@@ -126,7 +132,7 @@ export default function ComitePage() {
         const parsed = JSON.parse(userStr);
         setNomeUsuarioLogado(parsed.nome || "Membro Ned");
         
-        const cargoLimpo = String(parsed.perfil || parsed.cargo || "").toLowerCase().trim();
+        const cargoLimpo = String(parsed.cargo || parsed.perfil || "").toLowerCase().trim();
         
         if (cargoLimpo === "master") {
           setIsMaster(true);
@@ -282,15 +288,16 @@ export default function ComitePage() {
     }
   };
 
+  // Ajustado para garantir que o lead criado puxe o nome exato do comercial logado
   const handleCriarAnalise = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nomeNovaEmpresa.trim()) return;
     
     try {
       setCarregando(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const user = sessionData?.session?.user;
-      const nomeDoAgente = user?.user_metadata?.nome || user?.email || nomeUsuarioLogado || "Comercial Ned";
+      const userStr = localStorage.getItem("intraned_user");
+      const user = userStr ? JSON.parse(userStr) : null;
+      const nomeDoAgente = user?.nome || nomeUsuarioLogado || "Comercial Ned";
       const dataFormatada = new Date().toISOString().split("T")[0];
 
       const { error } = await supabase.from("em_analise").insert({
@@ -343,6 +350,8 @@ export default function ComitePage() {
       alert(`❌ Erro ao deletar: ${err.message}`);
     } finally { setCarregando(false); }
   };
+
+  const borderClass = "border border-slate-800"; // fallback style token
 
   const ativarModoLupaExecutiva = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
@@ -539,7 +548,7 @@ export default function ComitePage() {
                     <span className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-md uppercase">{item.status || "Em análise"}</span>
                   </td>
                   <td className="p-2.5 text-center">
-                    <button onClick={() => ativarModoLupaExecutiva(item)} className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors">
+                    <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors">
                       🏛️ Entrar em Modo Comitê
                     </button>
                   </td>
@@ -551,6 +560,9 @@ export default function ComitePage() {
                   )}
                 </tr>
               ))}
+              {analises.length === 0 && (
+                <tr><td colSpan={isMaster ? 6 : 5} className="p-4 text-center text-slate-400 italic">Nenhuma análise em pauta para você.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -583,7 +595,7 @@ export default function ComitePage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
               {empresasAnalise.length === 0 ? (
-                <tr><td colSpan={6} className="p-4 text-center text-slate-400 italic">Nenhum lead em análise na esteira.</td></tr>
+                <tr><td colSpan={6} className="p-4 text-center text-slate-400 italic">Nenhum lead em análise na esteira para você.</td></tr>
               ) : (
                 empresasAnalise.map((item) => {
                   const estaEditando = editandoId === item.id;

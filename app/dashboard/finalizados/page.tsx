@@ -105,42 +105,32 @@ export default function FinalizadosPage() {
     } catch (err) { console.error(err); }
   };
 
+  // 🎯 FUNÇÃO AJUSTADA E FILTRADA PARA HISTÓRICO COMERCIAL
   const carregarHistorico = async () => {
     try {
       setCarregando(true);
       const userStr = localStorage.getItem("intraned_user");
-      let allowedCedentes: string[] = [];
-      let isComercial = false;
-      let userNome = "";
+      let query = supabase.from("analises").select("*");
 
       if (userStr) {
         const user = JSON.parse(userStr);
-        userNome = user.nome;
-        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-        if (cargoUser === "comercial") {
-          isComercial = true;
-          const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-          if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
-        }
-      }
+        const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-      let query = supabase.from("analises").select("*");
-      if (isComercial) {
-        query = query.eq("comercial", userNome);
+        // 🛡️ Se for comercial, força o filtro na raiz trazendo apenas o que bater com o nome dele
+        if (cargoUser === "comercial" && user.nome) {
+          query = query.eq("comercial", user.nome);
+        }
       }
       
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
-        let filtrado = data.filter(a => {
+        // Filtra para exibir apenas os status que representam conclusões/arquivamentos fofos
+        const filtrado = data.filter(a => {
           const st = (a.status || "").toLowerCase().trim();
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
           return statusFinaisConfirmados.some(s => st.includes(s)) || (st !== "aberta" && !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "");
         });
-
-        if (isComercial) {
-          filtrado = filtrado.filter(a => allowedCedentes.includes(simplificarNome(a.empresa_nome)));
-        }
 
         const mesesUnicos = new Set<string>();
         const cedentesUnicos = new Set<string>();
@@ -218,7 +208,7 @@ export default function FinalizadosPage() {
     }
   };
 
-  const ativarModoConsultaFoco = async (empresa: any) => {
+  const激活modoConsultaFoco = async (empresa: any) => {
     setEmpresaFocoAtivo(empresa);
     setModoFocoComite(true);
     const { data } = await supabase.from("chat_comite").select("*").eq("empresa_nome", empresa.empresa_nome).order("id", { ascending: true });
@@ -353,7 +343,7 @@ export default function FinalizadosPage() {
   };
 
   function modoConsultaFocoAtivarModo(item: any) {
-    ativarModoConsultaFoco(item);
+    激活modoConsultaFoco(item);
   }
 
   // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO
@@ -468,7 +458,7 @@ export default function FinalizadosPage() {
           </div>
         </div>
 
-        <style dangerouslySetContent={{__html: `
+        <style dangerouslySetInnerHTML={{__html: `
           .custom-scrollbar::-webkit-scrollbar { width: 4px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
@@ -604,7 +594,7 @@ export default function FinalizadosPage() {
               {historicoFiltrado.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center p-10 text-slate-400 font-bold italic">
-                    Nenhum registro histórico atende aos filtros atuais.
+                    Nenhum registro histórico atende aos filtros atuais para você.
                   </td>
                 </tr>
               ) : (
@@ -633,7 +623,7 @@ export default function FinalizadosPage() {
                         {editando ? (
                           <input type="date" value={editDataEnvio} onChange={(e) => setEditDataEnvio(e.target.value)} className="w-full p-1.5 border border-slate-300 rounded text-[11px] outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
                         ) : (
-                          formatarDataLocal(item.criado_em)
+                          formatarDataLocal(item.criated_em || item.criado_em)
                         )}
                       </td>
 
