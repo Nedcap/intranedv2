@@ -1,8 +1,26 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
+import "@xyflow/react/dist/style.css";
+
+// 🚨 Força o React Flow a carregar apenas no cliente (Front-end) para não quebrar o build do Next.js
+const ReactFlowNoSSR = dynamic(
+  () => import("@xyflow/react").then((mod) => mod.ReactFlow),
+  { ssr: false }
+);
+
+const BackgroundNoSSR = dynamic(
+  () => import("@xyflow/react").then((mod) => mod.Background),
+  { ssr: false }
+);
+
+const ControlsNoSSR = dynamic(
+  () => import("@xyflow/react").then((mod) => mod.Controls),
+  { ssr: false }
+);
 
 interface UsuarioSistema {
   id: string;
@@ -17,10 +35,8 @@ export default function GerenciarHierarquiaPage() {
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   
-  // 🗺️ Agora mapeamos id_usuario -> Array de lider_ids (Permite múltiplos vínculos!)
+  // Mapa id_usuario -> Array de lider_ids
   const [hierarquiaLocal, setHierarquiaLocal] = useState<Record<string, string[]>>({});
-  
-  // 🎯 Lista de IDs dos usuários selecionados (Permite inserção múltipla!)
   const [usuariosSelecionadosIds, setUsuariosSelecionadosId] = useState<string[]>([]);
 
   const carregarDadosHierarquia = async () => {
@@ -42,7 +58,6 @@ export default function GerenciarHierarquiaPage() {
 
         const mapaRelacoes: Record<string, string[]> = {};
         mapeados.forEach(u => {
-          // Trata se o banco já tiver o formato antigo de string ou se for array nativa
           const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
           mapaRelacoes[u.id] = Array.isArray(lideres) ? lideres : [lideres];
         });
@@ -59,63 +74,35 @@ export default function GerenciarHierarquiaPage() {
     carregarDadosHierarquia();
   }, []);
 
-  // CONTROLE DE SELEÇÃO MÚLTIPLA (GAVETA ESQUERDA)
   const alternarSelecaoUsuario = (id: string) => {
     setUsuariosSelecionadosId(prev => 
       prev.includes(id) ? prev.filter(uid => uid !== id) : [...prev, id]
     );
   };
 
-  const selecionarTodosLivres = (usuariosLivres: UsuarioSistema[]) => {
-    if (usuariosSelecionadosIds.length === usuariosLivres.length) {
-      setUsuariosSelecionadosId([]);
-    } else {
-      setUsuariosSelecionadosId(usuariosLivres.map(u => u.id));
-    }
-  };
-
-  // EXECUTA A INTEGRAÇÃO EM MASSA E MULTI-PAI
-  const executarMovimentacaoMultipla = (novoLiderId: string | null) => {
+  const vincularLoteAoLider = (liderId: string | null) => {
     if (usuariosSelecionadosIds.length === 0) return;
 
     setHierarquiaLocal(prev => {
       const copia = { ...prev };
-      
       usuariosSelecionadosIds.forEach(subId => {
-        if (subId === novoLiderId) return;
-
-        // Se o drop for no fundo (null), limpa todos os líderes daquele grupo
-        if (novoLiderId === null) {
-          copia[subId] = [];
+        if (subId === liderId) return;
+        if (liderId === null) {
+          copia[subId] = []; // Reseta e joga pro topo
           return;
         }
-
-        const listaLideresAtuais = copia[subId] || [];
-        
-        // Evita duplicar o mesmo líder na Array
-        if (!listaLideresAtuais.includes(novoLiderId)) {
-          copia[subId] = [...listaLideresAtuais, novoLiderId];
+        const lideresAtuais = copia[subId] || [];
+        if (!lideresAtuais.includes(liderId)) {
+          copia[subId] = [...lideresAtuais, liderId];
         }
       });
-
       return copia;
     });
-
-    // Limpa o lote de seleção após o vínculo
     setUsuariosSelecionadosId([]);
   };
 
-  const removerLiderEspecifico = (e: React.MouseEvent, usuarioId: string, liderIdRemover: string) => {
-    e.stopPropagation();
-    setHierarquiaLocal(prev => ({
-      ...prev,
-      [usuarioId]: (prev[usuarioId] || []).filter(id => id !== liderIdRemover)
-    }));
-  };
-
-  const soltarCardGeral = (e: React.MouseEvent, usuarioId: string) => {
-    e.stopPropagation();
-    setHierarquiaLocal(prev => ({ ...prev, [usuarioId]: [] }));
+  const limparTodosVinculosCard = (id: string) => {
+    setHierarquiaLocal(prev => ({ ...prev, [id]: [] }));
   };
 
   const salvarEstruturaHierarquia = async () => {
@@ -123,11 +110,8 @@ export default function GerenciarHierarquiaPage() {
       setSalvando(true);
       for (const usuario of usuariosSistema) {
         const lideresLocais = hierarquiaLocal[usuario.id] || [];
-        
         const novasPermissoes = { ...usuario.permissoes };
         novasPermissoes.lider_ids = lideresLocais;
-        
-        // Mantém retrocompatibilidade apagando a chave singular antiga
         if (novasPermissoes.lider_id) delete novasPermissoes.lider_id;
 
         const { error } = await supabase
@@ -137,7 +121,7 @@ export default function GerenciarHierarquiaPage() {
 
         if (error) throw error;
       }
-      alert("🎉 Organograma multi-vínculo salvo com sucesso!");
+      alert("🎉 Organograma em rede salvo com sucesso!");
       await carregarDadosHierarquia();
     } catch (err: any) {
       alert(`❌ Erro ao salvar: ${err.message}`);
@@ -146,92 +130,109 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🌲 COMPONENTE RECURSIVO EM REDE (Aceita renders duplicados de um usuário em múltiplos galhos!)
-  const RenderizarFilhosOrganograma = ({ liderId }: { liderId: string | null }) => {
-    // Captura quem tem o liderId atual na sua lista de líderes
-    const filhos = usuariosSistema.filter(u => (hierarquiaLocal[u.id] || []).includes(liderId as string));
-    if (filhos.length === 0) return null;
+  // 🧮 ALGORITMO DE POSICIONAMENTO AUTOMÁTICO EM CAMADAS (Sem sobreposição)
+  const { nodes, edges } = useMemo(() => {
+    const nodesList: any[] = [];
+    const edgesList: any[] = [];
 
-    return (
-      <div className="flex justify-center items-start gap-x-8 pt-8 relative w-full">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-200"></div>
+    // 1. Calcula o "nível" (profundidade) de cada usuário para saber a linha vertical dele
+    const niveis: Record<string, number> = {};
+    const calcularNivel = (id: string): number => {
+      if (niveis[id] !== undefined) return niveis[id];
+      const pais = hierarquiaLocal[id] || [];
+      if (pais.length === 0) {
+        niveis[id] = 0;
+        return 0;
+      }
+      const niveisPais = pais.map(pId => calcularNivel(p) + 1);
+      const maxNivel = Math.max(...niveisPais);
+      niveis[id] = maxNivel;
+      return maxNivel;
+    };
 
-        {filhos.map((sub, idx) => {
-          const temFilhos = usuariosSistema.some(u => (hierarquiaLocal[u.id] || []).includes(sub.id));
-          const estaSelecionadoInLote = usuariosSelecionadosIds.includes(sub.id);
+    usuariosSistema.forEach(u => calcularNivel(u.id));
 
-          return (
+    // Agrupa os usuários por nível para calcular o espaçamento horizontal (X)
+    const usuariosPorNivel: Record<number, string[]> = {};
+    usuariosSistema.forEach(u => {
+      const nv = niveis[u.id] || 0;
+      if (!usuariosPorNivel[nv]) usuariosPorNivel[nv] = [];
+      usuariosPorNivel[nv].push(u.id);
+    });
+
+    // 2. Cria os Nós do Canvas (Cards Únicos)
+    usuariosSistema.forEach(u => {
+      const nv = niveis[u.id] || 0;
+      const indexNoNivel = usuariosPorNivel[nv].indexOf(u.id);
+      const totalNoNivel = usuariosPorNivel[nv].length;
+
+      // Centralização matemática horizontal baseada na quantidade de cards do mesmo nível
+      const posX = (indexNoNivel - (totalNoNivel - 1) / 2) * 280 + 400;
+      const posY = nv * 180 + 60;
+
+      const selecionado = usuariosSelecionadosIds.includes(u.id);
+
+      nodesList.push({
+        id: u.id,
+        position: { x: posX, y: posY },
+        data: {
+          label: (
             <div 
-              key={`${sub.id}-${liderId}`} // Chave composta para permitir o mesmo card em galhos diferentes
-              className="relative flex flex-col items-center shrink-0"
-              style={{
-                backgroundImage: `linear-gradient(to right, ${idx === 0 ? 'transparent' : '#e2e8f0'} 50%, ${idx === filhos.length - 1 ? 'transparent' : '#e2e8f0'} 50%)`,
-                backgroundPosition: 'top',
-                backgroundSize: '100% 2px',
-                backgroundRepeat: 'no-repeat',
-                paddingTop: '16px'
+              onClick={(e) => {
+                e.stopPropagation();
+                if (usuariosSelecionadosIds.length > 0) {
+                  vincularLoteAoLider(u.id);
+                } else {
+                  alternarSelecaoUsuario(u.id);
+                }
               }}
+              className={`flex flex-col w-[230px] bg-white border-2 p-3 rounded-xl transition-all text-left shadow-xs ${
+                selecionado ? "border-blue-600 ring-4 ring-blue-100 bg-blue-50/10" : "border-slate-200 hover:border-slate-400"
+              }`}
             >
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-200"></div>
-
-              {/* CARD MULTI-ALOCÁVEL */}
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (usuariosSelecionadosIds.length > 0) {
-                    executarMovimentacaoMultipla(sub.id); // Lança o lote selecionado abaixo deste pai
-                  } else {
-                    alternarSelecaoUsuario(sub.id); // Entra no lote de seleção
-                  }
-                }}
-                className={`relative flex flex-col w-[240px] bg-white border-2 p-3.5 rounded-2xl shadow-xs transition-all text-left z-10 cursor-pointer select-none ${
-                  estaSelecionadoInLote ? "border-blue-600 ring-4 ring-blue-100 bg-blue-50/10" : "border-slate-200 hover:border-slate-400 hover:shadow-md"
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`h-6 w-6 rounded-full flex items-center justify-center font-black text-[9px] uppercase ${
-                    sub.cargo === 'Master' || sub.cargo === 'Diretor' ? 'bg-slate-900 text-white' :
-                    sub.cargo === 'Gerente' ? 'bg-blue-600 text-white' : 'bg-amber-500 text-white'
-                  }`}>
-                    {sub.nome.substring(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-black text-slate-900 text-[11px] uppercase truncate tracking-tight">{sub.nome}</h3>
-                    <p className="text-[9px] text-slate-400 font-medium truncate leading-tight">{sub.email}</p>
-                  </div>
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-black text-[8px] uppercase">
+                  {u.nome.substring(0, 2)}
                 </div>
-
-                <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 gap-2">
-                  <button 
-                    onClick={(e) => liderId ? removerLiderEspecifico(e, sub.id, liderId) : soltarCardGeral(e, sub.id)}
-                    className="text-[9px] text-rose-500 hover:text-rose-700 font-bold uppercase transition-colors shrink-0"
-                  >
-                    ✕ Tirar Deste Ramo
-                  </button>
-                  <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tight shrink-0 ${
-                    sub.cargo === 'Master' || sub.cargo === 'Diretor' ? 'bg-purple-50 text-purple-600 border border-purple-100' :
-                    sub.cargo === 'Gerente' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
-                  }`}>
-                    {sub.cargo || "Operacional"}
-                  </span>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-slate-900 text-[11px] uppercase truncate">{u.nome}</h3>
+                  <p className="text-[9px] text-slate-400 truncate leading-none mt-0.5">{u.email}</p>
                 </div>
-
-                {temFilhos && (
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-4 bg-slate-200 translate-y-full"></div>
-                )}
               </div>
-
-              {/* Descida recursiva passando o ID deste nó para buscar os filhos dele */}
-              <RenderizarFilhosOrganograma liderId={sub.id} />
+              <div className="flex justify-between items-center mt-2.5 pt-1.5 border-t border-slate-100">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); limparTodosVinculosCard(u.id); }}
+                  className="text-[9px] text-rose-500 hover:text-rose-700 font-bold uppercase transition-colors bg-transparent border-0 cursor-pointer"
+                >
+                  ✕ Soltar
+                </button>
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-slate-100 text-slate-700">
+                  {sub.cargo || "Membro"}
+                </span>
+              </div>
             </div>
-          );
-        })}
-      </div>
-    );
-  };
+          )
+        },
+        style: { background: "transparent", border: "none", padding: 0 },
+      });
 
-  // No modelo multi-pai, as raízes são usuários que possuem a lista lider_ids vazia
-  const raizesDaArvore = usuariosSistema.filter(u => (hierarquiaLocal[u.id] || []).length === 0);
+      // 3. Cria as Arestas (As setas inteligentes cruzando a tela)
+      const pais = hierarquiaLocal[u.id] || [];
+      pais.forEach(pId => {
+        edgesList.push({
+          id: `edge-${pId}-${u.id}`,
+          source: pId,
+          target: u.id,
+          type: "smoothstep", // Desenha linhas curvas e ortogonais limpas
+          animated: true,
+          style: { stroke: "#cbd5e1", strokeWidth: 2 },
+        });
+      });
+    });
+
+    return { nodes: nodesList, edges: edgesList };
+  }, [usuariosSistema, hierarquiaLocal, usuariosSelecionadosIds]);
+
   const usuariosLivresParaArraste = usuariosSistema.filter(u => (hierarquiaLocal[u.id] || []).length === 0);
 
   return (
@@ -240,37 +241,27 @@ export default function GerenciarHierarquiaPage() {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-200 pb-4 shrink-0">
         <div>
-          <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">🌲 Central de Alçadas Multi-Vínculo (Rede)</h1>
-          <p className="text-xs text-slate-400">Selecione múltiplos usuários na gaveta esquerda e clique em cima de qualquer líder para criar vínculos simultâneos.</p>
+          <h1 className="text-base font-black text-slate-900 uppercase tracking-tight">🌲 Central de Alçadas em Rede Interativa</h1>
+          <p className="text-xs text-slate-400">Selecione colaboradores na gaveta esquerda e clique em qualquer card do canvas central para criar múltiplos vínculos diretos.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={carregarDadosHierarquia} disabled={carregando || salvando} className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 font-bold uppercase text-[10px] rounded-lg tracking-wider shadow-xs transition-all">
-            🔄 Descartar Mudanças
+          <button onClick={carregarDadosHierarquia} disabled={carregando || salvando} className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 font-bold uppercase text-[10px] rounded-lg tracking-wider transition-all">
+            🔄 Descartar
           </button>
           <button onClick={salvarEstruturaHierarquia} disabled={carregando || salvando} className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-md transition-all">
-            {salvando ? "⏳ Gravando Matriz..." : "📤 Salvar Alterações"}
+            {salvando ? "⏳ Gravando..." : "📤 Salvar Organograma"}
           </button>
         </div>
       </div>
 
-      {/* WORKSPACE COMPLETO */}
+      {/* WORKSPACE DIVIDIDO */}
       <div className="flex-1 flex gap-6 overflow-hidden w-full h-full items-stretch">
         
-        {/* GAVETA ESQUERDA: BANCO DE SELEÇÃO MULTIPLA */}
+        {/* GAVETA ESQUERDA */}
         <div className="w-[260px] bg-slate-900 text-white p-4 rounded-2xl flex flex-col shadow-xl shrink-0 border border-slate-800">
-          <div className="border-b border-slate-800 pb-2 mb-3 flex justify-between items-center">
-            <div>
-              <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block">👤 Em Seleção ({usuariosSelecionadosIds.length})</span>
-              <span className="text-slate-500 text-[10px] block mt-0.5 leading-tight">Marque e associe em lote.</span>
-            </div>
-            {usuariosLivresParaArraste.length > 0 && (
-              <button 
-                onClick={() => selecionarTodosLivres(usuariosLivresParaArraste)} 
-                className="text-[9px] font-bold uppercase text-blue-400 hover:underline bg-transparent border-0 cursor-pointer"
-              >
-                {usuariosSelecionadosIds.length === usuariosLivresParaArraste.length ? "Limpar" : "Todos"}
-              </button>
-            )}
+          <div className="border-b border-slate-800 pb-2 mb-3">
+            <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block">👤 Colaboradores Livres ({usuariosLivresParaArraste.length})</span>
+            <span className="text-slate-500 text-[10px] block mt-0.5 leading-tight">Selecione e clique em um líder no canvas.</span>
           </div>
           
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -282,99 +273,40 @@ export default function GerenciarHierarquiaPage() {
                   onClick={() => alternarSelecaoUsuario(user.id)}
                   className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer transition-all select-none ${
                     selecionado 
-                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 text-white" 
+                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 text-white animate-pulse" 
                       : "bg-slate-800 border-slate-700/60 text-slate-200 hover:border-slate-500"
                   }`}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <input 
-                      type="checkbox" 
-                      checked={selecionado} 
-                      readOnly 
-                      className="w-3.5 h-3.5 rounded text-blue-600 border-slate-700 bg-slate-950 focus:ring-0 shrink-0 pointer-events-none"
-                    />
-                    <span className="font-bold uppercase tracking-tight text-[11px] truncate">{user.nome}</span>
-                  </div>
-                  <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded font-mono shrink-0 ${selecionado ? 'bg-blue-800 text-white' : 'bg-slate-950 text-slate-400'}`}>
+                  <span className="font-bold uppercase tracking-tight text-[11px] truncate">{user.nome}</span>
+                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 font-mono">
                     {user.cargo || "Comercial"}
                   </span>
                 </div>
               );
             })}
-
-            {usuariosLivresParaArraste.length === 0 && (
-              <p className="text-slate-600 italic text-center text-[11px] pt-12">Todos organizados em tela.</p>
-            )}
           </div>
         </div>
 
-        {/* PAINEL CENTRAL: ORGANOGRAMA EM REDE */}
+        {/* CANVAS PRINCIPAL (REACT FLOW) */}
         <div 
-          className="flex-1 bg-white border border-slate-200 rounded-2xl p-8 overflow-auto shadow-inner relative flex flex-col"
-          onClick={() => {
-            if (usuariosSelecionadosIds.length > 0) executarMovimentacaoMultipla(null);
-          }}
+          className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-inner relative overflow-hidden flex flex-col h-full"
+          onClick={() => { if (usuariosSelecionadosIds.length > 0) vincularLoteAoLider(null); }}
         >
-          <div className="text-left mb-6 border-b border-slate-100 pb-3 shrink-0">
-            <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block mb-1">👑 Líderes Absolutos de Alçada (Diretores / Master)</span>
-            <span className="text-slate-400 text-[11px]">Selecione os usuários na gaveta e **clique no fundo branco** para torná-los chefes de célula, ou clique em outros cards para criar sub-ramos.</span>
-          </div>
-
-          <div className="flex justify-center items-start gap-x-12 pt-4 m-auto w-max min-w-full">
-            {raizesDaArvore.map((root) => {
-              const temFilhos = usuariosSistema.some(u => (hierarquiaLocal[u.id] || []).includes(root.id));
-              const estaSelecionadoInLote = usuariosSelecionadosIds.includes(root.id);
-
-              return (
-                <div key={root.id} className="flex flex-col items-center relative text-center">
-                  
-                  {/* CARD RAIZ PRINCIPAL */}
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (usuariosSelecionadosIds.length > 0) {
-                        executarMovimentacaoMultipla(root.id); // Aloca os selecionados abaixo deste pai
-                      } else {
-                        alternarSelecaoUsuario(root.id); // Entra no lote de seleção
-                      }
-                    }}
-                    className={`relative flex flex-col w-[240px] bg-white border-2 p-3.5 rounded-2xl shadow-sm transition-all text-left z-10 cursor-pointer ${
-                      estaSelecionadoInLote ? "border-blue-600 ring-4 ring-blue-100 bg-blue-50/10" : "border-slate-300 hover:border-slate-500"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center font-black text-[9px] uppercase">
-                        {root.nome.substring(0, 2)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-black text-slate-900 text-[11px] uppercase truncate tracking-tight">{root.nome}</h3>
-                        <p className="text-[9px] text-slate-400 font-medium truncate leading-tight">{root.email}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100">
-                      <button 
-                        onClick={(e) => soltarCardGeral(e, root.id)}
-                        className="text-[9px] text-rose-500 hover:text-rose-700 font-bold uppercase transition-colors"
-                      >
-                        ✕ Soltar Card
-                      </button>
-                      <span className="px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tight bg-purple-900 text-white">
-                        {root.cargo || "Diretor"}
-                      </span>
-                    </div>
-
-                    {temFilhos && (
-                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-slate-300 translate-y-full"></div>
-                    )}
-                  </div>
-
-                  {/* Renderiza as ramificações de rede descendente */}
-                  <RenderizarFilhosOrganograma liderId={root.id} />
-                </div>
-              );
-            })}
-          </div>
+          {/* Só renderiza se estiver no cliente (Front-end) */}
+          {typeof window !== "undefined" && (
+            <ReactFlowNoSSR
+              nodes={nodes}
+              edges={edges}
+              fitView
+              nodesConnectable={false}
+              nodesDraggable={true} // Permite arrastar os cards livremente pelo espaço se quiser reorganizar na mão!
+              minZoom={0.2}
+              maxZoom={1.5}
+            >
+              <BackgroundNoSSR color="#cbd5e1" gap={16} size={1} />
+              <ControlsNoSSR className="bg-white border border-slate-200 rounded-lg shadow-sm p-1" />
+            </ReactFlowNoSSR>
+          )}
         </div>
 
       </div>

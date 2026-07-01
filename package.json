@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.0",
+    "@xyflow/react": "^12.11.1",
     "googleapis": "^173.0.0",
     "html2pdf.js": "^0.14.0",
     "next": "16.2.7",
