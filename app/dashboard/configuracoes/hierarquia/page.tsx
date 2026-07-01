@@ -6,20 +6,20 @@ import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
 import "@xyflow/react/dist/style.css";
 
-// 🚨 Força o React Flow a carregar apenas no cliente (Front-end) para não quebrar o build do Next.js
-const ReactFlowNoSSR = dynamic(
-  () => import("@xyflow/react").then((mod) => mod.ReactFlow),
-  { ssr: false }
-);
-
-const BackgroundNoSSR = dynamic(
-  () => import("@xyflow/react").then((mod) => mod.Background),
-  { ssr: false }
-);
-
-const ControlsNoSSR = dynamic(
-  () => import("@xyflow/react").then((mod) => mod.Controls),
-  { ssr: false }
+// 🚨 Importa os componentes do pacote de forma dinâmica e segura para evitar que o Next.js tente renderizar no Servidor (SSR)
+const ReactFlowWrapper = dynamic(
+  () => import("@xyflow/react").then((mod) => {
+    const { ReactFlow, Background, Controls } = mod;
+    return function FlowContainer({ nodes, edges, ...props }: any) {
+      return (
+        <ReactFlow nodes={nodes} edges={edges} {...props}>
+          <Background color="#cbd5e1" gap={16} size={1} />
+          <Controls className="bg-white border border-slate-200 rounded-lg shadow-sm p-1" />
+        </ReactFlow>
+      );
+    };
+  }),
+  { ssr: false, loading: () => <div className="p-8 text-slate-400">Carregando mapa interativo...</div> }
 );
 
 interface UsuarioSistema {
@@ -88,7 +88,7 @@ export default function GerenciarHierarquiaPage() {
       usuariosSelecionadosIds.forEach(subId => {
         if (subId === liderId) return;
         if (liderId === null) {
-          copia[subId] = []; // Reseta e joga pro topo
+          copia[subId] = []; // Reseta vínculos e joga pro topo
           return;
         }
         const lideresAtuais = copia[subId] || [];
@@ -130,12 +130,11 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🧮 ALGORITMO DE POSICIONAMENTO AUTOMÁTICO EM CAMADAS (Sem sobreposição)
+  // 🧮 ALGORITMO DE POSICIONAMENTO EM CAMADAS
   const { nodes, edges } = useMemo(() => {
     const nodesList: any[] = [];
     const edgesList: any[] = [];
 
-    // 1. Calcula o "nível" (profundidade) de cada usuário para saber a linha vertical dele
     const niveis: Record<string, number> = {};
     const calcularNivel = (id: string): number => {
       if (niveis[id] !== undefined) return niveis[id];
@@ -144,7 +143,7 @@ export default function GerenciarHierarquiaPage() {
         niveis[id] = 0;
         return 0;
       }
-      const niveisPais = pais.map(pId => calcularNivel(p) + 1);
+      const niveisPais = pais.map(pId => calcularNivel(pId) + 1);
       const maxNivel = Math.max(...niveisPais);
       niveis[id] = maxNivel;
       return maxNivel;
@@ -152,7 +151,6 @@ export default function GerenciarHierarquiaPage() {
 
     usuariosSistema.forEach(u => calcularNivel(u.id));
 
-    // Agrupa os usuários por nível para calcular o espaçamento horizontal (X)
     const usuariosPorNivel: Record<number, string[]> = {};
     usuariosSistema.forEach(u => {
       const nv = niveis[u.id] || 0;
@@ -160,15 +158,14 @@ export default function GerenciarHierarquiaPage() {
       usuariosPorNivel[nv].push(u.id);
     });
 
-    // 2. Cria os Nós do Canvas (Cards Únicos)
     usuariosSistema.forEach(u => {
       const nv = niveis[u.id] || 0;
       const indexNoNivel = usuariosPorNivel[nv].indexOf(u.id);
       const totalNoNivel = usuariosPorNivel[nv].length;
 
-      // Centralização matemática horizontal baseada na quantidade de cards do mesmo nível
-      const posX = (indexNoNivel - (totalNoNivel - 1) / 2) * 280 + 400;
-      const posY = nv * 180 + 60;
+      // Espaçamento horizontal e vertical ajustado para os blocos
+      const posX = (indexNoNivel - (totalNoNivel - 1) / 2) * 280 + 350;
+      const posY = nv * 180 + 40;
 
       const selecionado = usuariosSelecionadosIds.includes(u.id);
 
@@ -186,12 +183,12 @@ export default function GerenciarHierarquiaPage() {
                   alternarSelecaoUsuario(u.id);
                 }
               }}
-              className={`flex flex-col w-[230px] bg-white border-2 p-3 rounded-xl transition-all text-left shadow-xs ${
+              className={`flex flex-col w-[230px] bg-white border-2 p-3.5 rounded-2xl text-left shadow-xs transition-all ${
                 selecionado ? "border-blue-600 ring-4 ring-blue-100 bg-blue-50/10" : "border-slate-200 hover:border-slate-400"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <div className="h-5 w-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-black text-[8px] uppercase">
+              <div className="flex items-center gap-2.5">
+                <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center font-black text-[9px] uppercase">
                   {u.nome.substring(0, 2)}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -199,15 +196,15 @@ export default function GerenciarHierarquiaPage() {
                   <p className="text-[9px] text-slate-400 truncate leading-none mt-0.5">{u.email}</p>
                 </div>
               </div>
-              <div className="flex justify-between items-center mt-2.5 pt-1.5 border-t border-slate-100">
+              <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100">
                 <button 
                   onClick={(e) => { e.stopPropagation(); limparTodosVinculosCard(u.id); }}
                   className="text-[9px] text-rose-500 hover:text-rose-700 font-bold uppercase transition-colors bg-transparent border-0 cursor-pointer"
                 >
                   ✕ Soltar
                 </button>
-                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-slate-100 text-slate-700">
-                  {sub.cargo || "Membro"}
+                <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase bg-slate-100 text-slate-700">
+                  {u.cargo || "Membro"}
                 </span>
               </div>
             </div>
@@ -216,14 +213,13 @@ export default function GerenciarHierarquiaPage() {
         style: { background: "transparent", border: "none", padding: 0 },
       });
 
-      // 3. Cria as Arestas (As setas inteligentes cruzando a tela)
       const pais = hierarquiaLocal[u.id] || [];
       pais.forEach(pId => {
         edgesList.push({
           id: `edge-${pId}-${u.id}`,
           source: pId,
           target: u.id,
-          type: "smoothstep", // Desenha linhas curvas e ortogonais limpas
+          type: "smoothstep",
           animated: true,
           style: { stroke: "#cbd5e1", strokeWidth: 2 },
         });
@@ -254,7 +250,7 @@ export default function GerenciarHierarquiaPage() {
         </div>
       </div>
 
-      {/* WORKSPACE DIVIDIDO */}
+      {/* WORKSPACE */}
       <div className="flex-1 flex gap-6 overflow-hidden w-full h-full items-stretch">
         
         {/* GAVETA ESQUERDA */}
@@ -273,7 +269,7 @@ export default function GerenciarHierarquiaPage() {
                   onClick={() => alternarSelecaoUsuario(user.id)}
                   className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer transition-all select-none ${
                     selecionado 
-                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 text-white animate-pulse" 
+                      ? "bg-blue-600 border-blue-400 font-bold ring-2 ring-blue-500/20 text-white" 
                       : "bg-slate-800 border-slate-700/60 text-slate-200 hover:border-slate-500"
                   }`}
                 >
@@ -287,26 +283,20 @@ export default function GerenciarHierarquiaPage() {
           </div>
         </div>
 
-        {/* CANVAS PRINCIPAL (REACT FLOW) */}
+        {/* CANVAS PRINCIPAL */}
         <div 
           className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-inner relative overflow-hidden flex flex-col h-full"
           onClick={() => { if (usuariosSelecionadosIds.length > 0) vincularLoteAoLider(null); }}
         >
-          {/* Só renderiza se estiver no cliente (Front-end) */}
-          {typeof window !== "undefined" && (
-            <ReactFlowNoSSR
-              nodes={nodes}
-              edges={edges}
-              fitView
-              nodesConnectable={false}
-              nodesDraggable={true} // Permite arrastar os cards livremente pelo espaço se quiser reorganizar na mão!
-              minZoom={0.2}
-              maxZoom={1.5}
-            >
-              <BackgroundNoSSR color="#cbd5e1" gap={16} size={1} />
-              <ControlsNoSSR className="bg-white border border-slate-200 rounded-lg shadow-sm p-1" />
-            </ReactFlowNoSSR>
-          )}
+          <ReactFlowWrapper
+            nodes={nodes}
+            edges={edges}
+            fitView
+            nodesConnectable={false}
+            nodesDraggable={true}
+            minZoom={0.2}
+            maxZoom={1.5}
+          />
         </div>
 
       </div>
