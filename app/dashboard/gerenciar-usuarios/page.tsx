@@ -84,20 +84,19 @@ export default function GerenciarUsuariosPage() {
   };
 
   const salvarUsuario = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nome.trim() || !email.trim()) return;
+  e.preventDefault();
+  if (!nome.trim() || !email.trim()) return;
 
-    try {
-      setSalvando(true);
-      const emailTratado = email.trim().toLowerCase();
+  try {
+    setSalvando(true);
+    const emailTratado = email.trim().toLowerCase();
 
-      // 🛡️ BLINDAGEM DA HIERARQUIA: 
-      // Em vez de forçar um Array e apagar a chave "lider_id", mantemos o objeto do banco.
+    // No modo de edição, mantemos a lógica antiga se o ID já existir no Auth
+    if (selecionado) {
       const payloadPermissoes = (selecionado?.permissoes && !Array.isArray(selecionado.permissoes)) 
         ? { ...selecionado.permissoes } 
         : {};
 
-      // Atualiza apenas os módulos de visualização no JSON
       MAPA_DE_ROTAS.forEach(r => {
         if (permissoes[r.path]) {
           payloadPermissoes[r.path] = true;
@@ -106,50 +105,62 @@ export default function GerenciarUsuariosPage() {
         }
       });
 
-      if (selecionado) {
-        // Modo Edição
-        const payloadUpdate: any = {
-          nome: nome.trim(),
-          email: emailTratado,
-          cargo: cargo,
-          permissoes: payloadPermissoes
-        };
+      const payloadUpdate: any = {
+        nome: nome.trim(),
+        email: emailTratado,
+        cargo: cargo,
+        permissoes: payloadPermissoes
+      };
 
-        if (senha.trim()) {
-          payloadUpdate.senha = senha.trim(); // Ajuste conforme a sua criptografia
-        }
+      const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
+      if (error) throw error;
+      alert("🎉 Permissões e dados atualizados com sucesso!");
+    } else {
+      // 🚀 MODO CADASTRO NOVO: Chama a nossa API Route automática!
+      if (!senha.trim()) {
+        alert("A senha de acesso inicial é obrigatória.");
+        return;
+      }
 
-        const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
-        if (error) throw error;
-        alert("🎉 Permissões e dados atualizados com sucesso!");
-      } else {
-        // Modo Cadastro Novo
-        if (!senha.trim()) {
-          alert("A senha de acesso inicial é obrigatória.");
-          return;
-        }
+      // Prepara as permissões iniciais baseadas no checklist
+      const payloadPermissoes: Record<string, boolean> = {};
+      MAPA_DE_ROTAS.forEach(r => {
+        if (permissoes[r.path]) payloadPermissoes[r.path] = true;
+      });
 
-        const { error } = await supabase.from("usuarios").insert([{
+      // Dispara para a API Route que criamos no Passo 2
+      const response = await fetch("/api/usuarios", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           nome: nome.trim(),
           email: emailTratado,
           senha: senha.trim(),
           cargo: cargo,
-          permissoes: payloadPermissoes
-        }]);
+          permissoes: payloadPermissoes,
+        }),
+      });
 
-        if (error) throw error;
-        alert("🎉 Novo colaborador registrado no sistema com sucesso!");
+      const resultado = await response.json();
+
+      if (!response.ok) {
+        throw new Error(resultado.error || "Erro desconhecido na API");
       }
 
-      limparFormulario();
-      await carregarUsuarios();
-    } catch (err: any) {
-      console.error(err);
-      alert(`Erro ao persistir informações: ${err.message}`);
-    } finally {
-      setSalvando(false);
+      alert("🎉 Novo colaborador registrado AUTOMATICAMENTE no Auth e no Banco!");
     }
-  };
+
+    limparFormulario();
+    await carregarUsuarios();
+  } catch (err: any) {
+    console.error(err);
+    alert(`Erro ao persistir informações: ${err.message}`);
+  } finally {
+    setSalvando(false);
+  }
+};
 
   const alternarPermissao = (path: string) => {
     setPermissoes(prev => ({ ...prev, [path]: !prev[path] }));
