@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
-import { SocksProxyAgent } from 'socks-proxy-agent';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 // 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN
 const NORD_USER = '4LQDCWTn4kB7tm6EnvwFfLbn'; 
 const NORD_PASS = 'Cj3FbeJ1ZRnLtjVmxg51Pkn2';   
 const NORD_IP = '153.53.226.43'; // Seu IP dedicado da NordVPN
-const NORD_PORT = '1080';        // Porta oficial SOCKS5 da NordVPN
+const NORD_PORT = '8989';        // Porta oficial de Proxy HTTP da NordVPN (Evita o ETIMEDOUT)
 
-// Cria a URL de conexão do proxy
-const proxyUrl = `socks://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
+// Monta a URL usando o protocolo HTTP padrão aceito pela Vercel
+const proxyUrl = `http://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
 
 export async function POST(request: Request) {
   try {
@@ -27,32 +27,31 @@ export async function POST(request: Request) {
 
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[VERCEL SOCKS5] Disparando requisição via Axios para: ${docLimpo}`);
+    console.log(`[VERCEL HTTP PROXY] Disparando via porta 8989 para: ${docLimpo}`);
 
-    // Criamos o agente explicitamente dentro do escopo da execução da Vercel
-    const agent = new SocksProxyAgent(proxyUrl);
+    // Inicializa o agente HTTP correto para a Vercel
+    const agent = new HttpsProxyAgent(proxyUrl);
 
-    // Faz a chamada usando o Axios injetando o agente SOCKS5 diretamente
+    // Faz a chamada oficial usando o Axios amarrado ao agente HTTP
     const resposta = await axios.post(urlLemit, params.toString(), {
       httpAgent: agent,
       httpsAgent: agent,
-      timeout: 15000, // Dá 15 segundos de folga para a conexão estabilizar via Los Angeles
+      timeout: 15000, // 15 segundos de margem
       headers: {
         'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
 
-    // Retorna os dados com sucesso
+    // Retorna os dados com sucesso para a sua tela visual
     return NextResponse.json(resposta.data);
 
   } catch (error: any) {
     console.error('Erro na execução do túnel Vercel:', error.response?.data || error.message);
     
-    // Retorna o detalhe real do erro para não mascarar no front-end
     return NextResponse.json(
       { 
-        error: 'Erro interno na rota do servidor.', 
+        error: 'Erro na comunicação através do IP Dedicado.', 
         detalhes: error.response?.data || error.message 
       },
       { status: 500 }
