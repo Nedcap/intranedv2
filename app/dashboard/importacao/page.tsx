@@ -40,7 +40,6 @@ function parseValorReal(valor: any): number {
 function formatarDataExcel(valorData: any): string {
   if (!valorData) return "";
   
-  // 🎯 FIX: Converte strings numéricas (ex: "46127.0") para número real para forçar a conversão de data Excel
   const numVal = Number(valorData);
   if (!isNaN(numVal) && numVal > 30000 && numVal < 60000) {
     const data = new Date(Math.round((numVal - 25569) * 86400 * 1000));
@@ -98,7 +97,6 @@ function checarSeVencido(dataStr: string): string {
 // 🤖 PROCESSADORES BLINDADOS
 // ============================================================================
 
-// 1.1 RISCO SEC
 const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return {};
@@ -128,7 +126,6 @@ const processarRiscoSec = (raw: any[][], base: BaseUniversal[]) => {
   return records;
 };
 
-// 1.2 RISCO FIDC
 const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CLIENTE" || strClean(cell) === "CNPJCPF"));
   if (headerIdx === -1) return {};
@@ -146,7 +143,6 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
     const rawCed = String(row[idxCliente]).trim();
     if (!rawCed || rawCed.toUpperCase() === "NAN" || rawCed.toUpperCase().includes("TOTAL")) continue;
 
-    // 🎯 FIX: Voltámos a passar null no CNPJ para que a Base Universal faça o cruzamento tolerante (por nome)
     const chave = normalizarPelaBaseUniversal(rawCed, null, base);
     if (!chave) continue;
 
@@ -159,7 +155,6 @@ const processarRiscoFidc = (raw: any[][], base: BaseUniversal[]) => {
   return records;
 };
 
-// 2.1 VOP SEC
 const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE" || strClean(cell) === "CPFCNPJ"));
   if (headerIdx === -1) return [];
@@ -194,7 +189,6 @@ const processarVopSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// 2.2 VOP FIDC
 const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
@@ -235,7 +229,6 @@ const processarVopFidc = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// 3.1 RECEITAS SEC
 const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "ADITIVO"));
   if (headerIdx === -1) return [];
@@ -283,7 +276,6 @@ const processarReceitasSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// 3.2 RECEITAS FIDC
 const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
@@ -333,12 +325,10 @@ const processarReceitasFidc = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// 4.1 LIQUIDADOS SEC (JUROS ATRASO)
 const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   let colDtaBaixa = 12;
   let colEncargos = 15;
 
-  // Localiza as posições corretas das colunas no ficheiro
   for (let i = 0; i < Math.min(30, raw.length); i++) {
     const rowStr = raw[i].map(x => strClean(x));
     if (rowStr.includes("DTABAIXA") || rowStr.includes("DATABAIXA")) {
@@ -351,15 +341,12 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   const lancamentos: any[] = [];
   let currentCedente = "";
 
-  // 🎯 FIX: Varre o ficheiro a partir da linha 0, pois o Cedente aparece ANTES do cabeçalho
   for (let i = 0; i < raw.length; i++) {
     const row = raw[i];
     if (!row || row.length === 0) continue;
 
-    // Busca a primeira célula preenchida da linha
     const firstCell = String(row.find(cell => cell !== null && cell !== undefined && String(cell).trim() !== "") || "").trim();
 
-    // Deteta a linha do Cedente (Ex: "12 - STOCK TECH S.A.")
     if (/^\d+\s*-/.test(firstCell)) { 
       currentCedente = firstCell.replace(/^\d+\s*-\s*/, "").trim(); 
       continue; 
@@ -388,7 +375,6 @@ const processarCampoLiquidadosSec = (raw: any[][], base: BaseUniversal[]) => {
   return lancamentos;
 };
 
-// 5.1 CARTEIRA ABERTA SEC
 const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
@@ -427,7 +413,6 @@ const processarCarteiraSec = (raw: any[][], base: BaseUniversal[]) => {
   return titulos;
 };
 
-// 5.2 CARTEIRA ABERTA FIDC
 const processarCarteiraFidc = (raw: any[][], base: BaseUniversal[]) => {
   const headerIdx = raw.findIndex(row => row.some(cell => strClean(cell) === "NOMEDOCEDENTE" || strClean(cell) === "CEDENTE"));
   if (headerIdx === -1) return [];
@@ -542,9 +527,10 @@ export default function ImportacaoPage() {
       else if (tipo === "juros") dadosMapeados = empresa === "sec" ? processarCampoLiquidadosSec(rawData, baseUniversalData) : [];
       else if (tipo === "carteira") dadosMapeados = empresa === "sec" ? processarCarteiraSec(rawData, baseUniversalData) : processarCarteiraFidc(rawData, baseUniversalData);
 
+      // 🎯 FIX: Deep copy para atualizar o estado do React corretamente nos nós profundos
       setDadosFinais((prev: any) => {
-        const atualizado = { ...prev };
-        atualizado[tipo] = { ...atualizado[tipo], [empresa]: dadosMapeados };
+        const atualizado = JSON.parse(JSON.stringify(prev));
+        atualizado[tipo][empresa] = dadosMapeados;
         return atualizado;
       });
       setStatusMsg(`✅ Processamento instantâneo concluído em ${file.name}!`);
@@ -600,8 +586,8 @@ export default function ImportacaoPage() {
       // ========================================================================
       const loteFinancas: any[] = [];
       const mesclarLancamento = (item: any) => {
-        // Usa o CNPJ caso tenha sido extraído, senão vai pelo nome original
         const cedenteFinalNormalizado = normalizarPelaBaseUniversal(item.cedenteOriginal, item.cnpj || null, baseUniversalData);
+        if (!cedenteFinalNormalizado) return;
         loteFinancas.push({
           empresa: item.empresa,
           data_operacao: converteDataParaISO(item.dataOp),
@@ -637,15 +623,18 @@ export default function ImportacaoPage() {
           if (errExtrato) throw errExtrato;
         }
 
+        // 🎯 FIX: Nova agregação matemática para dash_vop prevenindo zeramento incorreto
         const { data: dbVop } = await supabase.from('dash_vop').select('*');
         const vopMap = new Map();
         
         dbVop?.forEach(row => {
+          const key = `${row.mes_ano}_${row.cedente}`;
           const zerarSec = periodosAfetados.has(`SEC|${row.mes_ano}`);
           const zerarFidc = periodosAfetados.has(`FIDC|${row.mes_ano}`);
           
-          vopMap.set(`${row.mes_ano}_${row.cedente}`, {
-            ...row,
+          vopMap.set(key, {
+            mes_ano: row.mes_ano,
+            cedente: row.cedente,
             vop_sec: zerarSec ? 0 : (row.vop_sec || 0),
             vop_fidc: zerarFidc ? 0 : (row.vop_fidc || 0)
           });
@@ -654,8 +643,9 @@ export default function ImportacaoPage() {
         loteFinancas.forEach(item => {
           if (item.vop > 0) {
             const key = `${item.mes_ano}_${item.cedente}`;
-            if (!vopMap.has(key)) vopMap.set(key, { mes_ano: item.mes_ano, cedente: item.cedente, vop_sec: 0, vop_fidc: 0 });
-            
+            if (!vopMap.has(key)) {
+              vopMap.set(key, { mes_ano: item.mes_ano, cedente: item.cedente, vop_sec: 0, vop_fidc: 0 });
+            }
             const obj = vopMap.get(key);
             if (item.empresa === 'SEC') obj.vop_sec += item.vop;
             if (item.empresa === 'FIDC') obj.vop_fidc += item.vop;
