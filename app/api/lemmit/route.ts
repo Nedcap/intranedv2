@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
+import axios from 'axios';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 
-// 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN (Pegue no seu painel manual da Nord)
-// Atenção: Use o Username e Password longos da aba "Configuração Manual"
+// 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN
 const NORD_USER = '4LQDCWTn4kB7tm6EnvwFfLbn'; 
 const NORD_PASS = 'Cj3FbeJ1ZRnLtjVmxg51Pkn2';   
 const NORD_IP = '153.53.226.43'; // Seu IP dedicado
 const NORD_PORT = '1080';        // Porta oficial SOCKS5 da NordVPN
 
-// Monta a conexão isolada via SOCKS5
+// Cria o túnel SOCKS5
 const proxyUrl = `socks://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
 const agent = new SocksProxyAgent(proxyUrl);
 
@@ -22,42 +22,36 @@ export async function POST(request: Request) {
 
     const docLimpo = documento.replace(/\D/g, '');
 
+    // Formata o corpo exatamente como a Lemit exige (x-www-form-urlencoded)
     const params = new URLSearchParams();
     params.append('documento', docLimpo);
 
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[TÚNEL SOCKS5] Enviando consulta de ${docLimpo} isoladamente via NordVPN...`);
+    console.log(`[VERCEL PROXY] Enviando consulta de ${docLimpo} via Axios + SOCKS5`);
 
-    // Faz o fetch passando estritamente pelo túnel SOCKS5 da NordVPN
-    const resposta = await fetch(urlLemit, {
-      method: 'POST',
+    // Faz a chamada usando o Axios (que força a Vercel a usar o túnel SOCKS5)
+    const resposta = await axios.post(urlLemit, params.toString(), {
+      httpAgent: agent,
+      httpsAgent: agent,
       headers: {
-        'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: params.toString(),
-      // @ts-ignore
-      agent: agent, 
-      cache: 'force-cache', // Cache do Next.js salvando seus créditos
+        'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
     });
 
-    if (!resposta.ok) {
-      const erroDados = await resposta.json().catch(() => ({}));
-      return NextResponse.json(
-        { error: 'Erro retornado pela API da Lemit.', detalhes: erroDados },
-        { status: resposta.status }
-      );
-    }
-
-    const dados = await resposta.json();
-    return NextResponse.json(dados);
+    // Retorna os dados com sucesso
+    return NextResponse.json(resposta.data);
 
   } catch (error: any) {
-    console.error('Erro no túnel da NordVPN:', error.message);
+    console.error('Erro no túnel da Vercel/NordVPN:', error.response?.data || error.message);
+    
     return NextResponse.json(
-      { error: 'Falha na conexão isolada com o Proxy.', detalhes: error.message },
-      { status: 500 }
+      { 
+        error: 'Erro na comunicação através do IP Dedicado.', 
+        detalhes: error.response?.data || error.message 
+      },
+      { status: error.response?.status || 500 }
     );
   }
 }
