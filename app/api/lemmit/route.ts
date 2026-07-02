@@ -11,25 +11,27 @@ export async function POST(request: Request) {
 
     const docLimpo = documento.replace(/\D/g, '');
 
-    // 🎯 Ajuste de rota com base no painel da Lemit (Verificando se precisa de GET)
-    const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}/${docLimpo}`;
+    // Formato padrão da URL da API deles
+    const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[LOCAL DEV] Disparando requisição para: ${urlLemit}`);
+    // Formata os parâmetros como um formulário x-www-form-urlencoded
+    const params = new URLSearchParams();
+    params.append('documento', docLimpo);
 
-    // Testando com axios.get porque o documento vai direto na URL (padrão de consultas GET)
-    const resposta = await axios.get(urlLemit, {
+    console.log(`[LOCAL DEV POST] Consultando ${tipo} via POST para: ${urlLemit}`);
+
+    const resposta = await axios.post(urlLemit, params.toString(), {
       headers: {
-        'Authorization': 'Bearer LSE3EuOPZJ3SODp4FuwbOExc5VoW67vcUtwWEDYY',
-        'Content-Type': 'application/json'
+        'Authorization': 'Bearer LSE3EuOPZJ3SODp4FuwbOExc5VoW67vcUtwWEDYY', // Seu Token real
+        'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
 
     return NextResponse.json(resposta.data);
 
   } catch (error: any) {
-    // Se der erro, printa a resposta exata da Lemit no terminal do seu VS Code
     const dadosErro = error.response?.data || error.message;
-    console.error('❌ ERRO DETALHADO DA LEMIT NO TERMINAL:', dadosErro);
+    console.error('❌ ERRO DETALHADO NO TERMINAL:', dadosErro);
     
     return NextResponse.json(
       { error: 'Erro retornado pela API da Lemit.', detalhes: dadosErro },
