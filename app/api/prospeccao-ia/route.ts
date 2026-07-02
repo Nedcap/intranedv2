@@ -20,20 +20,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "O texto de busca é obrigatório." }, { status: 400 });
     }
 
-    // 1. Inicializa o client do Neon usando a variável de ambiente segura (.env.local)
     if (!process.env.NEON_DATABASE_URL) {
       throw new Error("A variável NEON_DATABASE_URL não está configurada no seu .env.local");
     }
     
-    // 🔥 CORREÇÃO: Usando Pool no lugar do neon() para suportar queries dinâmicas com Arrays
     const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL });
     
-    // 2. Inicializa a OpenAI
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // 3. Chamar a IA para estruturar os filtros a partir do prompt solto do usuário
     const promptSistema = `
       Você é um analista especialista em prospecção B2B. Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       Retorne ESTRITAMENTE um objeto JSON válido:
@@ -41,7 +37,7 @@ export async function POST(req: Request) {
         "atividade": "descrição curta do segmento",
         "cidade": "Nome da cidade por extenso ou null se não citada",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
-        "familias_cnae": ["array de strings com os 2 primeiros digitos das familias CNAE alvo"],
+        "familias_cnae": ["array de strings contendo APENAS OS 2 PRIMEIROS DÍGITOS numéricos das familias CNAE alvo, sem letras, sem 'xx'"],
         "termos_fortes": ["palavras-chave específicas do nicho"],
         "termos_fracos": ["palavras genéricas"]
       }
@@ -63,14 +59,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido. Por favor, especifique a região (ex: SP, PR)." }, { status: 400 });
     }
 
-    // 4. Montar a cláusula WHERE dinâmica para buscar direto no Neon (PostgreSQL)
+    // 🔥 FIX 1: Limpeza brutal contra as alucinações da IA ("22xx" vira "22")
+    if (perfilMercado.familias_cnae && Array.isArray(perfilMercado.familias_cnae)) {
+      perfilMercado.familias_cnae = perfilMercado.familias_cnae
+        .map((c: string) => c.replace(/\D/g, '').substring(0, 2))
+        .filter((c: string) => c.length === 2);
+    }
+
+    // 4. Montar a cláusula WHERE dinâmica
     let queryFiltros = "WHERE e.uf = $1 AND e.situacao = '02'";
     const parametrosQuery: any[] = [perfilMercado.uf.toUpperCase().trim()];
     let contadorParametros = 2;
 
     if (perfilMercado.cidade) {
+      // 🔥 FIX 2: Busca por cidade usando ILIKE abrangente
       queryFiltros += ` AND m.nome ILIKE $${contadorParametros}`;
-      parametrosQuery.push(perfilMercado.cidade.trim());
+      parametrosQuery.push(`%${perfilMercado.cidade.trim()}%`);
       contadorParametros++;
     }
 
@@ -80,7 +84,6 @@ export async function POST(req: Request) {
       parametrosQuery.push(...perfilMercado.familias_cnae);
     }
 
-    // Executa a busca bruta indexada no Neon de São Paulo (Limitado a 5000 para refinar o Score em RAM)
     const queryCompleta = `
       SELECT
         e.cnpj,
@@ -100,11 +103,10 @@ export async function POST(req: Request) {
       LIMIT 5000
     `;
 
-    // 🔥 CORREÇÃO: Executando com pool.query, que aceita a query dinâmica e o array de parâmetros normalmente
     const { rows } = await pool.query(queryCompleta, parametrosQuery);
 
-    // 5. Motor de Score e Relevância em Memória RAM (Idêntico ao bot original)
-    const SCORE_MINIMO = 4;
+    // 5. Motor de Score e Relevância em Memória RAM
+    const SCORE_MINIMO = 3; // 🔥 FIX 3: Baixado de 4 para 3. Se bater o CNAE certo, entra na lista!
     const leadsMapeados: any[] = [];
     
     const tFortes = (perfilMercado.termos_fortes || []).map((t: string) => normalizarTexto(t));
@@ -117,7 +119,8 @@ export async function POST(req: Request) {
       const cnaesSec = row.cnaes_secundarios || "";
       const famPrincipal = cnaePrinc.substring(0, 2);
 
-      if (famCnaes.includes(famPrincipal)) score += 3;
+      // 🔥 FIX 4: Se bater o CNAE principal da atividade alvo, já ganha 4 pontos direto
+      if (famCnaes.includes(famPrincipal)) score += 4;
 
       for (const fam of famCnaes) {
         if (cnaesSec.includes(fam)) {
@@ -150,7 +153,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Ordenação de relevância decrescente e corte no limite da tela
     const resultadoFinal = leadsMapeados
       .sort((a, b) => b.score - a.score)
       .slice(0, limite);
