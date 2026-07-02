@@ -9,18 +9,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Tipo e documento são obrigatórios.' }, { status: 400 });
     }
 
-    // Deixa apenas os números (limpa pontos e traços)
     const docLimpo = documento.replace(/\D/g, '');
 
-    // 🎯 AJUSTE DO PRINT: O documento vai direto na URL!
+    // 🎯 Ajuste de rota com base no painel da Lemit (Verificando se precisa de GET)
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}/${docLimpo}`;
 
-    console.log(`[API LEMIT] Consultando: ${urlLemit}`);
+    console.log(`[LOCAL DEV] Disparando requisição para: ${urlLemit}`);
 
-    // Faz a chamada oficial usando o seu token gerado
+    // Testando com axios.get porque o documento vai direto na URL (padrão de consultas GET)
     const resposta = await axios.get(urlLemit, {
       headers: {
-        // Mantemos a palavra Bearer com um espaço, seguido do SEU token real do print
         'Authorization': 'Bearer LSE3EuOPZJ3SODp4FuwbOExc5VoW67vcUtwWEDYY',
         'Content-Type': 'application/json'
       }
@@ -29,10 +27,12 @@ export async function POST(request: Request) {
     return NextResponse.json(resposta.data);
 
   } catch (error: any) {
-    const erroReal = error.response?.data || error.message;
-    console.error('Erro retornado pela Lemit:', erroReal);
+    // Se der erro, printa a resposta exata da Lemit no terminal do seu VS Code
+    const dadosErro = error.response?.data || error.message;
+    console.error('❌ ERRO DETALHADO DA LEMIT NO TERMINAL:', dadosErro);
+    
     return NextResponse.json(
-      { error: 'Erro na API da Lemit.', detalhes: erroReal },
+      { error: 'Erro retornado pela API da Lemit.', detalhes: dadosErro },
       { status: error.response?.status || 500 }
     );
   }
