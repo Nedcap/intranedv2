@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
-// 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN
+// 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN (Pegue no painel web da Nord)
 const NORD_USER = '4LQDCWTn4kB7tm6EnvwFfLbn'; 
 const NORD_PASS = 'Cj3FbeJ1ZRnLtjVmxg51Pkn2';   
-const NORD_IP = '153.53.226.43'; // Seu IP dedicado da NordVPN
-const NORD_PORT = 8989;          // Porta oficial de Proxy HTTP da NordVPN (Mantenha como número)
+const NORD_IP = '153.53.226.43'; // Seu IP dedicado
+const NORD_PORT = '8989';        // Porta oficial de Proxy HTTP da NordVPN
+
+const proxyUrl = `http://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
 
 export async function POST(request: Request) {
   try {
@@ -17,46 +19,51 @@ export async function POST(request: Request) {
 
     const docLimpo = documento.replace(/\D/g, '');
 
-    // Formata o corpo exatamente como a Lemit exige (x-www-form-urlencoded)
     const params = new URLSearchParams();
     params.append('documento', docLimpo);
 
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[VERCEL NATIVE PROXY] Roteando chamada para ${docLimpo} via objeto Axios.`);
+    // Verifica se está rodando no seu PC (localhost) ou na nuvem (Vercel)
+    const IsLocalhost = process.env.NODE_ENV === 'development' || request.url.includes('localhost');
 
-    // Faz a chamada oficial usando a configuração nativa de proxy do Axios
-    // Isso faz a Vercel empacotar o tráfego de forma limpa
-    const resposta = await axios.post(urlLemit, params.toString(), {
-      proxy: {
-        protocol: 'http',
-        host: NORD_IP,
-        port: NORD_PORT,
-        auth: {
-          username: NORD_USER,
-          password: NORD_PASS
-        }
-      },
-      timeout: 15000, // 15 segundos
+    let fetchOptions: any = {
+      method: 'POST',
       headers: {
         'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
-    });
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+      cache: 'force-cache', // Evita gastar seus créditos se o documento for repetido
+    };
 
-    // Retorna os dados com sucesso para o front-end
-    return NextResponse.json(resposta.data);
+    if (IsLocalhost) {
+      console.log(`[LOCAL DEV] Roteando chamada para ${docLimpo} isoladamente via Proxy HTTP NordVPN`);
+      // No seu PC local, nós forçamos o uso do agente da NordVPN
+      const agent = new HttpsProxyAgent(proxyUrl);
+      fetchOptions.agent = agent;
+    } else {
+      console.log(`[PRODUCTION VERCEL] Disparando requisição via rede nativa padrão.`);
+    }
+
+    // Dispara a requisição
+    const resposta = await fetch(urlLemit, fetchOptions);
+
+    if (!resposta.ok) {
+      const erroDados = await resposta.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: 'Erro retornado pela API da Lemit.', detalhes: erroDados },
+        { status: resposta.status }
+      );
+    }
+
+    const dados = await resposta.json();
+    return NextResponse.json(dados);
 
   } catch (error: any) {
-    // Se a Lemit rejeitar o tráfego após o proxy conectar, captura a resposta real deles aqui
-    const erroReal = error.response?.data || error.message;
-    console.error('Erro na execução do túnel Vercel:', erroReal);
-    
+    console.error('Erro na rota interna do servidor:', error.message);
     return NextResponse.json(
-      { 
-        error: 'Erro na comunicação através do IP Dedicado.', 
-        detalhes: erroReal 
-      },
+      { error: 'Falha interna ao processar a consulta.', detalhes: error.message },
       { status: 500 }
     );
   }
