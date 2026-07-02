@@ -24,7 +24,7 @@ interface PerfilAI {
   termos_fracos: string[];
 }
 
-// 🌲 Função de varredura profunda de equipe (Grafo/Multi-Líderes)
+// 🌲 Função de varredura profunda de equipe
 const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
   if (visitados.has(liderId)) return [];
   visitados.add(liderId);
@@ -69,27 +69,22 @@ export default function ProspeccaoIAPage() {
       const user = JSON.parse(userStr);
       const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-      // Se for Comercial simples, só pode mandar pra ele mesmo
       if (cargoUser !== "master" && cargoUser !== "diretor" && cargoUser !== "gerente") {
         setEquipeDisponivel([{ id: user.id, nome: user.nome }]);
         setAgenteAlvo(user.nome);
         return;
       }
 
-      // Se for Líder, varre a árvore do Supabase
       const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
       
       if (todosUsuarios) {
         if (cargoUser === "master" || cargoUser === "diretor") {
-          // Diretor vê todo mundo
           setEquipeDisponivel(todosUsuarios);
         } else {
-          // Gerente vê a cascata dele
           const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
           const time = todosUsuarios.filter(u => idsPermitidos.includes(u.id));
           setEquipeDisponivel(time);
         }
-        // Deixa o próprio usuário selecionado por padrão
         setAgenteAlvo(user.nome);
       }
     } catch (err) {
@@ -126,32 +121,41 @@ export default function ProspeccaoIAPage() {
     }
   };
 
-  // 💾 Função para jogar o Lead na Esteira (Comercial)
-  const vincularLeadNaEsteira = async () => {
+  // 🚀 JOGA O LEAD NO NEDHUB CRM (CRM_LEADS)
+  const enviarParaNedHub = async () => {
     if (!leadSelecionado || !agenteAlvo) return;
     
     try {
       setVinculando(true);
-      const dataFormatada = new Date().toISOString().split("T")[0];
       const agenteId = equipeDisponivel.find(e => e.nome === agenteAlvo)?.id || null;
 
-      const { error } = await supabase.from("em_analise").insert({
-        agente_comercial_id: agenteId,
-        agente_nome: agenteAlvo,
-        nome_empresa: leadSelecionado.razaoSocial.toUpperCase(),
-        data_envio: dataFormatada,
-        pendencias: "Lead gerado pela IA. Falta documentação."
+      // Insere o card na tabela do Kanban do NedHub
+      const { error } = await supabase.from("crm_leads").insert({
+        responsavel_id: agenteId,
+        responsavel_nome: agenteAlvo,
+        razaoSocial: leadSelecionado.razaoSocial.toUpperCase(),
+        cnpj: leadSelecionado.cnpj,
+        estagio: "Prospecção", // Estágio inicial de entrada no funil
+        campos_customizados: {
+          origem_lead: "AI Mining (Motor de Prospecção)",
+          score_ia: leadSelecionado.score,
+          cnae_principal: leadSelecionado.cnae_principal,
+          descricao_ramo: leadSelecionado.ramo,
+          cidade: leadSelecionado.cidade,
+          uf: leadSelecionado.uf,
+          bairro: leadSelecionado.bairro
+        }
       });
 
       if (error) throw error;
 
-      alert(`✅ Sucesso! O Lead foi delegado para a esteira de ${agenteAlvo}.`);
-      setLeadSelecionado(null); // Fecha a gaveta
+      alert(`🚀 Sensacional! Card criado no NedHub de ${agenteAlvo}.`);
+      setLeadSelecionado(null); 
       
-      // Remove o lead da lista para não clicar duas vezes
+      // Remove o lead da lista para evitar duplicidade de envio
       setLeads(prev => prev.filter(l => l.cnpj !== leadSelecionado.cnpj));
     } catch (err: any) {
-      alert(`❌ Erro ao vincular: ${err.message}`);
+      alert(`❌ Erro ao enviar para o NedHub: ${err.message}`);
     } finally {
       setVinculando(false);
     }
@@ -390,7 +394,7 @@ export default function ProspeccaoIAPage() {
                 {/* AREA DE DELEGAÇÃO COM HIERARQUIA */}
                 <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-2 mt-4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    Delegar Lead para Operador:
+                    Delegar Lead no NedHub para:
                   </label>
                   <select 
                     value={agenteAlvo}
@@ -411,11 +415,11 @@ export default function ProspeccaoIAPage() {
                     Cartão CNPJ
                   </button>
                   <button
-                    onClick={vincularLeadNaEsteira}
+                    onClick={enviarParaNedHub}
                     disabled={vinculando}
                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-black text-center shadow-md transition-colors cursor-pointer text-[11px] disabled:opacity-50"
                   >
-                    {vinculando ? "⏳ Gravando..." : "Vincular Esteira"}
+                    {vinculando ? "⏳ Gravando..." : "📤 Enviar p/ NedHub"}
                   </button>
                 </div>
               </div>
