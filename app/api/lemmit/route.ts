@@ -5,12 +5,11 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 // 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN
 const NORD_USER = '4LQDCWTn4kB7tm6EnvwFfLbn'; 
 const NORD_PASS = 'Cj3FbeJ1ZRnLtjVmxg51Pkn2';   
-const NORD_IP = '153.53.226.43'; // Seu IP dedicado
+const NORD_IP = '153.53.226.43'; // Seu IP dedicado da NordVPN
 const NORD_PORT = '1080';        // Porta oficial SOCKS5 da NordVPN
 
-// Cria o túnel SOCKS5
+// Cria a URL de conexão do proxy
 const proxyUrl = `socks://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
-const agent = new SocksProxyAgent(proxyUrl);
 
 export async function POST(request: Request) {
   try {
@@ -28,12 +27,16 @@ export async function POST(request: Request) {
 
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[VERCEL PROXY] Enviando consulta de ${docLimpo} via Axios + SOCKS5`);
+    console.log(`[VERCEL SOCKS5] Disparando requisição via Axios para: ${docLimpo}`);
 
-    // Faz a chamada usando o Axios (que força a Vercel a usar o túnel SOCKS5)
+    // Criamos o agente explicitamente dentro do escopo da execução da Vercel
+    const agent = new SocksProxyAgent(proxyUrl);
+
+    // Faz a chamada usando o Axios injetando o agente SOCKS5 diretamente
     const resposta = await axios.post(urlLemit, params.toString(), {
       httpAgent: agent,
       httpsAgent: agent,
+      timeout: 15000, // Dá 15 segundos de folga para a conexão estabilizar via Los Angeles
       headers: {
         'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial
         'Content-Type': 'application/x-www-form-urlencoded'
@@ -44,14 +47,15 @@ export async function POST(request: Request) {
     return NextResponse.json(resposta.data);
 
   } catch (error: any) {
-    console.error('Erro no túnel da Vercel/NordVPN:', error.response?.data || error.message);
+    console.error('Erro na execução do túnel Vercel:', error.response?.data || error.message);
     
+    // Retorna o detalhe real do erro para não mascarar no front-end
     return NextResponse.json(
       { 
-        error: 'Erro na comunicação através do IP Dedicado.', 
+        error: 'Erro interno na rota do servidor.', 
         detalhes: error.response?.data || error.message 
       },
-      { status: error.response?.status || 500 }
+      { status: 500 }
     );
   }
 }
