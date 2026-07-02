@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const servidorNord = 'us4970.nordvpn.com'; // O número do seu servidor do print
 
     // Criamos o agente que força a Vercel a mascarar a requisição com o seu IP Dedicado
-    const proxyAgent = new HttpsProxyAgent(`http://${usuarioNord}:${senhaNord}@${servidorNord}:89`);
+    const proxyAgent = new HttpsProxyAgent(`http://${usuarioNord}:${senhaNord}@${servidorNord}:80`);
 
     console.log(`[VERCEL PROXY] Encaminhando requisição via IP Dedicado NordVPN...`);
 
