@@ -9,18 +9,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Tipo e documento são obrigatórios.' }, { status: 400 });
     }
 
+    // Deixa apenas os números (limpa pontos e traços)
     const docLimpo = documento.replace(/\D/g, '');
-    const params = new URLSearchParams();
-    params.append('documento', docLimpo);
 
-    const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
+    // 🎯 AJUSTE DO PRINT: O documento vai direto na URL!
+    const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}/${docLimpo}`;
 
-    // Faz a chamada limpa usando Axios.
-    // Se rodar no Localhost, ele herda o IP exato da sua NordVPN ligada!
-    const resposta = await axios.post(urlLemit, params.toString(), {
+    console.log(`[API LEMIT] Consultando: ${urlLemit}`);
+
+    // Faz a chamada oficial usando o seu token gerado
+    const resposta = await axios.get(urlLemit, {
       headers: {
-        'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj',
-        'Content-Type': 'application/x-www-form-urlencoded',
+        // Mantemos a palavra Bearer com um espaço, seguido do SEU token real do print
+        'Authorization': 'Bearer LSE3EuOPZJ3SODp4FuwbOExc5VoW67vcUtwWEDYY',
+        'Content-Type': 'application/json'
       }
     });
 
@@ -28,9 +30,9 @@ export async function POST(request: Request) {
 
   } catch (error: any) {
     const erroReal = error.response?.data || error.message;
-    console.error('Erro na rota:', erroReal);
+    console.error('Erro retornado pela Lemit:', erroReal);
     return NextResponse.json(
-      { error: 'Erro retornado pela API da Lemit.', detalhes: erroReal },
+      { error: 'Erro na API da Lemit.', detalhes: erroReal },
       { status: error.response?.status || 500 }
     );
   }
