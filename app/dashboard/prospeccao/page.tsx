@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface Lead {
   cnpj: string;
@@ -22,6 +24,25 @@ interface PerfilAI {
   termos_fracos: string[];
 }
 
+// 🌲 Função de varredura profunda de equipe (Grafo/Multi-Líderes)
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
+
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
+
 export default function ProspeccaoIAPage() {
   const [prompt, setPrompt] = useState("");
   const [limite, setLimite] = useState(150);
@@ -30,6 +51,51 @@ export default function ProspeccaoIAPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [perfilAI, setPerfilAI] = useState<PerfilAI | null>(null);
   const [leadSelecionado, setLeadSelecionado] = useState<Lead | null>(null);
+
+  // 👥 Estados da Hierarquia
+  const [equipeDisponivel, setEquipeDisponivel] = useState<{id: string, nome: string}[]>([]);
+  const [agenteAlvo, setAgenteAlvo] = useState<string>("");
+  const [vinculando, setVinculando] = useState(false);
+
+  useEffect(() => {
+    carregarEquipeDoUsuario();
+  }, []);
+
+  const carregarEquipeDoUsuario = async () => {
+    try {
+      const userStr = localStorage.getItem("intraned_user");
+      if (!userStr) return;
+      
+      const user = JSON.parse(userStr);
+      const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
+
+      // Se for Comercial simples, só pode mandar pra ele mesmo
+      if (cargoUser !== "master" && cargoUser !== "diretor" && cargoUser !== "gerente") {
+        setEquipeDisponivel([{ id: user.id, nome: user.nome }]);
+        setAgenteAlvo(user.nome);
+        return;
+      }
+
+      // Se for Líder, varre a árvore do Supabase
+      const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+      
+      if (todosUsuarios) {
+        if (cargoUser === "master" || cargoUser === "diretor") {
+          // Diretor vê todo mundo
+          setEquipeDisponivel(todosUsuarios);
+        } else {
+          // Gerente vê a cascata dele
+          const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
+          const time = todosUsuarios.filter(u => idsPermitidos.includes(u.id));
+          setEquipeDisponivel(time);
+        }
+        // Deixa o próprio usuário selecionado por padrão
+        setAgenteAlvo(user.nome);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar hierarquia:", err);
+    }
+  };
 
   const executarMineraaoInteligente = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,9 +115,7 @@ export default function ProspeccaoIAPage() {
 
       const dados = await response.json();
 
-      if (dados.error) {
-        throw new Error(dados.error);
-      }
+      if (dados.error) throw new Error(dados.error);
 
       setLeads(dados.leads || []);
       setPerfilAI(dados.perfilAI || null);
@@ -59,6 +123,37 @@ export default function ProspeccaoIAPage() {
       alert("❌ Falha na mineração: " + err.message);
     } finally {
       setCarregando(false);
+    }
+  };
+
+  // 💾 Função para jogar o Lead na Esteira (Comercial)
+  const vincularLeadNaEsteira = async () => {
+    if (!leadSelecionado || !agenteAlvo) return;
+    
+    try {
+      setVinculando(true);
+      const dataFormatada = new Date().toISOString().split("T")[0];
+      const agenteId = equipeDisponivel.find(e => e.nome === agenteAlvo)?.id || null;
+
+      const { error } = await supabase.from("em_analise").insert({
+        agente_comercial_id: agenteId,
+        agente_nome: agenteAlvo,
+        nome_empresa: leadSelecionado.razaoSocial.toUpperCase(),
+        data_envio: dataFormatada,
+        pendencias: "Lead gerado pela IA. Falta documentação."
+      });
+
+      if (error) throw error;
+
+      alert(`✅ Sucesso! O Lead foi delegado para a esteira de ${agenteAlvo}.`);
+      setLeadSelecionado(null); // Fecha a gaveta
+      
+      // Remove o lead da lista para não clicar duas vezes
+      setLeads(prev => prev.filter(l => l.cnpj !== leadSelecionado.cnpj));
+    } catch (err: any) {
+      alert(`❌ Erro ao vincular: ${err.message}`);
+    } finally {
+      setVinculando(false);
     }
   };
 
@@ -132,7 +227,7 @@ export default function ProspeccaoIAPage() {
               >
                 {carregando ? (
                   <>
-                    <span className="w-3 height-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                     Minerando Base Neon Cloud...
                   </>
                 ) : (
@@ -178,7 +273,6 @@ export default function ProspeccaoIAPage() {
         {/* CONTEÚDO PRINCIPAL (TABELA + GAVETA DA DIREITA) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           
-          {/* TABELA DE REGISTROS (OCUPA 2 COLUNAS SE A GAVETA ESTIVER ABERTA, SENÃO TODAS) */}
           <div className={`bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden transition-all duration-300 ${
             leadSelecionado ? "lg:col-span-2" : "lg:col-span-3"
           }`}>
@@ -257,7 +351,7 @@ export default function ProspeccaoIAPage() {
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Painel de Auditoria</span>
                 <button 
                   onClick={() => setLeadSelecionado(null)}
-                  className="text-slate-500 hover:text-slate-300 font-bold text-xs p-1"
+                  className="text-slate-500 hover:text-slate-300 font-bold text-xs p-1 cursor-pointer"
                 >
                   ✕ Fechar
                 </button>
@@ -293,19 +387,35 @@ export default function ProspeccaoIAPage() {
                   </p>
                 </div>
 
-                {/* BOTÕES COMPLEMENTARES DE INTEGRAÇÃO */}
+                {/* AREA DE DELEGAÇÃO COM HIERARQUIA */}
+                <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg space-y-2 mt-4">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Delegar Lead para Operador:
+                  </label>
+                  <select 
+                    value={agenteAlvo}
+                    onChange={(e) => setAgenteAlvo(e.target.value)}
+                    className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white outline-none cursor-pointer focus:border-indigo-500 uppercase font-bold"
+                  >
+                    {equipeDisponivel.map(membro => (
+                      <option key={membro.id} value={membro.nome}>{membro.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button
                     onClick={() => window.open(`https://solucoes.receita.fazenda.gov.br/Servicos/CNPJreva/Cnpjreva_Solicitacao.asp?cnpj=${leadSelecionado.cnpj}`, "_blank")}
                     className="w-full bg-slate-950 text-slate-300 border border-slate-800 py-2 rounded-lg font-bold text-center hover:bg-slate-800 hover:text-white transition-colors cursor-pointer text-[11px]"
                   >
-                    Emitir Cartão CNPJ
+                    Cartão CNPJ
                   </button>
                   <button
-                    onClick={() => alert(`CNPJ ${leadSelecionado.cnpj} enviado para a mesa de análise de crédito Supabase.`)}
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg font-black text-center shadow-md transition-colors cursor-pointer text-[11px]"
+                    onClick={vincularLeadNaEsteira}
+                    disabled={vinculando}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg font-black text-center shadow-md transition-colors cursor-pointer text-[11px] disabled:opacity-50"
                   >
-                    Vincular Esteira BI
+                    {vinculando ? "⏳ Gravando..." : "Vincular Esteira"}
                   </button>
                 </div>
               </div>
