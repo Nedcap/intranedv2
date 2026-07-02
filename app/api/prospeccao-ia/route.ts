@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Bypass-Tunnel-Reminder': 'true' // 🚀 O crachá VIP que pula a tela de segurança do LocalTunnel
+        'Bypass-Tunnel-Reminder': 'true' // 🔥 ESSE CRACHÁ NÃO PODE SUMIR!
       },
       body: JSON.stringify(payloadPonte)
     });
