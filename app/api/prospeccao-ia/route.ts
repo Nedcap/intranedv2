@@ -62,7 +62,10 @@ export async function POST(req: Request) {
 
     const responsePonte = await fetch('https://api-nedhub-secreta.loca.lt/api/prospeccao/ia', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Bypass-Tunnel-Reminder': 'true' // 🚀 O crachá VIP que pula a tela de segurança do LocalTunnel
+      },
       body: JSON.stringify(payloadPonte)
     });
 
