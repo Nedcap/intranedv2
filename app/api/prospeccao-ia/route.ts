@@ -60,7 +60,7 @@ export async function POST(req: Request) {
       limite: limite
     };
 
-    const responsePonte = await fetch('https://new-elephant-39.loca.lt/api/prospeccao/ia', {
+    const responsePonte = await fetch('https://api-nedhub-secreta.loca.lt/api/prospeccao/ia', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
