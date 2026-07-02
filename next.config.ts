@@ -20,6 +20,15 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // 🚀 TÚNEL DE REDE: Cria um atalho estável que a Vercel aceita nativamente
+  async rewrites() {
+    return [
+      {
+        source: '/api/lemmit-bypass/:path*',
+        destination: 'https://api.lemit.com.br/api/v1/consulta/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;
