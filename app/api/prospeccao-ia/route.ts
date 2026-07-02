@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { Pool } from "@neondatabase/serverless";
 
-// Função para remover acentos e padronizar textos (Idêntica ao motor original do bot)
+// Função para remover acentos e padronizar textos na RAM
 function normalizarTexto(texto: string): string {
   if (!texto) return "";
   return String(texto)
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido. Por favor, especifique a região (ex: SP, PR)." }, { status: 400 });
     }
 
-    // 🔥 FIX 1: Limpeza brutal contra as alucinações da IA ("22xx" vira "22")
+    // Limpeza contra as alucinações da IA ("22xx" vira "22")
     if (perfilMercado.familias_cnae && Array.isArray(perfilMercado.familias_cnae)) {
       perfilMercado.familias_cnae = perfilMercado.familias_cnae
         .map((c: string) => c.replace(/\D/g, '').substring(0, 2))
@@ -72,8 +72,8 @@ export async function POST(req: Request) {
     let contadorParametros = 2;
 
     if (perfilMercado.cidade) {
-      // 🔥 FIX 2: Busca por cidade usando ILIKE abrangente
-      queryFiltros += ` AND m.nome ILIKE $${contadorParametros}`;
+      // 🔥 FIX ABSOLUTO: Usando faturamento de texto ignorando acentos (unaccent) tanto na coluna quanto no parâmetro
+      queryFiltros += ` AND unaccent(m.nome) ILIKE unaccent($${contadorParametros})`;
       parametrosQuery.push(`%${perfilMercado.cidade.trim()}%`);
       contadorParametros++;
     }
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     const { rows } = await pool.query(queryCompleta, parametrosQuery);
 
     // 5. Motor de Score e Relevância em Memória RAM
-    const SCORE_MINIMO = 3; // 🔥 FIX 3: Baixado de 4 para 3. Se bater o CNAE certo, entra na lista!
+    const SCORE_MINIMO = 3; 
     const leadsMapeados: any[] = [];
     
     const tFortes = (perfilMercado.termos_fortes || []).map((t: string) => normalizarTexto(t));
@@ -119,7 +119,6 @@ export async function POST(req: Request) {
       const cnaesSec = row.cnaes_secundarios || "";
       const famPrincipal = cnaePrinc.substring(0, 2);
 
-      // 🔥 FIX 4: Se bater o CNAE principal da atividade alvo, já ganha 4 pontos direto
       if (famCnaes.includes(famPrincipal)) score += 4;
 
       for (const fam of famCnaes) {
