@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 
 // 🔐 CREDENCIAIS DE SERVIÇO DA NORDVPN (Pegue no seu painel manual da Nord)
+// Atenção: Use o Username e Password longos da aba "Configuração Manual"
 const NORD_USER = '4LQDCWTn4kB7tm6EnvwFfLbn'; 
 const NORD_PASS = 'Cj3FbeJ1ZRnLtjVmxg51Pkn2';   
-const NORD_IP = '153.53.226.43'; // O IP fixo que você contratou
-const NORD_PORT = '80';          // Porta padrão de proxy HTTP da NordVPN
+const NORD_IP = '153.53.226.43'; // Seu IP dedicado
+const NORD_PORT = '1080';        // Porta oficial SOCKS5 da NordVPN
 
-// Monta o túnel autenticado do Proxy
-const proxyUrl = `http://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
-const agent = new HttpsProxyAgent(proxyUrl);
+// Monta a conexão isolada via SOCKS5
+const proxyUrl = `socks://${NORD_USER}:${NORD_PASS}@${NORD_IP}:${NORD_PORT}`;
+const agent = new SocksProxyAgent(proxyUrl);
 
 export async function POST(request: Request) {
   try {
@@ -19,28 +20,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Tipo e documento são obrigatórios.' }, { status: 400 });
     }
 
-    // Limpa o documento (remove pontos, traços, etc)
     const docLimpo = documento.replace(/\D/g, '');
 
-    // Formata o corpo do request como x-www-form-urlencoded exigido pela Lemit
     const params = new URLSearchParams();
     params.append('documento', docLimpo);
 
     const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
 
-    console.log(`[PROXY ATIVO] Redirecionando consulta de ${docLimpo} via NordVPN`);
+    console.log(`[TÚNEL SOCKS5] Enviando consulta de ${docLimpo} isoladamente via NordVPN...`);
 
-    // Faz a chamada oficial para a Lemit
+    // Faz o fetch passando estritamente pelo túnel SOCKS5 da NordVPN
     const resposta = await fetch(urlLemit, {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial da Lemit [cite: 1]
+        'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: params.toString(),
-      // @ts-ignore - Força o Next.js a aceitar o Agent no fetch nativo
+      // @ts-ignore
       agent: agent, 
-      cache: 'force-cache', // Mágica do cache nativo do Next.js (Economiza seus créditos!)
+      cache: 'force-cache', // Cache do Next.js salvando seus créditos
     });
 
     if (!resposta.ok) {
@@ -55,9 +54,9 @@ export async function POST(request: Request) {
     return NextResponse.json(dados);
 
   } catch (error: any) {
-    console.error('Erro na rota da Lemit:', error.message);
+    console.error('Erro no túnel da NordVPN:', error.message);
     return NextResponse.json(
-      { error: 'Falha interna no servidor ao processar a consulta.', detalhes: error.message },
+      { error: 'Falha na conexão isolada com o Proxy.', detalhes: error.message },
       { status: 500 }
     );
   }
