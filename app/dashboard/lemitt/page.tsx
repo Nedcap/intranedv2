@@ -27,13 +27,10 @@ export default function LemitDashboardPage() {
         params.append('documento', docLimpo);
 
         // FAZ A CHAMADA DIRETO DO NAVEGADOR (Herda o IP Dedicado da extensão!)
-        const response = await fetch(`https://api.lemit.com.br/api/v1/consulta/${tipo}`, {
+        const response = await fetch('/api/lemmit', {
           method: 'POST',
-          headers: { 
-            'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial da Lemit
-            'Content-Type': 'application/x-www-form-urlencoded' 
-          },
-          body: params.toString(),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tipo, documento }),
         });
 
         const resultado = await response.json();
