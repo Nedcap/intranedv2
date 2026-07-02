@@ -60,7 +60,7 @@ export async function POST(req: Request) {
       limite: limite
     };
 
-    const responsePonte = await fetch('http://localhost:5000/api/prospeccao/ia', {
+    const responsePonte = await fetch('https://api-nedhub-secreta.loca.lt/api/prospeccao/ia', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payloadPonte)
