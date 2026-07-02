@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
-import { neon } from "@neondatabase/serverless";
+import { Pool } from "@neondatabase/serverless";
 
 // Função para remover acentos e padronizar textos (Idêntica ao motor original do bot)
 function normalizarTexto(texto: string): string {
@@ -24,7 +24,9 @@ export async function POST(req: Request) {
     if (!process.env.NEON_DATABASE_URL) {
       throw new Error("A variável NEON_DATABASE_URL não está configurada no seu .env.local");
     }
-    const sqlNeon = neon(process.env.NEON_DATABASE_URL);
+    
+    // 🔥 CORREÇÃO: Usando Pool no lugar do neon() para suportar queries dinâmicas com Arrays
+    const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL });
     
     // 2. Inicializa a OpenAI
     const openai = new OpenAI({
@@ -98,7 +100,8 @@ export async function POST(req: Request) {
       LIMIT 5000
     `;
 
-    const rows = await sqlNeon(queryCompleta, parametrosQuery);
+    // 🔥 CORREÇÃO: Executando com pool.query, que aceita a query dinâmica e o array de parâmetros normalmente
+    const { rows } = await pool.query(queryCompleta, parametrosQuery);
 
     // 5. Motor de Score e Relevância em Memória RAM (Idêntico ao bot original)
     const SCORE_MINIMO = 4;
