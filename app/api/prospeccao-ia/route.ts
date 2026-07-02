@@ -60,11 +60,11 @@ export async function POST(req: Request) {
       limite: limite
     };
 
-    const responsePonte = await fetch('https://api-nedhub-secreta.loca.lt/api/prospeccao/ia', {
+    const responsePonte = await fetch('https://rely-merit-programs-paying.trycloudflare.com/api/prospeccao/ia', {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json',
-        'Bypass-Tunnel-Reminder': 'true' // 🔥 ESSE CRACHÁ NÃO PODE SUMIR!
+        'Content-Type': 'application/json'
+        // 🪓 Repare que não precisa mais da linha do 'Bypass-Tunnel-Reminder'! Pode apagar ela.
       },
       body: JSON.stringify(payloadPonte)
     });
