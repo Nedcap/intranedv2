@@ -11,42 +11,53 @@ export default function LemitDashboardPage() {
   const [historico, setHistorico] = useState<{ doc: string; tipo: string; data: string }[]>([]);
 
   const executarConsulta = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!documento) return;
+      e.preventDefault();
+      if (!documento) return;
 
-    setCarregando(true);
-    setErro(null);
-    setDados(null);
+      setCarregando(true);
+      setErro(null);
+      setDados(null);
 
-    try {
-      const response = await fetch('/api/lemmit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo, documento }),
-      });
+      try {
+        // Limpa o documento para enviar apenas números
+        const docLimpo = documento.replace(/\D/g, '');
 
-      const resultado = await response.json();
+        // Monta o formato x-www-form-urlencoded direto no Front-end
+        const params = new URLSearchParams();
+        params.append('documento', docLimpo);
 
-      if (!response.ok) {
-        throw new Error(resultado.error || 'Erro ao processar consulta.');
+        // FAZ A CHAMADA DIRETO DO NAVEGADOR (Herda o IP Dedicado da extensão!)
+        const response = await fetch(`https://api.lemit.com.br/api/v1/consulta/${tipo}`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': 'Bearer TFO3yrBrjnM8i2BCYeYUhRGRSEWqrx3O5HkkbQCj', // Token oficial da Lemit
+            'Content-Type': 'application/x-www-form-urlencoded' 
+          },
+          body: params.toString(),
+        });
+
+        const resultado = await response.json();
+
+        if (!response.ok) {
+          throw new Error(resultado.error || 'Erro retornado pela API da Lemit.');
+        }
+
+        setDados(resultado);
+
+        // Salva no histórico rápido da tela
+        const novoItem = {
+          doc: documento,
+          tipo: tipo === 'empresa' ? 'CNPJ' : 'CPF',
+          data: new Date().toLocaleTimeString('pt-BR'),
+        };
+        setHistorico((prev) => [novoItem, ...prev.slice(0, 4)]);
+
+      } catch (err: any) {
+        setErro(err.message || 'Falha na comunicação direta.');
+      } finally {
+        setCarregando(false);
       }
-
-      setDados(resultado);
-
-      // Salva no histórico rápido da tela
-      const novoItem = {
-        doc: documento,
-        tipo: tipo === 'empresa' ? 'CNPJ' : 'CPF',
-        data: new Date().toLocaleTimeString('pt-BR'),
-      };
-      setHistorico((prev) => [novoItem, ...prev.slice(0, 4)]);
-
-    } catch (err: any) {
-      setErro(err.message || 'Falha na comunicação.');
-    } finally {
-      setCarregando(false);
-    }
-  };
+    };
 
   // Atalhos para ler os dados dinamicamente se for Pessoa ou Empresa [cite: 8, 44]
   const info = dados?.pessoa || dados?.empresa;
