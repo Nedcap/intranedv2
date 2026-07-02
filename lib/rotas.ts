@@ -17,8 +17,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🎯 COMERCIAL
   { nome: "NedHub Comercial", path: "/dashboard/nedhub", icone: "🚀", categoria: "Comercial", defaultMaster: true },
   { nome: "Controle Comercial", path: "/dashboard/comercial", icone: "🎯", categoria: "Comercial", defaultMaster: true },
-  { nome: "Prospecção Avançada IA", path: "/prospeccao", icone: "🧠", categoria: "Comercial", defaultMaster: true },
-
+  { nome: "Prospecção Avançada IA", path: "/dashboard/prospeccao", icone: "🧠", categoria: "Comercial", defaultMaster: true },
   // 🛡️ CRÉDITO E RISCO
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Crédito", defaultMaster: true },
