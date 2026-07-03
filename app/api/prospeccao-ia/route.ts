@@ -97,7 +97,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         query: sqlQuery,
         useLegacySql: false,
-        location: "us-east1" // Mesma região do seu balde/dataset
+        location: "US" // Mesma região do seu balde/dataset
       })
     });
 
