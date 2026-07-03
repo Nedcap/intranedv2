@@ -13,16 +13,21 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // 1. Chamar a IA para estruturar os filtros a partir do prompt solto do usuário
+    // 1. Chamar a IA para estruturar os filtros E traduzir a cidade para o código TOM da Receita Federal
     const promptSistema = `
-      Você é um analista especialista em prospecção B2B. Analise o texto enviado pelo usuário e extraia os critérios estruturados.
+      Você é um analista especialista em prospecção B2B e conhece a fundo as tabelas da Receita Federal do Brasil.
+      Analise o texto enviado pelo usuário e extraia os critérios estruturados.
+      
+      ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", São Paulo é "7107", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
+
       Retorne ESTRITAMENTE um objeto JSON válido:
       {
         "atividade": "descrição curta do segmento",
-        "cidade": "Nome da cidade por extenso ou null se não citada",
+        "cidade_nome": "Nome da cidade por extenso",
+        "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
-        "familias_cnae": ["array de strings contendo APENAS OS 2 PRIMEIROS DÍGITOS numéricos das familias CNAE alvo, sem letras, sem 'xx'"],
-        "termos_fortes": ["palavras-chave específicas do nicho"],
+        "familias_cnae": ["array de strings contendo APENAS OS 2 PRIMEIROS DÍGITOS numéricos das familias CNAE alvo, sem letras"],
+        "termos_fortes": ["palavras-chave específicas"],
         "termos_fracos": ["palavras genéricas"]
       }
     `;
@@ -43,7 +48,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido. Por favor, especifique a região (ex: SP, PR)." }, { status: 400 });
     }
 
-    // 2. Limpeza contra as alucinações da IA
+    // 2. Limpeza contra as alucinações da IA nos CNAEs
     if (perfilMercado.familias_cnae && Array.isArray(perfilMercado.familias_cnae)) {
       perfilMercado.familias_cnae = perfilMercado.familias_cnae
         .map((c: string) => c.replace(/\D/g, '').substring(0, 2))
@@ -54,11 +59,12 @@ export async function POST(req: Request) {
     // 🔥 3. CONSULTA DIRETA VIA API REST DO BIGQUERY
     // =========================================================================
     
-    // Monta as condições de filtragem do SQL
+    // Monta as condições de filtragem do SQL usando a UF
     let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
-    if (perfilMercado.cidade) {
-      queryCondicoes += ` AND LOWER(municipio_rf) LIKE '%${perfilMercado.cidade.toLowerCase()}%'`;
+    // AGORA O FILTRO SÓ BUSCA PELO CÓDIGO NUMÉRICO EXATO! 🚀
+    if (perfilMercado.codigo_municipio) {
+      queryCondicoes += ` AND municipio_rf = '${perfilMercado.codigo_municipio}'`;
     }
 
     if (perfilMercado.familias_cnae && perfilMercado.familias_cnae.length > 0) {
@@ -68,7 +74,6 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // O uso das barras invertidas antes das crases (\`) garante que o Next.js monte a query sem bugar
     const sqlQuery = `
       SELECT 
         cnpj,
@@ -107,7 +112,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia o retorno bruto da API Rest do Google para as colunas do seu Front-end
+    // 4. Mapeia o retorno bruto para o formato do seu Front-end
     const leads = (bqDados.rows || []).map((row: any) => {
       return {
         cnpj: row.f[0].v,
@@ -119,7 +124,7 @@ export async function POST(req: Request) {
         bairro: row.f[6].v,
         cep: row.f[7].v,
         uf: row.f[8].v,
-        municipio_rf: row.f[9].v
+        municipio_rf: row.f[9].v // Retorna o código, o front pode exibir normalmente
       };
     });
 
