@@ -22,7 +22,7 @@ export async function POST(req: Request) {
 
       Retorne ESTRITAMENTE um objeto JSON válido:
       {
-        "atividade": "descrição curta do segmento",
+        "atividade": "descrição corta do segmento",
         "cidade_nome": "Nome da cidade por extenso",
         "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
@@ -56,13 +56,33 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🔥 3. CONSULTA DIRETA VIA API REST DO BIGQUERY
+    // 🔥 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PRÓPRIO
+    // =========================================================================
+    const oauthResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.GCP_CLIENT_ID || "",
+        client_secret: process.env.GCP_CLIENT_SECRET || "",
+        refresh_token: process.env.GCP_REFRESH_TOKEN || "",
+        grant_type: "refresh_token"
+      })
+    });
+
+    const oauthDados = await oauthResponse.json();
+    const accessTokenValido = oauthDados.access_token;
+
+    if (!accessTokenValido) {
+      throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error || "Token inválido"}`);
+    }
+
+    // =========================================================================
+    // 🧠 3. CONSTRUÇÃO DA QUERY DO BIGQUERY
     // =========================================================================
     
     // Monta as condições de filtragem do SQL usando a UF
     let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
-    // AGORA O FILTRO SÓ BUSCA PELO CÓDIGO NUMÉRICO EXATO! 🚀
     if (perfilMercado.codigo_municipio) {
       queryCondicoes += ` AND municipio_rf = '${perfilMercado.codigo_municipio}'`;
     }
@@ -91,12 +111,13 @@ export async function POST(req: Request) {
       LIMIT ${limiteSeguro}
     `;
 
-    // Dispara a requisição HTTP pura para a API global do BigQuery do Google
-    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries?key=${process.env.GCP_API_KEY}`;
+    // Dispara a requisição com o cabeçalho Authorization contendo o Access Token dinâmico
+    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
     
     const bqResponse = await fetch(urlBigQuery, {
       method: "POST",
       headers: {
+        "Authorization": `Bearer ${accessTokenValido}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -123,7 +144,7 @@ export async function POST(req: Request) {
         bairro: row.f[6].v,
         cep: row.f[7].v,
         uf: row.f[8].v,
-        municipio_rf: row.f[9].v // Retorna o código, o front pode exibir normalmente
+        municipio_rf: row.f[9].v
       };
     });
 
@@ -133,7 +154,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via API Rest:", error);
+    console.error("Erro na rota de prospecção via OAuth2:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
