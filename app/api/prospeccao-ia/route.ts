@@ -13,11 +13,16 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    // 🔥 O SEGREDO ESTÁ AQUI: Um prompt blindado obrigando a IA a dar a subclasse exata
     const promptSistema = `
-      Você é um analista especialista em prospecção B2B e conhece a fundo as tabelas da Receita Federal do Brasil.
+      Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs da Receita Federal do Brasil.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       
-      ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", São Paulo é "7107", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
+      ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
+
+      ATENÇÃO PARA O CNAE (MUITO IMPORTANTE): NÃO retorne apenas os 2 primeiros dígitos (como 46 para atacado ou 47 para varejo), pois isso trará setores genéricos irrelevantes como alimentos e agropecuária. 
+      Você DEVE retornar os prefixos CNAE ESPECÍFICOS de 3, 4 ou 5 dígitos (Grupos ou Subclasses) que correspondam EXATAMENTE e EXCLUSIVAMENTE ao nicho solicitado. 
+      Exemplo: Para autopeças, retorne "453" (Comércio de peças e acessórios para veículos). Para farmácias, retorne "4771", etc.
 
       Retorne ESTRITAMENTE um objeto JSON válido:
       {
@@ -25,15 +30,13 @@ export async function POST(req: Request) {
         "cidade_nome": "Nome da cidade por extenso",
         "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
-        "familias_cnae": ["array de strings contendo APENAS OS 2 PRIMEIROS DÍGITOS numéricos das familias CNAE alvo, sem letras"],
-        "termos_fortes": ["palavras-chave específicas"],
-        "termos_fracos": ["palavras genéricas"]
+        "codigos_cnae": ["array de strings contendo OS PREFIXOS CNAE EXATOS de 3 a 5 dígitos do segmento"]
       }
     `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      temperature: 0.1,
+      temperature: 0.1, // Temperatura baixa para ele não inventar CNAE que não existe
       messages: [
         { role: "system", content: promptSistema },
         { role: "user", content: promptUsuario },
@@ -44,13 +47,14 @@ export async function POST(req: Request) {
     const perfilMercado = JSON.parse(completion.choices[0].message.content || "{}");
 
     if (!perfilMercado.uf) {
-      return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido. Por favor, especifique a região (ex: SP, PR)." }, { status: 400 });
+      return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido." }, { status: 400 });
     }
 
-    if (perfilMercado.familias_cnae && Array.isArray(perfilMercado.familias_cnae)) {
-      perfilMercado.familias_cnae = perfilMercado.familias_cnae
-        .map((c: string) => c.replace(/\D/g, '').substring(0, 2))
-        .filter((c: string) => c.length === 2);
+    // Tratamento para limpar pontuações e garantir que tem pelo menos 3 dígitos de precisão
+    if (perfilMercado.codigos_cnae && Array.isArray(perfilMercado.codigos_cnae)) {
+      perfilMercado.codigos_cnae = perfilMercado.codigos_cnae
+        .map((c: string) => c.replace(/\D/g, ''))
+        .filter((c: string) => c.length >= 3); 
     }
 
     // =========================================================================
@@ -74,7 +78,6 @@ export async function POST(req: Request) {
     const oauthDados = await oauthResponse.json();
     
     if (oauthDados.error) {
-      console.error("Detalhes do erro do Google OAuth:", oauthDados);
       throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error}`);
     }
 
@@ -89,14 +92,14 @@ export async function POST(req: Request) {
       queryCondicoes += ` AND municipio_rf = '${perfilMercado.codigo_municipio}'`;
     }
 
-    if (perfilMercado.familias_cnae && perfilMercado.familias_cnae.length > 0) {
-      const cnaesFormatados = perfilMercado.familias_cnae.map((c: string) => `'${c}'`).join(',');
-      queryCondicoes += ` AND SUBSTR(cnae_principal, 1, 2) IN (${cnaesFormatados})`;
+    // 🎯 Sniper de precisão do SQL: Usando o LIKE com prefixo ao invés de buscar os primeiros 2 caracteres
+    if (perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0) {
+      const cnaesPrecisos = perfilMercado.codigos_cnae.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
+      queryCondicoes += ` AND (${cnaesPrecisos})`;
     }
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Mapeando as colunas sem google_lat e google_lng para evitar o erro do Parquet
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
@@ -128,7 +131,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia os dados casando perfeitamente com os cartões e tabelas do front-end
+    // 4. Mapeia os dados
     const leads = (bqDados.rows || []).map((row: any) => {
       const rSocial = row.f[11].v || "Razão Social indisponível";
       const gNome = row.f[14].v;
@@ -152,8 +155,8 @@ export async function POST(req: Request) {
         google_categoria: row.f[15].v,
         google_endereco: row.f[16].v,
         website: row.f[17].v,
-        lat: null, // Deixando nulo temporariamente
-        lng: null  // Deixando nulo temporariamente
+        lat: null,
+        lng: null
       };
     });
 
