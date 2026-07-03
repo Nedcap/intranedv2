@@ -265,6 +265,7 @@ export default function ChecagemPage() {
     }
   };
 
+  // 📝 LOGICA NOVA DE CÁLCULO INSERIDA AQUI
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -275,12 +276,18 @@ export default function ChecagemPage() {
       else if (["Alto Risco", "Não Confirma", "Problema"].includes(t.status_confirmacao)) risco += v;
       else outros += v;
     });
+
+    // Carteira passível de checagem = Carteira Total menos o que já é Alto Risco, Não Confirma, Problema e Política (outros)
+    const carteiraChecavel = total - risco - outros;
     const calcPerc = (val: number) => total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
+    const calcPercChecavel = (val: number) => carteiraChecavel > 0 ? ((val / carteiraChecavel) * 100).toFixed(1) : "0.0";
+
     return { 
-      total, confirmado, aConfirmar, risco, outros,
+      total, confirmado, aConfirmar, risco, outros, carteiraChecavel,
       pConfirmado: calcPerc(confirmado),
       pAConfirmar: calcPerc(aConfirmar),
-      pRisco: calcPerc(risco)
+      pRisco: calcPerc(risco),
+      pConfirmadoSobreChecavel: calcPercChecavel(confirmado) // Metrica nova solicitada
     };
   }, [titulos]);
 
@@ -484,17 +491,35 @@ export default function ChecagemPage() {
           <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
         
+        {/* CARD CONFIRMADOS ALTERADO COM O NOVO "SUBCARD" INTERNO */}
         <button 
           onClick={() => lidarCliqueCardKpi("CONFIRMADO")}
-          className={`text-left p-5 rounded-xl shadow-xs flex flex-col justify-center relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
+          className={`text-left p-4 rounded-xl shadow-xs flex flex-col justify-between relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
             filtroStatusCard === "CONFIRMADO" ? "bg-emerald-50 border-emerald-500 border-2 ring-2 ring-emerald-500/20" : "bg-white border-slate-200 border-l-4 border-l-emerald-500 hover:bg-slate-50"
           }`}
         >
-          <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
-          <span className="text-xl font-black text-slate-800 font-mono mt-1">{fM(kpis.confirmado)}</span>
-          <div className="absolute right-4 top-4 text-emerald-500 font-black text-lg">{kpis.pConfirmado}%</div>
-          <div className="w-full bg-slate-100 h-1.5 mt-3 rounded-full overflow-hidden">
-            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${kpis.pConfirmado}%` }}></div>
+          <div>
+            <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">✅ Confirmados</span>
+            <div className="flex justify-between items-baseline mt-1">
+              <span className="text-xl font-black text-slate-800 font-mono">{fM(kpis.confirmado)}</span>
+              <span className="text-emerald-600 font-black text-sm">{kpis.pConfirmado}%</span>
+            </div>
+            <div className="w-full bg-slate-100 h-1 mt-1.5 rounded-full overflow-hidden">
+              <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${kpis.pConfirmado}%` }}></div>
+            </div>
+          </div>
+
+          {/* 🪪 SUBCARD: Conversão Efetiva (Excluindo os Riscos/Problemas do cálculo) */}
+          <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between bg-slate-50/70 p-1.5 rounded-lg border border-slate-200/60">
+            <div className="flex flex-col">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight">Efetividade s/ Checável</span>
+              <span className="text-[9px] text-slate-500 font-semibold truncate max-w-[110px]" title={fM(kpis.carteiraChecavel)}>
+                Base: {fMShort(kpis.carteiraChecavel)}
+              </span>
+            </div>
+            <span className="text-xs font-black px-1.5 py-0.5 bg-emerald-500 text-white rounded font-mono shadow-xs">
+              {kpis.pConfirmadoSobreChecavel}%
+            </span>
           </div>
         </button>
 
@@ -558,7 +583,6 @@ export default function ChecagemPage() {
               
               return (
                 <div key={idx} className="flex-1 flex flex-col items-center h-full relative group">
-                  {/* ✅ INTERATIVIDADE DO HOVER RESTAURADA: Reincorporada a tag de valor flutuante */}
                   <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-900 text-white text-[10px] font-mono px-2 py-1 rounded shadow-lg transition-opacity whitespace-nowrap z-20 pointer-events-none">
                     Dia {item.dia}: {fM(item.valor)}
                   </div>
