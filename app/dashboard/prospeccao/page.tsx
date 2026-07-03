@@ -16,10 +16,9 @@ interface Lead {
   cep: string; 
   uf: string;
   municipio_rf: string; 
-  razao_social: string; // Nova coluna real vinda do BigQuery unificado
-  nome_fantasia?: string; // Nome fantasia comercial ou fallback
+  razao_social: string; 
+  nome_fantasia?: string; 
   
-  // Propriedades de Enriquecimento Comercial (Tabela google_places unificada)
   natureza_juridica?: string;
   capital_social?: number;
   google_categoria?: string;
@@ -28,22 +27,23 @@ interface Lead {
   lat?: number;
   lng?: number;
 
-  // Propriedades calculadas/locais
   score?: number; 
   cidadeExtenso?: string;
 }
 
+// 🔥 INTERFACE ATUALIZADA PARA BATER COM A API "SNIPER"
 interface PerfilAI {
   atividade: string;
   cidade_nome: string | null;
   codigo_municipio: string | null;
   uf: string;
-  familias_cnae: string[];
-  termos_fortes: string[];
-  termos_fracos: string[];
+  codigos_cnae?: string[]; // Propriedade nova do Sniper
+  familias_cnae?: string[]; // Mantido como opcional para não quebrar cache antigo
+  termos_fortes?: string[];
+  termos_fracos?: string[];
 }
 
-const obtenerIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
   if (visitados.has(liderId)) return [];
   visitados.add(liderId);
 
@@ -74,7 +74,6 @@ export default function ProspeccaoIAPage() {
   const [agenteAlvo, setAgenteAlvo] = useState<string>("");
   const [vinculando, setVinculando] = useState(false);
 
-  // 🏪 Recupera a lista salva no navegador ao abrir a página
   useEffect(() => {
     carregarEquipeDoUsuario();
     
@@ -85,7 +84,6 @@ export default function ProspeccaoIAPage() {
     if (perfilSalvo) setPerfilAI(JSON.parse(perfilSalvo));
   }, []);
 
-  // 💾 Salva a lista automaticamente sempre que ela mudar
   useEffect(() => {
     if (leads.length > 0) {
       localStorage.setItem("ned_leads_minerados", JSON.stringify(leads));
@@ -147,7 +145,16 @@ export default function ProspeccaoIAPage() {
         body: JSON.stringify({ promptUsuario: prompt, limite }),
       });
 
-      const dados = await response.json();
+      // 🛡️ BLINDAGEM DE JSON (Evita erro fatal se voltar HTML)
+      const textoPuro = await response.text();
+      let dados;
+      
+      try {
+        dados = JSON.parse(textoPuro);
+      } catch (jsonErr) {
+        console.error("Erro no retorno da API:", textoPuro);
+        throw new Error("A API retornou HTML ou erro fatal. Veja o console (F12).");
+      }
 
       if (dados.error) throw new Error(dados.error);
 
@@ -165,7 +172,6 @@ export default function ProspeccaoIAPage() {
         };
       });
 
-      // Adiciona os novos resultados aos que já estavam na tela (Merge sem duplicar CNPJ)
       setLeads(prev => {
         const cnpjsExistentes = new Set(prev.map(item => item.cnpj));
         const novosFiltrados = leadsTratados.filter((item: any) => !cnpjsExistentes.has(item.cnpj));
@@ -180,13 +186,11 @@ export default function ProspeccaoIAPage() {
     }
   };
 
-  // 🗑️ Excluir um único lead da lista da tela
   const eliminarLeadDaLista = (cnpjParaRemover: string) => {
     if (leadSelecionado?.cnpj === cnpjParaRemover) setLeadSelecionado(null);
     setLeads(prev => prev.filter(l => l.cnpj !== cnpjParaRemover));
   };
 
-  // 🧹 Começar do zero (Limpa a tela e o cache)
   const limparTodaAEstreia = () => {
     if (!confirm("Tem certeza que deseja limpar toda a lista da tela e recomeçar do zero?")) return;
     setLeads([]);
@@ -196,7 +200,6 @@ export default function ProspeccaoIAPage() {
     localStorage.removeItem("ned_perfil_minerado");
   };
 
-  // 📥 Exportar para Excel/CSV
   const exportarListaParaCSV = () => {
     if (leads.length === 0) return;
     
@@ -328,31 +331,30 @@ export default function ProspeccaoIAPage() {
 
         {/* METADADOS DA INTERPRETAÇÃO DA IA */}
         {perfilAI && (
-          <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shadow-sm">
+          <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 shadow-sm">
             <div className="space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nicho Mapeado</span>
-              <div className="text-xs font-bold text-slate-800 capitalize truncate">{perfilAI.atividade}</div>
+              <div className="text-xs font-bold text-slate-800 capitalize truncate">{perfilAI.atividade || "Busca Geral"}</div>
             </div>
             <div className="space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Região Alvo</span>
               <div className="text-xs font-bold text-indigo-600 uppercase">
-                {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf}`}
+                {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf || "Indefinido"}`}
               </div>
             </div>
             <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Famílias CNAE</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CNAEs Sniper Detectados</span>
               <div className="flex flex-wrap gap-1 mt-0.5">
-                {perfilAI.familias_cnae.map(c => (
-                  <span key={c} className="bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200">
-                    {c}xx
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Keywords de Score</span>
-              <div className="text-xs font-semibold text-emerald-600 truncate mt-0.5">
-                {perfilAI.termos_fortes.join(', ') || "Nenhum termo restrito"}
+                {/* 🛡️ TRATAMENTO SEGURO: Lê a lista nova, ou a antiga do cache, ou exibe vazio sem quebrar */}
+                {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 0 ? (
+                  (perfilAI.codigos_cnae || perfilAI.familias_cnae || []).map(c => (
+                    <span key={c} className="bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200">
+                      {c}*
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs font-semibold text-slate-400">Busca abrangente</span>
+                )}
               </div>
             </div>
           </div>
