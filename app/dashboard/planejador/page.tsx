@@ -2,7 +2,6 @@
 "use client";
 
 import { useState } from "react";
-// import { supabase } from "@/lib/supabase"; // Descomente se for usar depois
 
 interface ParadaSugerida {
   cidade_nome: string;
@@ -89,8 +88,8 @@ export default function PlanejadorRotasPage() {
       for (const cidade of cidadesAlvo) {
         const promptSimulado = `Buscar empresas do segmento '${atividade}' em ${cidade.cidade_nome} ${cidade.uf}`;
         
-        // 🔥 ATENÇÃO: Verifique se o nome da sua rota de extração é esse mesmo
-        const res = await fetch("/api/prospeccao", { 
+        // 🔥 CORRIGIDO: Agora bate na rota exata prospeccao-ia
+        const res = await fetch("/api/prospeccao-ia", { 
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ promptUsuario: promptSimulado, limite: limiteCidade })
@@ -126,7 +125,7 @@ export default function PlanejadorRotasPage() {
     : leadsDaRota.filter(l => l.parada_origem === cidadeAtivaFiltro);
 
   // =========================================================================
-  // 🚀 NOVO: Função para Exportar para Excel (CSV)
+  // 🚀 Função para Exportar para Excel (CSV)
   // =========================================================================
   const exportarParaCSV = () => {
     if (leadsFiltrados.length === 0) return;
