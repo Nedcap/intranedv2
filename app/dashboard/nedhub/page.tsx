@@ -53,6 +53,24 @@ const gerarLinkWhatsApp = (telefone: string) => {
   return `https://wa.me/${ddi}`;
 };
 
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
+
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
+
 export default function NedHubPage() {
   const [funilAtivo, setFunilAtivo] = useState<"vendas" | "pos_venda">("vendas");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -68,6 +86,9 @@ export default function NedHubPage() {
   const [buscandoRobo, setBuscandoRobo] = useState(false);
   const [abaAtivaConfig, setAbaAtivaConfig] = useState<"kanban" | "auditoria_direcao">("kanban");
 
+  // 🔥 NOVO: Estado para Master/Diretor filtrar o Kanban por membro da equipe
+  const [filtroResponsavel, setFiltroResponsavel] = useState<string>("TODOS");
+
   const [horariosDisponiveisGerentes, setHorariosDisponiveisGerentes] = useState<Record<string, string[]>>({});
 
   const [coresColunas, setCoresColunas] = useState<Record<string, string>>({
@@ -78,6 +99,8 @@ export default function NedHubPage() {
 
   const [modalNovoLead, setModalNovoLead] = useState(false);
   const [leadExpandido, setLeadExpandido] = useState<Lead | null>(null);
+  const [equipeDisponivel, setEquipeDisponivel] = useState<{id: string, nome: string}[]>([]);
+  const [agenteAlvo, setAgenteAlvo] = useState<string>("");
   
   const [modalCalendarioPopup, setModalCalendarioPopup] = useState<{ aberto: boolean; lead: Lead | null }>({ aberto: false, lead: null });
   const [modalGestaoAgenda, setModalGestaoAgenda] = useState(false);
@@ -93,14 +116,12 @@ export default function NedHubPage() {
   const [novaTarefaData, setNovaTarefaData] = useState("");
   const [templateSelecionado, setTemplateSelecionado] = useState("");
 
-  // Estados para Geração em Lote da Agenda do Comercial
   const [dataLote, setDataLote] = useState("");
   const [horaInicioLote, setHoraInicioLote] = useState("08:00");
   const [horaFimLote, setHoraFimLote] = useState("17:00");
   const [novoHorarioDisponivel, setNovoHorarioDisponivel] = useState("");
   const [intervaloLote, setIntervaloLote] = useState("90");
 
-  // Estados do Agendamento Profissional SDR
   const [filtroDataSdr, setFiltroDataSdr] = useState("");
   const [slotsSelecionadosParaAgendar, setSlotsSelecionadosParaAgendar] = useState<string[]>([]);
 
@@ -118,39 +139,56 @@ export default function NedHubPage() {
     localStorage.setItem("nedhub_slots_comercial", JSON.stringify(novosSlots));
   };
 
-  const carregarSessaoEPerfilReal = async () => {
+  // 🔥 Unificação Suprema de Sessão: Respeita o LocalStorage da Intranet
+  const inicializarSessaoEBase = async () => {
     try {
       setCarregando(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setCarregando(false);
-        return;
-      }
-      setUserId(user.id);
+      
+      const userStr = localStorage.getItem("intraned_user");
+      let uid = null;
+      let uRole = "SDR";
 
-      const { data: profile, error } = await supabase
-        .from("crm_profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (error) throw error;
-
-      if (profile && profile.role) {
-        setUserRole(profile.role);
+      if (userStr) {
+        const u = JSON.parse(userStr);
+        uid = u.id;
+        uRole = String(u.cargo || u.perfil || "SDR").trim().toUpperCase();
+        setUserId(uid);
+        setUserRole(uRole);
       } else {
-        setUserRole("SDR"); 
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) { 
+          uid = user.id; 
+          setUserId(uid); 
+        }
       }
 
-      const { data: hierarquia } = await supabase.from("crm_hierarquia").select("subordinado_id").eq("superior_id", user.id);
-      if (hierarquia) setSubordinadosIds(hierarquia.map(h => h.subordinado_id));
+      if (uid) {
+        const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+        if (todosUsuarios) {
+          if (uRole === "MASTER" || uRole === "DIRETOR" || uRole === "ADMIN") {
+            setEquipeDisponivel(todosUsuarios);
+          } else {
+            const idsPermitidos = obterIdsSubordinados(todosUsuarios, uid);
+            setSubordinadosIds(idsPermitidos);
+            const time = todosUsuarios.filter(x => idsPermitidos.includes(x.id) || x.id === uid);
+            setEquipeDisponivel(time);
+          }
+        }
+      }
+
+      await sincronizarBaseNedHub();
     } catch (e) {
-      console.error("Erro ao carregar sessão real de hierarquia", e);
-      setUserRole("SDR"); 
+      console.error("Erro na inicialização da sessão", e);
+      setUserRole("SDR");
     } finally {
       setCarregando(false);
     }
   };
+
+  useEffect(() => { 
+    inicializarSessaoEBase();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sincronizarBaseNedHub = async () => {
     try {
@@ -188,24 +226,12 @@ export default function NedHubPage() {
     }
   };
 
-  useEffect(() => { 
-    const inicializar = async () => {
-      await carregarSessaoEPerfilReal();
-      await sincronizarBaseNedHub();
-    };
-    inicializar();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 🔥 AJUSTADO: Agora busca direto na nossa inteligência unificada conectada ao BigQuery na nuvem!
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
     const cnpjLimpo = targetCnpj.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return;
 
     try {
       setBuscandoRobo(true);
-      
-      // Batendo na API Route interna da Vercel que configuramos anteriormente
       const res = await fetch("/api/prospeccao-ia", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,15 +243,13 @@ export default function NedHubPage() {
         const dados = dadosBot.leads && dadosBot.leads.length > 0 ? dadosBot.leads[0] : null;
 
         if (dados) {
-          // Fallback seguro caso a razão social não esteja disponível de imediato na tabela estabelecimentos
           const nomeIdentificacao = dados.razao_social || `EMPRESA CNPJ ${dados.cnpj}`;
           setInputRazao(nomeIdentificacao.toUpperCase());
-          
           setDadosAutomotivosBot({
             ramo: dadosBot.perfilAI?.atividade || "Consultado via BigQuery",
             cnae: dados.cnae_principal || "",
             bairro: dados.bairro || "",
-            cidade: dados.municipio_rf || "", // Mapeando coluna padrão BigQuery
+            cidade: dados.municipio_rf || "", 
             uf: dados.uf || ""
           });
         }
@@ -312,14 +336,9 @@ export default function NedHubPage() {
     } catch (err: any) { 
       alert(err.message); 
     } finally { 
-      onCompleteUploadTask();
+      setCarregando(false);
     }
   };
-
-  const onCompleteUploadTask = () => {
-    const uploadCompletoLocal = true;
-    setCarregando(false);
-  }
 
   const handleGerarLote = () => {
     if (!dataLote || !horaInicioLote || !horaFimLote || !intervaloLote || !gerenteSelecionadoAgenda) {
@@ -415,11 +434,18 @@ export default function NedHubPage() {
     } catch (e) { alert("Erro ao contactar API."); }
   };
 
+  // 🔥 ATUALIZADO: Agora aplica o filtro visual escolhido pelo Master/Diretor
   const colunasVisíveis = useMemo(() => {
     let filtrados = leads.filter(l => l.funilId === funilAtivo);
 
-    if (userRole !== "Diretor" && userRole !== "Master" && userRole !== "ADMIN" && userId) {
+    // Filtro original de bloqueio (se não for gestor, só vê os seus ou dos subordinados)
+    if (userRole !== "DIRETOR" && userRole !== "MASTER" && userRole !== "ADMIN" && userId) {
       filtrados = filtrados.filter(l => l.responsavel_id === userId || subordinadosIds.includes(l.responsavel_id || ""));
+    }
+
+    // Filtro Interativo do Master no Select
+    if (filtroResponsavel !== "TODOS") {
+      filtrados = filtrados.filter(l => String(l.responsavel_id) === String(filtroResponsavel));
     }
 
     const leadsComFlagPrioridade = filtrados.map(lead => {
@@ -447,7 +473,7 @@ export default function NedHubPage() {
         { id: "nao_convertida", nome: "❌ Não Convertida", cards: extrairPorEstagio("nao_convertida") },
       ];
     }
-  }, [leads, funilAtivo, userRole, userId, subordinadosIds]);
+  }, [leads, funilAtivo, userRole, userId, subordinadosIds, filtroResponsavel]);
 
   const metricasAuditoria = useMemo(() => {
     const hojeStr = new Date().toISOString().split("T")[0];
@@ -534,6 +560,21 @@ export default function NedHubPage() {
                 <option value="vendas">📋 Pipeline: Funil de Vendas (SDR)</option>
                 <option value="pos_venda">💼 Pipeline: Pós Venda & Comercial</option>
               </select>
+
+              {/* 🔥 NOVO: SELETOR DE ESPIONAGEM PARA MASTERS E DIRETORES */}
+              {(userRole === "MASTER" || userRole === "DIRETOR" || userRole === "ADMIN") && (
+                <select 
+                  value={filtroResponsavel} 
+                  onChange={(e) => setFiltroResponsavel(e.target.value)} 
+                  className="p-2 border border-purple-300 rounded-lg bg-purple-50 text-purple-900 font-black uppercase text-[10px] outline-none shadow-sm cursor-pointer"
+                >
+                  <option value="TODOS">🌍 Exibir Todos os Usuários</option>
+                  {equipeDisponivel.map(u => (
+                    <option key={u.id} value={u.id}>👤 {u.nome}</option>
+                  ))}
+                </select>
+              )}
+
             </div>
             <button onClick={() => setModalNovoLead(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg uppercase text-[10px] tracking-wider shadow-xs">+ Novo Negócio</button>
           </div>
