@@ -92,12 +92,11 @@ export async function POST(req: Request) {
     `;
 
     // Dispara a requisição HTTP pura para a API global do BigQuery do Google
-    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
+    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries?key=${process.env.GCP_API_KEY}`;
     
     const bqResponse = await fetch(urlBigQuery, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.GCP_ACCESS_TOKEN?.trim()}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
