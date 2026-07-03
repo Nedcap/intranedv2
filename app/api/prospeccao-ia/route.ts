@@ -51,17 +51,11 @@ export async function POST(req: Request) {
         .filter((c: string) => c.length === 2);
     }
 
-    // =========================================================================
+// =========================================================================
     // 🔥 3. CONEXÃO DIRETA COM O BIGQUERY (Substituindo a ponte antiga do Cloudflare)
     // =========================================================================
     
-    // Inicializa o BigQuery usando as variáveis seguras da Vercel (Workload Identity)
-    const bigquery = new BigQuery({
-      projectId: process.env.GCP_PROJECT_ID,
-      credentials: {
-        client_email: process.env.GCP_SERVICE_ACCOUNT_EMAIL,
-      },
-    });
+    const bigquery = new BigQuery();
 
     // Construindo as condições dinamicamente baseadas no retorno da IA
     let queryCondicoes = `WHERE uf = @uf`;
