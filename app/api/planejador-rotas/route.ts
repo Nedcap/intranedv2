@@ -1,64 +1,128 @@
 import { NextResponse } from "next/server";
-import { OpenAI } from "openai";
 
 export async function POST(req: Request) {
   try {
-    const { origem, destino, atividade } = await req.json();
+    // O front-end ainda vai mandar a 'atividade', mas para o desenho da rota, usaremos só origem e destino.
+    const { origem, destino } = await req.json();
 
-    if (!origem || !destino || !atividade) {
-      return NextResponse.json({ error: "Origem, destino e atividade são obrigatórios." }, { status: 400 });
+    if (!origem || !destino) {
+      return NextResponse.json(
+        { error: "Origem e destino são obrigatórios." },
+        { status: 400 }
+      );
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const googleApiKey = process.env.GOOGLE_MAPS_API_KEY; 
+    
+    if (!googleApiKey) {
+      return NextResponse.json(
+        { error: "Chave da API do Google Maps não configurada no servidor (.env)." },
+        { status: 500 }
+      );
+    }
 
-    // 🔥 PROMPT "SARGENTO": Obriga a IA a pensar na estrada e proíbe arrays menores que 3 itens.
-    const promptSistema = `
-      Você é um especialista em logística rodoviária brasileira e inteligência de mercado da Receita Federal.
+    // Chamando a Directions API do Google com alternativas ativadas para mapear de 1 a 3 rotas
+    const googleUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(
+      origem
+    )}&destination=${encodeURIComponent(
+      destino
+    )}&alternatives=true&key=${googleApiKey}&region=br&language=pt-BR`;
+
+    const mapsResponse = await fetch(googleUrl);
+    const mapsData = await mapsResponse.json();
+
+    if (mapsData.status !== "OK") {
+      return NextResponse.json(
+        { error: `Erro no Google Maps: ${mapsData.status} - ${mapsData.error_message || ""}` },
+        { status: 400 }
+      );
+    }
+
+    // Processando as rotas encontradas pelo Google
+    const rotasProcessadas = mapsData.routes.map((route: any, index: number) => {
+      const cidadesSet = new Set<string>();
+      const cidadesDetalhadas: Array<{ nome: string; uf: string; ordem: number }> = [];
+
+      // A primeira 'leg' contém o percurso principal
+      const percurso = route.legs[0];
+      let ordemContador = 1;
+
+      // 1. Extrair a Origem oficial
+      const splitPartida = percurso.start_address.split("-");
+      const cidadePartidaNome = splitPartida[0]?.trim();
+      const ufPartida = splitPartida[1]?.split(",")?.[0]?.trim() || "";
       
-      TAREFA: O usuário fará uma viagem de carro de: "${origem}" até "${destino}".
-      
-      PASSO A PASSO OBRIGATÓRIO:
-      1. Identifique qual é a rodovia principal (BR ou rodovia estadual) que liga essas duas cidades.
-      2. Liste as cidades que o motorista é OBRIGADO a passar por dentro ou cruzar no meio do caminho.
-      3. Escolha de 2 a 5 dessas cidades intermediárias que sejam bons "polos comerciais" para a atividade solicitada.
-      4. Descubra o CÓDIGO TOM (Tabela de Municípios da Receita, 4 dígitos) para cada uma delas.
-      5. Descubra os códigos CNAE de 2 dígitos referentes à atividade solicitada.
-
-      REGRA DE OURO CRÍTICA: 
-      O seu array "paradas_sugeridas" DEVE OBRIGATORIAMENTE ter no mínimo 3 itens (A Origem + No mínimo 1 ou mais paradas no meio do caminho + O Destino). 
-      SE VOCÊ RETORNAR APENAS ORIGEM E DESTINO (2 itens), O SISTEMA VAI FALHAR.
-
-      Retorne ESTRITAMENTE um objeto JSON válido neste exato formato:
-      {
-        "familias_cnae": ["array com 2 dígitos numéricos"],
-        "paradas_sugeridas": [
-          {
-            "cidade_nome": "Nome da Cidade",
-            "uf": "UF",
-            "codigo_municipio": "4 dígitos TOM",
-            "ordem": 1,
-            "justificativa_comercial": "Por que parar aqui?"
-          }
-        ]
+      if (cidadePartidaNome) {
+        cidadesSet.add(`${cidadePartidaNome}-${ufPartida}`);
+        cidadesDetalhadas.push({
+          nome: cidadePartidaNome,
+          uf: ufPartida,
+          ordem: ordemContador++
+        });
       }
-    `;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.2, // Um leve aumento para dar "criatividade" geográfica à IA
-      messages: [
-        { role: "system", content: promptSistema },
-        { role: "user", content: `Trace a rota de ${origem} para ${destino} buscando por ${atividade}. NÃO pule as cidades do meio do caminho!` },
-      ],
-      response_format: { type: "json_object" }
+      // 2. Extrair as cidades do meio do caminho analisando os passos (steps)
+      if (percurso.steps && percurso.steps.length > 0) {
+        percurso.steps.forEach((step: any) => {
+          const htmlText = step.html_instructions || "";
+          
+          // O Google geralmente formata destinos de rodovias assim em PT-BR
+          const matchDirecao = htmlText.match(/direção a\s+<b>([^<]+)<\/b>/i);
+          
+          if (matchDirecao && matchDirecao[1]) {
+            const candidato = matchDirecao[1].split("-");
+            const nomeCidade = candidato[0]?.trim();
+            const ufCidade = candidato[1]?.trim() || "";
+
+            // Filtro básico para ignorar nomes de rodovias (BR-116, SP-280, etc) e pegar apenas municípios
+            const ehRodovia = nomeCidade.includes("Rodovia") || nomeCidade.includes("BR-") || nomeCidade.includes("SP-") || nomeCidade.includes("PR-") || nomeCidade.match(/^[A-Z]{2}-\d{3}$/);
+
+            if (nomeCidade && nomeCidade.length > 2 && !ehRodovia) {
+              const chaveUnica = `${nomeCidade}-${ufCidade}`;
+              
+              if (!cidadesSet.has(chaveUnica)) {
+                cidadesSet.add(chaveUnica);
+                cidadesDetalhadas.push({
+                  nome: nomeCidade,
+                  uf: ufCidade || ufPartida, 
+                  ordem: ordemContador++
+                });
+              }
+            }
+          }
+        });
+      }
+
+      // 3. Extrair o Destino oficial
+      const splitChegada = percurso.end_address.split("-");
+      const cidadeChegadaNome = splitChegada[0]?.trim();
+      const ufChegada = splitChegada[1]?.split(",")?.[0]?.trim() || "";
+
+      if (cidadeChegadaNome) {
+        const chaveDestino = `${cidadeChegadaNome}-${ufChegada}`;
+        if (!cidadesSet.has(chaveDestino)) {
+          cidadesDetalhadas.push({
+            nome: cidadeChegadaNome,
+            uf: ufChegada,
+            ordem: ordemContador++
+          });
+        }
+      }
+
+      return {
+        id_rota: index + 1,
+        nome_rota: route.summary || `Rota Alternativa ${index + 1}`,
+        distancia: percurso.distance?.text,
+        duracao: percurso.duration?.text,
+        polyline_geral: route.overview_polyline?.points,
+        cidades: cidadesDetalhadas
+      };
     });
 
-    const planoRotaAI = JSON.parse(completion.choices[0].message.content || "{}");
-
-    return NextResponse.json({ planoRotaAI });
+    return NextResponse.json({ rotas: rotasProcessadas });
 
   } catch (error: any) {
-    console.error("Erro no planejador de rotas:", error);
+    console.error("Erro no back-end do planejador de rotas:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
