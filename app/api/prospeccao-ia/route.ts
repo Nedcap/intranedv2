@@ -51,10 +51,10 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🔥 3. CONSULTA DIRETA VIA API REST DO BIGQUERY (Ignorando o SDK travado)
+    // 🔥 3. CONSULTA DIRETA VIA API REST DO BIGQUERY
     // =========================================================================
     
-    // Monta as condições da query
+    // Monta as condições de filtragem do SQL
     let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
     if (perfilMercado.cidade) {
@@ -68,6 +68,7 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
+    // O uso das barras invertidas antes das crases (\`) garante que o Next.js monte a query sem bugar
     const sqlQuery = `
       SELECT 
         cnpj,
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
         cep,
         uf,
         municipio_rf
-      FROM ${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos
+      FROM \`${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos\`
       ${queryCondicoes}
       LIMIT ${limiteSeguro}
     `;
@@ -96,8 +97,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         query: sqlQuery,
-        useLegacySql: false,
-        location: "US-EAST1" // Mesma região do seu balde/dataset
+        useLegacySql: false
       })
     });
 
@@ -107,7 +107,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia as linhas esquisitas que a API Rest do Google devolve para o formato limpo do seu front-end
+    // 4. Mapeia o retorno bruto da API Rest do Google para as colunas do seu Front-end
     const leads = (bqDados.rows || []).map((row: any) => {
       return {
         cnpj: row.f[0].v,
