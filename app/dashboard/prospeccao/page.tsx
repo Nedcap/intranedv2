@@ -11,14 +11,24 @@ interface Lead {
   situacao: string; 
   data_abertura: string; 
   cnae_principal: string;
+  cnaes_secundarios?: string;
   bairro: string;
   cep: string; 
   uf: string;
   municipio_rf: string; 
-  nome_fantasia?: string; // Coluna real do BigQuery
+  razao_social: string; // Nova coluna real vinda do BigQuery unificado
+  nome_fantasia?: string; // Nome fantasia comercial ou fallback
   
-  // propriedades calculadas/fallbacks
-  razaoSocial?: string; 
+  // Propriedades de Enriquecimento Comercial (Tabela google_places unificada)
+  natureza_juridica?: string;
+  capital_social?: number;
+  google_categoria?: string;
+  google_endereco?: string;
+  website?: string;
+  lat?: number;
+  lng?: number;
+
+  // Propriedades calculadas/locais
   score?: number; 
   cidadeExtenso?: string;
 }
@@ -148,15 +158,9 @@ export default function ProspeccaoIAPage() {
           ? mapeamentoAI.cidade_nome
           : `CÓDIGO ${l.municipio_rf}`;
 
-        // PRIORIDADE 1: Nome Fantasia vindo do BigQuery. FALLBACK: Texto Amigável com CNPJ
-        const nomeIdentificacao = l.nome_fantasia && String(l.nome_fantasia).trim() !== ""
-          ? String(l.nome_fantasia).toUpperCase()
-          : `EMPRESA S/ FANTASIA (FINAL ${l.cnpj.substring(10, 14)})`;
-
         return {
           ...l,
           cidadeExtenso: cidadeReal || "Não identificada",
-          razaoSocial: nomeIdentificacao,
           score: l.score || 10 
         };
       });
@@ -196,9 +200,9 @@ export default function ProspeccaoIAPage() {
   const exportarListaParaCSV = () => {
     if (leads.length === 0) return;
     
-    const cabecalho = "CNPJ;Nome/Identificacao;Cidade;UF;CNAE;Bairro;Situacao\n";
+    const cabecalho = "CNPJ;Razao Social;Nome Comercial;Cidade;UF;CNAE;Bairro;Situacao;Website\n";
     const linhas = leads.map(l => 
-      `"${l.cnpj}";"${l.razaoSocial}";"${l.cidadeExtenso}";"${l.uf}";"${l.cnae_principal}";"${l.bairro || ''}";"${l.situacao}"`
+      `"${l.cnpj}";"${l.razao_social}";"${l.nome_fantasia || ''}";"${l.cidadeExtenso}";"${l.uf}";"${l.cnae_principal}";"${l.bairro || ''}";"${l.situacao}";"${l.website || ''}"`
     ).join("\n");
     
     const blob = new Blob([cabecalho + linhas], { type: "text/csv;charset=utf-8;" });
@@ -221,11 +225,11 @@ export default function ProspeccaoIAPage() {
       const { error } = await supabase.from("crm_leads").insert({
         responsavel_id: agenteId,
         responsavel_nome: agenteAlvo,
-        razaoSocial: (leadSelecionado.razaoSocial || leadSelecionado.cnpj).toUpperCase(),
+        razaoSocial: (leadSelecionado.razao_social || leadSelecionado.cnpj).toUpperCase(),
         cnpj: leadSelecionado.cnpj,
         estagio: "Prospecção", 
         campos_customizados: {
-          origem_lead: "BigQuery Cloud Mining (Motor de Prospecção)",
+          origem_lead: "BigQuery Cloud Mining (Rico em Dados)",
           score_ia: leadSelecionado.score || 10,
           cnae_principal: leadSelecionado.cnae_principal,
           descricao_ramo: perfilAI?.atividade || "Mapeado via AI",
@@ -233,7 +237,10 @@ export default function ProspeccaoIAPage() {
           uf: leadSelecionado.uf,
           bairro: leadSelecionado.bairro,
           situacao_cadastral: leadSelecionado.situacao,
-          data_abertura: leadSelecionado.data_abertura
+          data_abertura: leadSelecionado.data_abertura,
+          capital_social: leadSelecionado.capital_social || 0,
+          website: leadSelecionado.website || "",
+          google_categoria: leadSelecionado.google_categoria || ""
         }
       });
 
@@ -270,7 +277,7 @@ export default function ProspeccaoIAPage() {
               </span>
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
-              🧠 Motor de Prospecção Avançada <span className="text-indigo-600">BigQuery Mining</span>
+              🧠 Motor de Prospecção Avançada <span className="text-indigo-600">BigQuery Mining v2</span>
             </h1>
           </div>
         </div>
@@ -287,7 +294,7 @@ export default function ProspeccaoIAPage() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Ex: Quero indústrias farmacêuticas ou laboratórios de manipulação em Maringá PR que trabalhem com cosméticos ou suplementos..."
+                placeholder="Ex: Quero indústrias farmacêuticas ou laboratórios de manipulação em Maringá PR..."
                 className="w-full p-4 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[85px] resize-none"
                 disabled={carregando}
               />
@@ -386,7 +393,7 @@ export default function ProspeccaoIAPage() {
                   <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
                     <th className="p-3.5">Score</th>
                     <th className="p-3.5">CNPJ</th>
-                    <th className="p-3.5">Identificação Empresa</th>
+                    <th className="p-3.5">Razão Social / Identificação</th>
                     <th className="p-3.5">Cidade/UF</th>
                     <th className="p-3.5">CNAE Principal</th>
                     <th className="p-3.5 text-center">Ações</th>
@@ -396,7 +403,7 @@ export default function ProspeccaoIAPage() {
                   {leads.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center p-12 text-slate-500 font-bold bg-slate-50">
-                        {carregando ? "Varrendo índices na nuvem do Google BigQuery..." : "Área de trabalho vazia. Descreva um alvo acima para minerar e acumular leads aqui!"}
+                        {carregando ? "Cruzando tabelas na nuvem do Google BigQuery..." : "Área de trabalho vazia. Descreva um alvo acima para minerar e acumular leads aqui!"}
                       </td>
                     </tr>
                   ) : (
@@ -414,7 +421,12 @@ export default function ProspeccaoIAPage() {
                           </span>
                         </td>
                         <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
-                        <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[280px]">{lead.razaoSocial}</td>
+                        <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[280px]">
+                          <div>{lead.razao_social}</div>
+                          {lead.nome_fantasia && lead.nome_fantasia !== lead.razao_social && (
+                            <div className="text-[10px] text-indigo-500 font-semibold lowercase truncate tracking-tight">⭐ {lead.nome_fantasia}</div>
+                          )}
+                        </td>
                         <td className="p-3.5 uppercase text-slate-500">{lead.cidadeExtenso} / {lead.uf}</td>
                         <td className="p-3.5 text-slate-500 max-w-[250px] truncate">
                           <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] mr-1.5 border border-slate-200">
@@ -423,7 +435,7 @@ export default function ProspeccaoIAPage() {
                         </td>
                         <td className="p-3.5 text-center flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razaoSocial || lead.cnpj)}`, "_blank")}
+                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social || lead.cnpj)}`, "_blank")}
                             className="bg-white text-slate-700 border border-slate-300 font-bold px-2 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
                           >
                             Google
@@ -448,7 +460,7 @@ export default function ProspeccaoIAPage() {
           {leadSelecionado && (
             <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-lg animate-in slide-in-from-right-5 duration-200 lg:col-span-1 sticky top-6">
               <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Painel de Auditoria</span>
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Painel de Auditoria Enriquecido</span>
                 <button 
                   onClick={() => setLeadSelecionado(null)}
                   className="text-slate-400 hover:text-slate-600 font-bold text-xs p-1 cursor-pointer"
@@ -460,18 +472,21 @@ export default function ProspeccaoIAPage() {
               <div className="space-y-3">
                 <div>
                   <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight leading-tight">
-                    {leadSelecionado.razaoSocial}
+                    {leadSelecionado.razao_social}
                   </h3>
+                  {leadSelecionado.nome_fantasia && leadSelecionado.nome_fantasia !== leadSelecionado.razao_social && (
+                    <div className="text-xs font-bold text-indigo-600 uppercase mt-0.5">Fantasia: {leadSelecionado.nome_fantasia}</div>
+                  )}
                   <span className="font-mono font-bold text-slate-500 text-xs">{formatarCnpj(leadSelecionado.cnpj)}</span>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
                   <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">Estado/Município</span>
+                    <span className="text-slate-500 font-bold">Região</span>
                     <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.cidadeExtenso} - {leadSelecionado.uf}</span>
                   </div>
                   <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">Bairro Cadastrado</span>
+                    <span className="text-slate-500 font-bold">Bairro</span>
                     <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.bairro || "NÃO INFORMADO"}</span>
                   </div>
                   <div className="flex justify-between border-b border-slate-200 pb-1.5">
@@ -480,11 +495,38 @@ export default function ProspeccaoIAPage() {
                       STATUS {leadSelecionado.situacao}
                     </span>
                   </div>
-                  <div className="flex justify-between pt-0.5">
-                    <span className="text-slate-500 font-bold">CNAE Ativo</span>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500 font-bold">CNAE Principal</span>
                     <span className="text-indigo-600 font-mono font-bold">{leadSelecionado.cnae_principal}</span>
                   </div>
+                  {leadSelecionado.capital_social && leadSelecionado.capital_social > 0 ? (
+                    <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                      <span className="text-slate-500 font-bold">Capital Social</span>
+                      <span className="text-emerald-600 font-bold">
+                        {leadSelecionado.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      </span>
+                    </div>
+                  ) : null}
+                  {leadSelecionado.website && (
+                    <div className="flex justify-between pt-0.5 items-center">
+                      <span className="text-slate-500 font-bold">Website</span>
+                      <a 
+                        href={leadSelecionado.website.startsWith("http") ? leadSelecionado.website : `https://${leadSelecionado.website}`}
+                        target="_blank" 
+                        className="text-indigo-600 font-bold hover:underline text-[11px] truncate max-w-[150px]"
+                      >
+                        {leadSelecionado.website} 🔗
+                      </a>
+                    </div>
+                  )}
                 </div>
+
+                {leadSelecionado.google_categoria && (
+                  <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg">
+                    <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block mb-0.5">Classificação Comercial Google</span>
+                    <span className="text-xs font-semibold text-slate-800 capitalize">{leadSelecionado.google_categoria}</span>
+                  </div>
+                )}
 
                 <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-2 mt-4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
