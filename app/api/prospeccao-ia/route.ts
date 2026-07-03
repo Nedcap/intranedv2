@@ -96,14 +96,13 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Mapeando as 20 colunas e apontando para o dataset _us
+    // Mapeando as colunas sem google_lat e google_lng para evitar o erro do Parquet
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
-        google_nome, google_categoria, google_endereco, google_website,
-        google_lat, google_lng
+        google_nome, google_categoria, google_endereco, google_website
       FROM \`${process.env.GCP_PROJECT_ID}.banco_receita_us.estabelecimentos\`
       ${queryCondicoes}
       LIMIT ${limiteSeguro}
@@ -129,7 +128,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia os dados casando perfeitamente com os cartões e tabelas do seu front-end
+    // 4. Mapeia os dados casando perfeitamente com os cartões e tabelas do front-end
     const leads = (bqDados.rows || []).map((row: any) => {
       const rSocial = row.f[11].v || "Razão Social indisponível";
       const gNome = row.f[14].v;
@@ -153,8 +152,8 @@ export async function POST(req: Request) {
         google_categoria: row.f[15].v,
         google_endereco: row.f[16].v,
         website: row.f[17].v,
-        lat: row.f[18].v ? parseFloat(row.f[18].v) : null,
-        lng: row.f[19].v ? parseFloat(row.f[19].v) : null
+        lat: null, // Deixando nulo temporariamente
+        lng: null  // Deixando nulo temporariamente
       };
     });
 
