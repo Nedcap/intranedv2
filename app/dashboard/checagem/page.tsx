@@ -97,6 +97,14 @@ const classificarStatus = (ocorrenciaStr: string) => {
   return "A Confirmar";
 };
 
+// Nova classificação simplificada exclusiva para o fluxo do FIDC
+const classificarStatusFidc = (statusStr: string) => {
+  const s = String(statusStr).toUpperCase().trim();
+  if (s.includes("ABERTO")) return "A Confirmar";
+  if (s.includes("BAIXADO")) return "Confirmado";
+  return "A Confirmar";
+};
+
 const calcularDiasSLA = (d1: string | null, d2: string | null) => {
   if (!d1 || !d2) return 0;
   const data1 = new Date(d1);
@@ -193,51 +201,63 @@ export default function ChecagemPage() {
         }
 
         const loteUpload: any[] = [];
-        
-        if (tipoEmpresa === "SEC") {
-          const headerIdx = rawData.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE" || strClean(cell) === "NOMEDOCEDENTE"));
-          
-          if (headerIdx !== -1) {
-            const header = rawData[headerIdx].map(strClean);
-            
-            const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL");
-            const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO");
-            const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO"));
-            const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
-            const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO"));
-            const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
-            const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
-            const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
+        const headerIdx = rawData.findIndex(row => row.some(cell => {
+          const cleanCell = strClean(cell);
+          return cleanCell === "CEDENTE" || cleanCell === "NOMEDOCEDENTE" || cleanCell === "RASTREIOCHECAGEM" || cleanCell === "STATUSCHECAGEM";
+        }));
 
-            for (let i = headerIdx + 1; i < rawData.length; i++) {
-              const row = rawData[i];
-              const cedente = String(row[idxCed] || "").trim();
-              if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
-
-              const vlrAberto = parseValorReal(row[idxAberto]);
-              if (vlrAberto <= 0) continue; 
-
-              const ocorrenciaTexto = idxOcorr !== -1 ? String(row[idxOcorr] || "").trim() : "";
-
-              loteUpload.push({
-                data_referencia: dataReferencia,
-                empresa: "SEC",
-                cedente: cedente,
-                sacado: String(row[idxSac] || "").trim(),
-                documento: idxDoc !== -1 ? String(row[idxDoc] || "").trim() : "-",
-                vencimento: formatarDataExcel(row[idxVenc]),
-                valor_aberto: vlrAberto,
-                status_confirmacao: classificarStatus(ocorrenciaTexto),
-                ocorrencias: ocorrenciaTexto,
-                emissao: idxEmissao !== -1 ? formatarDataExcel(row[idxEmissao]) : null,
-                atualizacao: idxExp !== -1 ? formatarDataExcel(row[idxExp]) : null
-              });
-            }
-          }
-        } else {
-          alert("Mapeamento do FIDC em construção. Faça upload do SEC por enquanto.");
+        if (headerIdx === -1) {
+          alert("❌ Cabeçalho do arquivo não identificado.");
           setProcessandoUpload(false);
           return;
+        }
+
+        const header = rawData[headerIdx].map(strClean);
+        
+        const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL");
+        const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO");
+        const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO") || c === "NUMERO");
+        const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
+        const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR");
+        const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
+        const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
+        
+        // Coluna variante para checagem do SEC ou FIDC
+        const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
+        const idxStatusFidc = header.findIndex(c => c === "RASTREIOCHECAGEM" || c === "STATUSCHECAGEM");
+
+        for (let i = headerIdx + 1; i < rawData.length; i++) {
+          const row = rawData[i];
+          const cedente = String(row[idxCed] || "").trim();
+          if (!cedente || cedente.toUpperCase().includes("TOTAL")) continue;
+
+          const vlrAberto = parseValorReal(row[idxAberto]);
+          if (vlrAberto <= 0) continue; 
+
+          let statusFinal = "A Confirmar";
+          let ocorrenciaTexto = "";
+
+          if (tipoEmpresa === "FIDC" && idxStatusFidc !== -1) {
+            ocorrenciaTexto = String(row[idxStatusFidc] || "").trim();
+            statusFinal = classificarStatusFidc(ocorrenciaTexto);
+          } else if (idxOcorr !== -1) {
+            ocorrenciaTexto = String(row[idxOcorr] || "").trim();
+            statusFinal = classificarStatus(ocorrenciaTexto);
+          }
+
+          loteUpload.push({
+            data_referencia: dataReferencia,
+            empresa: tipoEmpresa,
+            cedente: cedente,
+            sacado: idxSac !== -1 ? String(row[idxSac] || "").trim() : "Não Informado",
+            documento: idxDoc !== -1 ? String(row[idxDoc] || "").trim() : "-",
+            vencimento: idxVenc !== -1 ? formatarDataExcel(row[idxVenc]) : null,
+            valor_aberto: vlrAberto,
+            status_confirmacao: statusFinal,
+            ocorrencias: ocorrenciaTexto,
+            emissao: idxEmissao !== -1 ? formatarDataExcel(row[idxEmissao]) : null,
+            atualizacao: idxExp !== -1 ? formatarDataExcel(row[idxExp]) : null
+          });
         }
 
         if (loteUpload.length > 0) {
@@ -265,7 +285,6 @@ export default function ChecagemPage() {
     }
   };
 
-  // 📝 LOGICA NOVA DE CÁLCULO INSERIDA AQUI
   const kpis = useMemo(() => {
     let total = 0, confirmado = 0, aConfirmar = 0, risco = 0, outros = 0;
     titulos.forEach(t => {
@@ -277,7 +296,6 @@ export default function ChecagemPage() {
       else outros += v;
     });
 
-    // Carteira passível de checagem = Carteira Total menos o que já é Alto Risco, Não Confirma, Problema e Política (outros)
     const carteiraChecavel = total - risco - outros;
     const calcPerc = (val: number) => total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
     const calcPercChecavel = (val: number) => carteiraChecavel > 0 ? ((val / carteiraChecavel) * 100).toFixed(1) : "0.0";
@@ -287,7 +305,7 @@ export default function ChecagemPage() {
       pConfirmado: calcPerc(confirmado),
       pAConfirmar: calcPerc(aConfirmar),
       pRisco: calcPerc(risco),
-      pConfirmadoSobreChecavel: calcPercChecavel(confirmado) // Metrica nova solicitada
+      pConfirmadoSobreChecavel: calcPercChecavel(confirmado)
     };
   }, [titulos]);
 
@@ -362,9 +380,6 @@ export default function ChecagemPage() {
     return array;
   }, [titulos, sortConfig, filtroStatusCard]);
 
-  // ==========================================================================
-  // 🕹️ INTERAÇÕES DA UI
-  // ==========================================================================
   const handleSort = (key: keyof AgregacaoCedente) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
   };
@@ -474,6 +489,13 @@ export default function ChecagemPage() {
               {processandoUpload ? "⏳ Lendo..." : "📥 Importar SEC"}
               <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "SEC")} />
             </label>
+
+            {/* BOTÃO ADICIONADO E MAPEADO PARA O FLUXO DO FIDC */}
+            <label className={`px-4 py-2 bg-violet-50 hover:bg-violet-600 hover:text-white text-violet-700 font-black rounded-lg text-[10px] uppercase cursor-pointer border border-violet-200 shadow-sm flex items-center gap-2`}>
+              {processandoUpload ? "⏳ Lendo..." : "📥 Importar FIDC"}
+              <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "FIDC")} />
+            </label>
+
             <button onClick={handleExpandirTudo} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-[10px] uppercase border border-slate-300 shadow-sm transition-colors">
               {Object.keys(expandidos).length === cedentesAgregados.length ? "➖ Recolher Tudo" : "➕ Expandir Tudo"}
             </button>
@@ -491,7 +513,6 @@ export default function ChecagemPage() {
           <span className="text-2xl font-black font-mono mt-1 truncate">{fM(kpis.total)}</span>
         </div>
         
-        {/* CARD CONFIRMADOS ALTERADO COM O NOVO "SUBCARD" INTERNO */}
         <button 
           onClick={() => lidarCliqueCardKpi("CONFIRMADO")}
           className={`text-left p-4 rounded-xl shadow-xs flex flex-col justify-between relative overflow-hidden border transition-all cursor-pointer select-none print:bg-white ${
@@ -509,7 +530,6 @@ export default function ChecagemPage() {
             </div>
           </div>
 
-          {/* 🪪 SUBCARD: Conversão Efetiva (Excluindo os Riscos/Problemas do cálculo) */}
           <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between bg-slate-50/70 p-1.5 rounded-lg border border-slate-200/60">
             <div className="flex flex-col">
               <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight">Efetividade s/ Checável</span>
@@ -557,7 +577,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO INTERATIVO RESTAURADO */}
+      {/* 📈 GRÁFICO INTERATIVO */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col print:hidden">
         <div className="mb-4 border-b border-slate-100 pb-2">
           <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
@@ -721,7 +741,6 @@ export default function ChecagemPage() {
                         <tr>
                           <td colSpan={7} className="bg-slate-100/50 p-4 border-b border-slate-200 print:p-2 print:bg-white print:border-b-2 print:border-slate-800">
                             
-                            {/* CONTROLES AVANÇADOS DA SUBTABELA */}
                             <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-xs print:hidden">
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-black text-slate-400 uppercase">🔍 Busca:</span>
@@ -793,7 +812,7 @@ export default function ChecagemPage() {
                                     }}>
                                       SLA / Aging {subSort.key === "sla_aging" && (subSort.direction === "asc" ? "🔼" : "🔽")}
                                     </th>
-                                    <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências</th>
+                                    <th className="p-2.5 max-w-[200px] print:hidden">Ocorrências / Status Base</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 print:divide-slate-200 font-medium text-slate-700">
