@@ -22,7 +22,7 @@ export async function POST(req: Request) {
 
       Retorne ESTRITAMENTE um objeto JSON válido:
       {
-        "atividade": "descrição corta do segmento",
+        "atividade": "descrição curta do segmento",
         "cidade_nome": "Nome da cidade por extenso",
         "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
@@ -56,31 +56,35 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🔥 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PRÓPRIO
+    // 🔥 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PROPRIO
     // =========================================================================
+    if (!process.env.GCP_CLIENT_ID || !process.env.GCP_REFRESH_TOKEN) {
+      throw new Error("Variáveis de ambiente do Google Cloud não foram carregadas corretamente na Vercel.");
+    }
+
     const oauthResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: process.env.GCP_CLIENT_ID || "",
+        client_id: process.env.GCP_CLIENT_ID,
         client_secret: process.env.GCP_CLIENT_SECRET || "",
-        refresh_token: process.env.GCP_REFRESH_TOKEN || "",
+        refresh_token: process.env.GCP_REFRESH_TOKEN,
         grant_type: "refresh_token"
       })
     });
 
     const oauthDados = await oauthResponse.json();
-    const accessTokenValido = oauthDados.access_token;
-
-    if (!accessTokenValido) {
-      throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error || "Token inválido"}`);
+    
+    if (oauthDados.error) {
+      console.error("Detalhes do erro do Google OAuth:", oauthDados);
+      throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error}`);
     }
 
+    const accessTokenValido = oauthDados.access_token;
+
     // =========================================================================
-    // 🧠 3. CONSTRUÇÃO DA QUERY DO BIGQUERY
+    // 🧠 3. CONSTRUÇÃO DA QUERY DO BIGQUERY (ADICIONANDO RAZÃO SOCIAL)
     // =========================================================================
-    
-    // Monta as condições de filtragem do SQL usando a UF
     let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
     if (perfilMercado.codigo_municipio) {
@@ -94,6 +98,7 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
+    // Adicionamos 'razao_social' explicitamente na busca como o 11º campo (índice 10)
     const sqlQuery = `
       SELECT 
         cnpj,
@@ -105,13 +110,14 @@ export async function POST(req: Request) {
         bairro,
         cep,
         uf,
-        municipio_rf
+        municipio_rf,
+        razao_social,
+        nome_fantasia
       FROM \`${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos\`
       ${queryCondicoes}
       LIMIT ${limiteSeguro}
     `;
 
-    // Dispara a requisição com o cabeçalho Authorization contendo o Access Token dinâmico
     const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
     
     const bqResponse = await fetch(urlBigQuery, {
@@ -132,7 +138,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia o retorno bruto para o formato do seu Front-end
+    // 4. Mapeia o retorno bruto incluindo a Razão Social mapeada
     const leads = (bqDados.rows || []).map((row: any) => {
       return {
         cnpj: row.f[0].v,
@@ -144,7 +150,9 @@ export async function POST(req: Request) {
         bairro: row.f[6].v,
         cep: row.f[7].v,
         uf: row.f[8].v,
-        municipio_rf: row.f[9].v
+        municipio_rf: row.f[9].v,
+        razao_social: row.f[10].v || 'Razão Social não encontrada', // Puxa direto a Razão Social da Receita
+        nome_fantasia: row.f[11].v || 'Empresa sem fantasia'        // Mantém o Fantasia isolado caso queira exibir
       };
     });
 
