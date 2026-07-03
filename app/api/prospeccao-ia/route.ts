@@ -1,3 +1,4 @@
+// C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 
@@ -13,30 +14,29 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // 🔥 O SEGREDO ESTÁ AQUI: Um prompt blindado obrigando a IA a dar a subclasse exata
     const promptSistema = `
-      Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs da Receita Federal do Brasil.
+      Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs e municípios da Receita Federal do Brasil.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       
       ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
 
-      ATENÇÃO PARA O CNAE (MUITO IMPORTANTE): NÃO retorne apenas os 2 primeiros dígitos (como 46 para atacado ou 47 para varejo), pois isso trará setores genéricos irrelevantes como alimentos e agropecuária. 
-      Você DEVE retornar os prefixos CNAE ESPECÍFICOS de 3, 4 ou 5 dígitos (Grupos ou Subclasses) que correspondam EXATAMENTE e EXCLUSIVAMENTE ao nicho solicitado. 
-      Exemplo: Para autopeças, retorne "453" (Comércio de peças e acessórios para veículos). Para farmácias, retorne "4771", etc.
+      ATENÇÃO PARA O CNAE (MUITO IMPORTANTES):
+      - Se o usuário pedir um nicho específico, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
+      - Se o pedido do usuário for aberto, amplo ou pedir "principais empresas", "comércios" ou "indústrias" em geral sem um nicho restrito, retorne o array "codigos_cnae" VAZIO []. Não tente inventar filtros restritivos se o objetivo for uma varredura geral.
 
       Retorne ESTRITAMENTE um objeto JSON válido:
       {
-        "atividade": "descrição curta do segmento",
+        "atividade": "descrição curta do segmento ou 'Geral'",
         "cidade_nome": "Nome da cidade por extenso",
         "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
         "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
-        "codigos_cnae": ["array de strings contendo OS PREFIXOS CNAE EXATOS de 3 a 5 dígitos do segmento"]
+        "codigos_cnae": ["array de strings contendo prefixos se houver nicho específico, ou [] se for busca geral"]
       }
     `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.1, // Temperatura baixa para ele não inventar CNAE que não existe
+      model: "gpt-4o",
+      temperature: 0.1,
       messages: [
         { role: "system", content: promptSistema },
         { role: "user", content: promptUsuario },
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido." }, { status: 400 });
     }
 
-    // Tratamento para limpar pontuações e garantir que tem pelo menos 3 dígitos de precisão
+    // Limpa pontuações e garante os dígitos de precisão caso a IA tenha retornado algum CNAE
     if (perfilMercado.codigos_cnae && Array.isArray(perfilMercado.codigos_cnae)) {
       perfilMercado.codigos_cnae = perfilMercado.codigos_cnae
         .map((c: string) => c.replace(/\D/g, ''))
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     // 🔥 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PROPRIO
     // =========================================================================
     if (!process.env.GCP_CLIENT_ID || !process.env.GCP_REFRESH_TOKEN) {
-      throw new Error("Variáveis de ambiente do Google Cloud não foram carregadas corretamente na Vercel.");
+      throw new Error("Variáveis de ambiente do Google Cloud não foram carregadas corretamente.");
     }
 
     const oauthResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -84,15 +84,16 @@ export async function POST(req: Request) {
     const accessTokenValido = oauthDados.access_token;
 
     // =========================================================================
-    // 🧠 3. CONSTRUÇÃO DA QUERY NO DATASET CORRETO (banco_receita_us)
+    // 🧠 3. CONSTRUÇÃO DA QUERY INTELIGENTE NO DATASET (banco_receita_us)
     // =========================================================================
-    let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
+    // Filtro base: apenas estabelecimentos ativos na UF correspondente
+    let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}' AND situacao = '02'`; // '02' costuma ser Ativa na RF
 
     if (perfilMercado.codigo_municipio) {
       queryCondicoes += ` AND municipio_rf = '${perfilMercado.codigo_municipio}'`;
     }
 
-    // 🎯 Sniper de precisão do SQL: Usando o LIKE com prefixo ao invés de buscar os primeiros 2 caracteres
+    // Se houver CNAEs específicos extraídos, aplica o sniper LIKE. Caso contrário, traz tudo da cidade!
     if (perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0) {
       const cnaesPrecisos = perfilMercado.codigos_cnae.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
       queryCondicoes += ` AND (${cnaesPrecisos})`;
@@ -100,14 +101,16 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
+    // Adicionamos um ORDER BY para jogar empresas com nome e dados do Google para o topo na buscona geral
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
-        razao_social, natureza_juridica, capital_social,
+        razao_social, naturezas_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
       FROM \`${process.env.GCP_PROJECT_ID}.banco_receita_us.estabelecimentos\`
       ${queryCondicoes}
+      ORDER BY CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura DESC
       LIMIT ${limiteSeguro}
     `;
 
@@ -131,7 +134,7 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia os dados
+    // 4. Mapeia os dados devolvendo para a view do planejador
     const leads = (bqDados.rows || []).map((row: any) => {
       const rSocial = row.f[11].v || "Razão Social indisponível";
       const gNome = row.f[14].v;

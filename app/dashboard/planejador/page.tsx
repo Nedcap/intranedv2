@@ -1,3 +1,4 @@
+// C:\Users\Alyson\intranet-webv2\app\dashboard\planejador\page.tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -44,8 +45,11 @@ export default function PlanejadorRotasPage() {
   // Estados das Rotas calculadas
   const [todasAsRotas, setTodasAsRotas] = useState<RotaAlternativa[]>([]);
   const [rotaSelecionada, setRotaSelecionada] = useState<RotaAlternativa | null>(null);
+  
+  // Lista mutável de cidades para permitir exclusão ativa pelo comercial
+  const [cidadesDaVisao, setCidadesDaVisao] = useState<CidadeRota[]>([]);
 
-  // Mapeamento de Leads por Cidade: { "Sorocaba": [Leads...] } -> Evita requests duplicados
+  // Mapeamento de Leads por Cidade: { "Sorocaba": [Leads...] } -> Cache de memória local
   const [bancoLeadsPorCidade, setBancoLeadsPorCidade] = useState<Record<string, Lead[]>>({});
   const [cidadeAbAtiva, setCidadeAbAtiva] = useState<string>("");
 
@@ -53,7 +57,7 @@ export default function PlanejadorRotasPage() {
   const [roteiroFinal, setRoteiroFinal] = useState<Lead[]>([]);
   const [abaPrincipalVisualizacao, setAbaPrincipalVisualizacao] = useState<"PROSPECCAO" | "MEU_ROTEIRO">("PROSPECCAO");
 
-  // 1. Chamar o back-end para cruzar as rotas no Google Maps
+  // 1. Passo 1: Buscar o esqueleto bruto rodoviário do Maps
   const mapearMalhaRodoviaria = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!origem || !destino || !atividade) return;
@@ -61,6 +65,7 @@ export default function PlanejadorRotasPage() {
     setCalculandoRota(true);
     setTodasAsRotas([]);
     setRotaSelecionada(null);
+    setCidadesDaVisao([]);
     setBancoLeadsPorCidade({});
     setCidadeAbAtiva("");
 
@@ -76,8 +81,8 @@ export default function PlanejadorRotasPage() {
 
       if (dados.rotas && dados.rotas.length > 0) {
         setTodasAsRotas(dados.rotas);
-        // Seleciona a primeira rota por padrão
         setRotaSelecionada(dados.rotas[0]);
+        setCidadesDaVisao(dados.rotas[0].cidades);
         setCidadeAbAtiva(dados.rotas[0].cidades[0]?.nome || "");
       } else {
         alert("Nenhuma rota encontrada para o trecho.");
@@ -89,12 +94,20 @@ export default function PlanejadorRotasPage() {
     }
   };
 
-  // 2. LAZY LOADING: Buscar leads da cidade apenas ao clicar nela, se não existir na memória
-  const ativarAbaEBuscarLeads = async (nomeCidade: string, ufCidade: string) => {
-    setCidadeAbAtiva(nomeCidade);
+  // Permite ao vendedor remover uma cidade indesejada do fluxo de abas
+  const excluirCidadeDaRota = (nomeCidade: string) => {
+    const filtradas = cidadesDaVisao.filter((c) => c.nome !== nomeCidade);
+    setCidadesDaVisao(filtradas);
+    
+    // Se excluiu a aba ativa atual, joga para a primeira remanescente
+    if (cidadeAbAtiva === nomeCidade) {
+      setCidadeAbAtiva(filtradas[0]?.nome || "");
+    }
+  };
 
-    // Se já foi alimentada antes, não faz requisição de novo. Protege tokens e banco!
-    if (bancoLeadsPorCidade[nomeCidade]) return;
+  // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito pelo usuário
+  const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
+    if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
 
     setCarregandoCidadeId(nomeCidade);
 
@@ -119,7 +132,6 @@ export default function PlanejadorRotasPage() {
         observacaoCommercial: "",
       }));
 
-      // Alimenta apenas a caixinha dessa cidade específica no estado do React
       setBancoLeadsPorCidade((prev) => ({
         ...prev,
         [nomeCidade]: tratados,
@@ -131,7 +143,7 @@ export default function PlanejadorRotasPage() {
     }
   };
 
-  // 3. Gerenciamento do Roteiro Final (O Carrinho B2B)
+  // 3. Gerenciamento do Roteiro Final
   const adicionarAoRoteiro = (lead: Lead) => {
     if (roteiroFinal.some((item) => item.cnpj === lead.cnpj)) {
       alert("Esta empresa já está no seu roteiro comercial.");
@@ -177,6 +189,7 @@ export default function PlanejadorRotasPage() {
   };
 
   const leadsExibicaoAba = bancoLeadsPorCidade[cidadeAbAtiva] || [];
+  const objetoCidadeAtiva = cidadesDaVisao.find((c) => c.nome === cidadeAbAtiva);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-700 p-6 font-sans antialiased text-[13px]">
@@ -223,7 +236,8 @@ export default function PlanejadorRotasPage() {
                   key={rota.id_rota}
                   onClick={() => {
                     setRotaSelecionada(rota);
-                    ativarAbaEBuscarLeads(rota.cidades[0]?.nome, rota.cidades[0]?.uf);
+                    setCidadesDaVisao(rota.cidades);
+                    setCidadeAbAtiva(rota.cidades[0]?.nome || "");
                   }}
                   className={`p-3 border rounded-xl cursor-pointer transition-all ${
                     rotaSelecionada?.id_rota === rota.id_rota
@@ -242,7 +256,7 @@ export default function PlanejadorRotasPage() {
           </div>
         )}
 
-        {/* CONTROLADOR DE MODOS DA PÁGINA (PROSPECÇÃO EM MASSA VS MEU ROTEIRO COMERCIAL) */}
+        {/* CONTROLADOR DE MODOS DA PÁGINA */}
         {rotaSelecionada && (
           <div className="flex gap-2 border-b border-slate-200 pb-2">
             <button
@@ -251,7 +265,7 @@ export default function PlanejadorRotasPage() {
                 abaPrincipalVisualizacao === "PROSPECCAO" ? "bg-slate-900 text-white" : "bg-slate-200/60 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              🚀 Prospecção por Cidade ({rotaSelecionada.cidades.length} mapeadas)
+              🚀 Prospecção por Cidade ({cidadesDaVisao.length} ativas)
             </button>
             <button
               onClick={() => setAbaPrincipalVisualizacao("MEU_ROTEIRO")}
@@ -259,7 +273,7 @@ export default function PlanejadorRotasPage() {
                 abaPrincipalVisualizacao === "MEU_ROTEIRO" ? "bg-indigo-600 text-white" : "bg-slate-200/60 text-indigo-600 hover:bg-slate-200"
               }`}
             >
-              💼 Meu Roteiro Selecionado
+              💼 Meu Roteiro Comercial Final
               <span className="bg-white text-slate-900 px-1.5 py-0.2 rounded text-[10px] font-mono font-black">{roteiroFinal.length}</span>
             </button>
           </div>
@@ -271,33 +285,35 @@ export default function PlanejadorRotasPage() {
             
             {/* MINI MAPA DIGITAL / FLUXO DE ABAS GEOGRÁFICAS */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto da Viagem (Clique na Cidade para Minerar e abrir Aba):</span>
+              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para Visualizar. Use o "X" para Excluir do Itinerário):</span>
               <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-                {rotaSelecionada.cidades.map((cidade, idx) => {
+                {cidadesDaVisao.map((cidade, idx) => {
                   const jaTemLeads = !!bancoLeadsPorCidade[cidade.nome];
                   const estaAtiva = cidadeAbAtiva === cityKey(cidade.nome);
-                  const estaCarregando = carregandoCidadeId === cidade.nome;
 
                   return (
-                    <div key={idx} className="flex items-center flex-shrink-0">
+                    <div key={idx} className="flex items-center flex-shrink-0 bg-white border border-slate-300 rounded-lg shadow-sm pl-1 pr-2 py-0.5 transition-all">
                       <button
-                        onClick={() => ativarAbaEBuscarLeads(cidade.nome, cidade.uf)}
-                        className={`px-3 py-2 rounded-lg font-black text-[11px] uppercase transition-all flex items-center gap-2 shadow-sm ${
-                          estaAtiva
-                            ? "bg-indigo-600 text-white ring-2 ring-indigo-200"
-                            : jaTemLeads
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : "bg-white text-slate-600 border border-slate-300 hover:bg-slate-50"
+                        onClick={() => setCidadeAbAtiva(cidade.nome)}
+                        className={`px-2 py-1.5 rounded font-black text-[11px] uppercase transition-all flex items-center gap-1.5 ${
+                          estaAtiva ? "text-indigo-600 font-extrabold" : "text-slate-600"
                         }`}
                       >
-                        {estaCarregando ? "⏳" : jaTemLeads ? "✅" : "📍"} {cidade.nome} / {cidade.uf}
+                        {jaTemLeads ? "✅" : "📍"} {cidade.nome} / {cidade.uf}
                         {jaTemLeads && (
                           <span className="bg-emerald-600 text-white font-mono px-1 rounded text-[9px]">
                             {bancoLeadsPorCidade[cidade.nome].length}
                           </span>
                         )}
                       </button>
-                      {idx < rotaSelecionada.cidades.length - 1 && <span className="text-slate-300 font-black px-1">➔</span>}
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); excluirCidadeDaRota(cidade.nome); }} 
+                        className="ml-1 text-slate-400 hover:text-red-500 font-bold px-1 transition-colors text-[11px] cursor-pointer"
+                        title="Remover parada da viagem"
+                      >
+                        ✕
+                      </button>
+                      {idx < cidadesDaVisao.length - 1 && <span className="text-slate-300 font-black ml-2">➔</span>}
                     </div>
                   );
                 })}
@@ -308,10 +324,18 @@ export default function PlanejadorRotasPage() {
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-black text-slate-900 uppercase text-xs flex items-center gap-2">
-                  🏬 Empresas Disponíveis em: <span className="text-indigo-600">{cidadeAbAtiva || "Nenhuma Selecionada"}</span>
+                  Parada Atual: <span className="text-indigo-600">{cidadeAbAtiva || "Nenhuma Selecionada"}</span>
                 </h3>
+                {cidadeAbAtiva && !bancoLeadsPorCidade[cidadeAbAtiva] && carregandoCidadeId !== cidadeAbAtiva && (
+                  <button
+                    onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer"
+                  >
+                    ⚡ Buscar Empresas de {cidadeAbAtiva}
+                  </button>
+                )}
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-500 text-[11px] uppercase">Leads por request:</span>
+                  <span className="font-bold text-slate-500 text-[11px] uppercase">Leads/request:</span>
                   <select value={limiteCidade} onChange={(e) => setLimiteCidade(Number(e.target.value))} className="p-1 bg-white border border-slate-300 rounded text-xs font-bold">
                     <option value={15}>15</option>
                     <option value={30}>30</option>
@@ -326,11 +350,22 @@ export default function PlanejadorRotasPage() {
               {carregandoCidadeId === cidadeAbAtiva ? (
                 <div className="p-12 text-center space-y-2">
                   <div className="animate-spin text-xl inline-block">⚡</div>
-                  <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Minerando nuvem e alimentando painel de {cidadeAbAtiva}...</p>
+                  <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Carregando dados comerciais e alimentando painel de {cidadeAbAtiva}...</p>
+                </div>
+              ) : !cidadeAbAtiva ? (
+                <div className="p-12 text-center text-slate-400 font-medium">
+                  Mapeie uma rota para iniciar o processo logístico.
                 </div>
               ) : leadsExibicaoAba.length === 0 ? (
-                <div className="p-12 text-center">
-                  <p className="text-slate-400 font-medium">Nenhum lead carregado para esta parada. Clique nela acima para disparar o cruzamento parcelado.</p>
+                <div className="p-12 text-center bg-slate-50/50">
+                  <p className="text-slate-500 font-black uppercase text-xs tracking-wider mb-2">Aba Vazia</p>
+                  <p className="text-slate-400 max-w-sm mx-auto mb-4">O motor de IA não foi acionado para esta cidade. Clique no botão de acionamento por etapa para minerar a malha de CNPJs.</p>
+                  <button
+                    onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer"
+                  >
+                    🔍 Acionar Prospecção de {cidadeAbAtiva}
+                  </button>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -359,7 +394,7 @@ export default function PlanejadorRotasPage() {
                                     : "bg-indigo-600 hover:bg-indigo-700 text-white"
                                 }`}
                               >
-                                {jaEstaNoRoteiro ? "✓ Adicionado" : "➕ Roteiro"}
+                                {jaEstaNoRoteiro ? "✓ Selecionada" : "➕ Roteiro"}
                               </button>
                             </td>
                             <td className="p-3.5 font-mono font-bold text-slate-500">{lead.cnpj}</td>
@@ -455,7 +490,6 @@ export default function PlanejadorRotasPage() {
   );
 }
 
-// Função auxiliar simples para tratar a chave do dicionário
 function cityKey(name: string): string {
   return name ? name.trim() : "";
 }
