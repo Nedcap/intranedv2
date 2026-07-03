@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
-import { BigQuery } from "@google-cloud/bigquery";
 
 export async function POST(req: Request) {
   try {
@@ -52,32 +51,23 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🔥 3. CONEXÃO DIRETA COM O BIGQUERY VIA ACCESS TOKEN
+    // 🔥 3. CONSULTA DIRETA VIA API REST DO BIGQUERY (Ignorando o SDK travado)
     // =========================================================================
     
-    // Instancia o BigQuery injetando o token temporário direto no cabeçalho de autenticação
-    const bigquery = new BigQuery({
-      projectId: process.env.GCP_PROJECT_ID,
-      token: process.env.GCP_ACCESS_TOKEN // Autenticação direta sem arquivos de chave!
-    });
+    // Monta as condições da query
+    let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
-    // Construindo as condições dinamicamente baseadas no retorno da IA
-    let queryCondicoes = `WHERE uf = @uf`;
-    const parametrosQuery: any = { uf: perfilMercado.uf.toUpperCase() };
-
-    // Filtro de Cidade (opcional)
     if (perfilMercado.cidade) {
-      queryCondicoes += ` AND LOWER(municipio_rf) LIKE @cidade`;
-      parametrosQuery.cidade = `%${perfilMercado.cidade.toLowerCase()}%`;
+      queryCondicoes += ` AND LOWER(municipio_rf) LIKE '%${perfilMercado.cidade.toLowerCase()}%'`;
     }
 
-    // Filtro de CNAE (opcional, verifica se os 2 primeiros dígitos batem)
     if (perfilMercado.familias_cnae && perfilMercado.familias_cnae.length > 0) {
-      queryCondicoes += ` AND SUBSTR(cnae_principal, 1, 2) IN UNNEST(@cnaes)`;
-      parametrosQuery.cnaes = perfilMercado.familias_cnae;
+      const cnaesFormatados = perfilMercado.familias_cnae.map((c: string) => `'${c}'`).join(',');
+      queryCondicoes += ` AND SUBSTR(cnae_principal, 1, 2) IN (${cnaesFormatados})`;
     }
 
-    // Query otimizada para o BigQuery varrer o mínimo de dados possível
+    const limiteSeguro = Math.min(limite, 1000);
+
     const sqlQuery = `
       SELECT 
         cnpj,
@@ -92,19 +82,46 @@ export async function POST(req: Request) {
         municipio_rf
       FROM \`${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos\`
       ${queryCondicoes}
-      LIMIT @limite
+      LIMIT ${limiteSeguro}
     `;
 
-    parametrosQuery.limite = Math.min(limite, 1000);
+    // Dispara a requisição HTTP pura para a API global do BigQuery do Google
+    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
+    
+    const bqResponse = await fetch(urlBigQuery, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.GCP_ACCESS_TOKEN?.trim()}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        query: sqlQuery,
+        useLegacySql: false,
+        location: "us-east1" // Mesma região do seu balde/dataset
+      })
+    });
 
-    const options = {
-      query: sqlQuery,
-      location: 'us-east1', 
-      params: parametrosQuery,
-    };
+    const bqDados = await bqResponse.json();
 
-    // Executa a busca na nuvem do Google
-    const [leads] = await bigquery.query(options);
+    if (bqDados.error) {
+      throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
+    }
+
+    // 4. Mapeia as linhas esquisitas que a API Rest do Google devolve para o formato limpo do seu front-end
+    const leads = (bqDados.rows || []).map((row: any) => {
+      return {
+        cnpj: row.f[0].v,
+        cnpj_raiz: row.f[1].v,
+        matriz_filial: row.f[2].v,
+        situacao: row.f[3].v,
+        data_abertura: row.f[4].v,
+        cnae_principal: row.f[5].v,
+        bairro: row.f[6].v,
+        cep: row.f[7].v,
+        uf: row.f[8].v,
+        municipio_rf: row.f[9].v
+      };
+    });
 
     return NextResponse.json({
       perfilAI: perfilMercado,
@@ -112,7 +129,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via BigQuery:", error);
+    console.error("Erro na rota de prospecção via API Rest:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
