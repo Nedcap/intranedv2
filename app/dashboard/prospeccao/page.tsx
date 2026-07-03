@@ -15,8 +15,9 @@ interface Lead {
   cep: string; 
   uf: string;
   municipio_rf: string; 
+  nome_fantasia?: string; // Coluna real do BigQuery
   
-  // propriedades tratadas para a interface
+  // propriedades calculadas/fallbacks
   razaoSocial?: string; 
   score?: number; 
   cidadeExtenso?: string;
@@ -24,7 +25,7 @@ interface Lead {
 
 interface PerfilAI {
   atividade: string;
-  cidade_nome: string | null; // Alinhado com o novo retorno do JSON da IA
+  cidade_nome: string | null;
   codigo_municipio: string | null;
   uf: string;
   familias_cnae: string[];
@@ -32,7 +33,6 @@ interface PerfilAI {
   termos_fracos: string[];
 }
 
-// 🌲 Função de varredura profunda de equipe
 const obtenerIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
   if (visitados.has(liderId)) return [];
   visitados.add(liderId);
@@ -60,14 +60,37 @@ export default function ProspeccaoIAPage() {
   const [perfilAI, setPerfilAI] = useState<PerfilAI | null>(null);
   const [leadSelecionado, setLeadSelecionado] = useState<Lead | null>(null);
 
-  // 👥 Estados da Hierarquia
   const [equipeDisponivel, setEquipeDisponivel] = useState<{id: string, nome: string}[]>([]);
   const [agenteAlvo, setAgenteAlvo] = useState<string>("");
   const [vinculando, setVinculando] = useState(false);
 
+  // 🏪 Recupera a lista salva no navegador ao abrir a página
   useEffect(() => {
     carregarEquipeDoUsuario();
+    
+    const leadsSalvos = localStorage.getItem("ned_leads_minerados");
+    const perfilSalvo = localStorage.getItem("ned_perfil_minerado");
+    
+    if (leadsSalvos) setLeads(JSON.parse(leadsSalvos));
+    if (perfilSalvo) setPerfilAI(JSON.parse(perfilSalvo));
   }, []);
+
+  // 💾 Salva a lista automaticamente sempre que ela mudar
+  useEffect(() => {
+    if (leads.length > 0) {
+      localStorage.setItem("ned_leads_minerados", JSON.stringify(leads));
+    } else {
+      localStorage.removeItem("ned_leads_minerados");
+    }
+  }, [leads]);
+
+  useEffect(() => {
+    if (perfilAI) {
+      localStorage.setItem("ned_perfil_minerado", JSON.stringify(perfilAI));
+    } else {
+      localStorage.removeItem("ned_perfil_minerado");
+    }
+  }, [perfilAI]);
 
   const carregarEquipeDoUsuario = async () => {
     try {
@@ -105,8 +128,6 @@ export default function ProspeccaoIAPage() {
     if (!prompt.trim()) return;
 
     setCarregando(true);
-    setPerfilAI(null);
-    setLeads([]);
     setLeadSelecionado(null);
 
     try {
@@ -122,27 +143,31 @@ export default function ProspeccaoIAPage() {
 
       const mapeamentoAI: PerfilAI = dados.perfilAI || null;
 
-      // Tratamento inteligente dos nomes exibidos na tabela baseado no nicho mapeado pela IA
       const leadsTratados = (dados.leads || []).map((l: any) => {
-        // Converte o código numérico da cidade para o nome real interpretado pela IA
         const cidadeReal = mapeamentoAI && l.municipio_rf === mapeamentoAI.codigo_municipio
           ? mapeamentoAI.cidade_nome
           : `CÓDIGO ${l.municipio_rf}`;
 
-        // Cria um nome fantasia fictício baseado na atividade alvo para a listagem ficar profissional
-        const segmentoFormatado = mapeamentoAI?.atividade 
-          ? mapeamentoAI.atividade.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-          : "Empresa Parceira";
+        // PRIORIDADE 1: Nome Fantasia vindo do BigQuery. FALLBACK: Texto Amigável com CNPJ
+        const nomeIdentificacao = l.nome_fantasia && String(l.nome_fantasia).trim() !== ""
+          ? String(l.nome_fantasia).toUpperCase()
+          : `EMPRESA S/ FANTASIA (FINAL ${l.cnpj.substring(10, 14)})`;
 
         return {
           ...l,
           cidadeExtenso: cidadeReal || "Não identificada",
-          razaoSocial: l.razao_social || `${segmentoFormatado} - Final ${l.cnpj.substring(10, 14)}`,
+          razaoSocial: nomeIdentificacao,
           score: l.score || 10 
         };
       });
 
-      setLeads(leadsTratados);
+      // Adiciona os novos resultados aos que já estavam na tela (Merge sem duplicar CNPJ)
+      setLeads(prev => {
+        const cnpjsExistentes = new Set(prev.map(item => item.cnpj));
+        const novosFiltrados = leadsTratados.filter((item: any) => !cnpjsExistentes.has(item.cnpj));
+        return [...prev, ...novosFiltrados];
+      });
+      
       setPerfilAI(mapeamentoAI);
     } catch (err: any) {
       alert("❌ Falha na mineração: " + err.message);
@@ -151,7 +176,41 @@ export default function ProspeccaoIAPage() {
     }
   };
 
-  // 🚀 JOGA O LEAD NO NEDHUB CRM (CRM_LEADS)
+  // 🗑️ Excluir um único lead da lista da tela
+  const eliminarLeadDaLista = (cnpjParaRemover: string) => {
+    if (leadSelecionado?.cnpj === cnpjParaRemover) setLeadSelecionado(null);
+    setLeads(prev => prev.filter(l => l.cnpj !== cnpjParaRemover));
+  };
+
+  // 🧹 Começar do zero (Limpa a tela e o cache)
+  const limparTodaAEstreia = () => {
+    if (!confirm("Tem certeza que deseja limpar toda a lista da tela e recomeçar do zero?")) return;
+    setLeads([]);
+    setPerfilAI(null);
+    setLeadSelecionado(null);
+    localStorage.removeItem("ned_leads_minerados");
+    localStorage.removeItem("ned_perfil_minerado");
+  };
+
+  // 📥 Exportar para Excel/CSV
+  const exportarListaParaCSV = () => {
+    if (leads.length === 0) return;
+    
+    const cabecalho = "CNPJ;Nome/Identificacao;Cidade;UF;CNAE;Bairro;Situacao\n";
+    const linhas = leads.map(l => 
+      `"${l.cnpj}";"${l.razaoSocial}";"${l.cidadeExtenso}";"${l.uf}";"${l.cnae_principal}";"${l.bairro || ''}";"${l.situacao}"`
+    ).join("\n");
+    
+    const blob = new Blob([cabecalho + linhas], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `leads_minerados_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const enviarParaNedHub = async () => {
     if (!leadSelecionado || !agenteAlvo) return;
     
@@ -159,7 +218,6 @@ export default function ProspeccaoIAPage() {
       setVinculando(true);
       const agenteId = equipeDisponivel.find(e => e.nome === agenteAlvo)?.id || null;
 
-      // Insere o card na tabela do Kanban do NedHub
       const { error } = await supabase.from("crm_leads").insert({
         responsavel_id: agenteId,
         responsavel_nome: agenteAlvo,
@@ -182,10 +240,7 @@ export default function ProspeccaoIAPage() {
       if (error) throw error;
 
       alert(`🚀 Sensacional! Card criado no NedHub de ${agenteAlvo}.`);
-      setLeadSelecionado(null); 
-      
-      // Remove o lead da lista para evitar duplicidade de envio
-      setLeads(prev => prev.filter(l => l.cnpj !== leadSelecionado.cnpj));
+      eliminarLeadDaLista(leadSelecionado.cnpj);
     } catch (err: any) {
       alert(`❌ Erro ao enviar para o NedHub: ${err.message}`);
     } finally {
@@ -217,9 +272,6 @@ export default function ProspeccaoIAPage() {
             <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
               🧠 Motor de Prospecção Avançada <span className="text-indigo-600">BigQuery Mining</span>
             </h1>
-            <p className="text-slate-500 text-xs mt-0.5">
-              Digite o perfil comercial desejado em linguagem livre. O ecossistema decodificará CNAEs e minerará a base na nuvem do Google em tempo real.
-            </p>
           </div>
         </div>
 
@@ -261,14 +313,7 @@ export default function ProspeccaoIAPage() {
                 disabled={carregando || !prompt.trim()}
                 className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600 shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
-                {carregando ? (
-                  <>
-                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    Minerando Base BigQuery Cloud...
-                  </>
-                ) : (
-                  "⚡ Iniciar Extração Inteligente"
-                )}
+                {carregando ? "Minerando Base BigQuery Cloud..." : "⚡ Iniciar Extração Inteligente"}
               </button>
             </div>
           </form>
@@ -299,7 +344,7 @@ export default function ProspeccaoIAPage() {
             </div>
             <div className="space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Keywords de Score</span>
-              <div className="text-xs font-semibold text-emerald-600 truncate mt-0.5" title={perfilAI.termos_fortes.join(', ')}>
+              <div className="text-xs font-semibold text-emerald-600 truncate mt-0.5">
                 {perfilAI.termos_fortes.join(', ') || "Nenhum termo restrito"}
               </div>
             </div>
@@ -314,8 +359,25 @@ export default function ProspeccaoIAPage() {
           }`}>
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
               <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
-                🎯 Leads Extraídos <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-mono font-bold text-[10px]">{leads.length}</span>
+                🎯 Área de Trabalho Ativa <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-mono font-bold text-[10px]">{leads.length} leads</span>
               </span>
+              
+              {leads.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={exportarListaParaCSV}
+                    className="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
+                  >
+                    📥 Exportar CSV
+                  </button>
+                  <button 
+                    onClick={limparTodaAEstreia}
+                    className="bg-red-50 border border-red-200 text-red-600 font-bold px-3 py-1 rounded hover:bg-red-100 text-[11px] cursor-pointer"
+                  >
+                    🗑️ Limpar Lista
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -324,7 +386,7 @@ export default function ProspeccaoIAPage() {
                   <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
                     <th className="p-3.5">Score</th>
                     <th className="p-3.5">CNPJ</th>
-                    <th className="p-3.5">Identificação</th>
+                    <th className="p-3.5">Identificação Empresa</th>
                     <th className="p-3.5">Cidade/UF</th>
                     <th className="p-3.5">CNAE Principal</th>
                     <th className="p-3.5 text-center">Ações</th>
@@ -334,7 +396,7 @@ export default function ProspeccaoIAPage() {
                   {leads.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center p-12 text-slate-500 font-bold bg-slate-50">
-                        {carregando ? "Varrendo índices na nuvem do Google BigQuery..." : "Nenhum lead carregado na esteira. Insira um perfil acima."}
+                        {carregando ? "Varrendo índices na nuvem do Google BigQuery..." : "Área de trabalho vazia. Descreva um alvo acima para minerar e acumular leads aqui!"}
                       </td>
                     </tr>
                   ) : (
@@ -347,24 +409,31 @@ export default function ProspeccaoIAPage() {
                         onClick={() => setLeadSelecionado(lead)}
                       >
                         <td className="p-3.5">
-                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded font-black font-mono text-[10px] tracking-wide">
+                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded font-black font-mono text-[10px]">
                             {lead.score} PTS
                           </span>
                         </td>
                         <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
-                        <td className="p-3.5 font-bold text-slate-900 uppercase truncate max-w-[280px]">{lead.razaoSocial}</td>
+                        <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[280px]">{lead.razaoSocial}</td>
                         <td className="p-3.5 uppercase text-slate-500">{lead.cidadeExtenso} / {lead.uf}</td>
                         <td className="p-3.5 text-slate-500 max-w-[250px] truncate">
                           <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] mr-1.5 border border-slate-200">
                             {lead.cnae_principal}
                           </span>
                         </td>
-                        <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="p-3.5 text-center flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razaoSocial || lead.cnpj)}`, "_blank")}
-                            className="bg-white text-slate-700 border border-slate-300 font-bold px-2.5 py-1 rounded-md hover:bg-slate-50 hover:text-slate-900 text-[11px] transition-all cursor-pointer shadow-sm"
+                            className="bg-white text-slate-700 border border-slate-300 font-bold px-2 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
                           >
                             Google
+                          </button>
+                          <button
+                            onClick={() => eliminarLeadDaLista(lead.cnpj)}
+                            className="bg-white text-red-500 border border-red-200 font-bold px-2 py-1 rounded hover:bg-red-50 text-[11px] cursor-pointer"
+                            title="Remover da lista"
+                          >
+                            ✕
                           </button>
                         </td>
                       </tr>
@@ -417,14 +486,6 @@ export default function ProspeccaoIAPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Filtro de Segmento IA</span>
-                  <p className="text-slate-700 font-medium bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
-                    {perfilAI?.atividade || "Mapeado via inteligência artificial"}
-                  </p>
-                </div>
-
-                {/* AREA DE DELEGAÇÃO COM HIERARQUIA */}
                 <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-2 mt-4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                     Delegar Lead no NedHub para:
@@ -443,13 +504,12 @@ export default function ProspeccaoIAPage() {
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button
                     onClick={() => {
-                      // Remove caracteres especiais para enviar apenas números limpos na URL do site parceiro
                       const cnpjLimpo = leadSelecionado.cnpj.replace(/\D/g, "");
                       window.open(`https://cnpj.biz/${cnpjLimpo}`, "_blank");
                     }}
-                    className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-lg font-bold text-center hover:bg-slate-50 hover:text-slate-900 transition-colors cursor-pointer text-[11px] shadow-sm"
+                    className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-lg font-bold text-center hover:bg-slate-50 text-[11px] cursor-pointer shadow-sm"
                   >
-                    Cartão CNPJ
+                    Cartão CNPJ ⚡
                   </button>
                   <button
                     onClick={enviarParaNedHub}
