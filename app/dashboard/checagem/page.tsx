@@ -218,8 +218,8 @@ export default function ChecagemPage() {
         const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO") || c === "NUMERO" || c === "TITULO");
         const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO" || c === "DATARECOB");
         
-        // Alargado o espectro de busca para valores em aberto do FIDC
-        const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR" || c === "SALDO" || c === "VALORATUAL" || c === "SALDOABERTO");
+        // 🎯 AJUSTE CENTRAL: Agora o sistema busca explicitamente por VALORTOTAL
+        const idxAberto = header.findIndex(c => c === "VALORTOTAL" || c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR" || c === "SALDO" || c === "VALORATUAL" || c === "SALDOABERTO");
         
         const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
         const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
@@ -271,7 +271,7 @@ export default function ChecagemPage() {
           alert(`✅ Importação concluída! ${loteUpload.length} títulos da ${tipoEmpresa} processados na data ${fData(dataReferencia)}.`);
           carregarDados();
         } else {
-          alert("❌ Nenhum título com saldo em aberto foi encontrado. Verifique se a coluna de valores/saldos do seu Excel bate com mapeamento padrão.");
+          alert("❌ Nenhum título válido foi encontrado. Verifique se a coluna com os valores realmente se chama 'ValorTotal'.");
         }
       };
       
@@ -598,7 +598,7 @@ export default function ChecagemPage() {
               if (item.valor > 0) {
                 if (item.evolucao === "UP") { corBarra = "bg-emerald-500 hover:bg-emerald-400"; corFundo = "bg-emerald-50"; iconeTendencia = "text-emerald-500"; } 
                 else if (item.evolucao === "DOWN") { corBarra = "bg-rose-500 hover:bg-rose-400"; corFundo = "bg-rose-50"; iconeTendencia = "text-rose-500"; } 
-                else { corBarra = "bg-blue-500 hover:bg-blue-400"; corFundo = "bg-blue-50"; iconeTendencia = "text-blue-500"; }
+                else { corBarra = "bg-blue-500 hover:bg-blue-400"; corFundo = "bg-violet-50"; iconeTendencia = "text-blue-500"; }
               }
               
               return (
