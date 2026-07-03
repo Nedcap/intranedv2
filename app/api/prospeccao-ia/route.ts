@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { BigQuery } from "@google-cloud/bigquery";
+import { GoogleAuth } from "google-auth-library";
 
 export async function POST(req: Request) {
   try {
@@ -51,11 +52,41 @@ export async function POST(req: Request) {
         .filter((c: string) => c.length === 2);
     }
 
-// =========================================================================
-    // 🔥 3. CONEXÃO DIRETA COM O BIGQUERY (Substituindo a ponte antiga do Cloudflare)
+    // =========================================================================
+    // 🔥 3. CONEXÃO DIRETA COM O BIGQUERY (Workload Identity Federation Manual)
     // =========================================================================
     
-    const bigquery = new BigQuery();
+    // Captura o token OIDC que a Vercel gera dinamicamente para a sua função
+    const vercelOidcToken = process.env.VERCEL_OIDC_TOKEN;
+
+    let authConfig: any = {};
+
+    if (vercelOidcToken) {
+      // Se estiver em produção na Vercel, monta a credencial federada programaticamente
+      const auth = new GoogleAuth({
+        credentials: {
+          type: "external_account",
+          audience: `//iam.googleapis.com/${process.env.GCP_WORKLOAD_IDENTITY_PROVIDER}`,
+          subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+          token_url: "https://sts.googleapis.com/v1/token",
+          service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${process.env.GCP_SERVICE_ACCOUNT_EMAIL}:generateAccessToken`,
+          credential_source: {
+            // Passa o token da Vercel direto para o validador do Google
+            url: "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", // placeholder exigido pela tipagem
+            headers: {
+              Authorization: `Bearer ${vercelOidcToken}`
+            }
+          }
+        }
+      });
+      authConfig.authClient = auth;
+    } else {
+      // Fallback local se você estiver testando na sua máquina (exige gcloud auth application-default login)
+      authConfig.projectId = process.env.GCP_PROJECT_ID;
+    }
+
+    // Instancia o BigQuery passando o cliente de autenticação federada criado
+    const bigquery = new BigQuery(authConfig);
 
     // Construindo as condições dinamicamente baseadas no retorno da IA
     let queryCondicoes = `WHERE uf = @uf`;
@@ -91,18 +122,17 @@ export async function POST(req: Request) {
       LIMIT @limite
     `;
 
-    parametrosQuery.limite = Math.min(limite, 1000); // Trava um teto de segurança por query
+    parametrosQuery.limite = Math.min(limite, 1000);
 
     const options = {
       query: sqlQuery,
-      location: 'us-east1', // Região onde criamos o dataset nos EUA
+      location: 'us-east1', 
       params: parametrosQuery,
     };
 
-    // Executa a busca na velocidade da luz na nuvem do Google
+    // Executa a busca na nuvem do Google usando a sessão federada
     const [leads] = await bigquery.query(options);
 
-    // Retorna para o Front-end os dados limpos vindos direto do BigQuery!
     return NextResponse.json({
       perfilAI: perfilMercado,
       leads: leads
