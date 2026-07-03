@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         cep,
         uf,
         municipio_rf
-      FROM \`${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos\`
+      FROM ${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos
       ${queryCondicoes}
       LIMIT ${limiteSeguro}
     `;
