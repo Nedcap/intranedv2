@@ -36,7 +36,6 @@ interface Lead {
 export default function PlanejadorRotasPage() {
   const [origem, setOrigem] = useState("");
   const [destino, setDestino] = useState("");
-  const [atividade, setAtividade] = useState("");
   const [limiteCidade, setLimiteCidade] = useState(30);
 
   const [calculandoRota, setCalculandoRota] = useState(false);
@@ -46,7 +45,7 @@ export default function PlanejadorRotasPage() {
   const [todasAsRotas, setTodasAsRotas] = useState<RotaAlternativa[]>([]);
   const [rotaSelecionada, setRotaSelecionada] = useState<RotaAlternativa | null>(null);
   
-  // Lista mutável de cidades para permitir exclusão ativa pelo comercial
+  // Lista mutável de cidades para permitir exclusão ativa pelo comercial antes ou durante o processo
   const [cidadesDaVisao, setCidadesDaVisao] = useState<CidadeRota[]>([]);
 
   // Mapeamento de Leads por Cidade: { "Sorocaba": [Leads...] } -> Cache de memória local
@@ -57,10 +56,10 @@ export default function PlanejadorRotasPage() {
   const [roteiroFinal, setRoteiroFinal] = useState<Lead[]>([]);
   const [abaPrincipalVisualizacao, setAbaPrincipalVisualizacao] = useState<"PROSPECCAO" | "MEU_ROTEIRO">("PROSPECCAO");
 
-  // 1. Passo 1: Buscar o esqueleto bruto rodoviário do Maps
+  // 1. Passo 1: Buscar APENAS o esqueleto rodoviário (Google Maps)
   const mapearMalhaRodoviaria = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!origem || !destino || !atividade) return;
+    if (!origem || !destino) return;
 
     setCalculandoRota(true);
     setTodasAsRotas([]);
@@ -99,20 +98,20 @@ export default function PlanejadorRotasPage() {
     const filtradas = cidadesDaVisao.filter((c) => c.nome !== nomeCidade);
     setCidadesDaVisao(filtradas);
     
-    // Se excluiu a aba ativa atual, joga para a primeira remanescente
     if (cidadeAbAtiva === nomeCidade) {
       setCidadeAbAtiva(filtradas[0]?.nome || "");
     }
   };
 
-  // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito pelo usuário
+  // 2. Passo 2: BUSCONA GERAL POR CLIQUE (Lazy Loading total sem nicho restrito)
   const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
-    if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
+    if (bancoLeadsPorCidade[nomeCidade]) return; 
 
     setCarregandoCidadeId(nomeCidade);
 
     try {
-      const promptSimulado = `Buscar empresas do segmento '${atividade}' em ${nomeCidade} ${ufCidade}`;
+      // Prompt amplo focado em capturar toda a malha ativa comercial/industrial da cidade
+      const promptSimulado = `Buscar principais empresas, comércios e indústrias ativas em ${nomeCidade} ${ufCidade}`;
 
       const res = await fetch("/api/prospeccao-ia", {
         method: "POST",
@@ -201,13 +200,13 @@ export default function PlanejadorRotasPage() {
             Módulo Estratégico Comercial - Enterprise v2
           </span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5">
-            🗺️ Planejador Geográfico de Rotas & Prospecção Parcelada
+            🗺️ Planejador Geográfico de Rotas & Buscona Geral de Empresas
           </h1>
         </div>
 
-        {/* FORMULÁRIO DE ENTRADA BRUTA */}
+        {/* FORMULÁRIO DE ENTRADA DO ITINERÁRIO (PURAMENTE LOGÍSTICO) */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <form onSubmit={mapearMalhaRodoviaria} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <form onSubmit={mapearMalhaRodoviaria} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div>
               <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-1.5">Cidade de Origem</label>
               <input type="text" value={origem} onChange={(e) => setOrigem(e.target.value)} placeholder="Ex: São Paulo / SP" className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:border-indigo-500" />
@@ -216,11 +215,7 @@ export default function PlanejadorRotasPage() {
               <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-1.5">Cidade de Destino</label>
               <input type="text" value={destino} onChange={(e) => setDestino(e.target.value)} placeholder="Ex: Maringá / PR" className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:border-indigo-500" />
             </div>
-            <div>
-              <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-1.5">Nicho / O que buscar por Cidade?</label>
-              <input type="text" value={atividade} onChange={(e) => setAtividade(e.target.value)} placeholder="Ex: Autopeças" className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:border-indigo-500" />
-            </div>
-            <button type="submit" disabled={calculandoRota || !origem || !destino || !atividade} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-colors cursor-pointer shadow-md">
+            <button type="submit" disabled={calculandoRota || !origem || !destino} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-colors cursor-pointer shadow-md">
               {calculandoRota ? "🧠 Cruzando Malha Rodoviária..." : "🎯 Mapear Rotas Alternativas"}
             </button>
           </form>
@@ -285,7 +280,7 @@ export default function PlanejadorRotasPage() {
             
             {/* MINI MAPA DIGITAL / FLUXO DE ABAS GEOGRÁFICAS */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para Visualizar. Use o "X" para Excluir do Itinerário):</span>
+              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para abrir. Use o "X" para Excluir do Itinerário antes de prospectar):</span>
               <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
                 {cidadesDaVisao.map((cidade, idx) => {
                   const jaTemLeads = !!bancoLeadsPorCidade[cidade.nome];
@@ -309,7 +304,7 @@ export default function PlanejadorRotasPage() {
                       <button 
                         onClick={(e) => { e.stopPropagation(); excluirCidadeDaRota(cidade.nome); }} 
                         className="ml-1 text-slate-400 hover:text-red-500 font-bold px-1 transition-colors text-[11px] cursor-pointer"
-                        title="Remover parada da viagem"
+                        title="Remover parada"
                       >
                         ✕
                       </button>
@@ -320,7 +315,7 @@ export default function PlanejadorRotasPage() {
               </div>
             </div>
 
-            {/* TABELÃO BRUTO DA CIDADE SELECIONADA */}
+            {/* TABELÃO DA CIDADE SELECIONADA */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-black text-slate-900 uppercase text-xs flex items-center gap-2">
@@ -331,7 +326,7 @@ export default function PlanejadorRotasPage() {
                     onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
                     className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer"
                   >
-                    ⚡ Buscar Empresas de {cidadeAbAtiva}
+                    ⚡ Fazer Buscona Geral de {cidadeAbAtiva}
                   </button>
                 )}
                 <div className="flex items-center gap-2">
@@ -350,7 +345,7 @@ export default function PlanejadorRotasPage() {
               {carregandoCidadeId === cidadeAbAtiva ? (
                 <div className="p-12 text-center space-y-2">
                   <div className="animate-spin text-xl inline-block">⚡</div>
-                  <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Carregando dados comerciais e alimentando painel de {cidadeAbAtiva}...</p>
+                  <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Varrendo mercado e alimentando painel de {cidadeAbAtiva}...</p>
                 </div>
               ) : !cidadeAbAtiva ? (
                 <div className="p-12 text-center text-slate-400 font-medium">
@@ -359,12 +354,12 @@ export default function PlanejadorRotasPage() {
               ) : leadsExibicaoAba.length === 0 ? (
                 <div className="p-12 text-center bg-slate-50/50">
                   <p className="text-slate-500 font-black uppercase text-xs tracking-wider mb-2">Aba Vazia</p>
-                  <p className="text-slate-400 max-w-sm mx-auto mb-4">O motor de IA não foi acionado para esta cidade. Clique no botão de acionamento por etapa para minerar a malha de CNPJs.</p>
+                  <p className="text-slate-400 max-w-sm mx-auto mb-4">O BigQuery não foi consultado para esta cidade ainda. Acione a busca aberta abaixo para resgatar todos os CNPJs ativos.</p>
                   <button
                     onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer"
                   >
-                    🔍 Acionar Prospecção de {cidadeAbAtiva}
+                    🔍 Acionar Buscona de {cidadeAbAtiva}
                   </button>
                 </div>
               ) : (
