@@ -200,32 +200,31 @@ export default function ChecagemPage() {
         }
 
         const loteUpload: any[] = [];
+        
+        // Localiza a linha do cabeçalho baseando-se nas colunas reais enviadas
         const headerIdx = rawData.findIndex(row => row.some(cell => {
           const cleanCell = strClean(cell);
-          return cleanCell === "CEDENTE" || cleanCell === "NOMEDOCEDENTE" || cleanCell === "RASTREIOCHECAGEM" || cleanCell === "STATUSCHECAGEM";
+          return cleanCell === "NOMECEDENTE" || cleanCell === "CEDENTE" || cleanCell === "STATUSCHECAGEM";
         }));
 
         if (headerIdx === -1) {
-          alert("❌ Cabeçalho do arquivo não identificado. Verifique os nomes das colunas.");
+          alert("❌ Cabeçalho do arquivo não identificado. Verifique o layout.");
           setProcessandoUpload(false);
           return;
         }
 
         const header = rawData[headerIdx].map(strClean);
         
-        const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL" || c === "EMPRESA");
-        const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO" || c === "DEVEDOR");
-        const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO") || c === "NUMERO" || c === "TITULO");
-        const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO" || c === "DATARECOB");
+        // Cruzamento exato usando o padrão limpo pelo strClean
+        const idxCed = header.findIndex(c => c === "NOMECEDENTE" || c === "CEDENTE" || c === "NOMEDOCEDENTE");
+        const idxSac = header.findIndex(c => c === "NOMESACADO" || c === "SACADO" || c === "DEVEDOR");
+        const idxDoc = header.findIndex(c => c === "NUMERODOCUMENTO" || c === "SEUNUMERO" || c === "NUMERO");
+        const idxVenc = header.findIndex(c => c === "MENORVENCIMENTO" || c === "VENCIMENTO" || c === "DTAVCTO");
+        const idxAberto = header.findIndex(c => c === "VALORABERTO" || c === "VLRABERTO" || c === "VALORTOTAL");
+        const idxEmissao = header.findIndex(c => c === "DATAOPERACAO" || c === "DTAEMISSAO" || c === "EMISSAO");
+        const idxExp = header.findIndex(c => c === "DATABAIXA" || c === "ATUALIZACAO");
         
-        // 🎯 AJUSTE CENTRAL: Agora o sistema busca explicitamente por VALORTOTAL
-        const idxAberto = header.findIndex(c => c === "VALORTOTAL" || c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR" || c === "SALDO" || c === "VALORATUAL" || c === "SALDOABERTO");
-        
-        const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
-        const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
-        
-        const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
-        const idxStatusFidc = header.findIndex(c => c === "RASTREIOCHECAGEM" || c === "STATUSCHECAGEM");
+        const idxStatusChecagem = header.findIndex(c => c === "STATUSCHECAGEM" || c === "RASTREIOCHECAGEM" || c === "OCORRENCIAS");
 
         for (let i = headerIdx + 1; i < rawData.length; i++) {
           const row = rawData[i];
@@ -236,13 +235,11 @@ export default function ChecagemPage() {
           if (vlrAberto <= 0) continue; 
 
           let statusFinal = "A Confirmar";
-          let ocorrenciaTexto = "";
+          let ocorrenciaTexto = idxStatusChecagem !== -1 ? String(row[idxStatusChecagem] || "").trim() : "";
 
-          if (tipoEmpresa === "FIDC" && idxStatusFidc !== -1) {
-            ocorrenciaTexto = String(row[idxStatusFidc] || "").trim();
+          if (tipoEmpresa === "FIDC") {
             statusFinal = classificarStatusFidc(ocorrenciaTexto);
-          } else if (idxOcorr !== -1) {
-            ocorrenciaTexto = String(row[idxOcorr] || "").trim();
+          } else {
             statusFinal = classificarStatus(ocorrenciaTexto);
           }
 
@@ -271,7 +268,7 @@ export default function ChecagemPage() {
           alert(`✅ Importação concluída! ${loteUpload.length} títulos da ${tipoEmpresa} processados na data ${fData(dataReferencia)}.`);
           carregarDados();
         } else {
-          alert("❌ Nenhum título válido foi encontrado. Verifique se a coluna com os valores realmente se chama 'ValorTotal'.");
+          alert("❌ Nenhum título com saldo aberto maior que 0 foi processado. Verifique os dados das linhas.");
         }
       };
       
@@ -444,7 +441,7 @@ export default function ChecagemPage() {
       style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}
     >
       
-      {/* 🖨️ CABEÇALHO EXCLUSIVO DE IMPRESSÃO */}
+      {/* 🖨️ CABEÇALHO IMPRESSÃO */}
       <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-4">
         <h1 className="text-2xl font-black uppercase text-slate-900">Relatório Executivo de Checagem</h1>
         <div className="flex justify-between mt-2 text-sm font-bold text-slate-600">
@@ -453,7 +450,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 🚀 HEADER CONTROLES */}
+      {/* 🚀 CONTROLES */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-5 rounded-xl shadow-xs border border-slate-200 print:hidden">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">✅ Controle de Checagem</h2>
@@ -506,7 +503,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📊 PAINEL DE KPIS CLICÁVEIS */}
+      {/* 📊 PAINEL KPIS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:grid-cols-5 print:gap-2 print:break-inside-avoid">
         <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center border border-slate-800">
           <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider">Saldo Total em Aberto</span>
@@ -577,7 +574,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO INTERATIVO */}
+      {/* 📈 GRÁFICO */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 flex flex-col print:hidden">
         <div className="mb-4 border-b border-slate-100 pb-2">
           <h3 className="font-black text-slate-800 uppercase tracking-tight text-sm">📈 Evolução Diária de Confirmações</h3>
@@ -625,7 +622,7 @@ export default function ChecagemPage() {
         </div>
       </div>
 
-      {/* 📄 TABELÃO MASTER-DETAIL */}
+      {/* 📄 TABELÃO */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs print:shadow-none print:border-none print:w-full">
         <div className="overflow-x-auto print:overflow-visible print:w-full">
           <table className="w-full text-left border-collapse min-w-[1000px] print:min-w-full">
