@@ -97,7 +97,6 @@ const classificarStatus = (ocorrenciaStr: string) => {
   return "A Confirmar";
 };
 
-// Nova classificação simplificada exclusiva para o fluxo do FIDC
 const classificarStatusFidc = (statusStr: string) => {
   const s = String(statusStr).toUpperCase().trim();
   if (s.includes("ABERTO")) return "A Confirmar";
@@ -207,22 +206,24 @@ export default function ChecagemPage() {
         }));
 
         if (headerIdx === -1) {
-          alert("❌ Cabeçalho do arquivo não identificado.");
+          alert("❌ Cabeçalho do arquivo não identificado. Verifique os nomes das colunas.");
           setProcessandoUpload(false);
           return;
         }
 
         const header = rawData[headerIdx].map(strClean);
         
-        const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL");
-        const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO");
-        const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO") || c === "NUMERO");
-        const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO");
-        const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR");
+        const idxCed = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "RAZAOSOCIAL" || c === "EMPRESA");
+        const idxSac = header.findIndex(c => c === "SACADO" || c === "NOMESACADO" || c === "DEVEDOR");
+        const idxDoc = header.findIndex(c => c === "SEUNUMERO" || c.includes("DOCUMENTO") || c === "NUMERO" || c === "TITULO");
+        const idxVenc = header.findIndex(c => c === "VENCORIG" || c === "DTAVCTO" || c === "VENCIMENTO" || c === "DATARECOB");
+        
+        // Alargado o espectro de busca para valores em aberto do FIDC
+        const idxAberto = header.findIndex(c => c.includes("VLRABERTO") || c.includes("VALORABERTO") || c === "VALOR" || c === "SALDO" || c === "VALORATUAL" || c === "SALDOABERTO");
+        
         const idxEmissao = header.findIndex(c => c === "DTAEMISSAO" || c === "EMISSAO" || c === "DATAEMISSAO");
         const idxExp = header.findIndex(c => c === "DTAEXP" || c === "ATUALIZACAO" || c === "DATAEXP");
         
-        // Coluna variante para checagem do SEC ou FIDC
         const idxOcorr = header.findIndex(c => c.includes("OCORRENCIAS") || c.includes("OBSERVACAO"));
         const idxStatusFidc = header.findIndex(c => c === "RASTREIOCHECAGEM" || c === "STATUSCHECAGEM");
 
@@ -249,7 +250,7 @@ export default function ChecagemPage() {
             data_referencia: dataReferencia,
             empresa: tipoEmpresa,
             cedente: cedente,
-            sacado: idxSac !== -1 ? String(row[idxSac] || "").trim() : "Não Informado",
+            sacado: idxSac !== -1 && row[idxSac] ? String(row[idxSac]).trim() : "SACADO NÃO INFORMADO",
             documento: idxDoc !== -1 ? String(row[idxDoc] || "").trim() : "-",
             vencimento: idxVenc !== -1 ? formatarDataExcel(row[idxVenc]) : null,
             valor_aberto: vlrAberto,
@@ -270,7 +271,7 @@ export default function ChecagemPage() {
           alert(`✅ Importação concluída! ${loteUpload.length} títulos da ${tipoEmpresa} processados na data ${fData(dataReferencia)}.`);
           carregarDados();
         } else {
-          alert("❌ Nenhum título com saldo em aberto foi encontrado.");
+          alert("❌ Nenhum título com saldo em aberto foi encontrado. Verifique se a coluna de valores/saldos do seu Excel bate com mapeamento padrão.");
         }
       };
       
@@ -490,7 +491,6 @@ export default function ChecagemPage() {
               <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "SEC")} />
             </label>
 
-            {/* BOTÃO ADICIONADO E MAPEADO PARA O FLUXO DO FIDC */}
             <label className={`px-4 py-2 bg-violet-50 hover:bg-violet-600 hover:text-white text-violet-700 font-black rounded-lg text-[10px] uppercase cursor-pointer border border-violet-200 shadow-sm flex items-center gap-2`}>
               {processandoUpload ? "⏳ Lendo..." : "📥 Importar FIDC"}
               <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={(e) => handleFileUpload(e, "FIDC")} />
