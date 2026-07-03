@@ -109,41 +109,46 @@ export default function PlanejadorRotasPage() {
 
   // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito (Buscona Geral Aberta)
   const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
-    if (bancoLeadsPorCidade[nomeCidade]) return; 
+  if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
 
-    setCarregandoCidadeId(nomeCidade);
+  setCarregandoCidadeId(nomeCidade);
 
-    try {
-      const promptSimulado = `Buscar principais empresas, comércios e indústrias ativas em ${nomeCidade} ${ufCidade}`;
-
-      const res = await fetch("/api/prospeccao-ia", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ promptUsuario: promptSimulado, limite: limiteCidade }),
-      });
-
-      const dados = await res.json();
-      if (dados.error) throw new Error(dados.error);
-
-      const obtidos = dados.leads || [];
-      const tratados = obtidos.map((l: any) => ({
-        ...l,
-        cidadeExtenso: nomeCidade,
+  try {
+    // 🔥 CORREÇÃO: Batemos no planejador central avisando a action que ele espera para encapsular a chamada
+    const res = await fetch("/api/planejador-rotas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        action: "PROSPECTAR_CIDADE",
+        nomeCidade: nomeCidade, 
         uf: ufCidade,
-        parada_origem: nomeCidade,
-        observacaoCommercial: "",
-      }));
+        atividade: "Geral" // Varredura ampla e aberta
+      }),
+    });
 
-      setBancoLeadsPorCidade((prev) => ({
-        ...prev,
-        [nomeCidade]: tratados,
-      }));
-    } catch (err: any) {
-      alert(`❌ Falha ao prospectar ${nomeCidade}: ` + err.message);
-    } finally {
-      setCarregandoCidadeId(null);
-    }
-  };
+    const dados = await res.json();
+    if (dados.error) throw new Error(dados.error);
+
+    // O route.ts centralizado retorna a propriedade 'empresas'
+    const obtidos = dados.empresas || [];
+    const tratados = obtidos.map((l: any) => ({
+      ...l,
+      cidadeExtenso: nomeCidade,
+      uf: ufCidade,
+      parada_origem: nomeCidade,
+      observacaoCommercial: "",
+    }));
+
+    setBancoLeadsPorCidade((prev) => ({
+      ...prev,
+      [nomeCidade]: tratados,
+    }));
+  } catch (err: any) {
+    alert(`❌ Falha ao prospectar ${nomeCidade}: ` + err.message);
+  } finally {
+    setCarregandoCidadeId(null);
+  }
+};
 
   // 🎯 Mágica para abrir o Google Maps Real com a Rota Completa contendo apenas as Cidades Ativas
   const abrirGoogleMapsComCidadesAtivas = () => {
