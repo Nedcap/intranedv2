@@ -56,7 +56,7 @@ export default function PlanejadorRotasPage() {
   const [roteiroFinal, setRoteiroFinal] = useState<Lead[]>([]);
   const [abaPrincipalVisualizacao, setAbaPrincipalVisualizacao] = useState<"PROSPECCAO" | "MEU_ROTEIRO">("PROSPECCAO");
 
-  // 1. Passo 1: Buscar o esqueleto rodoviário enviando obrigatoriamente a action correspondente
+  // 1. Passo 1: Buscar o esqueleto rodoviário expandido via gpt-4o híbrido no backend
   const mapearMalhaRodoviaria = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!origem || !destino) return;
@@ -72,7 +72,6 @@ export default function PlanejadorRotasPage() {
       const res = await fetch("/api/planejador-rotas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // 🔥 Correção do Erro: Enviando a flag action exigida pelo route.ts
         body: JSON.stringify({ 
           action: "GERAR_ROTA", 
           origem, 
@@ -103,20 +102,18 @@ export default function PlanejadorRotasPage() {
     const filtradas = cidadesDaVisao.filter((c) => c.nome !== nomeCidade);
     setCidadesDaVisao(filtradas);
     
-    // Se excluiu a aba ativa atual, joga para a primeira remanescente
     if (cidadeAbAtiva === nomeCidade) {
       setCidadeAbAtiva(filtradas[0]?.nome || "");
     }
   };
 
-  // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito (Buscona Aberta sem Nicho)
+  // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito (Buscona Geral Aberta)
   const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
-    if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
+    if (bancoLeadsPorCidade[nomeCidade]) return; 
 
     setCarregandoCidadeId(nomeCidade);
 
     try {
-      // Prompt amplo para capturar toda a malha ativa comercial/industrial da cidade
       const promptSimulado = `Buscar principais empresas, comércios e indústrias ativas em ${nomeCidade} ${ufCidade}`;
 
       const res = await fetch("/api/prospeccao-ia", {
@@ -146,6 +143,28 @@ export default function PlanejadorRotasPage() {
     } finally {
       setCarregandoCidadeId(null);
     }
+  };
+
+  // 🎯 Mágica para abrir o Google Maps Real com a Rota Completa contendo apenas as Cidades Ativas
+  const abrirGoogleMapsComCidadesAtivas = () => {
+    if (cidadesDaVisao.length === 0) return;
+    
+    const pontoA = cidadesDaVisao[0];
+    const pontoB = cidadesDaVisao[cidadesDaVisao.length - 1];
+    
+    // Filtra as cidades do meio do caminho (exclui a primeira e a última)
+    const intermediarias = cidadesDaVisao.slice(1, -1);
+    
+    const origemParam = encodeURIComponent(`${pontoA.nome}, ${pontoA.uf}, Brasil`);
+    const destinoParam = encodeURIComponent(`${pontoB.nome}, ${pontoB.uf}, Brasil`);
+    
+    // Une as cidades do meio usando o pipe '|' como delimitador de waypoints do Google Maps
+    const waypointsParam = intermediarias.length > 0 
+      ? `&waypoints=${intermediarias.map(c => encodeURIComponent(`${c.nome}, ${c.uf}, Brasil`)).join('|')}`
+      : "";
+      
+    const urlMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origemParam}&destination=${destinoParam}${waypointsParam}&travelmode=driving`;
+    window.open(urlMapsUrl, "_blank");
   };
 
   // 3. Gerenciamento do Roteiro Final
@@ -210,7 +229,7 @@ export default function PlanejadorRotasPage() {
           </h1>
         </div>
 
-        {/* FORMULÁRIO DE ENTRADA BRUTA (SEM INPUT DE NICHO) */}
+        {/* FORMULÁRIO DE ENTRADA BRUTA */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <form onSubmit={mapearMalhaRodoviaria} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div>
@@ -285,8 +304,19 @@ export default function PlanejadorRotasPage() {
           <div className="space-y-4">
             
             {/* MINI MAPA DIGITAL / FLUXO DE ABAS GEOGRÁFICAS */}
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para Visualizar. Use o "X" para Excluir do Itinerário):</span>
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest">Trajeto Logístico (Clique na Cidade para Visualizar. Use o "X" para Excluir do Itinerário):</span>
+                
+                {/* 📍 BOTÃO SOLICITADO: Abre o Google Maps externo com a rota tracejada real */}
+                <button
+                  onClick={abrirGoogleMapsComCidadesAtivas}
+                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-black rounded-lg text-[11px] uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+                >
+                  📍 Abrir Rota Tracejada no Maps
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
                 {cidadesDaVisao.map((cidade, idx) => {
                   const jaTemLeads = !!bancoLeadsPorCidade[cidade.nome];
