@@ -39,7 +39,7 @@ export default function PlanejadorRotasPage() {
   const [leadsDaRota, setLeadsDaRota] = useState<Lead[]>([]);
   const [cidadeAtivaFiltro, setCidadeAtivaFiltro] = useState<string>("TODAS");
 
-  // Passo 1: Calcular o Itinerário Geográfico com a IA (Versão Segura)
+  // Passo 1: Calcular o Itinerário Geográfico com a IA
   const calcularItinerario = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!origem || !destino || !atividade) return;
@@ -81,8 +81,8 @@ export default function PlanejadorRotasPage() {
     }
   };
 
-  // Passo 2: Disparar a mineração em lote no BigQuery (Versão Segura)
-  const generarAgendaProspeccao = async () => {
+  // 🔥 O NOME FOI CORRIGIDO AQUI PARA gerarAgendaProspeccao (SEM O "N")
+  const gerarAgendaProspeccao = async () => {
     const cidadesAlvo = paradas.filter(p => p.selecionada);
     if (cidadesAlvo.length === 0) {
       alert("Selecione pelo menos uma cidade para a parada!");
@@ -303,7 +303,6 @@ export default function PlanejadorRotasPage() {
                       key={parada.cidade_nome}
                       onClick={() => setCidadeAtivaFiltro(parada.cidade_nome)}
                       className={`px-3 py-1.5 rounded font-black uppercase text-[11px] transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        // 🔥 CORRIGIDO: Modificado de p.cidade_nome para parada.cidade_nome para evitar crash fatal de renderização
                         cidadeAtivaFiltro === parada.cidade_nome ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
                       }`}
                     >
