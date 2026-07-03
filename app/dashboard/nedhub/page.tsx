@@ -197,34 +197,41 @@ export default function NedHubPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 🔥 AJUSTADO: Agora busca direto na nossa inteligência unificada conectada ao BigQuery na nuvem!
   const consultarDadosCnpjNoRoboLocal = async (targetCnpj: string) => {
     const cnpjLimpo = targetCnpj.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) return;
 
     try {
       setBuscandoRobo(true);
-      const res = await fetch(`http://localhost:5000/api/prospeccao?cnpj=${cnpjLimpo}`);
+      
+      // Batendo na API Route interna da Vercel que configuramos anteriormente
+      const res = await fetch("/api/prospeccao-ia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptUsuario: `Consultar o CNPJ ${cnpjLimpo}`, limite: 1 })
+      });
+
       if (res.ok) {
         const dadosBot = await res.json();
-        const dados = dadosBot.data || dadosBot.lead || dadosBot;
+        const dados = dadosBot.leads && dadosBot.leads.length > 0 ? dadosBot.leads[0] : null;
 
-        if (dados && (dados.razaoSocial || dados.razao_social || dados.nome || dados.natureza_juridica)) {
-          setInputRazao((dados.razaoSocial || dados.razao_social || dados.nome || "").toUpperCase());
-          if (dados.telefone || dados.celular) setInputTelefone(dados.telefone || dados.celular);
-          if (dados.contato || dados.nome_contato) setInputContato(dados.contato || dados.nome_contato);
+        if (dados) {
+          // Fallback seguro caso a razão social não esteja disponível de imediato na tabela estabelecimentos
+          const nomeIdentificacao = dados.razao_social || `EMPRESA CNPJ ${dados.cnpj}`;
+          setInputRazao(nomeIdentificacao.toUpperCase());
           
           setDadosAutomotivosBot({
-            ramo: dados.ramo || dados.atividade_principal || dados.atividade || dados.descricao || "",
-            cnae: dados.cnae_principal || dados.cnae || dados.cnae_fiscal || "",
-            endereco: dados.logradouro || dados.endereco || dados.logradouro_completo || "",
+            ramo: dadosBot.perfilAI?.atividade || "Consultado via BigQuery",
+            cnae: dados.cnae_principal || "",
             bairro: dados.bairro || "",
-            cidade: dados.municipio_rf || dados.municipio || dados.cidade || "",
+            cidade: dados.municipio_rf || "", // Mapeando coluna padrão BigQuery
             uf: dados.uf || ""
           });
         }
       }
     } catch (err) {
-      console.log("Robô local offline.");
+      console.error("Erro ao consultar motor de busca na nuvem:", err);
     } finally {
       setBuscandoRobo(false);
     }
@@ -248,11 +255,15 @@ export default function NedHubPage() {
       };
       const { error } = await supabase.from("crm_leads").insert([payload]);
       if (error) throw error;
-      setModalNovoLead(false);
-      setInputCnpj(""); setInputRazao(""); setInputContato(""); setInputTelefone(""); setDadosAutomotivosBot({});
-      await sincronizarBaseNedHub();
+      modalStateAjustado();
     } catch (err: any) { alert(err.message); }
   };
+
+  const modalStateAjustado = async () => {
+    setModalNovoLead(false);
+    setInputCnpj(""); setInputRazao(""); setInputContato(""); setInputTelefone(""); setDadosAutomotivosBot({});
+    await sincronizarBaseNedHub();
+  }
 
   const handleOnDragOver = (e: React.DragEvent) => e.preventDefault();
   
@@ -301,9 +312,14 @@ export default function NedHubPage() {
     } catch (err: any) { 
       alert(err.message); 
     } finally { 
-      setCarregando(false); 
+      onCompleteUploadTask();
     }
   };
+
+  const onCompleteUploadTask = () => {
+    const uploadCompletoLocal = true;
+    setCarregando(false);
+  }
 
   const handleGerarLote = () => {
     if (!dataLote || !horaInicioLote || !horaFimLote || !intervaloLote || !gerenteSelecionadoAgenda) {
@@ -455,7 +471,7 @@ export default function NedHubPage() {
   if (carregando && !userRole) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white font-mono text-xs">
-        <span>🤖 Sincronizando credenciais e nível de acesso...</span>
+        <span>🤖 Sincronizando credenciais de acesso NedHub Cloud...</span>
       </div>
     );
   }
@@ -466,7 +482,7 @@ export default function NedHubPage() {
       {/* HEADER DE GESTÃO DA DIRETORIA */}
       <div className="flex bg-slate-900 text-white p-2.5 rounded-xl justify-between items-center text-[10px] font-mono">
         <div className="flex items-center gap-3">
-          <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BANCO):</span>
+          <span className="text-amber-400 font-bold">👑 PERFIL ATIVO (BIGQUERY FEDERATED):</span>
           <span className="bg-slate-800 px-2 py-0.5 rounded text-white font-bold uppercase">{userRole || "Carregando..."}</span>
         </div>
         <div className="flex gap-2 items-center">
@@ -511,8 +527,8 @@ export default function NedHubPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-3 bg-white p-4 rounded-xl shadow-xs gap-4">
             <div className="flex items-center gap-4">
               <div>
-                <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central v4</h2>
-                <p className="text-xs text-slate-400">Ambiente integrado com robô automático e calendário popup comercial.</p>
+                <h2 className="text-base font-black text-slate-900 tracking-tight uppercase">🚀 NedHub Central Cloud</h2>
+                <p className="text-xs text-slate-400">Ambiente unificado conectado ao BigQuery Cluster.</p>
               </div>
               <select value={funilAtivo} onChange={(e) => setFunilAtivo(e.target.value as any)} className="p-2 border border-blue-300 rounded-lg bg-blue-50 text-blue-900 font-black uppercase text-[10px] outline-none">
                 <option value="vendas">📋 Pipeline: Funil de Vendas (SDR)</option>
@@ -622,7 +638,6 @@ export default function NedHubPage() {
                     {leadExpandido.telefones?.map((tel, idx) => (
                       <div key={idx} className="flex items-center gap-1.5 bg-white border border-slate-300 px-2 py-1 rounded-md font-mono text-[10px] text-slate-700 font-bold shadow-sm">
                         <span>{tel}</span>
-                        {/* 🟢 Botão WhatsApp do Drawer */}
                         <button onClick={() => window.open(gerarLinkWhatsApp(tel), '_blank')} className="text-green-500 hover:text-green-600 font-bold px-1 transition-colors" title="Chamar no WhatsApp">
                           💬
                         </button>
@@ -632,7 +647,7 @@ export default function NedHubPage() {
                   </div>
                   <div className="flex gap-2">
                     <input type="text" value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)} placeholder="DDD + Número" className="p-2 border rounded-lg bg-white flex-1 font-mono outline-none" />
-                    <button onClick={() => { if (!novoTelefone) return; setLeadExpandido({ ...leadExpandido, telefones: [...(leadExpandido.telefones || []), novoTelefone] }); setNovoTelefone(""); }} className="px-3 bg-slate-800 text-white font-black text-[9px] rounded-lg">+ Add Tel</button>
+                    <button onClick={() => { if (!novoTelefone) return; setLeadExpandido({ ...leadExpandido,  telefones: [...(leadExpandido.telefones || []), novoTelefone] }); setNovoTelefone(""); }} className="px-3 bg-slate-800 text-white font-black text-[9px] rounded-lg">+ Add Tel</button>
                   </div>
                 </div>
               </div>
@@ -798,7 +813,7 @@ export default function NedHubPage() {
         </div>
       )}
 
-      {/* 🗓️ POPUP DE AGENDAMENTO EXCLUSIVO DO SDR (Seleção Múltipla Otimizada) */}
+      {/* 🗓️ POPUP DE AGENDAMENTO EXCLUSIVO DO SDR */}
       {modalCalendarioPopup.aberto && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-xl w-full space-y-4 border border-slate-200 shadow-2xl">
@@ -878,7 +893,7 @@ export default function NedHubPage() {
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
             <div>
               <h3 className="font-black uppercase text-slate-900 text-[11px]">🚀 Originação Comercial</h3>
-              <p className="text-slate-400 text-[9px]">A varredura do robô preenche o formulário ao digitar o 14º caractere.</p>
+              <p className="text-slate-400 text-[9px]">A varredura da nuvem preenche o formulário ao digitar o 14º caractere.</p>
             </div>
             <div className="space-y-3 text-[11px]">
               <div>
@@ -896,10 +911,10 @@ export default function NedHubPage() {
                     }} 
                     className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" 
                   />
-                  {buscandoRobo && <span className="absolute right-2 top-2 text-amber-500 font-bold animate-pulse">🤖 Lendo...</span>}
+                  {buscandoRobo && <span className="absolute right-2 top-2 text-amber-500 font-bold animate-pulse">☁️ Lendo BigQuery...</span>}
                 </div>
               </div>
-              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social:</label><input type="text" placeholder="Preenchido pelo bot" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" /></div>
+              <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Razão Social:</label><input type="text" placeholder="Preenchido pela nuvem" value={inputRazao} onChange={e => setInputRazao(e.target.value)} className="w-full p-2 border bg-slate-50 uppercase rounded-lg outline-none text-slate-800 font-black" /></div>
               <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Nome do Decisor:</label><input type="text" placeholder="Contato" value={inputContato} onChange={e => setInputContato(e.target.value)} className="w-full p-2 border bg-slate-50 rounded-lg outline-none text-slate-800 font-bold" /></div>
               <div><label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Telefone Principal:</label><input type="text" placeholder="Celular ou Fixo" value={inputTelefone} onChange={e => setInputTelefone(e.target.value)} className="w-full p-2 border bg-slate-50 font-mono rounded-lg outline-none text-slate-800 font-bold" /></div>
             </div>
