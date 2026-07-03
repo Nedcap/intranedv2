@@ -39,7 +39,7 @@ export default function PlanejadorRotasPage() {
   const [leadsDaRota, setLeadsDaRota] = useState<Lead[]>([]);
   const [cidadeAtivaFiltro, setCidadeAtivaFiltro] = useState<string>("TODAS");
 
-  // Passo 1: Calcular o Itinerário Geográfico com a IA
+  // Passo 1: Calcular o Itinerário Geográfico com a IA (Versão Segura)
   const calcularItinerario = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!origem || !destino || !atividade) return;
@@ -54,16 +54,26 @@ export default function PlanejadorRotasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ origem, destino, atividade })
       });
-      const dados = await res.json();
+      
+      const textoPuro = await res.text();
+      let dados;
+      
+      try {
+        dados = JSON.parse(textoPuro);
+      } catch (jsonErr) {
+        console.error("Resposta HTML recebida da rota:", textoPuro);
+        throw new Error("A rota de itinerário retornou um erro interno (HTML). Verifique o terminal do backend.");
+      }
+
       if (dados.error) throw new Error(dados.error);
 
-      const listaParadas = (dados.planoRotaAI.paradas_sugeridas || []).map((p: any) => ({
+      const listaParadas = (dados.planoRotaAI?.paradas_sugeridas || []).map((p: any) => ({
         ...p,
         selecionada: true
       }));
 
       setParadas(listaParadas);
-      setFamiliasCnae(dados.planoRotaAI.familias_cnae || []);
+      setFamiliasCnae(dados.planoRotaAI?.familias_cnae || []);
     } catch (err: any) {
       alert("❌ Erro ao traçar rota: " + err.message);
     } finally {
@@ -71,8 +81,8 @@ export default function PlanejadorRotasPage() {
     }
   };
 
-  // Passo 2: Disparar a mineração em lote no BigQuery
-  const gerarAgendaProspeccao = async () => {
+  // Passo 2: Disparar a mineração em lote no BigQuery (Versão Segura)
+  const generarAgendaProspeccao = async () => {
     const cidadesAlvo = paradas.filter(p => p.selecionada);
     if (cidadesAlvo.length === 0) {
       alert("Selecione pelo menos uma cidade para a parada!");
@@ -85,23 +95,34 @@ export default function PlanejadorRotasPage() {
     try {
       let acumuladorLeads: Lead[] = [];
 
-      for (const cidade of cidadesAlvo) {
-        const promptSimulado = `Buscar empresas do segmento '${atividade}' em ${cidade.cidade_nome} ${cidade.uf}`;
+      for (const city of cidadesAlvo) {
+        const promptSimulado = `Buscar empresas do segmento '${atividade}' em ${city.cidade_nome} ${city.uf}`;
         
-        // 🔥 CORRIGIDO: Agora bate na rota exata prospeccao-ia
         const res = await fetch("/api/prospeccao-ia", { 
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ promptUsuario: promptSimulado, limite: limiteCidade })
         });
         
-        const dados = await res.json();
+        const textoPuro = await res.text();
+        let dados;
+        
+        try {
+          dados = JSON.parse(textoPuro);
+        } catch (jsonErr) {
+          console.error(`Erro na cidade ${city.cidade_nome}:`, textoPuro);
+          throw new Error(`A mineração para a cidade ${city.cidade_nome} falhou no servidor (HTML). Verifique o terminal.`);
+        }
+
+        if (dados.error) {
+          throw new Error(`Erro em ${city.cidade_nome}: ${dados.error}`);
+        }
         
         if (dados.leads && dados.leads.length > 0) {
           const tratados = dados.leads.map((l: any) => ({
             ...l,
-            cidadeExtenso: cidade.cidade_nome,
-            parada_origem: cidade.cidade_nome
+            cidadeExtenso: city.cidade_nome,
+            parada_origem: city.cidade_nome
           }));
           acumuladorLeads = [...acumuladorLeads, ...tratados];
         }
@@ -130,10 +151,8 @@ export default function PlanejadorRotasPage() {
   const exportarParaCSV = () => {
     if (leadsFiltrados.length === 0) return;
 
-    // Cabeçalhos do Excel
     const headers = ["Parada Origem", "CNPJ", "Razão Social", "Nome Comercial", "Bairro", "CNAE", "Situação", "Pesquisa Rápida"];
     
-    // Mapeamento das linhas tratando vírgulas e aspas para não quebrar o Excel
     const rows = leadsFiltrados.map(lead => [
       `"${lead.parada_origem || ""}"`,
       `"${lead.cnpj || ""}"`,
@@ -145,7 +164,6 @@ export default function PlanejadorRotasPage() {
       `"https://www.google.com/search?q=${encodeURIComponent(lead.razao_social + " " + lead.cidadeExtenso)}"`
     ]);
 
-    // Montagem do arquivo (BOM para garantir acentuação correta no Excel)
     const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
     
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -154,7 +172,6 @@ export default function PlanejadorRotasPage() {
     const link = document.createElement("a");
     link.href = url;
     
-    // Nome dinâmico do arquivo
     const nomeArquivo = cidadeAtivaFiltro === "TODAS" 
       ? `Rota_${origem.split('/')[0].trim()}_a_${destino.split('/')[0].trim()}.csv`
       : `Leads_${cidadeAtivaFiltro}.csv`;
@@ -286,7 +303,8 @@ export default function PlanejadorRotasPage() {
                       key={parada.cidade_nome}
                       onClick={() => setCidadeAtivaFiltro(parada.cidade_nome)}
                       className={`px-3 py-1.5 rounded font-black uppercase text-[11px] transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        cidadeAtivaFiltro === p.cidade_nome ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
+                        // 🔥 CORRIGIDO: Modificado de p.cidade_nome para parada.cidade_nome para evitar crash fatal de renderização
+                        cidadeAtivaFiltro === parada.cidade_nome ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
                       }`}
                     >
                       📍 {parada.cidade_nome} <span className="bg-slate-200 text-slate-800 rounded px-1 text-[9px] font-mono">{count}</span>
@@ -295,7 +313,7 @@ export default function PlanejadorRotasPage() {
                 })}
               </div>
 
-              {/* BOTÃO MÁGICO DE EXPORTAR EXCEL */}
+              {/* BOTÃO EXPORTAR EXCEL */}
               <button
                 onClick={exportarParaCSV}
                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded text-[11px] uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
