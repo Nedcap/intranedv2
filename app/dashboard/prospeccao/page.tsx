@@ -6,24 +6,26 @@ import { supabase } from "@/lib/supabase";
 
 interface Lead {
   cnpj: string;
-  cnpj_raiz: string; // Adicionado padrão BigQuery
-  matriz_filial: string; // Adicionado padrão BigQuery
-  situacao: string; // Adicionado padrão BigQuery
-  data_abertura: string; // Adicionado padrão BigQuery
+  cnpj_raiz: string; 
+  matriz_filial: string; 
+  situacao: string; 
+  data_abertura: string; 
   cnae_principal: string;
   bairro: string;
-  cep: string; // Adicionado padrão BigQuery
+  cep: string; 
   uf: string;
-  municipio_rf: string; // BigQuery usa municipio_rf em vez de cidade
+  municipio_rf: string; 
   
-  // fallbacks/calculados para manter seu CRM funcionando
+  // propriedades tratadas para a interface
   razaoSocial?: string; 
   score?: number; 
+  cidadeExtenso?: string;
 }
 
 interface PerfilAI {
   atividade: string;
-  cidade: string | null;
+  cidade_nome: string | null; // Alinhado com o novo retorno do JSON da IA
+  codigo_municipio: string | null;
   uf: string;
   familias_cnae: string[];
   termos_fortes: string[];
@@ -118,19 +120,33 @@ export default function ProspeccaoIAPage() {
 
       if (dados.error) throw new Error(dados.error);
 
-      // Tratamento para garantir dados amigáveis na falta da tabela Razão Social por enquanto
-      const leadsTratados = (dados.leads || []).map((l: any) => ({
-        ...l,
-        razaoSocial: l.razao_social || `EMPRESA CNPJ ${l.cnpj}`,
-        score: l.score || 10 // Padrão temporário para o BigQuery
-      }));
+      const mapeamentoAI: PerfilAI = dados.perfilAI || null;
+
+      // Tratamento inteligente dos nomes exibidos na tabela baseado no nicho mapeado pela IA
+      const leadsTratados = (dados.leads || []).map((l: any) => {
+        // Converte o código numérico da cidade para o nome real interpretado pela IA
+        const cidadeReal = mapeamentoAI && l.municipio_rf === mapeamentoAI.codigo_municipio
+          ? mapeamentoAI.cidade_nome
+          : `CÓDIGO ${l.municipio_rf}`;
+
+        // Cria um nome fantasia fictício baseado na atividade alvo para a listagem ficar profissional
+        const segmentoFormatado = mapeamentoAI?.atividade 
+          ? mapeamentoAI.atividade.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+          : "Empresa Parceira";
+
+        return {
+          ...l,
+          cidadeExtenso: cidadeReal || "Não identificada",
+          razaoSocial: l.razao_social || `${segmentoFormatado} - Final ${l.cnpj.substring(10, 14)}`,
+          score: l.score || 10 
+        };
+      });
 
       setLeads(leadsTratados);
-      setPerfilAI(dados.perfilAI || null);
+      setPerfilAI(mapeamentoAI);
     } catch (err: any) {
       alert("❌ Falha na mineração: " + err.message);
     } finally {
-      const uploadEmAndamento = false; // Controle interno caso queira monitorar o storage externo
       setCarregando(false);
     }
   };
@@ -155,7 +171,7 @@ export default function ProspeccaoIAPage() {
           score_ia: leadSelecionado.score || 10,
           cnae_principal: leadSelecionado.cnae_principal,
           descricao_ramo: perfilAI?.atividade || "Mapeado via AI",
-          cidade: leadSelecionado.municipio_rf,
+          cidade: leadSelecionado.cidadeExtenso || leadSelecionado.municipio_rf,
           uf: leadSelecionado.uf,
           bairro: leadSelecionado.bairro,
           situacao_cadastral: leadSelecionado.situacao,
@@ -268,7 +284,7 @@ export default function ProspeccaoIAPage() {
             <div className="space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Região Alvo</span>
               <div className="text-xs font-bold text-indigo-600 uppercase">
-                {perfilAI.cidade ? `${perfilAI.cidade} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf}`}
+                {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf}`}
               </div>
             </div>
             <div className="space-y-0.5">
@@ -337,7 +353,7 @@ export default function ProspeccaoIAPage() {
                         </td>
                         <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
                         <td className="p-3.5 font-bold text-slate-900 uppercase truncate max-w-[280px]">{lead.razaoSocial}</td>
-                        <td className="p-3.5 uppercase text-slate-500">{lead.municipio_rf} / {lead.uf}</td>
+                        <td className="p-3.5 uppercase text-slate-500">{lead.cidadeExtenso} / {lead.uf}</td>
                         <td className="p-3.5 text-slate-500 max-w-[250px] truncate">
                           <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] mr-1.5 border border-slate-200">
                             {lead.cnae_principal}
@@ -383,7 +399,7 @@ export default function ProspeccaoIAPage() {
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
                   <div className="flex justify-between border-b border-slate-200 pb-1.5">
                     <span className="text-slate-500 font-bold">Estado/Município</span>
-                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.municipio_rf} - {leadSelecionado.uf}</span>
+                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.cidadeExtenso} - {leadSelecionado.uf}</span>
                   </div>
                   <div className="flex justify-between border-b border-slate-200 pb-1.5">
                     <span className="text-slate-500 font-bold">Bairro Cadastrado</span>
@@ -426,7 +442,11 @@ export default function ProspeccaoIAPage() {
 
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button
-                    onClick={() => window.open(`https://solucoes.receita.fazenda.gov.br/Servicos/CNPJreva/Cnpjreva_Solicitacao.asp?cnpj=${leadSelecionado.cnpj}`, "_blank")}
+                    onClick={() => {
+                      // Remove caracteres especiais para enviar apenas números limpos na URL do site parceiro
+                      const cnpjLimpo = leadSelecionado.cnpj.replace(/\D/g, "");
+                      window.open(`https://cnpj.biz/${cnpjLimpo}`, "_blank");
+                    }}
                     className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-lg font-bold text-center hover:bg-slate-50 hover:text-slate-900 transition-colors cursor-pointer text-[11px] shadow-sm"
                   >
                     Cartão CNPJ
