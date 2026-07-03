@@ -45,7 +45,7 @@ export default function PlanejadorRotasPage() {
   const [todasAsRotas, setTodasAsRotas] = useState<RotaAlternativa[]>([]);
   const [rotaSelecionada, setRotaSelecionada] = useState<RotaAlternativa | null>(null);
   
-  // Lista mutável de cidades para permitir exclusão ativa pelo comercial antes ou durante o processo
+  // Lista mutável de cidades para permitir exclusão ativa pelo comercial
   const [cidadesDaVisao, setCidadesDaVisao] = useState<CidadeRota[]>([]);
 
   // Mapeamento de Leads por Cidade: { "Sorocaba": [Leads...] } -> Cache de memória local
@@ -56,7 +56,7 @@ export default function PlanejadorRotasPage() {
   const [roteiroFinal, setRoteiroFinal] = useState<Lead[]>([]);
   const [abaPrincipalVisualizacao, setAbaPrincipalVisualizacao] = useState<"PROSPECCAO" | "MEU_ROTEIRO">("PROSPECCAO");
 
-  // 1. Passo 1: Buscar APENAS o esqueleto rodoviário (Google Maps)
+  // 1. Passo 1: Buscar o esqueleto rodoviário enviando obrigatoriamente a action correspondente
   const mapearMalhaRodoviaria = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!origem || !destino) return;
@@ -72,7 +72,12 @@ export default function PlanejadorRotasPage() {
       const res = await fetch("/api/planejador-rotas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origem, destino }),
+        // 🔥 Correção do Erro: Enviando a flag action exigida pelo route.ts
+        body: JSON.stringify({ 
+          action: "GERAR_ROTA", 
+          origem, 
+          destino 
+        }),
       });
 
       const dados = await res.json();
@@ -98,19 +103,20 @@ export default function PlanejadorRotasPage() {
     const filtradas = cidadesDaVisao.filter((c) => c.nome !== nomeCidade);
     setCidadesDaVisao(filtradas);
     
+    // Se excluiu a aba ativa atual, joga para a primeira remanescente
     if (cidadeAbAtiva === nomeCidade) {
       setCidadeAbAtiva(filtradas[0]?.nome || "");
     }
   };
 
-  // 2. Passo 2: BUSCONA GERAL POR CLIQUE (Lazy Loading total sem nicho restrito)
+  // 2. Passo 2: LAZY LOADING acionado via clique de botão explícito (Buscona Aberta sem Nicho)
   const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
-    if (bancoLeadsPorCidade[nomeCidade]) return; 
+    if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
 
     setCarregandoCidadeId(nomeCidade);
 
     try {
-      // Prompt amplo focado em capturar toda a malha ativa comercial/industrial da cidade
+      // Prompt amplo para capturar toda a malha ativa comercial/industrial da cidade
       const promptSimulado = `Buscar principais empresas, comércios e indústrias ativas em ${nomeCidade} ${ufCidade}`;
 
       const res = await fetch("/api/prospeccao-ia", {
@@ -204,7 +210,7 @@ export default function PlanejadorRotasPage() {
           </h1>
         </div>
 
-        {/* FORMULÁRIO DE ENTRADA DO ITINERÁRIO (PURAMENTE LOGÍSTICO) */}
+        {/* FORMULÁRIO DE ENTRADA BRUTA (SEM INPUT DE NICHO) */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <form onSubmit={mapearMalhaRodoviaria} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div>
@@ -280,7 +286,7 @@ export default function PlanejadorRotasPage() {
             
             {/* MINI MAPA DIGITAL / FLUXO DE ABAS GEOGRÁFICAS */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para abrir. Use o "X" para Excluir do Itinerário antes de prospectar):</span>
+              <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest mb-3">Trajeto Logístico (Clique na Cidade para Visualizar. Use o "X" para Excluir do Itinerário):</span>
               <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
                 {cidadesDaVisao.map((cidade, idx) => {
                   const jaTemLeads = !!bancoLeadsPorCidade[cidade.nome];
@@ -304,7 +310,7 @@ export default function PlanejadorRotasPage() {
                       <button 
                         onClick={(e) => { e.stopPropagation(); excluirCidadeDaRota(cidade.nome); }} 
                         className="ml-1 text-slate-400 hover:text-red-500 font-bold px-1 transition-colors text-[11px] cursor-pointer"
-                        title="Remover parada"
+                        title="Remover parada da viagem"
                       >
                         ✕
                       </button>
@@ -315,7 +321,7 @@ export default function PlanejadorRotasPage() {
               </div>
             </div>
 
-            {/* TABELÃO DA CIDADE SELECIONADA */}
+            {/* TABELÃO BRUTO DA CIDADE SELECIONADA */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-black text-slate-900 uppercase text-xs flex items-center gap-2">
