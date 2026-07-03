@@ -13,7 +13,6 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // 1. Chamar a IA para estruturar os filtros E traduzir a cidade para o código TOM da Receita Federal
     const promptSistema = `
       Você é um analista especialista em prospecção B2B e conhece a fundo as tabelas da Receita Federal do Brasil.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
@@ -48,7 +47,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido. Por favor, especifique a região (ex: SP, PR)." }, { status: 400 });
     }
 
-    // 2. Limpeza contra as alucinações da IA nos CNAEs
     if (perfilMercado.familias_cnae && Array.isArray(perfilMercado.familias_cnae)) {
       perfilMercado.familias_cnae = perfilMercado.familias_cnae
         .map((c: string) => c.replace(/\D/g, '').substring(0, 2))
@@ -83,7 +81,7 @@ export async function POST(req: Request) {
     const accessTokenValido = oauthDados.access_token;
 
     // =========================================================================
-    // 🧠 3. CONSTRUÇÃO DA QUERY DO BIGQUERY (ADICIONANDO RAZÃO SOCIAL)
+    // 🧠 3. CONSTRUÇÃO DA QUERY NO DATASET CORRETO (banco_receita_us)
     // =========================================================================
     let queryCondicoes = `WHERE uf = '${perfilMercado.uf.toUpperCase()}'`;
 
@@ -98,22 +96,15 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Adicionamos 'razao_social' explicitamente na busca como o 11º campo (índice 10)
+    // Mapeando as 20 colunas e apontando para o dataset _us
     const sqlQuery = `
       SELECT 
-        cnpj,
-        cnpj_raiz,
-        matriz_filial,
-        situacao,
-        data_abertura,
-        cnae_principal,
-        bairro,
-        cep,
-        uf,
-        municipio_rf,
-        razao_social,
-        nome_fantasia
-      FROM \`${process.env.GCP_PROJECT_ID}.dados_receita.estabelecimentos\`
+        cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
+        cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
+        razao_social, natureza_juridica, capital_social,
+        google_nome, google_categoria, google_endereco, google_website,
+        google_lat, google_lng
+      FROM \`${process.env.GCP_PROJECT_ID}.banco_receita_us.estabelecimentos\`
       ${queryCondicoes}
       LIMIT ${limiteSeguro}
     `;
@@ -138,8 +129,11 @@ export async function POST(req: Request) {
       throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
     }
 
-    // 4. Mapeia o retorno bruto incluindo a Razão Social mapeada
+    // 4. Mapeia os dados casando perfeitamente com os cartões e tabelas do seu front-end
     const leads = (bqDados.rows || []).map((row: any) => {
+      const rSocial = row.f[11].v || "Razão Social indisponível";
+      const gNome = row.f[14].v;
+
       return {
         cnpj: row.f[0].v,
         cnpj_raiz: row.f[1].v,
@@ -147,12 +141,20 @@ export async function POST(req: Request) {
         situacao: row.f[3].v,
         data_abertura: row.f[4].v,
         cnae_principal: row.f[5].v,
-        bairro: row.f[6].v,
-        cep: row.f[7].v,
-        uf: row.f[8].v,
-        municipio_rf: row.f[9].v,
-        razao_social: row.f[10].v || 'Razão Social não encontrada', // Puxa direto a Razão Social da Receita
-        nome_fantasia: row.f[11].v || 'Empresa sem fantasia'        // Mantém o Fantasia isolado caso queira exibir
+        cnaes_secundarios: row.f[6].v,
+        bairro: row.f[7].v,
+        cep: row.f[8].v,
+        uf: row.f[9].v,
+        municipio_rf: row.f[10].v,
+        razao_social: rSocial,
+        nome_fantasia: gNome && gNome.trim() !== "" ? gNome : rSocial,
+        natureza_juridica: row.f[12].v,
+        capital_social: row.f[13].v ? parseFloat(row.f[13].v) : 0,
+        google_categoria: row.f[15].v,
+        google_endereco: row.f[16].v,
+        website: row.f[17].v,
+        lat: row.f[18].v ? parseFloat(row.f[18].v) : null,
+        lng: row.f[19].v ? parseFloat(row.f[19].v) : null
       };
     });
 
