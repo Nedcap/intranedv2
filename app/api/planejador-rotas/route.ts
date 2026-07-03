@@ -1,4 +1,3 @@
-// C:\Users\Alyson\intranet-webv2\app\dashboard\planejador\page.tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
