@@ -2,6 +2,9 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 
+// Instanciação no top-level para reaproveitamento de conexão e performance do Next.js
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -20,7 +23,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Chave do Google Maps não configurada (.env)." }, { status: 500 });
     }
 
-    // 1. Consultar o Google Directions para obter a malha rodoviária real e tempo/distância
+    // 1. Consultar o Google Directions para obter a malha rodoviária real, polylines e metadados de tempo
     const googleUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(origem)}&destination=${encodeURIComponent(destino)}&alternatives=true&key=${googleApiKey}&region=br&language=pt-BR`;
     const mapsResponse = await fetch(googleUrl);
     const mapsData = await mapsResponse.json();
@@ -29,41 +32,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Erro no Google Maps: ${mapsData.status}` }, { status: 400 });
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    // 2. Processar cada rota alternativa retornada pelo Google
+    // 2. Processar em paralelo cada rota alternativa retornada pelo motor do Google Maps
     const rotasProcessadas = await Promise.all(
       mapsData.routes.map(async (route: any, index: number) => {
         const percurso = route.legs[0];
         const nomeRodoviaGeral = route.summary || "Rodovia Principal";
         
-        // Formata as cidades de partida e chegada normalizadas pelo Google
-        const cidadeOrigemGoogle = percurso.start_address.split("-")[0]?.trim() || origem;
-        const cidadeDestinoGoogle = percurso.end_address.split("-")[0]?.trim() || destino;
+        // Mantemos os endereços brutos e completos do Google para que a IA faça a extração perfeita da cidade
+        const enderecoOrigemCompleto = percurso.start_address || origem;
+        const enderecoDestinoCompleto = percurso.end_address || destino;
 
-        // Extrai fragmentos de texto do Google para dar contexto geográfico exato para a IA
+        // Extrai fragmentos de texto das manobras para dar o gabarito das rodovias exatas para a IA
         const dicasDoGoogle = percurso.steps
           .map((s: any) => s.html_instructions || "")
           .join(" | ")
-          .replace(/<[^>]*>/g, ""); // Remove tags HTML
+          .replace(/<[^>]*>/g, ""); // Remove tags HTML de formatação do Maps
 
-        // Prompt Geográfico para o GPT-4o expandir a rota e incluir as cidades pequenas omitidas pelo Maps
+        // Prompt Geo-Logístico mestre para expansão cirúrgica de microrregiões e municípios omitidos
         const promptSistema = `
           Você é um geógrafo especialista em logística rodoviária brasileira e malhas de trânsito comercial intercidades.
-          O Google Maps calculou um trajeto, mas omitiu cidades pequenas no meio do caminho porque o motorista segue reto na rodovia.
+          O Google Maps calculou um trajeto rodoviário baseado em instruções de direção, mas omitiu cidades menores (e até médias) no meio do caminho porque o motorista apenas segue reto na rodovia principal.
           
-          SUA TAREFA: Expandir a rota fornecida adicionando TODAS as cidades intermediárias reais (grandes, médias e pequenas) que o motorista obrigatoriamente cruza por dentro ou passa ao lado trafegando pela rodovia informada.
+          SUA TAREFA: Analisar o trajeto fornecido e expandir a rota adicionando TODAS as cidades intermediárias reais (grandes, médias e pequenas) que o motorista obrigatoriamente cruza por dentro, passa pela avenida perimetral ou intersecta ao lado trafegando pela rodovia informada.
           
-          DADOS DA ROTA:
-          - Ponto de Partida: "${cidadeOrigemGoogle}"
-          - Ponto de Destino: "${cidadeDestinoGoogle}"
+          DADOS REAIS DA ROTA DA ESTRADA:
+          - Endereço de Partida (Google): "${enderecoOrigemCompleto}"
+          - Endereço de Destino (Google): "${enderecoDestinoCompleto}"
           - Rodovia Principal / Resumo do Trajeto: "${nomeRodoviaGeral}"
-          - Instruções do Google: "${dicasDoGoogle.substring(0, 1000)}"
+          - Linha de Instruções de Manobra: "${dicasDoGoogle.substring(0, 1200)}"
 
           REGRAS DE OURO CRÍTICAS:
-          1. Retorne as cidades estritamente na ordem geográfica sequencial da viagem (da partida até o destino).
-          2. Não pule nenhuma cidade pequena intercidades que fique na rota da pista. Queremos fazer uma buscona geral de CNPJs na estrada.
-          3. Garanta que o primeiro item do array seja a cidade de Origem e o último seja a de Destino.
+          1. Retorne as cidades estritamente na ordem geográfica sequencial da viagem (da partida real até o destino final).
+          2. Não pule nenhuma cidade intercidades que fique às margens da pista. O time comercial precisa desse mapeamento para fazer buscas de CNPJs na estrada.
+          3. Garanta obrigatoriamente que a primeira cidade do array seja a Cidade de Origem correta e a última seja a Cidade de Destino correta (extraídas dos endereços fornecidos).
           
           Retorne ESTRITAMENTE um objeto JSON válido neste exato formato:
           {
@@ -75,11 +76,11 @@ export async function POST(req: Request) {
 
         try {
           const completion = await openai.chat.completions.create({
-            model: "gpt-4o", // Forçado o modelo bruto GPT-4o conforme solicitado
-            temperature: 0.1,
+            model: "gpt-4o",
+            temperature: 0.1, // Baixa temperatura para manter o rigor geográfico real e evitar alucinações
             messages: [
               { role: "system", content: promptSistema },
-              { role: "user", content: `Liste detalhadamente todas as cidades da rota entre ${cidadeOrigemGoogle} e ${cidadeDestinoGoogle} usando a rodovia ${nomeRodoviaGeral}.` }
+              { role: "user", content: `Mapeie detalhadamente todas as cidades limítrofes e intermediárias no trajeto de ${origem} para ${destino} trafegando pela ${nomeRodoviaGeral}.` }
             ],
             response_format: { type: "json_object" }
           });
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
           const resultadoIA = JSON.parse(completion.choices[0].message.content || "{}");
           const listaCidadesExpanded = resultadoIA.cidades_itinerario || [];
 
-          // Tipifica e insere a ordem sequencial correta
+          // Tipifica, limpa espaços e insere o index sequencial ordenado esperado pelo page.tsx
           const cidadesDetalhadas = listaCidadesExpanded.map((c: any, cIdx: number) => ({
             nome: c.nome?.trim(),
             uf: c.uf?.trim()?.toUpperCase(),
@@ -100,12 +101,15 @@ export async function POST(req: Request) {
             distancia: percurso.distance?.text,
             duracao: percurso.duration?.text,
             polyline_geral: route.overview_polyline?.points,
-            cidades: cidadesDetalhadas.length > 0 ? cidadesDetalhadas : [{ nome: cidadeOrigemGoogle, uf: "", ordem: 1 }, { nome: cidadeDestinoGoogle, uf: "", ordem: 2 }]
+            cidades: cidadesDetalhadas.length > 0 
+              ? cidadesDetalhadas 
+              : [{ nome: origem, uf: "", ordem: 1 }, { nome: destino, uf: "", ordem: 2 }]
           };
 
         } catch (aiErr) {
-          console.error("Falha na expansão de cidades via IA para a rota", index, aiErr);
-          // Fallback seguro caso a OpenAI falhe
+          console.error(`[Aviso] Falha na expansão via IA para a rota alternativa ${index + 1}:`, aiErr);
+          
+          // Fallback seguro de contingência caso a OpenAI atinja rate limit ou falhe
           return {
             id_rota: index + 1,
             nome_rota: nomeRodoviaGeral,
@@ -113,8 +117,8 @@ export async function POST(req: Request) {
             duracao: percurso.duration?.text,
             polyline_geral: route.overview_polyline?.points,
             cidades: [
-              { nome: cidadeOrigemGoogle, uf: "", ordem: 1 },
-              { nome: cidadeDestinoGoogle, uf: "", ordem: 2 }
+              { nome: origem.split("/")[0].trim(), uf: "", ordem: 1 },
+              { nome: destino.split("/")[0].trim(), uf: "", ordem: 2 }
             ]
           };
         }
@@ -124,7 +128,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ rotas: rotasProcessadas });
 
   } catch (error: any) {
-    console.error("Erro no back-end do planejador de rotas:", error);
+    console.error("Erro crítico no back-end do planejador de rotas:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

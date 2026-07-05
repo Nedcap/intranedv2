@@ -1,130 +1,210 @@
-// C:\Users\Alyson\intranet-webv2\app\api\planejador-rotas\route.ts
+// C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { action, origem, destino } = body;
+    const { promptUsuario, limite = 200 } = await req.json();
 
-    if (action !== "GERAR_ROTA") {
-      return NextResponse.json({ error: "Ação inválida ou não informada." }, { status: 400 });
+    if (!promptUsuario) {
+      return NextResponse.json({ error: "O texto de busca é obrigatório." }, { status: 400 });
     }
 
-    if (!origem || !destino) {
-      return NextResponse.json({ error: "Origem e destino são obrigatórios." }, { status: 400 });
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const promptSistema = `
+      Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs e municípios da Receita Federal do Brasil.
+      Analise o texto enviado pelo usuário e extraia os critérios estruturados.
+      
+      ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
+
+      ATENÇÃO PARA O CNAE (MUITO IMPORTANTES):
+      - Se o usuário pedir um nicho específico, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
+      - Se o pedido do usuário for aberto, amplo ou pedir "principais empresas", "comércios" ou "indústrias" em geral sem um nicho restrito, retorne o array "codigos_cnae" VAZIO []. Não tente inventar filtros restritivos se o objetivo for uma varredura geral.
+
+      Retorne ESTRITAMENTE um objeto JSON válido:
+      {
+        "atividade": "descrição curta do segmento ou 'Geral'",
+        "cidade_nome": "Nome da cidade por extenso",
+        "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
+        "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
+        "codigos_cnae": ["array de strings contendo prefixos se houver nicho específico, ou [] se for busca geral"]
+      }
+    `;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: promptSistema },
+        { role: "user", content: promptUsuario },
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const perfilMercado = JSON.parse(completion.choices[0].message.content || "{}");
+
+    if (!perfilMercado.uf) {
+      return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido." }, { status: 400 });
     }
 
-    const googleApiKey = process.env.GOOGLE_MAPS_API_KEY; 
-    if (!googleApiKey) {
-      return NextResponse.json({ error: "Chave do Google Maps não configurada (.env)." }, { status: 500 });
+    // Limpa pontuações e garante os dígitos de precisão caso a IA tenha retornado algum CNAE
+    if (perfilMercado.codigos_cnae && Array.isArray(perfilMercado.codigos_cnae)) {
+      perfilMercado.codigos_cnae = perfilMercado.codigos_cnae
+        .map((c: string) => c.replace(/\D/g, ''))
+        .filter((c: string) => c.length >= 3);
     }
 
-    // 1. Consultar o Google Directions para obter a malha rodoviária real e tempo/distância
-    const googleUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(origem)}&destination=${encodeURIComponent(destino)}&alternatives=true&key=${googleApiKey}&region=br&language=pt-BR`;
-    const mapsResponse = await fetch(googleUrl);
-    const mapsData = await mapsResponse.json();
-
-    if (mapsData.status !== "OK") {
-      return NextResponse.json({ error: `Erro no Google Maps: ${mapsData.status}` }, { status: 400 });
+    // =========================================================================
+    // 🔐 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PROPRIO
+    // =========================================================================
+    if (!process.env.GCP_CLIENT_ID || !process.env.GCP_REFRESH_TOKEN) {
+      throw new Error("Variáveis de ambiente do Google Cloud não foram carregadas corretamente.");
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    // 2. Processar cada rota alternativa retornada pelo Google
-    const rotasProcessadas = await Promise.all(
-      mapsData.routes.map(async (route: any, index: number) => {
-        const percurso = route.legs[0];
-        const nomeRodoviaGeral = route.summary || "Rodovia Principal";
-        
-        // Formata as cidades de partida e chegada normalizadas pelo Google
-        const cidadeOrigemGoogle = percurso.start_address.split("-")[0]?.trim() || origem;
-        const cidadeDestinoGoogle = percurso.end_address.split("-")[0]?.trim() || destino;
-
-        // Extrai fragmentos de texto do Google para dar contexto geográfico exato para a IA
-        const dicasDoGoogle = percurso.steps
-          .map((s: any) => s.html_instructions || "")
-          .join(" | ")
-          .replace(/<[^>]*>/g, ""); // Remove tags HTML
-
-        // Prompt Geográfico para o GPT-4o expandir a rota e incluir as cidades pequenas omitidas pelo Maps
-        const promptSistema = `
-          Você é um geógrafo especialista em logística rodoviária brasileira e malhas de trânsito comercial intercidades.
-          O Google Maps calculou um trajeto, mas omitiu cidades pequenas no meio do caminho porque o motorista segue reto na rodovia.
-          
-          SUA TAREFA: Expandir a rota fornecida adicionando TODAS as cidades intermediárias reais (grandes, médias e pequenas) que o motorista obrigatoriamente cruza por dentro ou passa ao lado trafegando pela rodovia informada.
-          
-          DADOS DA ROTA:
-          - Ponto de Partida: "${cidadeOrigemGoogle}"
-          - Ponto de Destino: "${cidadeDestinoGoogle}"
-          - Rodovia Principal / Resumo do Trajeto: "${nomeRodoviaGeral}"
-          - Instruções do Google: "${dicasDoGoogle.substring(0, 1000)}"
-
-          REGRAS DE OURO CRÍTICAS:
-          1. Retorne as cidades estritamente na ordem geográfica sequencial da viagem (da partida até o destino).
-          2. Não pule nenhuma cidade pequena intercidades que fique na rota da pista. Queremos fazer uma buscona geral de CNPJs na estrada.
-          3. Garanta que o primeiro item do array seja a cidade de Origem e o último seja a de Destino.
-          
-          Retorne ESTRITAMENTE um objeto JSON válido neste exato formato:
-          {
-            "cidades_itinerario": [
-              { "nome": "Nome da Cidade", "uf": "UF" }
-            ]
-          }
-        `;
-
-        try {
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o", // Forçado o modelo bruto GPT-4o conforme solicitado
-            temperature: 0.1,
-            messages: [
-              { role: "system", content: promptSistema },
-              { role: "user", content: `Liste detalhadamente todas as cidades da rota entre ${cidadeOrigemGoogle} e ${cidadeDestinoGoogle} usando a rodovia ${nomeRodoviaGeral}.` }
-            ],
-            response_format: { type: "json_object" }
-          });
-
-          const resultadoIA = JSON.parse(completion.choices[0].message.content || "{}");
-          const listaCidadesExpanded = resultadoIA.cidades_itinerario || [];
-
-          // Tipifica e insere a ordem sequencial correta
-          const cidadesDetalhadas = listaCidadesExpanded.map((c: any, cIdx: number) => ({
-            nome: c.nome?.trim(),
-            uf: c.uf?.trim()?.toUpperCase(),
-            ordem: cIdx + 1
-          }));
-
-          return {
-            id_rota: index + 1,
-            nome_rota: nomeRodoviaGeral,
-            distancia: percurso.distance?.text,
-            duracao: percurso.duration?.text,
-            polyline_geral: route.overview_polyline?.points,
-            cidades: cidadesDetalhadas.length > 0 ? cidadesDetalhadas : [{ nome: cidadeOrigemGoogle, uf: "", ordem: 1 }, { nome: cidadeDestinoGoogle, uf: "", ordem: 2 }]
-          };
-
-        } catch (aiErr) {
-          console.error("Falha na expansão de cidades via IA para a rota", index, aiErr);
-          // Fallback seguro caso a OpenAI falhe
-          return {
-            id_rota: index + 1,
-            nome_rota: nomeRodoviaGeral,
-            distancia: percurso.distance?.text,
-            duracao: percurso.duration?.text,
-            polyline_geral: route.overview_polyline?.points,
-            cidades: [
-              { nome: cidadeOrigemGoogle, uf: "", ordem: 1 },
-              { nome: cidadeDestinoGoogle, uf: "", ordem: 2 }
-            ]
-          };
-        }
+    const oauthResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.GCP_CLIENT_ID,
+        client_secret: process.env.GCP_CLIENT_SECRET || "",
+        refresh_token: process.env.GCP_REFRESH_TOKEN,
+        grant_type: "refresh_token"
       })
-    );
+    });
 
-    return NextResponse.json({ rotas: rotasProcessadas });
+    const oauthDados = await oauthResponse.json();
+    
+    if (oauthDados.error) {
+      throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error}`);
+    }
+
+    const accessTokenValido = oauthDados.access_token;
+
+    // =========================================================================
+    // 🧠 3. CONSTRUÇÃO DA QUERY INTELIGENTE DINÂMICA NO BIGQUERY
+    // =========================================================================
+    let filtroCnaeClausula = "";
+    const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
+
+    if (temNichoEspecifico) {
+      const cnaesPrecisos = perfilMercado.codigos_cnae.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
+      filtroCnaeClausula = `AND (${cnaesPrecisos})`;
+    }
+
+    const limiteSeguro = Math.min(limite, 1000);
+
+    // Estrutura de ORDER BY Dinâmica e Inteligente para não afetar outras telas do sistema
+    let ordenacaoEstrategica = "";
+    if (temNichoEspecifico) {
+      // Cenário A (Prospecção focada por ramos): Prioridade para dados ricos do Google e abertura mais antiga
+      ordenacaoEstrategica = `
+        CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, 
+        data_abertura ASC
+      `;
+    } else {
+      // Cenário B (Varredura Geral de Pulverização FIDC): Prioriza pequenos B2B invisíveis sem remover dados
+      ordenacaoEstrategica = `
+        -- Penaliza MEIs mandando-os para o fim da fila na busca geral, mantendo LTDAs e SLUs no topo
+        CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
+        -- Aloca peso máximo para setores industriais, atacadistas, logísticos e de usinagem periférica
+        CASE 
+          WHEN REGEXP_CONTAINS(cnae_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+          WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 -- Varejo pontua um pouco abaixo
+          ELSE 1 
+        END ASC,
+        data_abertura ASC
+      `;
+    }
+
+    const sqlQuery = `
+      SELECT 
+        cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
+        cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
+        razao_social, natureza_juridica, capital_social,
+        google_nome, google_categoria, google_endereco, google_website
+      FROM \`${process.env.GCP_PROJECT_ID}.banco_receita_us.estabelecimentos_otimizado\`
+      WHERE uf = @uf 
+        AND situacao = '02'
+        AND (@municipio IS NULL OR municipio_rf = @municipio)
+        ${filtroCnaeClausula}
+      ORDER BY ${ordenacaoEstrategica}
+      LIMIT ${limiteSeguro}
+    `;
+
+    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
+    
+    const bqResponse = await fetch(urlBigQuery, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessTokenValido}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        query: sqlQuery,
+        useLegacySql: false,
+        parameterMode: "NAMED",
+        queryParameters: [
+          {
+            name: "uf",
+            parameterType: { type: "STRING" },
+            parameterValue: { value: perfilMercado.uf.toUpperCase() }
+          },
+          {
+            name: "municipio",
+            parameterType: { type: "STRING" },
+            parameterValue: { value: perfilMercado.codigo_municipio || null }
+          }
+        ]
+      })
+    });
+
+    const bqDados = await bqResponse.json();
+
+    if (bqDados.error) {
+      throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
+    }
+
+    // =========================================================================
+    // 🗺️ 4. MAPEAMENTO DOS RESULTADOS FORMATADOS PARA O FRONTEND
+    // =========================================================================
+    const leads = (bqDados.rows || []).map((row: any) => {
+      const rSocial = row.f[11].v || "Razão Social indisponível";
+      const gNome = row.f[14].v;
+
+      return {
+        cnpj: row.f[0].v,
+        cnpj_raiz: row.f[1].v,
+        matriz_filial: row.f[2].v,
+        situacao: row.f[3].v,
+        data_abertura: row.f[4].v,
+        cnae_principal: row.f[5].v,
+        cnaes_secundarios: row.f[6].v,
+        bairro: row.f[7].v,
+        cep: row.f[8].v,
+        uf: row.f[9].v,
+        municipio_rf: row.f[10].v,
+        razao_social: rSocial,
+        nome_fantasia: gNome && gNome.trim() !== "" ? gNome : rSocial,
+        natureza_juridica: row.f[12].v,
+        capital_social: row.f[13].v ? parseFloat(row.f[13].v) : 0,
+        google_categoria: row.f[15].v,
+        google_endereco: row.f[16].v,
+        website: row.f[17].v,
+        lat: null,
+        lng: null
+      };
+    });
+
+    return NextResponse.json({
+      perfilAI: perfilMercado,
+      leads: leads
+    });
 
   } catch (error: any) {
-    console.error("Erro no back-end do planejador de rotas:", error);
+    console.error("Erro na rota de prospecção via OAuth2:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
