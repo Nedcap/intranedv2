@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node -e \"const fs=require('fs'); try { const f='./node_modules/duckdb/package.json'; const d=JSON.parse(fs.readFileSync(f,'utf8')); if(d.binary && !d.binary.napi_versions){ d.binary.napi_versions=[3]; fs.writeFileSync(f, JSON.stringify(d, null, 2)); console.log('✅ DuckDB Patched para Vercel'); } } catch(e) {}\" && next build",
     "start": "next start",
     "lint": "eslint"
   },
