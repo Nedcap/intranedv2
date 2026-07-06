@@ -21,6 +21,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Naveg.A.I", path: "/dashboard/planejador", icone: "🧭", categoria: "Comercial", defaultMaster: true },
 
   // 🛡️ CRÉDITO E RISCO
+  { nome: "Motor de Crédito", path: "/dashboard/motor-credito", icone: "⚡", categoria: "Crédito", defaultMaster: true },
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Crédito", defaultMaster: true },
   { nome: "Carteira Dinâmica", path: "/dashboard/carteira", icone: "📈", categoria: "Crédito", defaultMaster: true },
