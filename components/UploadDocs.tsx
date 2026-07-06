@@ -8,8 +8,6 @@ interface UploadDocsProps {
     cnpj: string;
     razao_social: string;
     uf: string;
-    cidadeExtenso?: string;
-    capital_social?: number;
   };
   onSucesso: () => void;
 }
@@ -39,14 +37,14 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     let pathDocumento = `clientes/${cnpjLimpo}/${Date.now()}_${file.name}`;
 
     try {
-      // 1. Pede a URL assinada para a API oficial do R2 que você enviou
+      // 1. Pede a URL assinada para a sua API oficial do R2
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileType: file.type,
-          analiseId: cnpjLimpo, // Pasta organizada por CNPJ
+          analiseId: cnpjLimpo,
         }),
       });
 
@@ -54,8 +52,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       
       const data = await res.json();
       if (data.signedUrl) {
-        setMensagem("📁 Transferindo arquivo diretamente para o Cloudflare R2...");
-        // 2. PUT direto no R2
+        setMensagem("📁 Transferindo arquivo para o Cloudflare R2...");
+        // 2. Upload direto no bucket do R2
         const uploadRes = await fetch(data.signedUrl, {
           method: "PUT",
           headers: { "Content-Type": file.type },
@@ -71,26 +69,13 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setMensagem("🚀 Injetando solicitação na esteira de crédito...");
 
     try {
-      // 3. Inserção limpa: Envia APENAS o que o comercial tem de fato.
-      // O restante inicia como estrutura vazia prontas para o Excel V8 processar
+      // 3. Inserção Cirúrgica: Apenas o estritamente necessário para criar o registro do comercial
       const { error: supaError } = await supabase.from("analises_credito").insert({
         cnpj: cnpjLimpo,
         razao_social: empresa.razao_social,
         uf: empresa.uf,
-        cidade: empresa.cidadeExtenso || "Curitiba",
         status: "robo_processando",
-        dados_documentos: [{ nome: file.name, path: pathDocumento }],
-        
-        // Inicializa as colunas JSONB vazias (Evita que o analise/page quebre ao ler nulo)
-        dados_gerais: { fundacao: "", ramo: "", gerente: "Luiz", relacionamento: "Prospect" },
-        proposta: { modalidade: "Desconto", limite: 0, prazo: 30, tranche: 0, taxa: 0.04, garantia: "Aval", rating: "C" },
-        dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
-        dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
-        dados_endividamento: [],
-        dados_restritivos: [],
-        dados_estrutura_societaria: [],
-        dados_juridico: { processos_tramitacao: "", processos_arquivados: "" },
-        parecer_comite: ""
+        dados_documentos: [{ nome: file.name, path: pathDocumento }]
       });
 
       if (supaError) throw supaError;
@@ -104,7 +89,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
     } catch (err: any) {
       console.error("Erro Supabase:", err);
-      setMensagem("❌ Erro de Schema: " + err.message);
+      setMensagem("❌ Erro de Inserção: " + err.message);
     } finally {
       setUploading(false);
     }
