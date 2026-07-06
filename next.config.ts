@@ -5,10 +5,15 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  
   // 🚜 MODO TRATOR: Ignora fiscais de Linting no Build
   eslint: {
     ignoreDuringBuilds: true,
   },
+
+  // 📦 EXTENSÃO NATIVA: Impede que a Vercel tente empacotar o DuckDB como JS comum, evitando o erro de Build
+  serverExternalPackages: ['duckdb'],
+
   // 🖼️ CONFIGURAÇÃO DE MÍDIA: Permite o carregamento seguro de imagens do Supabase
   images: {
     remotePatterns: [
@@ -20,6 +25,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
   // 🚀 TÚNEL DE REDE: Cria um atalho estável que a Vercel aceita nativamente
   async rewrites() {
     return [
