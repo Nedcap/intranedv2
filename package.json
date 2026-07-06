@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node -e \"const fs=require('fs'); try { const f='./node_modules/duckdb/package.json'; const d=JSON.parse(fs.readFileSync(f,'utf8')); if(d.binary && !d.binary.napi_versions){ d.binary.napi_versions=[3]; d.binary.module_path='./lib/binding/{napi_build_version}/'; fs.writeFileSync(f, JSON.stringify(d, null, 2)); const oldP='./node_modules/duckdb/lib/binding/duckdb.node'; const newD='./node_modules/duckdb/lib/binding/3/'; if(!fs.existsSync(newD)) fs.mkdirSync(newD, {recursive:true}); if(fs.existsSync(oldP)) fs.renameSync(oldP, newD+'duckdb.node'); console.log('✅ Patch Aplicado na Pasta Certa!'); } } catch(e) { console.error(e); }\" && next build",
     "start": "next start",
     "lint": "eslint"
   },
