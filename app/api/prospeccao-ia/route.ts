@@ -1,7 +1,14 @@
 // C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
-import duckdb from "duckdb";
+
+// =========================================================================
+// 🥷 TRUQUE NINJA SUPREMO: O 'eval' cega totalmente o robô da Vercel no deploy
+// =========================================================================
+const getDuckDB = () => {
+  return eval("require('duckdb')"); 
+};
+const duckdb = getDuckDB();
 
 // 1. Inicializa o motor do DuckDB em memória
 const db = new duckdb.Database(":memory:");
@@ -9,11 +16,24 @@ const db = new duckdb.Database(":memory:");
 // Função auxiliar para rodar queries no DuckDB com suporte a Async/Await
 const rodarQuery = (query: string): Promise<any[]> => {
   return new Promise((resolve, reject) => {
-    db.all(query, (err, res) => {
+    db.all(query, (err: any, res: any) => {
       if (err) reject(err);
       else resolve(res);
     });
   });
+};
+
+// =========================================================================
+// 🌐 PREPARAÇÃO DA VERCEL (Libera acesso à internet para ler o Parquet do R2)
+// =========================================================================
+let bancoPreparado = false;
+const prepararBanco = async () => {
+  if (!bancoPreparado) {
+    // A Vercel só permite extensões na pasta temporária /tmp
+    await rodarQuery("SET extension_directory = '/tmp/duckdb_extensions';");
+    await rodarQuery("INSTALL httpfs; LOAD httpfs;");
+    bancoPreparado = true;
+  }
 };
 
 export async function POST(req: Request) {
@@ -27,6 +47,9 @@ export async function POST(req: Request) {
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
+
+    // Garante que o motor consegue ler links "https://" do Cloudflare antes da consulta
+    await prepararBanco();
 
     // =========================================================================
     // 🧠 1. INTELIGÊNCIA ARTIFICIAL: EXTRAÇÃO DOS DADOS
