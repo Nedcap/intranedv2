@@ -44,7 +44,7 @@ export default function MotorCreditoPage() {
     }
   };
 
-const handleBuscarPorCnpj = async (e: React.FormEvent) => {
+  const handleBuscarPorCnpj = async (e: React.FormEvent) => {
     e.preventDefault();
     const cnpjLimpo = cnpjBusca.replace(/\D/g, "");
     if (cnpjLimpo.length < 14) {
@@ -54,7 +54,6 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
 
     setLoading(true);
     try {
-      // Batendo agora na API nova focada 100% em correspondência exata!
       const res = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,10 +67,8 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
       }
 
       if (data.found && data.empresa) {
-        // Encontrou a empresa real e exata no BigQuery
         setEmpresas([data.empresa]);
       } else {
-        // Fallback assistido para o comercial não travar se o CNPJ for muito recente e não estiver no parquet
         alert("❌ CNPJ não localizado na base oficial do BigQuery.\n💡 Liberando modo de entrada manual assistida para não travar o envio.");
         setEmpresas([{
           cnpj: cnpjLimpo,
@@ -133,7 +130,7 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        {/* BOX DE SOLICITAÇÃO ESTREITA POR CNPJ COM BOTÃO E INPUTS VOLTADOS */}
+        {/* BOX DE SOLICITAÇÃO ESTREITA POR CNPJ */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all"></div>
           
@@ -161,7 +158,6 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
                 </div>
               </div>
 
-              {/* RETORNO DA CONSULTA DO CNPJ COM CABEÇALHOS CORRETOS */}
               {empresas.length > 0 && (
                 <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 bg-slate-50 overflow-hidden mt-3 max-w-[600px]">
                   {empresas.map((emp) => (
@@ -185,7 +181,6 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
               )}
             </form>
           ) : (
-            /* LOCK DA EMPRESA + CONTAINER DO COFRE DE UPLOAD REATIVADO */
             <div className="space-y-4">
               <div className="p-4 border border-emerald-200 bg-emerald-50/40 rounded-lg flex justify-between items-center">
                 <div>
@@ -204,13 +199,14 @@ const handleBuscarPorCnpj = async (e: React.FormEvent) => {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
+                {/* Carrega o componente de lote de arquivos */}
                 <UploadDocs empresa={empresaSelecionada} onSucesso={resetarAposSucesso} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL INTEGRA COM CABEÇALHOS DO PROJETO */}
+        {/* TABELA DE STATUS DO COMERCIAL */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">

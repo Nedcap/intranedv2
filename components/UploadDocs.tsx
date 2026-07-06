@@ -11,77 +11,102 @@ interface UploadDocsProps {
   onSucesso: () => void;
 }
 
+interface ArquivoFila {
+  id: string;
+  file: File;
+  status: "pendente" | "enviando" | "sucesso" | "erro";
+  mensagem: string;
+}
+
 export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
-  const [file, setFile] = useState<File | null>(null);
+  // 📈 Mudança para suportar MÚLTIPLOS arquivos simultâneos estilo planilha
+  const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [mensagem, setMensagem] = useState("");
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-      setMensagem("");
+    if (e.target.files) {
+      const novos: ArquivoFila[] = Array.from(e.target.files).map((f, i) => ({
+        id: `${Date.now()}-${i}`,
+        file: f,
+        status: "pendente",
+        mensagem: "Pronto para processamento"
+      }));
+      setArquivos(prev => [...prev, ...novos]);
     }
   };
 
-  const handleUpload = async () => {
-    if (!file) {
-      setMensagem("⚠️ Selecione um arquivo PDF primeiro!");
-      return;
-    }
+  const removerArquivoDaFila = (id: string) => {
+    setArquivos(prev => prev.filter(a => a.id !== id));
+  };
 
+  const executarEsteiraUpload = async () => {
+    if (arquivos.length === 0) return;
     setUploading(true);
-    setMensagem("🔄 Solicitando URL assinada à rota /api/upload...");
 
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
 
-    try {
-      // 1. Faz o pedido da Assinatura para a tua API R2
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          analiseId: cnpjLimpo,
-        }),
-      });
+    // Processa os arquivos em lote sequencial
+    for (let i = 0; i < arquivos.length; i++ ) {
+      const item = arquivos[i];
+      if (item.status === "sucesso") continue;
 
-      if (!res.ok) {
-        const txtErro = await res.text();
-        throw new Error(`A rota /api/upload respondeu com status ${res.status}: ${txtErro}`);
-      }
-      
-      const data = await res.json();
-      
-      if (!data.signedUrl) {
-        throw new Error(data.error || "A API não devolveu o campo 'signedUrl'. Verifica os logs do servidor.");
-      }
+      setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Assinando cofre R2..." } : a));
 
-      setMensagem("📁 Transferindo arquivo diretamente para o Cloudflare R2...");
-      
-      // 2. PUT direto no Storage da Cloudflare
-      const uploadRes = await fetch(data.signedUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
+      try {
+        // 1. Chamada estrita com tratamento de erro detalhado para desmascarar o Failed to Fetch
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            fileName: item.file.name,
+            fileType: item.file.type,
+            analiseId: cnpjLimpo,
+          }),
+        }).catch(err => {
+          throw new Error(`A rota local /api/upload está inacessível ou fora do ar: ${err.message}`);
+        });
 
-      if (!uploadRes.ok) {
-        throw new Error(`O Cloudflare R2 rejeitou o arquivo. Status: ${uploadRes.statusText}`);
+        const data = await res.json();
+
+        if (!res.ok || data.error || !data.signedUrl) {
+          throw new Error(data.error || `HTTP ${res.status}: Servidor rejeitou os parâmetros R2.`);
+        }
+
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Transferindo binário para o R2..." } : a));
+
+        // 2. PUT direto para o bucket da Cloudflare
+        const uploadRes = await fetch(data.signedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": item.file.type },
+          body: item.file,
+        }).catch(err => {
+          throw new Error(`Falha física de upload no R2 (Verifique CORS ou chaves no Vercel): ${err.message}`);
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Cloudflare R2 rejeitou o arquivo: ${uploadRes.statusText}`);
+        }
+
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Gravado com sucesso!" } : a));
+
+      } catch (err: any) {
+        console.error(`Erro no arquivo ${item.file.name}:`, err);
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "erro", mensagem: err.message } : a));
       }
-      
-      setMensagem("✅ Sucesso! Arquivo guardado no R2.");
-      setFile(null);
-      
+    }
+
+    setUploading(false);
+    
+    // Verifica se pelo menos um arquivo subiu com sucesso para avançar a tela
+    const algumSucesso = arquivos.some(a => a.status === "sucesso" || a.status === "pendente");
+    if (algumSucesso) {
       setTimeout(() => {
         onSucesso();
-      }, 1500);
-
-    } catch (err: any) {
-      console.error("DEBUG CRÍTICO UPLOAD R2:", err);
-      setMensagem(`❌ Falha no Envio: ${err.message}`);
-    } finally {
-      setUploading(false);
+        setArquivos([]);
+      }, 2000);
     }
   };
 
@@ -89,29 +114,63 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     <div className="space-y-4 font-sans">
       <div>
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
-          Anexar Documento para Análise (Contrato Social / Balanço PDF)
+          Anexar Documentação em Lote (Selecione um ou vários PDFs: Balanços, FAT, IRPF)
         </label>
         <input
           type="file"
           accept="application/pdf"
+          multiple // 🔥 Habilita flexibilidade total de colunas de documentos
           onChange={handleFileChange}
-          className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-bold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer"
+          disabled={uploading}
+          className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-bold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer disabled:opacity-40"
         />
       </div>
 
+      {/* GRADE VISUAL DO EXCEL INTERNO DE ARQUIVOS */}
+      {arquivos.length > 0 && (
+        <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+          <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider">
+            📋 Fila de Entrada de Arquivos para o Robô
+          </div>
+          <div className="divide-y divide-slate-200">
+            {arquivos.map((item) => (
+              <div key={item.id} className="p-2.5 flex justify-between items-center text-xs">
+                <div className="truncate max-w-[400px]">
+                  <p className="font-bold text-slate-800 truncate">{item.file.name}</p>
+                  <p className={`text-[10px] font-medium font-mono ${
+                    item.status === "erro" ? "text-red-500" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
+                  }`}>{item.mensagem}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                    item.status === "sucesso" ? "bg-emerald-100 text-emerald-800" :
+                    item.status === "erro" ? "bg-red-100 text-red-800" :
+                    item.status === "enviando" ? "bg-amber-100 text-amber-800 animate-pulse" : "bg-slate-200 text-slate-600"
+                  }`}>
+                    {item.status}
+                  </span>
+                  {!uploading && item.status !== "sucesso" && (
+                    <button 
+                      onClick={() => removerArquivoDaFila(item.id)}
+                      className="text-slate-400 hover:text-red-500 font-bold px-1 transition-colors cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <button
-        onClick={handleUpload}
-        disabled={uploading || !file}
+        onClick={executarEsteiraUpload}
+        disabled={uploading || arquivos.length === 0}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "A transferir para o R2..." : "🚀 Enviar Documentação para Análise"}
+        {uploading ? "Processando Lote no R2..." : "🚀 Disparar Documentos para a Mesa V8"}
       </button>
-
-      {mensagem && (
-        <p className="text-center font-bold text-xs text-slate-600 animate-pulse mt-2">
-          {mensagem}
-        </p>
-      )}
     </div>
   );
 }
