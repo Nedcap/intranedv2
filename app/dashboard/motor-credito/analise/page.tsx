@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
+import { useSearchParams } from "next/navigation";
 
 interface FilaItem {
   id: string;
@@ -26,7 +27,8 @@ interface EndividamentoItem {
 }
 
 interface RestritivoItem {
-  origem: string;
+  origin: string; // corrigindo typo estrutural interno mantido para compatibilidade
+  origem?: string; 
   tipo: string;
   qtd: number;
   valor: number;
@@ -48,7 +50,7 @@ interface AnaliseData {
   dados_endividamento: EndividamentoItem[];
   dados_restritivos: RestritivoItem[];
   dados_estrutura_societaria: SócioItem[];
-  dados_juridico: { processos_tramitacao?: string; processos_arquivados?: string };
+  dados_juridico: { processos_tramitacao?: string; procesos_arquivados?: string; processos_arquivados?: string };
   parecer_comite: string;
 }
 
@@ -71,9 +73,9 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
     { instituicao: "Viacredi", modalidade: "Desconto de Duplicatas", saldo: 382000 }
   ],
   dados_restritivos: [
-    { origem: "Totalcap (PJ)", tipo: "Refin", qtd: 1, valor: 4681.44, obs: "Caixa Econômica" },
-    { origem: "Totalcap (PJ)", tipo: "Protesto", qtd: 30, valor: 1412847.78, obs: "Impostos Federais/Municipais" },
-    { origem: "Sidnei (PF)", tipo: "Refin", qtd: 1, valor: 4681.44, obs: "Caixa Econômica" }
+    { origin: "Totalcap (PJ)", tipo: "Refin", qtd: 1, valor: 4681.44, obs: "Caixa Econômica" },
+    { origin: "Totalcap (PJ)", tipo: "Protesto", qtd: 30, valor: 1412847.78, obs: "Impostos Federais/Municipais" },
+    { origin: "Sidnei (PF)", tipo: "Refin", qtd: 1, valor: 4681.44, obs: "Caixa Econômica" }
   ],
   dados_estrutura_societaria: [
     { s_nome: "Sidnei da Silva", s_perc: 100, s_cargo: "Sócio Administrador", s_aval: true, b_bens: "1 imóvel + 1 terrain (IRPF)", b_valor: 199425.89 }
@@ -86,6 +88,9 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
 };
 
 function MesaAnaliseConteudo() {
+  const searchParams = useSearchParams();
+  const idDaUrl = searchParams.get("id");
+
   const [fila, setFila] = useState<FilaItem[]>([]);
   const [analise, setAnalise] = useState<AnaliseData>(DADOS_MODELO_TOTALCAP);
   const [idSelecionado, setIdSelecionado] = useState<string | null>(null);
@@ -94,29 +99,34 @@ function MesaAnaliseConteudo() {
   const [loadingFila, setLoadingFila] = useState(true);
   const [loadingAnalise, setLoadingAnalise] = useState(false);
   const [salvando, setSalvando] = useState(false);
-  const [recusando, setRecusando] = useState(false);
+  const [processandoDecisao, setProcessandoDecisao] = useState(false);
 
-  // 🔄 Polling Automático e Inicialização
   useEffect(() => {
-    buscarFilaSupabase(true); // Ativa spinner apenas na primeira carga
-
+    buscarFilaSupabase(true);
     const intervalo = setInterval(() => {
-      buscarFilaSupabase(false); // Atualiza em background sem piscar a tela
-    }, 10000); // 10 segundos
-
+      buscarFilaSupabase(false);
+    }, 10000);
     return () => clearInterval(intervalo);
   }, []);
+
+  useEffect(() => {
+    if (idDaUrl) {
+      selecionarEmpresaDaEsteira(idDaUrl);
+    }
+  }, [idDaUrl]);
 
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
+      // 🔥 Alinhado com a regra: exibe na mesa apenas os cards em processamento ou revisão humana
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status")
-        .order("criado_em", { ascending: false });
+        .in("status", ["robo_processando", "em_revisao_humana"])
+        .order("created_at", { ascending: false });
         
       if (error) throw error;
-      if (data) setFila(data);
+      if (data) setFila(data as any);
     } catch (err) {
       console.error("Erro de sincronização da fila:", err);
     } finally {
@@ -131,81 +141,125 @@ function MesaAnaliseConteudo() {
       const { data, error } = await supabase.from("analises_credito").select("*").eq("id", id).single();
       if (error) throw error;
       if (data) {
+        const dc = data.dados_consolidados || {};
+        
+        // Se entrou como robo_processando e o humano abriu, joga o status para revisão humana para congelar o robô
+        if (data.status === "robo_processando") {
+          await supabase.from("analises_credito").update({ status: "em_revisao_humana" }).eq("id", id);
+        }
+
         setAnalise({
           id: data.id,
           cnpj: data.cnpj,
           razao_social: data.razao_social,
-          uf: data.uf,
-          cidade: data.cidade || "",
-          capital_social: Number(data.capital_social || 0),
-          status: data.status,
-          dados_gerais: data.dados_gerais || {},
-          proposta: data.proposta || { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
-          dados_faturamento: data.dados_faturamento || { "2024": {}, "2025": {}, "2026": {} },
-          dados_potencial: data.dados_potencial || { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
-          dados_endividamento: data.dados_endividamento || [],
-          dados_restritivos: data.dados_restritivos || [],
-          dados_estrutura_societaria: data.dados_estrutura_societaria || [],
-          dados_juridico: data.dados_juridico || {},
-          parecer_comite: data.parecer_comite || ""
+          status: data.status === "robo_processando" ? "em_revisao_humana" : data.status,
+          uf: dc.uf || "PR",
+          cidade: dc.cidade || "Curitiba",
+          capital_social: Number(dc.capital_social || 0),
+          dados_gerais: dc.dados_gerais || {},
+          proposta: dc.proposta || { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
+          dados_faturamento: dc.dados_faturamento || { "2024": {}, "2025": {}, "2026": {} },
+          dados_potencial: dc.dados_potencial || { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
+          dados_endividamento: dc.dados_endividamento || [],
+          dados_restritivos: dc.dados_restritivos || dc.dados_restritivos?.map((r: any) => ({ ...r, origin: r.origin || r.origem })) || [],
+          dados_estrutura_societaria: dc.dados_estrutura_societaria || [],
+          dados_juridico: dc.dados_juridico || {},
+          parecer_comite: dc.parecer_comite || ""
         });
       }
     } catch (err) {
-      console.error(err);
+      console.error("Erro ao abrir card:", err);
     } finally {
       setLoadingAnalise(false);
     }
   };
 
-  const persistirNoBanco = async () => {
+  const persistirNoBanco = async (mostrarAlerta = true) => {
     if (!idSelecionado || !analise.id) {
-      alert("💡 Você está editando o Template Estático. Envie uma análise real pelo comercial para salvar.");
-      return;
+      if (mostrarAlerta) alert("💡 Você está editando o Template Estático. Envie uma análise real pelo comercial para salvar.");
+      return false;
     }
     try {
       setSalvando(true);
-      const { error } = await supabase.from("analises_credito").update({ ...analise }).eq("id", analise.id);
+      const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
+
+      const { error } = await supabase
+        .from("analises_credito")
+        .update({ dados_consolidados: dadosParaCompactar })
+        .eq("id", analise.id);
+
       if (error) throw error;
-      alert("✅ Excel v8 persistido no Supabase!");
-      buscarFilaSupabase(false);
+      if (mostrarAlerta) alert("✅ Excel v8 persistido e salvo no Supabase!");
+      return true;
     } catch (err: any) {
-      alert("❌ Erro: " + err.message);
+      alert("❌ Erro ao salvar dados: " + err.message);
+      return false;
     } finally {
       setSalvando(false);
     }
   };
 
-  // ⚠️ RECUSA OPERACIONAL: Devolve o status da empresa para pendência
+  // ⚡ Finaliza a esteira atualizando o status final ouvido pelo Comercial
+  const finalizarFluxoComStatus = async (novoStatus: "aprovado" | "reprovado") => {
+    if (!idSelecionado || !analise.id) return;
+    
+    const confirmacao = window.confirm(`Deseja realmente aplicar o veredito de [${novoStatus.toUpperCase()}] para esta empresa?`);
+    if (!confirmacao) return;
+
+    try {
+      setProcessandoDecisao(true);
+      
+      // Salva os dados da planilha antes para não perder o parecer final do analista
+      await persistirNoBanco(false);
+
+      const { error } = await supabase
+        .from("analises_credito")
+        .update({ status: novoStatus })
+        .eq("id", analise.id);
+
+      if (error) throw error;
+
+      alert(`Veredito de [${novoStatus.toUpperCase()}] gravado com sucesso na esteira!`);
+      setIdSelecionado(null);
+      setAnalise(DADOS_MODELO_TOTALCAP);
+      await buscarFilaSupabase(true);
+
+    } catch (err: any) {
+      alert("Erro ao processar decisão técnica: " + err.message);
+    } finally {
+      setProcessandoDecisao(false);
+    }
+  };
+
   const devolverParaComercialPendente = async () => {
     if (!idSelecionado || !analise.id) {
       alert("Mude para uma empresa real da esteira para executar a recusa.");
       return;
     }
 
-    const justificativa = prompt("Digite o motivo da devolução (Ex: Falta balanço de 2025 ou extratos ilegíveis):");
-    if (justificativa === null) return; // Cancelou o prompt
+    const justificativa = prompt("Digite o motivo da devolução (Falta balanço de 2025 ou extratos ilegíveis):");
+    if (justificativa === null) return; 
     if (!justificativa.trim()) {
-      alert("⚠️ Você precisa informar uma justificativa para o comercial ajustar.");
+      alert("⚠️ Você precisa informar uma justificativa.");
       return;
     }
 
     try {
-      setRecusando(true);
-      
-      // Altera o status para 'aberta' (ou o seu status inicial da esteira) e anexa a obs no parecer
+      setProcessandoDecisao(true);
+      const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
+      dadosParaCompactar.parecer_comite = `🚨 DEVOLVIDO PARA PENDÊNCIA:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_comite || "");
+
       const { error } = await supabase
         .from("analises_credito")
         .update({ 
-          status: "aberta", 
-          parecer_comite: `🚨 DEVOLVIDO PARA PENDÊNCIA:\nMotivo: ${justificativa}\n\n` + analise.parecer_comite
+          status: "aguardando_docs", 
+          dados_consolidados: dadosParaCompactar
         })
         .eq("id", analise.id);
 
       if (error) throw error;
 
-      alert("📥 Empresa devolvida para a fila pendente do comercial com sucesso!");
-      
-      // Reseta a visualização
+      alert("📥 Empresa devolvida para 'Aguardando Docs' no comercial!");
       setIdSelecionado(null);
       setAnalise(DADOS_MODELO_TOTALCAP);
       await buscarFilaSupabase(true);
@@ -213,13 +267,10 @@ function MesaAnaliseConteudo() {
     } catch (err: any) {
       alert("❌ Falha ao processar devolução: " + err.message);
     } finally {
-      setRecusando(false);
+      setProcessandoDecisao(false);
     }
   };
 
-  // =========================================================================
-  // 🎛️ GERENCIADOR DE GRADES DINÂMICAS
-  // =========================================================================
   const adicionarLinhaSocios = () => {
     const nova = { s_nome: "Novo Sócio", s_perc: 0, s_cargo: "Diretor", s_aval: true, b_bens: "", b_valor: 0 };
     setAnalise({ ...analise, dados_estrutura_societaria: [...analise.dados_estrutura_societaria, nova] });
@@ -237,7 +288,7 @@ function MesaAnaliseConteudo() {
   };
 
   const adicionarLinhaRestritivos = () => {
-    const nova = { origem: "Nome Alvo", tipo: "Protesto", qtd: 1, valor: 0, obs: "" };
+    const nova = { origin: "Nome Alvo", tipo: "Protesto", qtd: 1, valor: 0, obs: "" };
     setAnalise({ ...analise, dados_restritivos: [...analise.dados_restritivos, nova] });
   };
   const removerLinhaRestritivos = (index: number) => {
@@ -280,11 +331,9 @@ function MesaAnaliseConteudo() {
             <span className="font-black text-slate-800 uppercase text-[10px] tracking-widest block">
               📥 Fila do Comitê de Risco ({fila.length})
             </span>
-            {/* Botão de Atualização Manual Rápida */}
             <button 
               onClick={() => buscarFilaSupabase(true)} 
               className="text-indigo-600 hover:text-indigo-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-              title="Sincronizar Manualmente"
             >
               🔄 Atualizar
             </button>
@@ -313,8 +362,8 @@ function MesaAnaliseConteudo() {
                   <p className={`text-xs font-black uppercase truncate ${idSelecionado === item.id ? "text-white" : "text-slate-900"}`}>{item.razao_social}</p>
                   <div className="flex justify-between items-center mt-1">
                     <p className={`text-[10px] font-mono ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-400"}`}>CNPJ: {item.cnpj}</p>
-                    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded ${idSelecionado === item.id ? "bg-indigo-800 text-white" : "bg-amber-100 text-amber-800"}`}>
-                      {item.status || "robo"}
+                    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded ${idSelecionado === item.id ? "bg-indigo-900 text-white" : item.status === "robo_processando" ? "bg-amber-100 text-amber-800 animate-pulse" : "bg-indigo-100 text-indigo-800"}`}>
+                      {item.status === "robo_processando" ? "🤖 Robo" : "🕵️ Auditoria"}
                     </span>
                   </div>
                 </div>
@@ -334,33 +383,48 @@ function MesaAnaliseConteudo() {
         ) : (
           <div className="space-y-4">
             {/* COMMAND HEAD BAR */}
-            <div className="border-b border-slate-200 pb-3 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
+            <div className="border-b border-slate-200 pb-3 flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
               <div>
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"}`}>
-                  {idSelecionado ? `Card Ativo (${analise.status || "Mesa"})` : "Visualização de Estrutura Técnica (Estático)"}
+                  {idSelecionado ? `Card Ativo (${analise.status === 'robo_processando' ? 'Robô OCR' : 'Mesa Risco'})` : "Visualização de Estrutura Técnica (Estático)"}
                 </span>
                 <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
                 <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade}/{analise.uf}</p>
               </div>
               
-              <div className="flex items-center gap-2">
-                {/* Botão Dinâmico de Devolução Operacional */}
+              <div className="flex flex-wrap items-center gap-2">
                 {idSelecionado && (
-                  <button 
-                    onClick={devolverParaComercialPendente} 
-                    disabled={recusando} 
-                    className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-black px-4 py-2 rounded-lg text-xs uppercase tracking-widest cursor-pointer transition-all disabled:opacity-40"
-                  >
-                    {recusando ? "Devolvendo..." : "🚨 Devolver Pendente"}
-                  </button>
+                  <>
+                    <button 
+                      onClick={() => finalizarFluxoComStatus("aprovado")} 
+                      disabled={processandoDecisao}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2 rounded-lg text-xs uppercase tracking-widest cursor-pointer transition-all disabled:opacity-40 shadow-sm"
+                    >
+                      ✅ Aprovar Crédito
+                    </button>
+                    <button 
+                      onClick={() => finalizarFluxoComStatus("reprovado")} 
+                      disabled={processandoDecisao}
+                      className="bg-slate-800 hover:bg-slate-900 text-white font-black px-4 py-2 rounded-lg text-xs uppercase tracking-widest cursor-pointer transition-all disabled:opacity-40 shadow-sm"
+                    >
+                      ❌ Reprovar Risco
+                    </button>
+                    <button 
+                      onClick={devolverParaComercialPendente} 
+                      disabled={processandoDecisao} 
+                      className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-black px-3 py-2 rounded-lg text-xs uppercase tracking-widest cursor-pointer transition-all disabled:opacity-40"
+                    >
+                      🚨 Devolver Comercial
+                    </button>
+                  </>
                 )}
                 
                 <button 
-                  onClick={persistirNoBanco} 
-                  disabled={salvando} 
+                  onClick={() => persistirNoBanco(true)} 
+                  disabled={salvando || processandoDecisao} 
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2 rounded-lg text-xs uppercase tracking-widest shadow-md cursor-pointer transition-all disabled:opacity-40"
                 >
-                  {salvando ? "Sincronizando..." : idSelecionado ? "💾 Salvar Planilha (Supabase)" : "💡 Testar Fórmulas e Inserções"}
+                  {salvando ? "Sincronizando..." : idSelecionado ? "💾 Salvar Planilha" : "💡 Testar Fórmulas"}
                 </button>
               </div>
             </div>
@@ -581,7 +645,7 @@ function MesaAnaliseConteudo() {
                         <tbody className="text-xs font-mono font-bold">
                           {analise.dados_restritivos.map((rest, i) => (
                             <tr key={i} className="hover:bg-slate-50">
-                              <td className="p-1"><input type="text" value={rest.origem} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].origem = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-transparent font-black font-sans uppercase" /></td>
+                              <td className="p-1"><input type="text" value={rest.origin || rest.origem || ""} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].origin = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-transparent font-black font-sans uppercase" /></td>
                               <td className="p-1"><input type="text" value={rest.tipo} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].tipo = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-transparent text-amber-600 font-bold font-sans uppercase" /></td>
                               <td className="p-1 text-center"><input type="number" value={rest.qtd} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].qtd = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-center rounded w-16 bg-transparent" /></td>
                               <td className="p-1 text-right"><input type="number" value={rest.valor} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].valor = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-right rounded w-36 bg-transparent text-red-600 font-black" /></td>
@@ -608,7 +672,7 @@ function MesaAnaliseConteudo() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="block font-black text-emerald-600 uppercase text-[10px] tracking-widest">🟢 Arquivados / Extintos</label>
-                      <textarea value={analise.dados_juridico.processos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_arquivados: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
+                      <textarea value={analise.dados_juridico.processos_arquivados || analise.dados_juridico.procesos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_arquivados: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
                     </div>
                   </div>
                 )}
