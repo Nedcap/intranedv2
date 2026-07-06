@@ -37,8 +37,8 @@ interface Lead {
   google_categoria?: string;
   google_endereco?: string;
   website?: string;
-  lat?: number; // 👈 Adicionado para mapeamento
-  lng?: number; // 👈 Adicionado para mapeamento
+  lat?: number; 
+  lng?: number; 
   parada_origem?: string;
   observacaoCommercial?: string; 
 }
@@ -138,8 +138,8 @@ export default function PlanejadorRotasPage() {
         uf: ufCidade,
         parada_origem: nomeCidade,
         observacaoCommercial: "",
-        lat: l.lat || null, // 👈 Puxando coordenada pra visão comercial
-        lng: l.lng || null  // 👈 Puxando coordenada pra visão comercial
+        lat: l.lat || null, 
+        lng: l.lng || null  
       }));
 
       setBancoLeadsPorCidade((prev) => ({
@@ -153,6 +153,7 @@ export default function PlanejadorRotasPage() {
     }
   };
 
+  // 🎯 URL DO MAPS CORRIGIDA COM PARSER DE WAYPOINTS OFICIAL DA GOOGLE URL API
   const abrirGoogleMapsComCidadesAtivas = () => {
     if (cidadesDaVisao.length === 0) return;
     
@@ -167,7 +168,7 @@ export default function PlanejadorRotasPage() {
       ? `&waypoints=${intermediarias.map(c => encodeURIComponent(`${c.nome}, ${c.uf}, Brasil`)).join('|')}`
       : "";
       
-    const urlMapsUrl = `http://maps.google.com/maps?origin=${origemParam}&destination=${destinoParam}${waypointsParam}&travelmode=driving`;
+    const urlMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origemParam}&destination=${destinoParam}${waypointsParam}&travelmode=driving`;
     window.open(urlMapsUrl, "_blank");
   };
 
@@ -193,7 +194,6 @@ export default function PlanejadorRotasPage() {
     const listaAlvo = abaPrincipalVisualizacao === "MEU_ROTEIRO" ? roteiroFinal : bancoLeadsPorCidade[cidadeAbAtiva] || [];
     if (listaAlvo.length === 0) return;
 
-    // Adicionado Lat e Lng no CSV exportado!
     const headers = ["Cidade Parada", "CNPJ", "Razão Social", "Nome Fantasia", "Bairro", "CNAE Principal", "Situação RF", "Capital Social", "Website Google", "Lat", "Lng", "Obs Planejamento"];
     const rows = listaAlvo.map((lead) => [
       `"${lead.parada_origem || ""}"`,
@@ -221,7 +221,7 @@ export default function PlanejadorRotasPage() {
   };
 
   const leadsExibicaoAba = bancoLeadsPorCidade[cidadeAbAtiva] || [];
-  const objetoCidadeAtiva = cidadesDaVisao.find((c) => c.nome === cidadeAbAtiva);
+  const objetoCidadeAtiva = cidadesDaVisao.find((c) => c.nome === cityKey(cidadeAbAtiva));
 
   const totalEmpresasMapeadasNoCache = Object.values(bancoLeadsPorCidade).reduce((acc, curr) => acc + curr.length, 0);
   const totalCapitalSocialRoteiroFinal = roteiroFinal.reduce((acc, curr) => acc + (curr.capital_social || 0), 0);
@@ -323,11 +323,11 @@ export default function PlanejadorRotasPage() {
           </div>
         )}
 
-        {/* MÓDULO 1: SALA DE PROSPECÇÃO COM LAYOUT SPLIT (60% TABELA / 40% RADAR MAPA/PREVIEW) */}
+        {/* MÓDULO 1: SALA DE PROSPECÇÃO COM LAYOUT SPLIT */}
         {rotaSelecionada && abaPrincipalVisualizacao === "PROSPECCAO" && (
           <div className="grid grid-cols-1 xl:grid-cols-10 gap-6 items-start">
             
-            {/* PAINEL ESQUERDO: MINERAÇÃO E TABELA (60% DA TELA) */}
+            {/* PAINEL ESQUERDO: MINERAÇÃO E TABELA */}
             <div className="xl:col-span-6 space-y-4">
               
               {/* COMPONENTE DE ABAS GEOGRÁFICAS DE FLUXO CONTÍNUO */}
@@ -345,6 +345,7 @@ export default function PlanejadorRotasPage() {
                         estaAtiva ? "border-indigo-500 bg-indigo-50/20" : "border-slate-200 bg-white"
                       }`}>
                         <button
+                          type="button"
                           onClick={() => setCidadeAbAtiva(cidade.nome)}
                           className={`px-2 py-1 rounded font-black text-[11px] uppercase transition-all flex items-center gap-1.5 ${
                             estaAtiva ? "text-indigo-700" : "text-slate-600"
@@ -358,6 +359,7 @@ export default function PlanejadorRotasPage() {
                           )}
                         </button>
                         <button 
+                          type="button"
                           onClick={(e) => { e.stopPropagation(); excluirCidadeDaRota(cidade.nome); }} 
                           className="ml-1 text-slate-300 hover:text-red-600 font-black px-1 text-[11px] cursor-pointer transition-colors"
                           title="Excluir cidade deste planejamento de rota"
@@ -427,6 +429,7 @@ export default function PlanejadorRotasPage() {
                       A partição do BigQuery para <span className="text-slate-700 font-bold">{cidadeAbAtiva}</span> ainda não sofreu o request por etapas. Dispare a extração via IA abaixo.
                     </p>
                     <button
+                      type="button"
                       onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
                       className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest shadow-md transition-all cursor-pointer"
                     >
@@ -453,6 +456,7 @@ export default function PlanejadorRotasPage() {
                             <tr key={lead.cnpj} className="hover:bg-indigo-50/20 transition-all">
                               <td className="p-3">
                                 <button
+                                  type="button"
                                   onClick={() => adicionarAoRoteiro(lead)}
                                   className={`px-2.5 py-1 rounded font-black text-[10px] uppercase transition-all cursor-pointer shadow-sm border ${
                                     jaEstaNoRoteiro
@@ -480,6 +484,7 @@ export default function PlanejadorRotasPage() {
                               </td>
                               <td className="p-3">
                                 <button 
+                                  type="button"
                                   onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social + " " + lead.cidadeExtenso)}`, "_blank")} 
                                   className="bg-white border border-slate-300 font-black px-2 py-1 rounded text-[10px] uppercase hover:bg-slate-50 shadow-sm transition-colors cursor-pointer"
                                 >
@@ -496,10 +501,8 @@ export default function PlanejadorRotasPage() {
               </div>
             </div>
 
-            {/* PAINEL DIREITO: CONTROLADOR DE INTELIGÊNCIA LOGÍSTICA (40% DA TELA) */}
+            {/* PAINEL DIREITO: CONTROLADOR DE INTELIGÊNCIA LOGÍSTICA */}
             <div className="xl:col-span-4 space-y-4">
-              
-              {/* CARD PREVIEW DE MAPEAMENTO E DIRETRIZES MAPS */}
               <div className="bg-slate-900 text-white rounded-xl p-5 shadow-md border border-slate-800 space-y-4">
                 <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                   <div>
@@ -507,6 +510,7 @@ export default function PlanejadorRotasPage() {
                     <h2 className="text-base font-black text-white uppercase tracking-tight mt-1">Sala de Situação Logística</h2>
                   </div>
                   <button
+                    type="button"
                     onClick={abrirGoogleMapsComCidadesAtivas}
                     className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 border border-indigo-500 text-white font-black rounded-lg text-[11px] uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 shadow-md"
                   >
@@ -514,7 +518,6 @@ export default function PlanejadorRotasPage() {
                   </button>
                 </div>
 
-                {/* MÉTRICAS ACUMULADAS DA SESSÃO */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-800/60 border border-slate-800 p-3 rounded-lg">
                     <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Leads em Memória</span>
@@ -526,7 +529,6 @@ export default function PlanejadorRotasPage() {
                   </div>
                 </div>
 
-                {/* VISUAL PREVIEW: RASTREADOR DE PROGRESSO LOGÍSTICO DA ESTRADA */}
                 <div className="space-y-2 pt-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Progresso Físico do Trajeto:</span>
                   <div className="bg-slate-800/40 border border-slate-800 p-4 rounded-xl space-y-3 max-h-[300px] overflow-y-auto scrollbar-thin">
@@ -560,7 +562,6 @@ export default function PlanejadorRotasPage() {
                   </div>
                 </div>
               </div>
-
             </div>
           </div>
         )}
@@ -628,6 +629,7 @@ export default function PlanejadorRotasPage() {
                         </td>
                         <td className="p-3.5 text-center">
                           <button
+                            type="button"
                             onClick={() => removerDoRoteiro(lead.cnpj)}
                             className="p-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded text-[10px] font-black uppercase transition-colors cursor-pointer shadow-sm"
                           >
