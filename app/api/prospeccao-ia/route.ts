@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import duckdb from "duckdb";
 
-// Inicializa o motor do DuckDB em memória de forma estática para máxima performance
+// 1. Inicializa o motor do DuckDB em memória
 const db = new duckdb.Database(":memory:");
 
-// Função auxiliar para rodar queries no DuckDB usando Promises (Async/Await)
+// Função auxiliar para rodar queries no DuckDB com suporte a Async/Await
 const rodarQuery = (query: string): Promise<any[]> => {
   return new Promise((resolve, reject) => {
     db.all(query, (err, res) => {
@@ -28,6 +28,9 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    // =========================================================================
+    // 🧠 1. INTELIGÊNCIA ARTIFICIAL: EXTRAÇÃO DOS DADOS
+    // =========================================================================
     const promptSistema = `
       Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs e municípios da Receita Federal do Brasil.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
@@ -65,20 +68,16 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // ☁️ CONFIGURAÇÃO DA URL DO CLOUDFLARE R2
+    // 🚀 2. DUCKDB: CONSULTA DIRETA NO PARQUET (SEM GOOGLE CLOUD!)
     // =========================================================================
-    // TODO: Assim que o upload terminar no Cloudflare, ative a URL pública ou domínio personalizado do bucket
-    // e cole o link direto para o seu arquivo .parquet aqui embaixo:
-    const URL_PARQUET_R2 = "https://pub-SUA-URL-DO-R2.r2.dev/estabelecimentos_completo.parquet";
+    
+    // A sua URL oficial e definitiva hospedada no Cloudflare R2
+    const URL_PARQUET = "https://pub-a1fa05d1cdae48b0bc49ed4783ebac96.r2.dev/estabelecimentos_completo.parquet";
 
-    // =========================================================================
-    // 🧠 CONSTRUÇÃO DA QUERY COM INTELIGÊNCIA DE PULVERIZAÇÃO NO DUCKDB
-    // =========================================================================
     let filtroCnaeClausula = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
-      // Limpa e garante strings limpas para os CNAEs
       const cnaesLimpos = perfilMercado.codigos_cnae
         .map((c: string) => c.replace(/\D/g, ''))
         .filter((c: string) => c.length >= 3);
@@ -91,7 +90,6 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Inteligência de Ordenação Condicional (A mesma do BigQuery, adaptada perfeitamente para DuckDB)
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
@@ -99,14 +97,14 @@ export async function POST(req: Request) {
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // A mágica: a função read_parquet do DuckDB lê os blocos HTTP sob demanda direto do seu Cloudflare R2!
+    // A mágica acontece aqui: read_parquet puxa os bytes exatos lá da Cloudflare
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
-      FROM read_parquet('${URL_PARQUET_R2}')
+      FROM read_parquet('${URL_PARQUET}')
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
         AND ('${perfilMercado.codigo_municipio || "NULL"}' = 'NULL' OR municipio_rf = '${perfilMercado.codigo_municipio}')
@@ -115,17 +113,19 @@ export async function POST(req: Request) {
       LIMIT ${limiteSeguro}
     `;
 
-    // Executa a consulta no motor colunar ultra-rápido do DuckDB
     const rows = await rodarQuery(sqlQuery);
 
     // =========================================================================
-    // 🗺️ MAPEAMENTO DOS RESULTADOS PARA O FRONTEND
+    // 🗺️ 3. MAPEAMENTO E ENVIO PARA O FRONTEND
     // =========================================================================
     const leads = rows.map((row: any) => {
-      // Garante a conversão correta de datas caso o DuckDB retorne como objeto Date
-      const dataAberturaStr = row.data_abertura instanceof Date 
-        ? row.data_abertura.toISOString().split('T')[0] 
-        : row.data_abertura;
+      // Ajuste para datas que vêm do DuckDB
+      let dataAberturaStr = row.data_abertura;
+      if (row.data_abertura instanceof Date) {
+        dataAberturaStr = row.data_abertura.toISOString().split('T')[0];
+      } else if (typeof row.data_abertura === 'number') {
+        dataAberturaStr = new Date(row.data_abertura).toISOString().split('T')[0];
+      }
 
       return {
         cnpj: row.cnpj,
@@ -157,7 +157,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro crítico na rota de prospecção via DuckDB/Parquet:", error);
+    console.error("Erro na rota de prospecção via DuckDB:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
