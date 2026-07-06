@@ -125,7 +125,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const med2024 = qtd2024 > 0 ? tot2024 / qtd2024 : 0;
       const med2025 = qtd2025 > 0 ? tot2025 / qtd2025 : 0;
       const med2026 = qtd2026 > 0 ? tot2026 / qtd2026 : 0;
-      const potencialEstimado = med2025 * 2.5;
+      const potencialEstimado = med2025 * 2.5; // Regra de negócio (exemplo)
       const alavancagem = med2025 > 0 ? (totalBancos / med2025).toFixed(2) : "0.00";
 
       // 2. Arrays para o Chart.js
