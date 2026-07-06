@@ -32,15 +32,16 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
+      // 🛠️ CORREÇÃO CRÍTICA: Mudado de 'criado_em' para 'created_at' para eliminar o erro 42703 (Bad Request)
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status")
-        .order("criado_em", { ascending: false });
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       if (data) setFilaReal(data);
     } catch (err) {
-      console.error("Erro ao carregar esteira:", err);
+      console.error("Erro ao carregar esteira comercial:", err);
     }
   };
 
@@ -199,14 +200,13 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* Carrega o componente de lote de arquivos */}
                 <UploadDocs empresa={empresaSelecionada} onSucesso={resetarAposSucesso} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL */}
+        {/* TABELA DE STATUS DO COMERCIAL INTEGRA COM CABEÇALHOS DO PROJETO */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
