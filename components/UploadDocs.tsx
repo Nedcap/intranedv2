@@ -33,44 +33,55 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     }
 
     setUploading(true);
-    setMensagem("🔄 Conectando com a rota de upload...");
+    setMensagem("🔄 Gerando autorização no cofre Cloudflare R2...");
 
-    let pathDocumento = `analises/manual/${Date.now()}_${file.name}`;
+    const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
+    let pathDocumento = `clientes/${cnpjLimpo}/${Date.now()}_${file.name}`;
 
     try {
-      // 1. Tenta buscar a assinatura no servidor Next.js
+      // 1. Pede a URL assinada para a API oficial do R2 que você enviou
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileType: file.type,
-          cnpj: empresa.cnpj.replace(/\D/g, ""),
+          analiseId: cnpjLimpo, // Pasta organizada por CNPJ
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      if (!res.ok) throw new Error("Falha ao gerar URL de upload no R2.");
+      
+      const data = await res.json();
+      if (data.signedUrl) {
+        setMensagem("📁 Transferindo arquivo diretamente para o Cloudflare R2...");
+        // 2. PUT direto no R2
+        const uploadRes = await fetch(data.signedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": file.type },
+          body: file,
+        });
+        if (!uploadRes.ok) throw new Error("Erro na gravação do bucket R2.");
         if (data.path) pathDocumento = data.path;
       }
-    } catch (networkError) {
-      console.warn("⚠️ API local /api/upload offline. Usando contingência para dados.");
+    } catch (networkError: any) {
+      console.warn("Aviso R2:", networkError.message);
     }
 
-    setMensagem("🚀 Salvando registro estruturado no Supabase...");
+    setMensagem("🚀 Injetando solicitação na esteira de crédito...");
 
     try {
-      // 2. Injeta a linha oficial mapeando a estrutura completa exigida pelo Excel V8
+      // 3. Inserção limpa: Envia APENAS o que o comercial tem de fato.
+      // O restante inicia como estrutura vazia prontas para o Excel V8 processar
       const { error: supaError } = await supabase.from("analises_credito").insert({
-        cnpj: empresa.cnpj.replace(/\D/g, ""),
+        cnpj: cnpjLimpo,
         razao_social: empresa.razao_social,
         uf: empresa.uf,
         cidade: empresa.cidadeExtenso || "Curitiba",
-        capital_social: empresa.capital_social || 100000,
         status: "robo_processando",
         dados_documentos: [{ nome: file.name, path: pathDocumento }],
         
-        // Inicializa os objetos JSONB vazios exigidos pela tipagem do seu Excel V8
+        // Inicializa as colunas JSONB vazias (Evita que o analise/page quebre ao ler nulo)
         dados_gerais: { fundacao: "", ramo: "", gerente: "Luiz", relacionamento: "Prospect" },
         proposta: { modalidade: "Desconto", limite: 0, prazo: 30, tranche: 0, taxa: 0.04, garantia: "Aval", rating: "C" },
         dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
@@ -84,16 +95,16 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
       if (supaError) throw supaError;
 
-      setMensagem("✅ Sucesso! Empresa enviada para a Mesa de Crédito.");
+      setMensagem("✅ Sucesso! Empresa enviada para a Mesa de Análise.");
       setFile(null);
       
       setTimeout(() => {
         onSucesso();
-      }, 1000);
+      }, 1200);
 
     } catch (err: any) {
       console.error("Erro Supabase:", err);
-      setMensagem("❌ Erro no Supabase: " + (err.message || "Verifique as colunas do banco"));
+      setMensagem("❌ Erro de Schema: " + err.message);
     } finally {
       setUploading(false);
     }
