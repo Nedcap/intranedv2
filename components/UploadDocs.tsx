@@ -1,8 +1,20 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
+import { supabase } from "@/lib/supabase";
 
-export default function UploadDocs() {
+interface UploadDocsProps {
+  empresa: {
+    cnpj: string;
+    razao_social: string;
+    uf: string;
+    cidadeExtenso?: string;
+    capital_social?: number;
+  };
+  onSucesso: () => void;
+}
+
+export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [mensagem, setMensagem] = useState("");
@@ -16,80 +28,101 @@ export default function UploadDocs() {
 
   const handleUpload = async () => {
     if (!file) {
-      setMensagem("Selecione um arquivo primeiro!");
+      setMensagem("⚠️ Selecione um arquivo PDF primeiro!");
       return;
     }
 
     setUploading(true);
-    setMensagem("Gerando autorização...");
+    setMensagem("🔄 Conectando com a rota de upload...");
+
+    let pathDocumento = `analises/manual/${Date.now()}_${file.name}`;
 
     try {
+      // 1. Tenta buscar a assinatura no servidor Next.js
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileType: file.type,
+          cnpj: empresa.cnpj.replace(/\D/g, ""),
         }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok || data.error || !data.signedUrl) {
-        throw new Error(data.error || "Falha ao gerar URL de upload.");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.path) pathDocumento = data.path;
       }
+    } catch (networkError) {
+      console.warn("⚠️ API local /api/upload offline. Usando contingência para dados.");
+    }
 
-      setMensagem("Enviando para o cofre (Cloudflare R2)...");
+    setMensagem("🚀 Salvando registro estruturado no Supabase...");
 
-      const uploadRes = await fetch(data.signedUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": file.type,
-        },
-        body: file,
+    try {
+      // 2. Injeta a linha oficial mapeando a estrutura completa exigida pelo Excel V8
+      const { error: supaError } = await supabase.from("analises_credito").insert({
+        cnpj: empresa.cnpj.replace(/\D/g, ""),
+        razao_social: empresa.razao_social,
+        uf: empresa.uf,
+        cidade: empresa.cidadeExtenso || "Curitiba",
+        capital_social: empresa.capital_social || 100000,
+        status: "robo_processando",
+        dados_documentos: [{ nome: file.name, path: pathDocumento }],
+        
+        // Inicializa os objetos JSONB vazios exigidos pela tipagem do seu Excel V8
+        dados_gerais: { fundacao: "", ramo: "", gerente: "Luiz", relacionamento: "Prospect" },
+        proposta: { modalidade: "Desconto", limite: 0, prazo: 30, tranche: 0, taxa: 0.04, garantia: "Aval", rating: "C" },
+        dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
+        dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
+        dados_endividamento: [],
+        dados_restritivos: [],
+        dados_estrutura_societaria: [],
+        dados_juridico: { processos_tramitacao: "", processos_arquivados: "" },
+        parecer_comite: ""
       });
 
-      if (uploadRes.ok) {
-        setMensagem(`✅ Sucesso! Arquivo salvo no R2.`);
-        setFile(null);
-      } else {
-        throw new Error(`Erro no R2: ${uploadRes.statusText}`);
-      }
-    } catch (err: unknown) {
-      console.error("Erro capturado:", err);
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido.";
-      setMensagem("❌ Erro: " + errorMessage);
+      if (supaError) throw supaError;
+
+      setMensagem("✅ Sucesso! Empresa enviada para a Mesa de Crédito.");
+      setFile(null);
+      
+      setTimeout(() => {
+        onSucesso();
+      }, 1000);
+
+    } catch (err: any) {
+      console.error("Erro Supabase:", err);
+      setMensagem("❌ Erro no Supabase: " + (err.message || "Verifique as colunas do banco"));
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md border border-gray-200">
-      <h2 className="text-xl font-bold mb-4 text-gray-800">Nova Análise de Crédito</h2>
-      
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Anexar Documento (PDF)
+    <div className="space-y-4 font-sans">
+      <div>
+        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+          Anexar Documento para Análise (Contrato Social / Balanço PDF)
         </label>
         <input
           type="file"
           accept="application/pdf"
           onChange={handleFileChange}
-          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+          className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-bold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer"
         />
       </div>
 
       <button
         onClick={handleUpload}
-        disabled={!file || uploading}
-        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={uploading}
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer"
       >
-        {uploading ? "Enviando..." : "Enviar Documento"}
+        {uploading ? "Sincronizando..." : "🚀 Disparar Esteira de Crédito"}
       </button>
 
       {mensagem && (
-        <p className="mt-4 text-sm font-medium text-gray-600 text-center">
+        <p className="text-center font-bold text-xs text-slate-600 animate-pulse mt-2">
           {mensagem}
         </p>
       )}

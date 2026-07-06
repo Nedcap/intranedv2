@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Faltam dados do arquivo" }, { status: 400 });
     }
 
+    // Organização de pastas inteligente: se vier o analiseId (CNPJ limpo), joga na pasta do cliente, senão cria um avulso com timestamp
     const path = analiseId ? `clientes/${analiseId}/${fileName}` : `avulsos/${Date.now()}-${fileName}`;
 
     const command = new PutObjectCommand({
@@ -27,12 +28,13 @@ export async function POST(request: Request) {
       ContentType: fileType,
     });
 
+    // Gera a URL assinada válida por 60 segundos para o front-end injetar o PUT direto
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 60 });
 
     return NextResponse.json({ signedUrl, path });
     
-  } catch (error) {
-    console.error("Erro ao gerar URL do R2:", error);
-    return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 });
+  } catch (error: any) {
+    console.error("Erro real ao gerar URL do R2:", error);
+    return NextResponse.json({ error: "Erro interno no servidor: " + error.message }, { status: 500 });
   }
 }
