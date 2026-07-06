@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface UploadDocsProps {
   empresa: {
@@ -19,7 +20,6 @@ interface ArquivoFila {
 }
 
 export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
-  // 📈 Suporte para múltiplos arquivos simultâneos na esteira comercial
   const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -44,8 +44,9 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setUploading(true);
 
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
+    const documentosRegistrados: { nome: string; path: string }[] = [];
 
-    // Processa os arquivos em lote sequencial
+    // 1. Loop de Uploads em Lote para o Cloudflare R2
     for (let i = 0; i < arquivos.length; i++) {
       const item = arquivos[i];
       if (item.status === "sucesso") continue;
@@ -53,7 +54,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Assinando cofre R2..." } : a));
 
       try {
-        // 1. Busca a URL assinada na API interna do servidor Next.js
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { 
@@ -77,7 +77,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Transferindo binário para o R2..." } : a));
 
-        // 2. PUT cirúrgico direto para o bucket do Cloudflare R2 sem cabeçalhos conflitantes
         const uploadRes = await fetch(data.signedUrl, {
           method: "PUT",
           headers: { 
@@ -85,12 +84,15 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           },
           body: item.file,
         }).catch(err => {
-          throw new Error(`Falha física de upload no R2 (Verifique CORS ou chaves no Vercel): ${err.message}`);
+          throw new Error(`Falha física de upload no R2 (Verifique o CORS): ${err.message}`);
         });
 
         if (!uploadRes.ok) {
           throw new Error(`Cloudflare R2 rejeitou o arquivo: ${uploadRes.statusText}`);
         }
+
+        // Armazena o path retornado pelo seu R2 para registrar na tabela
+        documentosRegistrados.push({ nome: item.file.name, path: data.path || "" });
 
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Gravado com sucesso!" } : a));
 
@@ -100,16 +102,34 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       }
     }
 
-    setUploading(false);
-    
-    // Se todos ou algum arquivo subiu com sucesso, encerra limpando a fila
-    const algumSucesso = arquivos.some(a => a.status === "sucesso");
-    if (algumSucesso) {
-      setTimeout(() => {
-        onSucesso();
-        setArquivos([]);
-      }, 2000);
+    // 2. Inserção do Registro no Supabase caso pelo menos um arquivo tenha subido
+    if (documentosRegistrados.length > 0) {
+      try {
+        setArquivos(prev => prev.map(a => a.status === "sucesso" ? { ...a, messaging: "Criando cartão na esteira..." } : a));
+        
+        const { error: supaError } = await supabase.from("analises_credito").insert({
+          cnpj: cnpjLimpo,
+          razao_social: empresa.razao_social,
+          uf: empresa.uf,
+          status: "robo_processando",
+          // Se sua coluna aceitar JSONB, injeta o array de arquivos salvos
+          dados_documentos: documentosRegistrados
+        });
+
+        if (supaError) throw supaError;
+
+        setTimeout(() => {
+          onSucesso();
+          setArquivos([]);
+        }, 1500);
+
+      } catch (dbErr: any) {
+        console.error("Erro ao registrar na tabela do Supabase:", dbErr);
+        alert(`⚠️ Arquivos salvos no R2, mas falhou ao criar cartão no banco: ${dbErr.message}`);
+      }
     }
+
+    setUploading(false);
   };
 
   return (

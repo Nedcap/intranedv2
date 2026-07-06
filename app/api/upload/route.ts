@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, PutBucketCorsCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 
@@ -19,27 +19,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Faltam dados do arquivo" }, { status: 400 });
     }
 
-    // 🔥 FORÇANDO O CORS DO BUCKET COMPATÍVEL COM O VALIDADOR INTERNO DO R2
-    try {
-      const corsCommand = new PutBucketCorsCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        CORSConfiguration: {
-          CORSRules: [
-            {
-              AllowedOrigins: ["*"],
-              AllowedMethods: ["GET", "PUT", "POST", "OPTIONS"],
-              AllowedHeaders: ["*"],
-              MaxAgeSeconds: 3000
-            }
-          ]
-        }
-      });
-      await s3Client.send(corsCommand);
-      console.log("🚀 [CORS BYPASS] Injetado com sucesso via SDK");
-    } catch (corsErr: any) {
-      console.error("Erro ao tentar injetar o CORS automaticamente:", corsErr.message);
-    }
-
     const path = analiseId ? `clientes/${analiseId}/${fileName}` : `avulsos/${Date.now()}-${fileName}`;
 
     const command = new PutObjectCommand({
@@ -48,7 +27,11 @@ export async function POST(request: Request) {
       ContentType: fileType,
     });
 
-    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 60 });
+    // 🔥 Correção da Assinatura: força a URL a não exigir hashing do payload no upload direto do navegador
+    const signedUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: 300,
+      signableHeaders: new Set(["host", "content-type"]) 
+    });
 
     return NextResponse.json({ signedUrl, path });
     
