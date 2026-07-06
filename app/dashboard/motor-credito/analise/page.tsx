@@ -28,6 +28,7 @@ interface AnaliseData {
   parecer_comite: string;
 }
 
+// 📦 DADOS ESTÁTICOS PADRÃO (TOTALCAP) - MODELO DO SEU EXCEL REAL
 const DADOS_MODELO_TOTALCAP: AnaliseData = {
   id: null,
   cnpj: "11.127.136/0001-83",
@@ -51,7 +52,7 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
   ],
   dados_estrutura_societaria: [{ s_nome: "Sidnei da Silva", s_perc: 100, s_cargo: "Sócio Administrador", s_aval: true, b_bens: "1 imóvel + 1 terreno (IRPF)", b_valor: 199425.89 }],
   dados_juridico: {
-    processos_tramitacao: "🔴 7 Processos em Tramitação / Suspensos\n- 4 Fiscal / Tributário: Execuções Fiscais movidas pela União (ações de R$ 695k e R$ 288k) e Curitiba (R$ 75k).\n- 1 Cível: Ação Monitória movida pelo Banco Itaú cobrando CCB de R$ 410.878,49.\n- 2 Tributário: Ações de defesa atacando a União com créditos a receber.",
+    processos_tramitacao: "🔴 7 Processos em Tramitação / Suspensos\n- 4 Fiscal / Tributário: Execuções Fiscais movidas pela União (ações de R$ 695k e R$ 288k) e Curitiba (R$ 75k).\n- 1 Cível: Ação Monitória movida pelo Banco Itaú cobrando CCB de R$ 410.878,49.\n- 2 Tributário: Ações de defense atacando a União com créditos a receber.",
     processos_arquivados: "🟢 ~6 Processos Extintos / Arquivados Definitivamente\n- Cobranças bancárias antigas quitadas e encerradas junto ao Sicredi (R$ 37k)."
   },
   parecer_comite: "Conclusão: Empresa apresenta faturamento em crescimento, com 39% de incremento nos 5 primeiros meses de 2025 em comparação ao ano anterior. Operação 100% bancarizada e sem vencidos no SCR. Empresa e sócio possuem 1 Refin da Caixa Econômica, mas o restritivo advém da pessoa física.\n\nNa parte processual, a ação monitória do Itaú (R$ 410k) está sendo discutida judicialmente e não impacta o SCR atual. Recomendo aprovação do limite solicitado de R$ 80k devido ao forte fluxo de caixa."
@@ -103,7 +104,6 @@ function MesaAnaliseConteudo() {
           uf: data.uf,
           cidade: data.cidade || "",
           capital_social: Number(data.capital_social || 0),
-          status: data.status,
           dados_gerais: data.dados_gerais || {},
           proposta: data.proposta || { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
           dados_faturamento: data.dados_faturamento || { "2024": {}, "2025": {}, "2026": {} },
@@ -170,7 +170,7 @@ function MesaAnaliseConteudo() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       
-      {/* SEÇÃO DA ESQUERDA */}
+      {/* SEÇÃO DA ESQUERDA: A FILA DE EMPRESAS */}
       <div className="lg:col-span-3 space-y-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col min-h-[650px]">
           <span className="font-black text-slate-800 uppercase text-[10px] tracking-widest block border-b pb-2 mb-3">
@@ -205,11 +205,6 @@ function MesaAnaliseConteudo() {
                   <p className={`text-[10px] font-mono mt-0.5 ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-400"}`}>
                     CNPJ: {item.cnpj}
                   </p>
-                  <span className={`inline-block text-[9px] font-black px-1.5 py-0.5 rounded mt-2 uppercase tracking-wide ${
-                    idSelecionado === item.id ? "bg-indigo-700 text-white" : "bg-amber-100 text-amber-800"
-                  }`}>
-                    {item.status === "robo_processando" ? "🤖 Robô Extraindo" : "🕵️ Mesa"}
-                  </span>
                 </div>
               ))}
             </div>
@@ -217,7 +212,7 @@ function MesaAnaliseConteudo() {
         </div>
       </div>
 
-      {/* SEÇÃO DA DIREITA */}
+      {/* SEÇÃO DA DIREITA: O EXCEL VIRTUAL */}
       <div className="lg:col-span-9 space-y-4">
         {loadingAnalise ? (
           <div className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-sm min-h-[650px] flex flex-col items-center justify-center">
@@ -231,7 +226,7 @@ function MesaAnaliseConteudo() {
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"}`}>
                   {idSelecionado ? "Edição de Registro Ativo (Supabase)" : "Visualização de Estrutura Técnica (Estático)"}
                 </span>
-                {/* Corrigido o fechamento da tag de chaves abaixo! */}
+                {/* 🔒 CHAVE CORRETAMENTE FECHADA AQUI ABAIXO! SEM ERRO DE REGEX! */}
                 <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
                 <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade || "Curitiba"}/{analise.uf}</p>
               </div>
