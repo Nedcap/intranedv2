@@ -30,51 +30,56 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     }
 
     setUploading(true);
-    setMensagem("🔄 Gerando autorização no cofre Cloudflare R2...");
+    setMensagem("🔄 Solicitando URL assinada à rota /api/upload...");
 
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
 
     try {
-      // 1. Pede a URL assinada para a nossa API do R2 (app/api/upload/route.ts)
+      // 1. Faz o pedido da Assinatura para a tua API R2
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileType: file.type,
-          analiseId: cnpjLimpo, // Passa o CNPJ limpo para cair na pasta certa
+          analiseId: cnpjLimpo,
         }),
       });
 
-      if (!res.ok) throw new Error("Falha ao gerar URL de upload no R2.");
+      if (!res.ok) {
+        const txtErro = await res.text();
+        throw new Error(`A rota /api/upload respondeu com status ${res.status}: ${txtErro}`);
+      }
       
       const data = await res.json();
       
-      if (data.signedUrl) {
-        setMensagem("📁 Transferindo documento diretamente para o Cloudflare R2...");
-        
-        // 2. Transfere o arquivo via PUT direto para o storage da Cloudflare, usando as credenciais da Vercel
-        const uploadRes = await fetch(data.signedUrl, {
-          method: "PUT",
-          headers: { "Content-Type": file.type },
-          body: file,
-        });
-
-        if (!uploadRes.ok) throw new Error("Erro na gravação do bucket R2.");
-        
-        setMensagem("✅ Sucesso! Arquivo armazenado e disponibilizado para análise.");
-        setFile(null);
-        
-        // Callback para a tela pai resetar a busca do comercial
-        setTimeout(() => {
-          onSucesso();
-        }, 1500);
-      } else {
-        throw new Error(data.error || "Assinatura R2 não retornada.");
+      if (!data.signedUrl) {
+        throw new Error(data.error || "A API não devolveu o campo 'signedUrl'. Verifica os logs do servidor.");
       }
+
+      setMensagem("📁 Transferindo arquivo diretamente para o Cloudflare R2...");
+      
+      // 2. PUT direto no Storage da Cloudflare
+      const uploadRes = await fetch(data.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error(`O Cloudflare R2 rejeitou o arquivo. Status: ${uploadRes.statusText}`);
+      }
+      
+      setMensagem("✅ Sucesso! Arquivo guardado no R2.");
+      setFile(null);
+      
+      setTimeout(() => {
+        onSucesso();
+      }, 1500);
+
     } catch (err: any) {
-      console.error("Erro no Upload R2:", err);
-      setMensagem("❌ Falha no Envio: " + err.message);
+      console.error("DEBUG CRÍTICO UPLOAD R2:", err);
+      setMensagem(`❌ Falha no Envio: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -99,7 +104,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         disabled={uploading || !file}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "Transmitindo ao Storage..." : "🚀 Enviar Documentação para Análise"}
+        {uploading ? "A transferir para o R2..." : "🚀 Enviar Documentação para Análise"}
       </button>
 
       {mensagem && (
