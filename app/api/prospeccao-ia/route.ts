@@ -82,11 +82,9 @@ export async function POST(req: Request) {
 
     if (nomeCidadeReal) {
       try {
-        // Lendo o JSON que criamos e colocamos na pasta do projeto
         const filePath = path.join(process.cwd(), 'tabela_tom.json');
         const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         
-        // Formatar o nome para garantir o match (Tira acentos e deixa tudo em caixa alta)
         const cidadeSanitizada = nomeCidadeReal.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
         const chaveBusca = `${cidadeSanitizada}-${perfilMercado.uf.toUpperCase()}`;
         
@@ -101,7 +99,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. BIGQUERY: CONSULTA (Ajustado para ignorar colunas dropadas de Geocoding)
+    // 🚀 3. BIGQUERY: CONSULTA (Corrigido para 'natureza_juridica' no singular)
     // =========================================================================
     const bigquery = obterClienteBigQuery();
 
@@ -134,9 +132,8 @@ export async function POST(req: Request) {
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
-        razao_social, naturezas_juridica, capital_social,
+        razao_social, natureza_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
-        -- 🧠 Colunas de lat/lng foram removidas daqui para evitar conflito com o Parquet otimizado
       FROM ${TABELA_BIGQUERY}
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
@@ -173,8 +170,8 @@ export async function POST(req: Request) {
         google_categoria: row.google_categoria,
         google_endereco: row.google_endereco,
         website: row.google_website,
-        lat: null, // 👈 Azeitado: Devolvendo nulo seguro sem bater na tabela
-        lng: null, // 👈 Azeitado: Devolvendo nulo seguro sem bater na tabela
+        lat: null, 
+        lng: null, 
         cidadeExtenso: nomeCidadeReal || undefined 
       };
     });
