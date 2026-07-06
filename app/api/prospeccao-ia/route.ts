@@ -1,6 +1,20 @@
 // C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
+import duckdb from "duckdb";
+
+// Inicializa o motor do DuckDB em memória de forma estática para máxima performance
+const db = new duckdb.Database(":memory:");
+
+// Função auxiliar para rodar queries no DuckDB usando Promises (Async/Await)
+const rodarQuery = (query: string): Promise<any[]> => {
+  return new Promise((resolve, reject) => {
+    db.all(query, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
+    });
+  });
+};
 
 export async function POST(req: Request) {
   try {
@@ -20,17 +34,17 @@ export async function POST(req: Request) {
       
       ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
 
-      ATENÇÃO PARA O CNAE (MUITO IMPORTANTES):
+      ATENÇÃO PARA O CNAE:
       - Se o usuário pedir um nicho específico, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
-      - Se o pedido do usuário for aberto, amplo ou pedir "principais empresas", "comércios" ou "indústrias" em geral sem um nicho restrito, retorne o array "codigos_cnae" VAZIO []. Não tente inventar filtros restritivos se o objetivo for uma varredura geral.
-
-      Retorne ESTRITAMENTE um objeto JSON válido:
+      - Se for busca aberta/geral, retorne o array VAZIO [].
+      
+      Retorne ESTRITAMENTE um JSON:
       {
-        "atividade": "descrição curta do segmento ou 'Geral'",
-        "cidade_nome": "Nome da cidade por extenso",
-        "codigo_municipio": "String com o código de 4 dígitos TOM da Receita Federal ou null",
-        "uf": "Duas letras maiúsculas do Estado (ex: SP, PR)",
-        "codigos_cnae": ["array de strings contendo prefixos se houver nicho específico, ou [] se for busca geral"]
+        "atividade": "descrição",
+        "cidade_nome": "Nome extenso",
+        "codigo_municipio": "TOM de 4 dígitos ou null",
+        "uf": "UF",
+        "codigos_cnae": []
       }
     `;
 
@@ -50,149 +64,88 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não consegui identificar o Estado (UF) no seu pedido." }, { status: 400 });
     }
 
-    // Limpa pontuações e garante os dígitos de precisão caso a IA tenha retornado algum CNAE
-    if (perfilMercado.codigos_cnae && Array.isArray(perfilMercado.codigos_cnae)) {
-      perfilMercado.codigos_cnae = perfilMercado.codigos_cnae
-        .map((c: string) => c.replace(/\D/g, ''))
-        .filter((c: string) => c.length >= 3);
-    }
+    // =========================================================================
+    // ☁️ CONFIGURAÇÃO DA URL DO CLOUDFLARE R2
+    // =========================================================================
+    // TODO: Assim que o upload terminar no Cloudflare, ative a URL pública ou domínio personalizado do bucket
+    // e cole o link direto para o seu arquivo .parquet aqui embaixo:
+    const URL_PARQUET_R2 = "https://pub-SUA-URL-DO-R2.r2.dev/estabelecimentos_completo.parquet";
 
     // =========================================================================
-    // 🔐 2. AUTENTICAÇÃO OAUTH2 DINÂMICA VIA REFRESH TOKEN PROPRIO
-    // =========================================================================
-    if (!process.env.GCP_CLIENT_ID || !process.env.GCP_REFRESH_TOKEN) {
-      throw new Error("Variáveis de ambiente do Google Cloud não foram carregadas corretamente.");
-    }
-
-    const oauthResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: process.env.GCP_CLIENT_ID,
-        client_secret: process.env.GCP_CLIENT_SECRET || "",
-        refresh_token: process.env.GCP_REFRESH_TOKEN,
-        grant_type: "refresh_token"
-      })
-    });
-
-    const oauthDados = await oauthResponse.json();
-    
-    if (oauthDados.error) {
-      throw new Error(`Falha na renovação do Token Google: ${oauthDados.error_description || oauthDados.error}`);
-    }
-
-    const accessTokenValido = oauthDados.access_token;
-
-    // =========================================================================
-    // 🧠 3. CONSTRUÇÃO DA QUERY INTELIGENTE DINÂMICA NO BIGQUERY
+    // 🧠 CONSTRUÇÃO DA QUERY COM INTELIGÊNCIA DE PULVERIZAÇÃO NO DUCKDB
     // =========================================================================
     let filtroCnaeClausula = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
-      const cnaesPrecisos = perfilMercado.codigos_cnae.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
-      filtroCnaeClausula = `AND (${cnaesPrecisos})`;
+      // Limpa e garante strings limpas para os CNAEs
+      const cnaesLimpos = perfilMercado.codigos_cnae
+        .map((c: string) => c.replace(/\D/g, ''))
+        .filter((c: string) => c.length >= 3);
+
+      if (cnaesLimpos.length > 0) {
+        const cnaesPrecisos = cnaesLimpos.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
+        filtroCnaeClausula = `AND (${cnaesPrecisos})`;
+      }
     }
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Estrutura de ORDER BY Dinâmica e Inteligente para não afetar outras telas do sistema
-    let ordenacaoEstrategica = "";
-    if (temNichoEspecifico) {
-      // Cenário A (Prospecção focada por ramos): Prioridade para dados ricos do Google e abertura mais antiga
-      ordenacaoEstrategica = `
-        CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, 
-        data_abertura ASC
-      `;
-    } else {
-      // Cenário B (Varredura Geral de Pulverização FIDC): Prioriza pequenos B2B invisíveis sem remover dados
-      ordenacaoEstrategica = `
-        -- Penaliza MEIs mandando-os para o fim da fila na busca geral, mantendo LTDAs e SLUs no topo
-        CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
-        -- Aloca peso máximo para setores industriais, atacadistas, logísticos e de usinagem periférica
-        CASE 
-          WHEN REGEXP_CONTAINS(cnae_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
-          WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 -- Varejo pontua um pouco abaixo
-          ELSE 1 
-        END ASC,
-        data_abertura ASC
-      `;
-    }
+    // Inteligência de Ordenação Condicional (A mesma do BigQuery, adaptada perfeitamente para DuckDB)
+    let ordenacaoEstrategica = temNichoEspecifico 
+      ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
+      : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
+         CASE WHEN REGEXP_MATCHES(cnae_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+              WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
+         data_abertura ASC`;
 
+    // A mágica: a função read_parquet do DuckDB lê os blocos HTTP sob demanda direto do seu Cloudflare R2!
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
-      FROM \`${process.env.GCP_PROJECT_ID}.banco_receita_us.estabelecimentos_otimizado\`
-      WHERE uf = @uf 
+      FROM read_parquet('${URL_PARQUET_R2}')
+      WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
-        AND (@municipio IS NULL OR municipio_rf = @municipio)
+        AND ('${perfilMercado.codigo_municipio || "NULL"}' = 'NULL' OR municipio_rf = '${perfilMercado.codigo_municipio}')
         ${filtroCnaeClausula}
       ORDER BY ${ordenacaoEstrategica}
       LIMIT ${limiteSeguro}
     `;
 
-    const urlBigQuery = `https://bigquery.googleapis.com/bigquery/v2/projects/${process.env.GCP_PROJECT_ID}/queries`;
-    
-    const bqResponse = await fetch(urlBigQuery, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessTokenValido}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        query: sqlQuery,
-        useLegacySql: false,
-        parameterMode: "NAMED",
-        queryParameters: [
-          {
-            name: "uf",
-            parameterType: { type: "STRING" },
-            parameterValue: { value: perfilMercado.uf.toUpperCase() }
-          },
-          {
-            name: "municipio",
-            parameterType: { type: "STRING" },
-            parameterValue: { value: perfilMercado.codigo_municipio || null }
-          }
-        ]
-      })
-    });
-
-    const bqDados = await bqResponse.json();
-
-    if (bqDados.error) {
-      throw new Error(`Erro no BigQuery: ${bqDados.error.message}`);
-    }
+    // Executa a consulta no motor colunar ultra-rápido do DuckDB
+    const rows = await rodarQuery(sqlQuery);
 
     // =========================================================================
-    // 🗺️ 4. MAPEAMENTO DOS RESULTADOS FORMATADOS PARA O FRONTEND
+    // 🗺️ MAPEAMENTO DOS RESULTADOS PARA O FRONTEND
     // =========================================================================
-    const leads = (bqDados.rows || []).map((row: any) => {
-      const rSocial = row.f[11].v || "Razão Social indisponível";
-      const gNome = row.f[14].v;
+    const leads = rows.map((row: any) => {
+      // Garante a conversão correta de datas caso o DuckDB retorne como objeto Date
+      const dataAberturaStr = row.data_abertura instanceof Date 
+        ? row.data_abertura.toISOString().split('T')[0] 
+        : row.data_abertura;
 
       return {
-        cnpj: row.f[0].v,
-        cnpj_raiz: row.f[1].v,
-        matriz_filial: row.f[2].v,
-        situacao: row.f[3].v,
-        data_abertura: row.f[4].v,
-        cnae_principal: row.f[5].v,
-        cnaes_secundarios: row.f[6].v,
-        bairro: row.f[7].v,
-        cep: row.f[8].v,
-        uf: row.f[9].v,
-        municipio_rf: row.f[10].v,
-        razao_social: rSocial,
-        nome_fantasia: gNome && gNome.trim() !== "" ? gNome : rSocial,
-        natureza_juridica: row.f[12].v,
-        capital_social: row.f[13].v ? parseFloat(row.f[13].v) : 0,
-        google_categoria: row.f[15].v,
-        google_endereco: row.f[16].v,
-        website: row.f[17].v,
+        cnpj: row.cnpj,
+        cnpj_raiz: row.cnpj_raiz,
+        matriz_filial: row.matriz_filial,
+        situacao: row.situacao,
+        data_abertura: dataAberturaStr,
+        cnae_principal: row.cnae_principal,
+        cnaes_secundarios: row.cnaes_secundarios,
+        bairro: row.bairro,
+        cep: row.cep,
+        uf: row.uf,
+        municipio_rf: row.municipio_rf,
+        razao_social: row.razao_social || "Razão Social indisponível",
+        nome_fantasia: row.google_nome && row.google_nome.trim() !== "" ? row.google_nome : row.razao_social,
+        natureza_juridica: row.natureza_juridica,
+        capital_social: row.capital_social ? parseFloat(row.capital_social) : 0,
+        google_categoria: row.google_categoria,
+        google_endereco: row.google_endereco,
+        website: row.google_website,
         lat: null,
         lng: null
       };
@@ -204,7 +157,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via OAuth2:", error);
+    console.error("Erro crítico na rota de prospecção via DuckDB/Parquet:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
