@@ -1,12 +1,8 @@
-// C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import duckdb from "duckdb";
 
-// 🛑 A MÁGICA ESTÁ AQUI: Proíbe o Next.js de executar essa rota durante o build da Vercel
-export const dynamic = 'force-dynamic';
-
-const db = new duckdb.Database(":memory:");
+const db = new duckdb.Database(":memory:")
 
 const rodarQuery = (query: string): Promise<any[]> => {
   return new Promise((resolve, reject) => {
