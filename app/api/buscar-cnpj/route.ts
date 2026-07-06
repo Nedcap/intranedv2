@@ -7,9 +7,10 @@ const obterClienteBigQuery = () => {
   const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
   try {
+    // 💡 Variável definida no singular:
     const credenciais = JSON.parse(jsonCredenciais);
     return new BigQuery({
-      projectId: credentials.project_id,
+      projectId: credenciais.project_id, // 💥 Corrigido de credentials para credenciais!
       credentials: {
         client_email: credenciais.client_email,
         private_key: credenciais.private_key,
@@ -28,13 +29,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "O número do CNPJ é obrigatório." }, { status: 400 });
     }
 
-    // Limpa qualquer máscara deixando apenas os 14 dígitos numéricos
     const cnpjLimpo = cnpj.replace(/\D/g, "");
 
     const bigquery = obterClienteBigQuery();
     const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
 
-    // Consulta cirúrgica por correspondência exata de CNPJ
     const sqlQuery = `
       SELECT 
         cnpj, razao_social, uf, municipio_rf, capital_social
