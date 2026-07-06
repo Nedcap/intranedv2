@@ -19,7 +19,7 @@ interface ArquivoFila {
 }
 
 export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
-  // 📈 Mudança para suportar MÚLTIPLOS arquivos simultâneos estilo planilha
+  // 📈 Suporte para múltiplos arquivos simultâneos na esteira comercial
   const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -46,14 +46,14 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
 
     // Processa os arquivos em lote sequencial
-    for (let i = 0; i < arquivos.length; i++ ) {
+    for (let i = 0; i < arquivos.length; i++) {
       const item = arquivos[i];
       if (item.status === "sucesso") continue;
 
       setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Assinando cofre R2..." } : a));
 
       try {
-        // 1. Chamada estrita com tratamento de erro detalhado para desmascarar o Failed to Fetch
+        // 1. Busca a URL assinada na API interna do servidor Next.js
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { 
@@ -77,10 +77,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Transferindo binário para o R2..." } : a));
 
-        // 2. PUT direto para o bucket da Cloudflare
+        // 2. PUT cirúrgico direto para o bucket do Cloudflare R2 sem cabeçalhos conflitantes
         const uploadRes = await fetch(data.signedUrl, {
           method: "PUT",
-          headers: { "Content-Type": item.file.type },
+          headers: { 
+            "Content-Type": item.file.type 
+          },
           body: item.file,
         }).catch(err => {
           throw new Error(`Falha física de upload no R2 (Verifique CORS ou chaves no Vercel): ${err.message}`);
@@ -100,8 +102,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
     setUploading(false);
     
-    // Verifica se pelo menos um arquivo subiu com sucesso para avançar a tela
-    const algumSucesso = arquivos.some(a => a.status === "sucesso" || a.status === "pendente");
+    // Se todos ou algum arquivo subiu com sucesso, encerra limpando a fila
+    const algumSucesso = arquivos.some(a => a.status === "sucesso");
     if (algumSucesso) {
       setTimeout(() => {
         onSucesso();
@@ -119,7 +121,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         <input
           type="file"
           accept="application/pdf"
-          multiple // 🔥 Habilita flexibilidade total de colunas de documentos
+          multiple
           onChange={handleFileChange}
           disabled={uploading}
           className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-bold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer disabled:opacity-40"
