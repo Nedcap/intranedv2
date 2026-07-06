@@ -101,7 +101,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. BIGQUERY: CONSULTA (Agora com Latitude e Longitude)
+    // 🚀 3. BIGQUERY: CONSULTA (Ajustado para ignorar colunas dropadas de Geocoding)
     // =========================================================================
     const bigquery = obterClienteBigQuery();
 
@@ -134,9 +134,9 @@ export async function POST(req: Request) {
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
-        razao_social, natureza_juridica, capital_social,
-        google_nome, google_categoria, google_endereco, google_website,
-        lat, lng -- 👈 INCLUÍDO AS COORDENADAS AQUI (Ajuste o nome se na sua tabela for 'latitude', 'longitude')
+        razao_social, naturezas_juridica, capital_social,
+        google_nome, google_categoria, google_endereco, google_website
+        -- 🧠 Colunas de lat/lng foram removidas daqui para evitar conflito com o Parquet otimizado
       FROM ${TABELA_BIGQUERY}
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
@@ -173,9 +173,9 @@ export async function POST(req: Request) {
         google_categoria: row.google_categoria,
         google_endereco: row.google_endereco,
         website: row.google_website,
-        lat: row.lat ? parseFloat(row.lat) : null, // 👈 LATITUDE REAL DA TABELA
-        lng: row.lng ? parseFloat(row.lng) : null, // 👈 LONGITUDE REAL DA TABELA
-        cidadeExtenso: nomeCidadeReal || undefined // Devolvemos o nome mapeado para o front
+        lat: null, // 👈 Azeitado: Devolvendo nulo seguro sem bater na tabela
+        lng: null, // 👈 Azeitado: Devolvendo nulo seguro sem bater na tabela
+        cidadeExtenso: nomeCidadeReal || undefined 
       };
     });
 
