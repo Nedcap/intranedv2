@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
+import GerarAnalise from "@/components/gerar-analise"; // 🚀 IMPORTAÇÃO DO GERADOR HTML AQUI
 
 // =========================================================================
 // INTERFACES (ESTRUTURA COMPLETA DO EXCEL)
@@ -317,6 +318,9 @@ function MesaAnaliseConteudo() {
                     <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-black px-3 py-2 rounded-md text-[10px] uppercase tracking-widest cursor-pointer transition-all">
                       🚨 Devolver Analise
                     </button>
+                    
+                    {/* BOTÃO DO GERADOR HTML AQUI */}
+                    <GerarAnalise analise={analise} />
                   </>
                 )}
               </div>
