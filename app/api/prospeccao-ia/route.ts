@@ -1,28 +1,29 @@
+// C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
-import duckdb from "duckdb";
+import { BigQuery } from "@google-cloud/bigquery";
 
-const db = new duckdb.Database(":memory:")
+export const dynamic = 'force-dynamic';
 
-const rodarQuery = (query: string): Promise<any[]> => {
-  return new Promise((resolve, reject) => {
-    db.all(query, (err: any, res: any) => {
-      if (err) reject(err);
-      else resolve(res);
+// Inicializa o BigQuery usando o JSON da variável de ambiente
+const obterClienteBigQuery = () => {
+  const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  
+  if (!jsonCredenciais) {
+    throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
+  }
+
+  try {
+    const credenciais = JSON.parse(jsonCredenciais);
+    return new BigQuery({
+      projectId: credenciais.project_id,
+      credentials: {
+        client_email: credenciais.client_email,
+        private_key: credenciais.private_key,
+      },
     });
-  });
-};
-
-// =========================================================================
-// 🌐 PREPARAÇÃO DA VERCEL (Libera acesso à internet para ler o Parquet do R2)
-// =========================================================================
-let bancoPreparado = false;
-const prepararBanco = async () => {
-  if (!bancoPreparado) {
-    // A Vercel só permite extensões na pasta temporária /tmp
-    await rodarQuery("SET extension_directory = '/tmp/duckdb_extensions';");
-    await rodarQuery("INSTALL httpfs; LOAD httpfs;");
-    bancoPreparado = true;
+  } catch (err: any) {
+    throw new Error("Falha ao processar o JSON das credenciais do Google: " + err.message);
   }
 };
 
@@ -37,9 +38,6 @@ export async function POST(req: Request) {
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
-
-    // Garante que o motor consegue ler links "https://" do Cloudflare antes da consulta
-    await prepararBanco();
 
     // =========================================================================
     // 🧠 1. INTELIGÊNCIA ARTIFICIAL: EXTRAÇÃO DOS DADOS
@@ -81,11 +79,9 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 2. DUCKDB: CONSULTA DIRETA NO PARQUET (SEM GOOGLE CLOUD!)
+    // 🚀 2. BIGQUERY: CONSULTA DIRETA NA NUVEM DO GOOGLE
     // =========================================================================
-    
-    // A sua URL oficial e definitiva hospedada no Cloudflare R2
-    const URL_PARQUET = "https://pub-a1fa05d1cdae48b0bc49ed4783ebac96.r2.dev/estabelecimentos_completo.parquet";
+    const bigquery = obterClienteBigQuery();
 
     let filtroCnaeClausula = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
@@ -106,18 +102,20 @@ export async function POST(req: Request) {
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
-         CASE WHEN REGEXP_MATCHES(cnae_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+         CASE WHEN REGEXP_CONTAINS(cnae_principal, r'^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // A mágica acontece aqui: read_parquet puxa os bytes exatos lá da Cloudflare
+    // ⚠️ AJUSTE AQUI: Substitua pelo caminho correto da sua tabela no BigQuery (projeto.dataset.tabela)
+    const TABELA_BIGQUERY = "`seu_projeto_google.seu_dataset.sua_tabela`";
+
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
-      FROM read_parquet('${URL_PARQUET}')
+      FROM ${TABELA_BIGQUERY}
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
         AND ('${perfilMercado.codigo_municipio || "NULL"}' = 'NULL' OR municipio_rf = '${perfilMercado.codigo_municipio}')
@@ -126,18 +124,15 @@ export async function POST(req: Request) {
       LIMIT ${limiteSeguro}
     `;
 
-    const rows = await rodarQuery(sqlQuery);
+    const [rows] = await bigquery.query({ query: sqlQuery });
 
     // =========================================================================
     // 🗺️ 3. MAPEAMENTO E ENVIO PARA O FRONTEND
     // =========================================================================
     const leads = rows.map((row: any) => {
-      // Ajuste para datas que vêm do DuckDB
       let dataAberturaStr = row.data_abertura;
-      if (row.data_abertura instanceof Date) {
-        dataAberturaStr = row.data_abertura.toISOString().split('T')[0];
-      } else if (typeof row.data_abertura === 'number') {
-        dataAberturaStr = new Date(row.data_abertura).toISOString().split('T')[0];
+      if (row.data_abertura && row.data_abertura.value) {
+        dataAberturaStr = row.data_abertura.value; // Ajuste para o formato de data do BigQuery
       }
 
       return {
@@ -170,7 +165,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via DuckDB:", error);
+    console.error("Erro na rota de prospecção via BigQuery:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
