@@ -1,19 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 🚜 MODO TRATOR: Ignora erros no Build
+  // 🚜 MODO TRATOR: Ignora erros de compilação
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
   
-  // 📦 EXTENSÃO NATIVA
+  // 📦 EXTENSÃO NATIVA: Impede que a Vercel empacote o DuckDB como JS comum
   serverExternalPackages: ['duckdb'],
-
-  // 🥷 TRUQUE NINJA: Obriga a Vercel a enviar o DuckDB para o servidor sem que o compilador analise o C++
-  experimental: {
-    outputFileTracingIncludes: {
-      '/api/**/*': ['./node_modules/duckdb/**/*'],
-    },
-  },
 
   // 🖼️ CONFIGURAÇÃO DE MÍDIA
   images: {
