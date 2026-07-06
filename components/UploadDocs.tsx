@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
-import { supabase } from "@/lib/supabase";
 
 interface UploadDocsProps {
   empresa: {
@@ -44,9 +43,9 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setUploading(true);
 
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
-    const documentosRegistrados: { nome: string; path: string }[] = [];
+    let peloMenosUmSucesso = false;
 
-    // 1. Envia os arquivos em lote sequencial para o seu próprio Backend
+    // 1. Processa os arquivos enviando em lote para o próprio servidor (Bypass total de CORS)
     for (let i = 0; i < arquivos.length; i++) {
       const item = arquivos[i];
       if (item.status === "sucesso") continue;
@@ -58,7 +57,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         formData.append("file", item.file);
         formData.append("analiseId", cnpjLimpo);
 
-        // Faz o POST para a sua rota local. O CORS não afeta requisições de mesma origem.
+        // Chamada local para o seu próprio teto (mesmo domínio)
         const res = await fetch("/api/upload", {
           method: "POST",
           body: formData,
@@ -70,9 +69,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           throw new Error(data.error || `Erro HTTP ${res.status}`);
         }
 
-        // Guarda os caminhos retornados pelo backend para salvar no banco
-        documentosRegistrados.push({ nome: item.file.name, path: data.path || "" });
-
+        peloMenosUmSucesso = true;
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Salvo com sucesso!" } : a));
 
       } catch (err: any) {
@@ -81,30 +78,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       }
     }
 
-    // 2. Cria o registro unificado no Supabase se pelo menos um arquivo subiu
-    if (documentosRegistrados.length > 0) {
-      try {
-        setArquivos(prev => prev.map(a => a.status === "sucesso" ? { ...a, mensagem: "Criando cartão na esteira..." } : a));
-        
-        const { error: supaError } = await supabase.from("analises_credito").insert({
-          cnpj: cnpjLimpo,
-          razao_social: empresa.razao_social,
-          uf: empresa.uf,
-          status: "robo_processando",
-          dados_documentos: documentosRegistrados
-        });
-
-        if (supaError) throw supaError;
-
-        setTimeout(() => {
-          onSucesso();
-          setArquivos([]);
-        }, 1500);
-
-      } catch (dbErr: any) {
-        console.error("Erro ao salvar no Supabase:", dbErr);
-        alert(`⚠️ Arquivos armazenados, mas falhou ao atualizar a esteira: ${dbErr.message}`);
-      }
+    // 2. Se os uploads foram concluídos com sucesso, apenas avisa a tela mãe para avançar
+    if (peloMenosUmSucesso) {
+      setTimeout(() => {
+        onSucesso();
+        setArquivos([]);
+      }, 1500);
     }
 
     setUploading(false);
