@@ -24,11 +24,11 @@ interface AnaliseData {
   dados_endividamento: Array<{ instituicao: string; modalidade: string; saldo: number }>;
   dados_restritivos: Array<{ origem: string; tipo: string; qtd: number; valor: number; obs: string }>;
   dados_estrutura_societaria: Array<{ s_nome: string; s_perc: number; s_cargo: string; s_aval: boolean; b_bens: string; b_valor: number }>;
-  dados_juridico: { processos_tramitacao?: string; processos_arquivados?: string };
+  dados_juridico: { processos_tramitacao?: string; processes_arquivados?: string };
   parecer_comite: string;
 }
 
-// 📦 DADOS ESTÁTICOS PADRÃO (TOTALCAP) - EXIBIDOS AO ABRIR A TELA
+// 📦 DADOS REAIS EXTRAÍDOS DA SUA PLANILHA DA RECAPADORA TOTALCAP
 const DADOS_MODELO_TOTALCAP: AnaliseData = {
   id: null,
   cnpj: "11.127.136/0001-83",
@@ -55,7 +55,7 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
     processos_tramitacao: "🔴 7 Processos em Tramitação / Suspensos\n- 4 Fiscal / Tributário: Execuções Fiscais movidas pela União (ações de R$ 695k e R$ 288k) e Curitiba (R$ 75k).\n- 1 Cível: Ação Monitória movida pelo Banco Itaú cobrando CCB de R$ 410.878,49.\n- 2 Tributário: Ações de defesa atacando a União com créditos a receber.",
     processos_arquivados: "🟢 ~6 Processos Extintos / Arquivados Definitivamente\n- Cobranças bancárias antigas quitadas e encerradas junto ao Sicredi (R$ 37k)."
   },
-  parecer_comite: "Conclusão: Empresa apresenta faturamento em crescimento, com 39% de incremento nos 5 primeiros meses de 2025 em comparação ao ano anterior. Operação 100% bancarizada e sem vencidos no SCR. Empresa e sócio possuem 1 Refin da Caixa Econômica, mas o restritivo advém da pessoa física.\n\nNa parte processual, a ação monitória do Itaú (R$ 410k) está sendo discutida judicialmente e não impacta o SCR atual. Recomendo aprovação do limite solicitado de R$ 80k devido ao forte fluxo de caixa."
+  parecer_comite: "Conclusão: Empresa apresenta faturamento em crescimento, com 39% de incremento nos 5 primeiros meses de 2025 em comparação ao ano anterior. Operação 100% bancarizada e sem vencidos no SCR. Empresa e sócio possuem 1 Refin da Caixa Econômica, mas o restritivo advém da pessoa física e não da empresa.\n\nNa parte processual, notei 1 processo que demanda um pouco de atenção: uma ação monitória do Itaú por uma CCB não paga no valor de R$ 410k. No entanto, tal valor não consta no SCR, possivelmente devido ao grau do processo ou por possuírem liminar para ocultação do valor.\n\nCom exceção desse ponto mencionado, por tratar-se de uma dívida bancária em discussão, não vejo impeditivos para a aprovação do cadastro do cliente. Considerando o porte da empresa e o limite baixo solicitado de R$ 100k, recomendo a aprovação conforme o pleito."
 };
 
 function MesaAnaliseConteudo() {
@@ -126,7 +126,7 @@ function MesaAnaliseConteudo() {
 
   const persistirNoBanco = async () => {
     if (!idSelecionado || !analise.id) {
-      alert("💡 Você está editando a Planilha de Modelo Estático. Envie uma análise real pelo painel comercial para salvar alterações persistentes.");
+      alert("💡 Você está editando a Planilha de Modelo Estático. Envie uma análise real pelo painel comercial para salvar alterações.");
       return;
     }
     try {
@@ -163,7 +163,7 @@ function MesaAnaliseConteudo() {
     return ((atual - anterior) / anterior) * 100;
   };
 
-  const fatMedioAtual = calcularMediaMensal("2026") || calcularMediaMensal("2025") || 244319.06;
+  const fatMedioAtual = calcularMediaMensal("2025") || 244319.06;
   const totalEndividamento = analise.dados_endividamento.reduce((acc, d) => acc + Number(d.saldo), 0) || 0;
   const totalRestritivos = analise.dados_restritivos.reduce((acc, r) => acc + Number(r.valor), 0) || 0;
   const potencialRealCalculado = fatMedioAtual * 2.5;
@@ -180,11 +180,8 @@ function MesaAnaliseConteudo() {
           
           {loadingFila ? (
             <p className="text-xs font-mono text-slate-400 animate-pulse py-4 text-center">Sincronizando esteira...</p>
-          ) : fila.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-8">Nenhuma análise pendente.</p>
           ) : (
             <div className="space-y-2 overflow-y-auto max-h-[580px] pr-1">
-              {/* Opção para voltar para o Modelo Estático */}
               <div 
                 onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO_TOTALCAP); }}
                 className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
@@ -192,10 +189,9 @@ function MesaAnaliseConteudo() {
                 }`}
               >
                 <p className="text-xs font-black text-indigo-700 uppercase">⭐ TEMPLATE MODELO ESTÁTICO</p>
-                <p className="text-[10px] font-mono text-slate-500 mt-0.5">Planilha Completa de Teste</p>
+                <p className="text-[10px] font-mono text-slate-500 mt-0.5">Planilha TOTALCAP Completa</p>
               </div>
 
-              {/* Lista real vinda do Supabase */}
               {fila.map((item) => (
                 <div
                   key={item.id}
@@ -231,21 +227,19 @@ function MesaAnaliseConteudo() {
           </div>
         ) : (
           <div className="space-y-4 animate-fade-in">
-            {/* WORKSPACE COMMAND BAR */}
             <div className="border-b border-slate-200 pb-3 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
               <div>
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"}`}>
                   {idSelecionado ? "Edição de Registro Ativo (Supabase)" : "Visualização de Estrutura Técnica (Estático)"}
                 </span>
-                <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
-                <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade || "Não Informada"}/{analise.uf}</p>
+                <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social</h2>
+                <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade || "Curitiba"}/{analise.uf}</p>
               </div>
               <button onClick={persistirNoBanco} disabled={salvando} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2 rounded-lg text-xs uppercase tracking-widest disabled:opacity-50 shadow-md cursor-pointer transition-all">
-                {salvando ? "Salvando..." : idSelecionado ? "💾 Gravar Alterações" : "💡 Testar Fórmulas (Modo Estático)"}
+                {salvando ? "Salvando..." : idSelecionado ? "💾 Gravar Alterações" : "💡 Testar Fórmulas"}
               </button>
             </div>
 
-            {/* ABAS DO EXCELZÃO V8 */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
               <div className="bg-slate-100 border-b border-slate-200 flex flex-wrap p-1 gap-0.5">
                 {[
@@ -271,7 +265,6 @@ function MesaAnaliseConteudo() {
                 ))}
               </div>
 
-              {/* FORMULÁRIOS DAS ABAS */}
               <div className="p-5 min-h-[450px]">
                 {abaAtiva === "proposta" && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -310,18 +303,14 @@ function MesaAnaliseConteudo() {
                         <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase"><th className="p-2.5">Nome Sócio</th><th className="p-2.5 text-center">% Part.</th><th className="p-2.5">Bens IRPF Arrestáveis</th><th className="p-2.5 text-right">Valor Avaliado (R$)</th></tr>
                       </thead>
                       <tbody className="text-xs font-mono font-bold">
-                        {analise.dados_estrutura_societaria.length === 0 ? (
-                          <tr><td colSpan={4} className="p-4 text-center text-slate-400">Nenhum sócio registrado. Use o botão de adição nas próximas versões.</td></tr>
-                        ) : (
-                          analise.dados_estrutura_societaria.map((socio, idx) => (
-                            <tr key={idx}>
-                              <td className="p-2 font-sans font-black uppercase text-slate-900">{socio.s_nome}</td>
-                              <td className="p-1 text-center"><input type="number" value={socio.s_perc} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].s_perc = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-16 p-1 border text-center rounded bg-white font-bold" /></td>
-                              <td className="p-1 font-sans"><input type="text" value={socio.b_bens} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].b_bens = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-full p-1 border rounded bg-white" /></td>
-                              <td className="p-1 text-right"><input type="number" value={socio.b_valor} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].b_valor = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-32 p-1 border text-right rounded bg-white text-emerald-600 font-black" /></td>
-                            </tr>
-                          ))
-                        )}
+                        {analise.dados_estrutura_societaria.map((socio, idx) => (
+                          <tr key={idx}>
+                            <td className="p-2 font-sans font-black uppercase text-slate-900">{socio.s_nome}</td>
+                            <td className="p-1 text-center"><input type="number" value={socio.s_perc} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].s_perc = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-16 p-1 border text-center rounded bg-white font-bold" /></td>
+                            <td className="p-1 font-sans"><input type="text" value={socio.b_bens} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].b_bens = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-full p-1 border rounded bg-white" /></td>
+                            <td className="p-1 text-right"><input type="number" value={socio.b_valor} onChange={(e) => { const clone = [...analise.dados_estrutura_societaria]; clone[idx].b_valor = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: clone }); }} className="w-32 p-1 border text-right rounded bg-white text-emerald-600 font-black" /></td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -335,7 +324,7 @@ function MesaAnaliseConteudo() {
                           <th className="p-2.5 border-r w-[110px]">Mês Ref</th>
                           <th className="p-2.5 border-r text-center">Ano 2024 (R$)</th>
                           <th className="p-2.5 border-r text-center">Ano 2025 (R$)</th>
-                          <th className="p-2.5 border-r text-center">$\Delta\%$ (25 vs 24)</th>
+                          <th className="p-2.5 border-r text-center">Delta % (25 vs 24)</th>
                           <th className="p-2.5 text-center">Ano 2026 (R$)</th>
                         </tr>
                       </thead>
@@ -376,105 +365,105 @@ function MesaAnaliseConteudo() {
                       </tbody>
                     </table>
                   </div>
-                </div>
-              )}
+                )}
 
-              {abaAtiva === "potencial" && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 max-w-[700px] space-y-4">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b pb-1">Capacidade Operacional de Cessão</span>
-                  <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
-                    <div><label className="block text-slate-400 font-bold mb-1">Ticket Módulo (R$)</label><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, ticket_medio: Number(e.target.value) } })} className="w-full p-2 border bg-white rounded font-mono font-bold" /></div>
-                    <div><label className="block text-slate-400 font-bold mb-1">Prazo de Vendas (Dias)</label><input type="number" value={analise.dados_potencial.prazo_medio_vendas} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, prazo_medio_vendas: Number(e.target.value) } })} className="w-full p-2 border bg-white rounded font-mono font-bold" /></div>
+                {abaAtiva === "potencial" && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 max-w-[700px] space-y-4">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b pb-1">Capacidade Operacional de Cessão</span>
+                    <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
+                      <div><label className="block text-slate-400 font-bold mb-1">Ticket Médio (R$)</label><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, ticket_medio: Number(e.target.value) } })} className="w-full p-2 border bg-white rounded font-mono font-bold" /></div>
+                      <div><label className="block text-slate-400 font-bold mb-1">Prazo de Vendas (Dias)</label><input type="number" value={analise.dados_potencial.prazo_medio_vendas} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, prazo_medio_vendas: Number(e.target.value) } })} className="w-full p-2 border bg-white rounded font-mono font-bold" /></div>
+                    </div>
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex justify-between items-center font-black">
+                      <span className="text-emerald-800">📈 POTENCIAL REAL ESTIMADO:</span>
+                      <span className="font-mono text-sm text-emerald-600 bg-white border px-3 py-1 rounded shadow-sm">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    </div>
                   </div>
-                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex justify-between items-center font-black">
-                    <span className="text-emerald-800">📈 POTENCIAL REAL ESTIMADO:</span>
-                    <span className="font-mono text-sm text-emerald-600 bg-white border px-3 py-1 rounded shadow-sm">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {abaAtiva === "endividamento" && (
-                <div className="space-y-4 max-w-[800px]">
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                {abaAtiva === "endividamento" && (
+                  <div className="space-y-4 max-w-[800px]">
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase"><th className="p-2.5">Instituição</th><th className="p-2.5">Modalidade</th><th className="p-2.5 text-right">Saldo Devedor (R$)</th></tr>
+                        </thead>
+                        <tbody className="text-xs font-mono font-bold">
+                          {analise.dados_endividamento.length === 0 ? (
+                            <tr><td colSpan={3} className="p-4 text-center text-slate-400">Nenhuma linha ativa no SCR.</td></tr>
+                          ) : (
+                            analise.dados_endividamento.map((div, i) => (
+                              <tr key={i}>
+                                <td className="p-1"><input type="text" value={div.instituicao} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].instituicao = e.target.value; setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded w-full font-sans font-black uppercase" /></td>
+                                <td className="p-1"><input type="text" value={div.modalidade} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].modalidade = e.target.value; setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded w-full font-sans text-slate-400 uppercase" /></td>
+                                <td className="p-1"><input type="number" value={div.saldo} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].saldo = Number(e.target.value); setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded text-right w-44 text-red-600 font-black" /></td>
+                              </tr>
+                            ))
+                          )}
+                          <tr className="bg-slate-100 font-black border-t">
+                            <td colSpan={2} className="p-2.5 font-sans text-slate-900">Total Bancos/Fundos</td>
+                            <td className="p-2.5 text-right text-red-600 font-mono font-black">R$ {totalEndividamento.toLocaleString("pt-BR")}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex justify-between items-center font-bold">
+                      <span className="text-slate-500">📉 Índice de Alavancagem Global:</span>
+                      <span className="font-mono font-black text-indigo-700 bg-white border px-2 py-0.5 rounded shadow-sm">{(fatMedioAtual > 0 ? totalEndividamento / fatMedioAtual : 0).toFixed(2)}x Faturamento Mensal</span>
+                    </div>
+                  </div>
+                )}
+
+                {abaAtiva === "restritivos" && (
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-w-[900px]">
                     <table className="w-full text-left border-collapse">
                       <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase"><th className="p-2.5">Instituição</th><th className="p-2.5">Modalidade</th><th className="p-2.5 text-right">Saldo Devedor (R$)</th></tr>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase"><th className="p-2.5">Ofensor</th><th className="p-2.5">Tipo</th><th className="p-2.5 text-center">Qtd</th><th className="p-2.5 text-right">Valor Global (R$)</th><th className="p-2.5">Obs/Origem</th></tr>
                       </thead>
                       <tbody className="text-xs font-mono font-bold">
-                        {analise.dados_endividamento.length === 0 ? (
-                          <tr><td colSpan={3} className="p-4 text-center text-slate-400">Nenhuma linha ativa no SCR.</td></tr>
+                        {analise.dados_restritivos.length === 0 ? (
+                          <tr><td colSpan={5} className="p-4 text-center text-slate-400">Nenhum apontamento restritivo localizado.</td></tr>
                         ) : (
-                          analise.dados_endividamento.map((div, i) => (
+                          analise.dados_restritivos.map((rest, i) => (
                             <tr key={i}>
-                              <td className="p-1"><input type="text" value={div.instituicao} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].instituicao = e.target.value; setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded w-full font-sans font-black uppercase" /></td>
-                              <td className="p-1"><input type="text" value={div.modalidade} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].modalidade = e.target.value; setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded w-full font-sans text-slate-400 uppercase" /></td>
-                              <td className="p-1"><input type="number" value={div.saldo} onChange={(e) => { const c = [...analise.dados_endividamento]; c[i].saldo = Number(e.target.value); setAnalise({ ...analise, dados_endividamento: c }); }} className="p-1 border rounded text-right w-44 text-red-600 font-black" /></td>
+                              <td className="p-1 font-sans uppercase font-black"><input type="text" value={rest.origem} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].origem = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white font-black" /></td>
+                              <td className="p-1 font-sans uppercase text-amber-600"><input type="text" value={rest.tipo} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].tipo = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white text-amber-600" /></td>
+                              <td className="p-1 text-center"><input type="number" value={rest.qtd} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].qtd = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-center rounded w-16 bg-white" /></td>
+                              <td className="p-1 text-right text-red-600 font-bold"><input type="number" value={rest.valor} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].valor = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-right rounded w-36 bg-white text-red-600" /></td>
+                              <td className="p-1 font-sans text-slate-400 lowercase"><input type="text" value={rest.obs} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].obs = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white text-slate-400" /></td>
                             </tr>
                           ))
                         )}
                         <tr className="bg-slate-100 font-black border-t">
-                          <td colSpan={2} className="p-2.5 font-sans text-slate-900">Total Bancos/Fundos</td>
-                          <td className="p-2.5 text-right text-red-600 font-mono font-black">R$ {totalEndividamento.toLocaleString("pt-BR")}</td>
+                          <td colSpan={3} className="p-2.5 font-sans text-slate-900">Total Restritivos Expostos</td>
+                          <td className="p-2.5 text-right text-red-600 font-mono font-black">R$ {totalRestritivos.toLocaleString("pt-BR")}</td>
+                          <td></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
-                  <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex justify-between items-center font-bold">
-                    <span className="text-slate-500">📉 Índice de Alavancagem Global:</span>
-                    <span className="font-mono font-black text-indigo-700 bg-white border px-2 py-0.5 rounded shadow-sm">{(fatMedioAtual > 0 ? totalEndividamento / fatMedioAtual : 0).toFixed(2)}x Faturamento Mensal</span>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {abaAtiva === "restritivos" && (
-                <div className="border border-slate-200 rounded-lg overflow-hidden max-w-[900px]">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase"><th className="p-2.5">Ofensor</th><th className="p-2.5">Tipo</th><th className="p-2.5 text-center">Qtd</th><th className="p-2.5 text-right">Valor Global (R$)</th><th className="p-2.5">Obs/Origem</th></tr>
-                    </thead>
-                    <tbody className="text-xs font-mono font-bold">
-                      {analise.dados_restritivos.length === 0 ? (
-                        <tr><td colSpan={5} className="p-4 text-center text-slate-400">Nenhum apontamento restritivo localizado.</td></tr>
-                      ) : (
-                        analise.dados_restritivos.map((rest, i) => (
-                          <tr key={i}>
-                            <td className="p-1 font-sans uppercase font-black"><input type="text" value={rest.origem} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].origem = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white font-black" /></td>
-                            <td className="p-1 font-sans uppercase text-amber-600"><input type="text" value={rest.tipo} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].tipo = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white text-amber-600" /></td>
-                            <td className="p-1 text-center"><input type="number" value={rest.qtd} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].qtd = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-center rounded w-16 bg-white" /></td>
-                            <td className="p-1 text-right text-red-600 font-bold"><input type="number" value={rest.valor} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].valor = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border text-right rounded w-36 bg-white text-red-600" /></td>
-                            <td className="p-1 font-sans text-slate-400 lowercase"><input type="text" value={rest.obs} onChange={(e) => { const c = [...analise.dados_restritivos]; c[i].obs = e.target.value; setAnalise({ ...analise, dados_restritivos: c }); }} className="p-1 border rounded w-full bg-white text-slate-400" /></td>
-                          </tr>
-                        ))
-                      )}
-                      <tr className="bg-slate-100 font-black border-t">
-                        <td colSpan={3} className="p-2.5 font-sans text-slate-900">Total Restritivos Expostos</td>
-                        <td className="p-2.5 text-right text-red-600 font-mono font-black">R$ {totalRestritivos.toLocaleString("pt-BR")}</td>
-                        <td></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {abaAtiva === "juridico" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="block font-black text-red-600 uppercase text-[10px] tracking-widest">🔴 Em Tramitação / Execuções</label>
-                    <textarea value={analise.dados_juridico.processos_tramitacao || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_tramitacao: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
+                {abaAtiva === "juridico" && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block font-black text-red-600 uppercase text-[10px] tracking-widest">🔴 Em Tramitação / Execuções</label>
+                      <textarea value={analise.dados_juridico.processos_tramitacao || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_tramitacao: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block font-black text-emerald-600 uppercase text-[10px] tracking-widest">🟢 Arquivados / Extintos</label>
+                      <textarea value={analise.dados_juridico.processos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_arquivados: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="block font-black text-emerald-600 uppercase text-[10px] tracking-widest">🟢 Arquivados / Extintos</label>
-                    <textarea value={analise.dados_juridico.processos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_juridico: { ...analise.dados_juridico, processos_arquivados: e.target.value } })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[220px] font-sans" />
-                  </div>
-                </div>
-              )}
+                )}
 
-              {abaAtiva === "parecer" && (
-                <div className="space-y-2">
-                  <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest">Parecer Consolidado do Comitê de Crédito</label>
-                  <textarea value={analise.parecer_comite} onChange={(e) => setAnalise({ ...analise, parecer_comite: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[280px] font-sans" />
-                </div>
-              )}
+                {abaAtiva === "parecer" && (
+                  <div className="space-y-2">
+                    <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest">Parecer Consolidado do Comitê de Crédito</label>
+                    <textarea value={analise.parecer_comite} onChange={(e) => setAnalise({ ...analise, parecer_comite: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 min-h-[280px] font-sans" />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
