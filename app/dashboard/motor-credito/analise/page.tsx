@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
-import GerarAnalise from "@/components/gerar-analise"; // 🚀 IMPORTAÇÃO DO GERADOR HTML AQUI
+import GerarAnalise from "@/components/gerar-analise"; 
 
 // =========================================================================
 // INTERFACES (ESTRUTURA COMPLETA DO EXCEL)
@@ -65,17 +65,25 @@ interface AnaliseData {
   proposta: { modalidade: string; limite: number; prazo: number; tranche: number; taxa: number; garantia: string; rating: string };
   dados_faturamento: Record<string, Record<string, number>>;
   dados_potencial: { ticket_medio: number; prazo_medio_vendas: number; vendas_prazo_perc: number };
+  
+  // NOVO: Endividamento Resumo (Curto/Longo Prazo)
+  dados_endividamento_resumo: { curto_prazo: number; longo_prazo: number };
   dados_endividamento: EndividamentoItem[];
+  
   dados_restritivos: RestritivoItem[];
   dados_estrutura_societaria: SócioItem[];
   dados_referencias: ReferenciaFundo[];
+  
+  // NOVO: Anexos e Organograma
+  anexos: { organograma_url?: string; fachada_url?: string; satelite_url?: string; fotos_url?: string };
+
   dados_qualitativos: { 
     processos_tramitacao?: string; processos_arquivados?: string; 
     noticias_midia?: string; relatorio_visita?: string; parecer_diretor?: string;
   };
   parecer_comite: string;
-  recomendacao_analista?: string; // NOVO: Veredito sugerido
-  [key: string]: any; // Flexibilidade para novos campos dinâmicos
+  recomendacao_analista?: string; 
+  [key: string]: any; 
 }
 
 const DADOS_MODELO: AnaliseData = {
@@ -85,7 +93,13 @@ const DADOS_MODELO: AnaliseData = {
   proposta: { modalidade: "Desconto", limite: 80000, prazo: 75, tranche: 20000, taxa: 0.035, garantia: "Aval", rating: "B" },
   dados_faturamento: { "2024": {}, "2025": {}, "2026": {} }, 
   dados_potencial: { ticket_medio: 3000, prazo_medio_vendas: 75, vendas_prazo_perc: 100 },
-  dados_endividamento: [], dados_restritivos: [], dados_estrutura_societaria: [], dados_referencias: [], dados_qualitativos: {}
+  dados_endividamento_resumo: { curto_prazo: 0, longo_prazo: 0 },
+  dados_endividamento: [], 
+  dados_restritivos: [], 
+  dados_estrutura_societaria: [], 
+  dados_referencias: [], 
+  anexos: { organograma_url: "", fachada_url: "" },
+  dados_qualitativos: {}
 };
 
 // =========================================================================
@@ -117,7 +131,6 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
-      // Puxa APENAS o que está na mesa do analista
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status")
@@ -147,10 +160,12 @@ function MesaAnaliseConteudo() {
           proposta: dc.proposta || { modalidade: "Desconto", limite: 0, prazo: 30, tranche: 0, taxa: 0.00, garantia: "Aval", rating: "C" },
           dados_faturamento: dc.dados_faturamento || { "2024": {}, "2025": {}, "2026": {} },
           dados_potencial: dc.dados_potencial || { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
+          dados_endividamento_resumo: dc.dados_endividamento_resumo || { curto_prazo: 0, longo_prazo: 0 },
           dados_endividamento: dc.dados_endividamento || [],
           dados_restritivos: dc.dados_restritivos?.map((r: any) => ({ ...r, origem: r.origem || r.origin })) || [],
           dados_estrutura_societaria: dc.dados_estrutura_societaria || [],
           dados_referencias: dc.dados_referencias || [],
+          anexos: dc.anexos || { organograma_url: "", fachada_url: "" },
           dados_qualitativos: dc.dados_qualitativos || {},
           parecer_comite: dc.parecer_comite || "",
           recomendacao_analista: dc.recomendacao_analista || "Aprovação Integral"
@@ -174,7 +189,6 @@ function MesaAnaliseConteudo() {
     } catch (err: any) { alert("❌ Erro ao salvar dados: " + err.message); return false; } finally { setProcessandoDecisao(false); }
   };
 
-  // 🔥 FLUXO NOVO: Enviar para Comitê
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_comite.trim()) {
@@ -187,7 +201,7 @@ function MesaAnaliseConteudo() {
 
     try {
       setProcessandoDecisao(true);
-      await persistirNoBanco(false); // Salva os dados primeiro
+      await persistirNoBanco(false); 
       
       const { error } = await supabase.from("analises_credito").update({ status: "aguardando_comite" }).eq("id", analise.id);
       if (error) throw error;
@@ -216,7 +230,7 @@ function MesaAnaliseConteudo() {
     } catch (err: any) { alert("❌ Falha na devolução."); } finally { setProcessandoDecisao(false); }
   };
 
-  // GERENCIAMENTO DE LINHAS (ESTILO EXCEL)
+  // GERENCIAMENTO DE LINHAS
   const addSocio = () => setAnalise({ ...analise, dados_estrutura_societaria: [...analise.dados_estrutura_societaria, { s_nome: "", s_perc: 0, s_cargo: "Sócio", s_aval: true, figura_contrato: true, assinatura: "Isolada", b_bens: "", b_valor: 0 }] });
   const rmSocio = (i: number) => setAnalise({ ...analise, dados_estrutura_societaria: analise.dados_estrutura_societaria.filter((_, idx) => idx !== i) });
 
@@ -244,41 +258,42 @@ function MesaAnaliseConteudo() {
   const fatMedioAtual = calcMedia("2025") || 0;
   const totBancos = analise.dados_endividamento.reduce((acc, d) => acc + Number(d.saldo), 0) || 0;
   const totRest = analise.dados_restritivos.reduce((acc, r) => acc + Number(r.valor), 0) || 0;
+  const totPatrimonio = analise.dados_estrutura_societaria.reduce((acc, s) => acc + Number(s.b_valor), 0) || 0;
 
   // =========================================================================
-  // CONSTANTES VISUAIS EXCEL (Classes Tailwind reutilizáveis)
+  // CONSTANTES VISUAIS EXCEL (Bordas duras, header cinza, fonte compacta)
   // =========================================================================
-  const cellStyle = "w-full h-full p-2 bg-transparent outline-none focus:bg-indigo-50 focus:ring-inset focus:ring-2 focus:ring-indigo-500 font-sans text-xs transition-all";
-  const thStyle = "p-2.5 bg-slate-100 border border-slate-300 font-black text-[10px] uppercase text-slate-600 text-center tracking-widest";
-  const tdStyle = "border border-slate-300 p-0 bg-white hover:bg-slate-50 relative focus-within:bg-indigo-50/30 transition-colors";
+  const cellStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-sans text-[11px] transition-all";
+  const numStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-mono text-[11px] text-right transition-all";
+  const thStyle = "p-2 bg-[#e2e8f0] border border-[#cbd5e1] font-bold text-[10px] uppercase text-slate-700 text-center";
+  const tdStyle = "border border-[#cbd5e1] p-0 bg-white hover:bg-slate-50 relative focus-within:bg-blue-50/30 transition-colors";
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start bg-slate-100 min-h-screen p-4 md:p-6">
       
       {/* SIDEBAR */}
       <div className="lg:col-span-3">
-        <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col min-h-[700px]">
-          <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4">
-            <span className="font-black text-slate-800 uppercase text-[11px] tracking-widest block">
-              📥 Esteira do Analista ({fila.length})
+        <div className="bg-white border border-slate-300 rounded shadow-sm flex flex-col min-h-[700px]">
+          <div className="flex justify-between items-center border-b border-slate-300 bg-slate-200 p-3">
+            <span className="font-bold text-slate-800 uppercase text-[11px] block">
+              📥 Fila de Análise ({fila.length})
             </span>
-            <button onClick={() => buscarFilaSupabase(true)} className="text-indigo-600 hover:text-indigo-800 text-[11px] font-bold cursor-pointer">🔄 Atualizar</button>
+            <button onClick={() => buscarFilaSupabase(true)} className="text-blue-600 hover:text-blue-800 text-[11px] font-bold cursor-pointer">🔄 Atualizar</button>
           </div>
           
-          <div className="space-y-2 overflow-y-auto max-h-[600px] pr-1">
-            <div onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO); }} className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${idSelecionado === null ? "bg-indigo-50 border-indigo-400" : "bg-white border-slate-200 hover:bg-slate-100"}`}>
-              <p className="text-xs font-black text-indigo-700 uppercase">⭐ TEMPLATE MODELO ESTÁTICO</p>
-              <p className="text-[10px] font-mono text-slate-500 mt-0.5">Visão Completa dos Campos</p>
+          <div className="space-y-1 overflow-y-auto max-h-[600px] p-2">
+            <div onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO); }} className={`p-2 border cursor-pointer transition-all ${idSelecionado === null ? "bg-blue-50 border-blue-400 border-l-4" : "bg-white border-slate-200 hover:bg-slate-100"}`}>
+              <p className="text-[11px] font-bold text-blue-700 uppercase">⭐ TEMPLATE MODELO</p>
             </div>
             {loadingFila ? (
               <div className="text-center py-6 text-slate-400 font-mono text-[11px]">Sincronizando...</div>
             ) : fila.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-xs font-bold">Fila de análise vazia.</div>
+              <div className="text-center py-6 text-slate-400 text-[11px] font-bold">Fila vazia.</div>
             ) : (
               fila.map((item) => (
-                <div key={item.id} onClick={() => selecionarEmpresaDaEsteira(item.id)} className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${idSelecionado === item.id ? "bg-indigo-600 border-indigo-700 text-white shadow-md" : "bg-white border-slate-200 hover:border-slate-300"}`}>
-                  <p className={`text-xs font-black uppercase truncate ${idSelecionado === item.id ? "text-white" : "text-slate-900"}`}>{item.razao_social}</p>
-                  <p className={`text-[10px] font-mono mt-1 ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-400"}`}>CNPJ: {item.cnpj}</p>
+                <div key={item.id} onClick={() => selecionarEmpresaDaEsteira(item.id)} className={`p-2 border cursor-pointer transition-all ${idSelecionado === item.id ? "bg-blue-600 border-blue-700 text-white shadow-md border-l-4 border-l-blue-300" : "bg-white border-slate-200 hover:border-slate-300"}`}>
+                  <p className={`text-[11px] font-bold uppercase truncate ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.razao_social}</p>
+                  <p className={`text-[10px] font-mono mt-0.5 ${idSelecionado === item.id ? "text-blue-200" : "text-slate-500"}`}>{item.cnpj}</p>
                 </div>
               ))
             )}
@@ -289,34 +304,34 @@ function MesaAnaliseConteudo() {
       {/* WORKSPACE ESTILO PLANILHA */}
       <div className="lg:col-span-9 space-y-4">
         {loadingAnalise ? (
-          <div className="bg-white border border-slate-300 rounded-xl p-12 text-center shadow-sm min-h-[650px] flex flex-col items-center justify-center">
-            <span className="animate-spin text-2xl block text-indigo-500">⏳</span>
-            <p className="text-xs font-black uppercase text-slate-500 mt-4">Carregando Matriz de Dados...</p>
+          <div className="bg-white border border-slate-300 rounded shadow-sm min-h-[650px] flex flex-col items-center justify-center">
+            <span className="animate-spin text-2xl block text-blue-500">⏳</span>
+            <p className="text-xs font-bold uppercase text-slate-500 mt-4">Carregando Matriz...</p>
           </div>
         ) : (
-          <div className="bg-white border border-slate-300 rounded-xl shadow-sm overflow-hidden flex flex-col">
+          <div className="bg-white border border-slate-300 shadow-sm overflow-hidden flex flex-col">
             
             {/* TOOLBAR EXCEL */}
-            <div className="p-4 border-b border-slate-300 bg-slate-100 flex flex-col md:flex-row justify-between md:items-center gap-4">
+            <div className="p-3 border-b border-slate-300 bg-[#f8fafc] flex flex-col md:flex-row justify-between md:items-center gap-4">
               <div>
-                <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-slate-400 text-white"}`}>
-                  {idSelecionado ? `Card Ativo` : "Modo Edição Base"}
+                <span className={`px-2 py-0.5 text-[9px] font-bold uppercase border ${idSelecionado ? "bg-green-100 text-green-800 border-green-300" : "bg-slate-200 text-slate-600 border-slate-300"}`}>
+                  {idSelecionado ? `Editando Banco de Dados` : "Modo Espelho (Template)"}
                 </span>
-                <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mt-1.5 leading-none">{analise.razao_social}</h2>
-                <p className="text-xs font-mono font-bold text-slate-500 mt-1">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade}/{analise.uf}</p>
+                <h2 className="text-lg font-bold text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
+                <p className="text-[11px] font-mono text-slate-500 mt-0.5">CNPJ: {analise.cnpj} | {analise.cidade}/{analise.uf}</p>
               </div>
               
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold px-4 py-2 rounded-md text-xs uppercase tracking-widest shadow-sm cursor-pointer transition-all">
-                  💾 Salvar Planilha
+                <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className="bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold px-3 py-1.5 text-[11px] uppercase shadow-sm cursor-pointer transition-all">
+                  💾 Salvar
                 </button>
                 {idSelecionado && (
                   <>
-                    <button onClick={encaminharParaComite} disabled={processandoDecisao} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-4 py-2 rounded-md text-xs uppercase tracking-widest cursor-pointer shadow-sm transition-all flex items-center gap-1">
-                      🚀 Enviar Parecer p/ Comitê
+                    <button onClick={encaminharParaComite} disabled={processandoDecisao} className="bg-blue-600 hover:bg-blue-700 border border-blue-800 text-white font-bold px-3 py-1.5 text-[11px] uppercase cursor-pointer shadow-sm transition-all flex items-center gap-1">
+                      🚀 Enviar p/ Comitê
                     </button>
-                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-black px-3 py-2 rounded-md text-[10px] uppercase tracking-widest cursor-pointer transition-all">
-                      🚨 Devolver Analise
+                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-bold px-3 py-1.5 text-[11px] uppercase cursor-pointer transition-all">
+                      🚨 Devolver
                     </button>
                     
                     {/* BOTÃO DO GERADOR HTML AQUI */}
@@ -326,45 +341,45 @@ function MesaAnaliseConteudo() {
               </div>
             </div>
 
-            {/* ENGINE DE ABAS */}
-            <div className="bg-slate-100 border-b border-slate-300 px-2 pt-2 flex flex-wrap gap-1 overflow-x-auto">
+            {/* ENGINE DE ABAS EXCEL */}
+            <div className="bg-[#e2e8f0] border-b border-slate-400 px-1 pt-1 flex flex-wrap gap-0.5 overflow-x-auto">
               {[
-                { id: "proposta", label: "📋 1. Proposta & Cadastro" },
-                { id: "estrutura", label: "👥 2. Societário" },
-                { id: "fat", label: "📊 3. Faturamento & Potencial" },
-                { id: "endividamento", label: "🏦 4. Bancos & Fundos" },
-                { id: "restritivos", label: "🚨 5. Restritivos & Jurídico" },
-                { id: "parecer", label: "📝 6. Parecer Final & Envio" }
+                { id: "proposta", label: "Capa & Proposta" },
+                { id: "estrutura", label: "Societário & Organograma" },
+                { id: "fat", label: "Faturamento & Potencial" },
+                { id: "endividamento", label: "Endividamento & Referências" },
+                { id: "restritivos", label: "Restritivos & Jurídico" },
+                { id: "parecer", label: "Parecer & Visitas" }
               ].map((tab) => (
-                <button key={tab.id} onClick={() => setAbaAtiva(tab.id)} className={`px-4 py-2.5 font-black uppercase text-[10px] tracking-wider rounded-t-md border border-b-0 transition-all cursor-pointer ${abaAtiva === tab.id ? "bg-white text-indigo-700 border-slate-300 border-t-2 border-t-indigo-500 shadow-[0_4px_0_white] z-10" : "bg-transparent border-transparent text-slate-500 hover:bg-slate-200"}`}>
+                <button key={tab.id} onClick={() => setAbaAtiva(tab.id)} className={`px-4 py-1.5 font-bold uppercase text-[10px] border border-b-0 transition-all cursor-pointer ${abaAtiva === tab.id ? "bg-white text-blue-700 border-slate-400 border-t-2 border-t-blue-600 shadow-[0_2px_0_white] z-10" : "bg-[#f1f5f9] border-[#cbd5e1] text-slate-600 hover:bg-slate-200"}`}>
                   {tab.label}
                 </button>
               ))}
             </div>
 
             {/* ÁREA DE TRABALHO DA PLANILHA */}
-            <div className="p-6 bg-slate-50 min-h-[500px]">
+            <div className="p-4 bg-white min-h-[500px]">
               
               {/* ========================================================= */}
-              {/* ABA 1: PROPOSTA E CADASTRO */}
+              {/* ABA 1: CAPA E PROPOSTA */}
               {/* ========================================================= */}
               {abaAtiva === "proposta" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b border-slate-300 pb-1">Detalhes da Operação Comercial</span>
-                    <table className="w-full border-collapse">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div className="bg-blue-800 text-white text-[10px] font-bold uppercase p-1.5 border border-blue-900">1. Condições da Proposta</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
                       <tbody>
                         <tr><td className={`${thStyle} w-1/3 text-right`}>Analista</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.analista || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, analista: e.target.value } })} className={cellStyle} /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>Gerente / Hub</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.gerente || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, gerente: e.target.value } })} className={cellStyle} /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>Modalidade</td><td className={tdStyle}><input type="text" value={analise.proposta.modalidade} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, modalidade: e.target.value } })} className={cellStyle} /></td></tr>
-                        <tr><td className={`${thStyle} text-right bg-indigo-50`}>Limite (R$)</td><td className={`${tdStyle} bg-indigo-50/30`}><input type="number" value={analise.proposta.limite} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, limite: Number(e.target.value) } })} className={`${cellStyle} font-mono font-bold text-indigo-700`} /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Prazo (Dias)</td><td className={tdStyle}><input type="number" value={analise.proposta.prazo} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, prazo: Number(e.target.value) } })} className={`${cellStyle} font-mono`} /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Taxa (%)</td><td className={tdStyle}><input type="number" step="0.001" value={analise.proposta.taxa} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, taxa: Number(e.target.value) } })} className={`${cellStyle} font-mono`} /></td></tr>
+                        <tr><td className={`${thStyle} text-right bg-blue-50`}>Limite (R$)</td><td className={`${tdStyle} bg-blue-50`}><input type="number" value={analise.proposta.limite} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, limite: Number(e.target.value) } })} className={`${numStyle} text-blue-700 font-bold`} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Prazo (Dias)</td><td className={tdStyle}><input type="number" value={analise.proposta.prazo} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, prazo: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Taxa (%)</td><td className={tdStyle}><input type="number" step="0.001" value={analise.proposta.taxa} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, taxa: Number(e.target.value) } })} className={numStyle} /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>Garantia</td><td className={tdStyle}><input type="text" value={analise.proposta.garantia} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, garantia: e.target.value } })} className={cellStyle} /></td></tr>
-                        <tr><td className={`${thStyle} text-right bg-amber-50`}>Rating V8</td>
+                        <tr><td className={`${thStyle} text-right bg-yellow-100`}>Rating V8</td>
                           <td className={tdStyle}>
-                            <select value={analise.proposta.rating} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, rating: e.target.value } })} className={`${cellStyle} font-black text-amber-700`}>
-                              <option value="A">Rating A (Baixo Risco)</option><option value="B">Rating B (Risco Aceitável)</option><option value="C">Rating C (Risco Moderado)</option><option value="D">Rating D (Fora do Perfil)</option>
+                            <select value={analise.proposta.rating} onChange={(e) => setAnalise({ ...analise, proposta: { ...analise.proposta, rating: e.target.value } })} className={`${cellStyle} font-bold text-yellow-800 bg-yellow-50`}>
+                              <option value="A">Rating A</option><option value="B">Rating B</option><option value="C">Rating C</option><option value="D">Rating D</option>
                             </select>
                           </td>
                         </tr>
@@ -372,21 +387,22 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
                   
-                  <div className="space-y-4">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b border-slate-300 pb-1">Ficha Cadastral Complementar</span>
-                    <table className="w-full border-collapse">
+                  <div>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">2. Dados da Empresa</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
                       <tbody>
                         <tr><td className={`${thStyle} w-1/3 text-right`}>Fundação</td><td className={tdStyle}><input type="date" value={analise.dados_gerais.fundacao || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, fundacao: e.target.value } })} className={cellStyle} /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Capital (R$)</td><td className={tdStyle}><input type="number" value={analise.capital_social} onChange={(e) => setAnalise({ ...analise, capital_social: Number(e.target.value) })} className={`${cellStyle} font-mono`} /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Atividade Principal</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.ramo || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, ramo: e.target.value } })} className={`${cellStyle} uppercase`} /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Unidades Locais</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.unidades || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, unidades: e.target.value } })} className={cellStyle} placeholder="Ex: Matriz e 2 Filiais" /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Licenças Especiais</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.licencas || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, licencas: e.target.value } })} className={cellStyle} placeholder="Ex: ANVISA, SIF, ISO" /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>Balanço Auditado</td>
+                        <tr><td className={`${thStyle} text-right`}>Capital (R$)</td><td className={tdStyle}><input type="number" value={analise.capital_social} onChange={(e) => setAnalise({ ...analise, capital_social: Number(e.target.value) })} className={numStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Atividade</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.ramo || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, ramo: e.target.value } })} className={`${cellStyle} uppercase`} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Unidades</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.unidades || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, unidades: e.target.value } })} className={cellStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Site/URL</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.site || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, site: e.target.value } })} className={cellStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Licenças</td><td className={tdStyle}><input type="text" value={analise.dados_gerais.licencas || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, licencas: e.target.value } })} className={cellStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Bal. Auditado</td>
                           <td className={tdStyle}>
-                            <select value={analise.dados_gerais.balanco_auditado || "Não"} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, balanco_auditado: e.target.value } })} className={cellStyle}><option value="Não">Não</option><option value="Sim">Sim (Big 4)</option><option value="Sim (Outras)">Sim (Outras Auditorias)</option></select>
+                            <select value={analise.dados_gerais.balanco_auditado || "Não"} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, balanco_auditado: e.target.value } })} className={cellStyle}><option value="Não">Não</option><option value="Sim">Sim</option></select>
                           </td>
                         </tr>
-                        <tr><td className={`${thStyle} text-right`}>Consultoria Ativa</td>
+                        <tr><td className={`${thStyle} text-right`}>Consultoria</td>
                           <td className={tdStyle}>
                             <select value={analise.dados_gerais.consultoria || "Não"} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, consultoria: e.target.value } })} className={cellStyle}><option value="Não">Não</option><option value="FDC / Falconi">FDC / Falconi</option><option value="Outras">Sim (Outras)</option></select>
                           </td>
@@ -398,45 +414,63 @@ function MesaAnaliseConteudo() {
               )}
 
               {/* ========================================================= */}
-              {/* ABA 2: SOCIETÁRIO E IRPF */}
+              {/* ABA 2: SOCIETÁRIO E ORGANOGRAMA */}
               {/* ========================================================= */}
               {abaAtiva === "estrutura" && (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center mb-1 border-b border-slate-300 pb-2">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Matriz Societária e Capacidade Patrimonial</span>
-                    <button onClick={addSocio} className="bg-indigo-50 text-indigo-700 border border-indigo-200 font-black px-3 py-1 rounded-md text-[10px] uppercase hover:bg-indigo-100">+ Add Sócio / Avalista</button>
-                  </div>
-                  <div className="overflow-x-auto shadow-sm rounded border border-slate-300">
-                    <table className="w-full text-left border-collapse min-w-[1000px] bg-white">
-                      <thead>
-                        <tr>
-                          <th className={thStyle}>Nome Completo / Empresa</th>
-                          <th className={`${thStyle} w-16`}>%</th>
-                          <th className={`${thStyle} w-24`}>Assina?</th>
-                          <th className={`${thStyle} w-28`}>Regra</th>
-                          <th className={`${thStyle} w-16`}>Aval</th>
-                          <th className={thStyle}>Descrição de Bens (IRPF/PJ)</th>
-                          <th className={`${thStyle} w-32`}>Valor Avaliado</th>
-                          <th className={`${thStyle} w-10`}>Del</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {analise.dados_estrutura_societaria.map((s, idx) => (
-                          <tr key={idx}>
-                            <td className={tdStyle}><input type="text" value={s.s_nome} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_nome = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} font-bold uppercase`} /></td>
-                            <td className={tdStyle}><input type="number" value={s.s_perc} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_perc = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} text-center font-mono`} /></td>
-                            <td className={`${tdStyle} text-center`}><input type="checkbox" checked={s.figura_contrato} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].figura_contrato = e.target.checked; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className="cursor-pointer h-4 w-4 accent-indigo-600" /></td>
-                            <td className={tdStyle}>
-                              <select value={s.assinatura || "Isolada"} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].assinatura = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} text-center`}>
-                                <option value="Isolada">Isolada</option><option value="Conjunta">Conjunta</option>
-                              </select>
-                            </td>
-                            <td className={`${tdStyle} text-center`}><input type="checkbox" checked={s.s_aval} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_aval = e.target.checked; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className="cursor-pointer h-4 w-4 accent-indigo-600" /></td>
-                            <td className={tdStyle}><input type="text" value={s.b_bens} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].b_bens = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} text-slate-600`} placeholder="Ex: 2 Imóveis Comerciais SP" /></td>
-                            <td className={tdStyle}><input type="number" value={s.b_valor} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].b_valor = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} text-right text-emerald-600 font-bold`} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={() => rmSocio(idx)} className="text-red-500 font-black px-2 py-1 hover:bg-red-100 rounded">✕</button></td>
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
+                      <span>3. Estrutura Societária e Patrimônio Informado</span>
+                      <button onClick={addSocio} className="bg-slate-600 hover:bg-slate-500 text-white px-2 py-0.5 rounded text-[9px] border border-slate-500">+ Linha</button>
+                    </div>
+                    <div className="overflow-x-auto border border-t-0 border-[#cbd5e1]">
+                      <table className="w-full text-left border-collapse min-w-[1000px] bg-white">
+                        <thead>
+                          <tr>
+                            <th className={thStyle}>Sócio / Avalista</th>
+                            <th className={`${thStyle} w-16`}>%</th>
+                            <th className={`${thStyle} w-20`}>Assina?</th>
+                            <th className={`${thStyle} w-24`}>Regra</th>
+                            <th className={`${thStyle} w-16`}>Aval</th>
+                            <th className={thStyle}>Descrição de Bens (PJ/PF)</th>
+                            <th className={`${thStyle} w-32`}>Valor Bens (R$)</th>
+                            <th className={`${thStyle} w-10`}>Del</th>
                           </tr>
-                        ))}
+                        </thead>
+                        <tbody>
+                          {analise.dados_estrutura_societaria.map((s, idx) => (
+                            <tr key={idx}>
+                              <td className={tdStyle}><input type="text" value={s.s_nome} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_nome = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} font-bold uppercase`} /></td>
+                              <td className={tdStyle}><input type="number" value={s.s_perc} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_perc = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={numStyle} /></td>
+                              <td className={`${tdStyle} text-center`}><input type="checkbox" checked={s.figura_contrato} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].figura_contrato = e.target.checked; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className="cursor-pointer h-3 w-3" /></td>
+                              <td className={tdStyle}>
+                                <select value={s.assinatura || "Isolada"} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].assinatura = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${cellStyle} text-center`}>
+                                  <option value="Isolada">Isolada</option><option value="Conjunta">Conjunta</option>
+                                </select>
+                              </td>
+                              <td className={`${tdStyle} text-center`}><input type="checkbox" checked={s.s_aval} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].s_aval = e.target.checked; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className="cursor-pointer h-3 w-3" /></td>
+                              <td className={tdStyle}><input type="text" value={s.b_bens} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].b_bens = e.target.value; setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={cellStyle} /></td>
+                              <td className={tdStyle}><input type="number" value={s.b_valor} onChange={(e) => { const a = [...analise.dados_estrutura_societaria]; a[idx].b_valor = Number(e.target.value); setAnalise({ ...analise, dados_estrutura_societaria: a }); }} className={`${numStyle} text-green-700 font-bold`} /></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={() => rmSocio(idx)} className="text-red-500 font-bold px-2 py-0.5 hover:bg-red-50 text-[10px]">X</button></td>
+                            </tr>
+                          ))}
+                          <tr className="bg-slate-200 border-t-2 border-slate-400">
+                            <td colSpan={6} className="p-1.5 text-right font-bold uppercase text-[10px] text-slate-800">Total Patrimônio Avaliado</td>
+                            <td className="p-1.5 text-right font-mono font-bold text-green-700 text-[11px]">R$ {totPatrimonio.toLocaleString("pt-BR")}</td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* ORGANOGRAMA E ANEXOS */}
+                  <div>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">4. Anexos e Organograma (Links de Imagem)</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
+                      <tbody>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => setAnalise({ ...analise, anexos: { ...analise.anexos, organograma_url: e.target.value } })} className={cellStyle} placeholder="Cole o link da imagem..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => setAnalise({ ...analise, anexos: { ...analise.anexos, fachada_url: e.target.value } })} className={cellStyle} placeholder="Cole o link da imagem..." /></td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -448,14 +482,13 @@ function MesaAnaliseConteudo() {
               {/* ========================================================= */}
               {abaAtiva === "fat" && (
                 <div className="space-y-6">
-                  {/* TABELA DE FATURAMENTO */}
                   <div>
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b border-slate-300 pb-1 mb-3">Tabela Dinâmica de Faturamento Anual</span>
-                    <div className="overflow-x-auto shadow-sm rounded border border-slate-300">
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">5. Faturamento Bruto Consolidado</div>
+                    <div className="overflow-x-auto border border-t-0 border-[#cbd5e1]">
                       <table className="w-full border-collapse text-left min-w-[800px] bg-white">
                         <thead>
                           <tr>
-                            <th className={`${thStyle} w-32 text-left`}>Mês Referência</th>
+                            <th className={`${thStyle} w-32 text-left`}>Mês</th>
                             <th className={thStyle}>Realizado 2024</th>
                             <th className={thStyle}>Realizado 2025</th>
                             <th className={thStyle}>Delta YoY %</th>
@@ -467,73 +500,85 @@ function MesaAnaliseConteudo() {
                             const delta = calcDelta(mes, "2025", "2024");
                             return (
                               <tr key={mes}>
-                                <td className={`${tdStyle} bg-slate-50 font-black uppercase text-[10px] text-slate-600 pl-3`}>{mes.substring(0,3)}</td>
-                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2024"]?.[mes] || ""} onChange={(e) => handleFat("2024", mes, e.target.value)} className={`${cellStyle} text-center font-mono`} /></td>
-                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2025"]?.[mes] || ""} onChange={(e) => handleFat("2025", mes, e.target.value)} className={`${cellStyle} text-center font-mono`} /></td>
-                                <td className={`${tdStyle} text-center font-black text-xs ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-500' : 'text-slate-400'}`}>{delta === 0 ? "-" : `${delta > 0 ? '↑' : '↓'} ${delta.toFixed(1)}%`}</td>
-                                <td className={`${tdStyle} bg-indigo-50/20`}><input type="number" value={analise.dados_faturamento["2026"]?.[mes] || ""} onChange={(e) => handleFat("2026", mes, e.target.value)} className={`${cellStyle} text-center font-mono text-indigo-700 font-bold`} /></td>
+                                <td className={`${tdStyle} bg-slate-100 font-bold uppercase text-[10px] text-slate-700 pl-2`}>{mes.substring(0,3)}</td>
+                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2024"]?.[mes] || ""} onChange={(e) => handleFat("2024", mes, e.target.value)} className={numStyle} /></td>
+                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2025"]?.[mes] || ""} onChange={(e) => handleFat("2025", mes, e.target.value)} className={numStyle} /></td>
+                                <td className={`${tdStyle} text-center font-bold text-[11px] bg-slate-50 ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-slate-400'}`}>{delta === 0 ? "-" : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`}</td>
+                                <td className={`${tdStyle} bg-blue-50`}><input type="number" value={analise.dados_faturamento["2026"]?.[mes] || ""} onChange={(e) => handleFat("2026", mes, e.target.value)} className={`${numStyle} text-blue-800 font-bold`} /></td>
                               </tr>
                             );
                           })}
-                          {/* TOTAIS */}
-                          <tr className="bg-slate-100 border-t-2 border-slate-300 font-black text-xs">
-                            <td className="p-2 border border-slate-300 text-slate-800">SOMA TOTAL</td>
-                            <td className="p-2 border border-slate-300 text-center">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
-                            <td className="p-2 border border-slate-300 text-center">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
-                            <td className="p-2 border border-slate-300 text-center text-indigo-600">{(((calcTotAno("2025") - calcTotAno("2024")) / (calcTotAno("2024") || 1)) * 100).toFixed(1)}%</td>
-                            <td className="p-2 border border-slate-300 text-center text-indigo-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
+                          <tr className="bg-slate-200 border-t-2 border-slate-400 font-bold text-[11px]">
+                            <td className="p-1.5 border border-[#cbd5e1] text-slate-800">SOMA TOTAL</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-center text-blue-700">{(((calcTotAno("2025") - calcTotAno("2024")) / (calcTotAno("2024") || 1)) * 100).toFixed(1)}%</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono text-blue-800">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
                           </tr>
-                          <tr className="bg-slate-200 border-t border-slate-300 font-black text-xs">
-                            <td className="p-2 border border-slate-300 text-slate-700">MÉDIA MENSAL</td>
-                            <td className="p-2 border border-slate-300 text-center text-slate-600">{calcMedia("2024").toLocaleString("pt-BR")}</td>
-                            <td className="p-2 border border-slate-300 text-center text-slate-600">{calcMedia("2025").toLocaleString("pt-BR")}</td>
-                            <td className="p-2 border border-slate-300"></td>
-                            <td className="p-2 border border-slate-300 text-center text-indigo-800">{calcMedia("2026").toLocaleString("pt-BR")}</td>
+                          <tr className="bg-slate-300 border-t border-slate-400 font-bold text-[11px]">
+                            <td className="p-1.5 border border-[#cbd5e1] text-slate-800">MÉDIA MENSAL</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono">{calcMedia("2024").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono">{calcMedia("2025").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-[#cbd5e1]"></td>
+                            <td className="p-1.5 border border-[#cbd5e1] text-right font-mono text-blue-900">{calcMedia("2026").toLocaleString("pt-BR")}</td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  {/* BLOCO DE POTENCIAL */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-white border border-slate-300 rounded shadow-sm p-4">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3">Modelagem de Capacidade / Cessão</span>
-                      <table className="w-full border-collapse">
-                        <tbody>
-                          <tr><td className={`${thStyle} text-right w-1/2`}>Ticket Médio (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, ticket_medio: Number(e.target.value) } })} className={`${cellStyle} font-mono`} /></td></tr>
-                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.prazo_medio_vendas} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, prazo_medio_vendas: Number(e.target.value) } })} className={`${cellStyle} font-mono`} /></td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="bg-emerald-50 border border-emerald-200 rounded shadow-sm p-4 flex flex-col justify-center items-center text-center">
-                      <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest block mb-2">📈 Potencial Real Estimado (Mensal)</span>
-                      <span className="font-mono text-3xl font-black text-emerald-600 tracking-tighter">R$ {(fatMedioAtual * 2.5).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
-                      <span className="text-[9px] font-bold text-emerald-600/70 uppercase mt-1">Baseado na média de 2025 x Rotatividade</span>
-                    </div>
+                  <div>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">6. Parâmetros de Potencial e Rotação</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
+                      <tbody>
+                        <tr><td className={`${thStyle} text-right w-1/4`}>Ticket Médio (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, ticket_medio: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.prazo_medio_vendas} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, prazo_medio_vendas: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>% Vendas a Prazo</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.vendas_prazo_perc} onChange={(e) => setAnalise({ ...analise, dados_potencial: { ...analise.dados_potencial, vendas_prazo_perc: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr>
+                          <td className={`${thStyle} text-right bg-green-100 text-green-800`}>Potencial Estimado (R$)</td>
+                          <td className={`${tdStyle} bg-green-50 p-2 text-right font-mono font-black text-green-700 text-sm`}>{(fatMedioAtual * 2.5).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
 
               {/* ========================================================= */}
-              {/* ABA 4: BANCOS E FUNDOS */}
+              {/* ABA 4: ENDIVIDAMENTO E REFERÊNCIAS */}
               {/* ========================================================= */}
               {abaAtiva === "endividamento" && (
-                <div className="space-y-8">
-                  {/* SCR BANCOS */}
+                <div className="space-y-6">
+                  
+                  {/* RESUMO ENDIVIDAMENTO GERAL */}
                   <div>
-                    <div className="flex justify-between items-center mb-1 border-b border-slate-300 pb-2">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">SCR Centralizado Bancos Tradicionais</span>
-                      <button onClick={addBanco} className="bg-indigo-50 text-indigo-700 border border-indigo-200 font-black px-3 py-1 rounded-md text-[10px] uppercase hover:bg-indigo-100">+ Add Credor</button>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">7. Endividamento Geral Consolidado (Curto x Longo Prazo)</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
+                      <tbody>
+                        <tr><td className={`${thStyle} text-right w-1/4`}>Curto Prazo (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_endividamento_resumo?.curto_prazo || 0} onChange={(e) => setAnalise({ ...analise, dados_endividamento_resumo: { ...analise.dados_endividamento_resumo, curto_prazo: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>Longo Prazo (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_endividamento_resumo?.longo_prazo || 0} onChange={(e) => setAnalise({ ...analise, dados_endividamento_resumo: { ...analise.dados_endividamento_resumo, longo_prazo: Number(e.target.value) } })} className={numStyle} /></td></tr>
+                        <tr>
+                          <td className={`${thStyle} text-right bg-red-50 text-red-800`}>Total (Geral + Detalhado)</td>
+                          <td className={`${tdStyle} bg-red-50 p-1.5 text-right font-mono font-bold text-red-700 text-[11px]`}>R$ {totBancos.toLocaleString("pt-BR")}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* INSTITUIÇÕES / SCR DETALHADO */}
+                  <div>
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
+                      <span>8. Detalhamento SCR e Instituições (Bancos Tradicionais)</span>
+                      <button onClick={addBanco} className="bg-slate-600 hover:bg-slate-500 text-white px-2 py-0.5 rounded text-[9px] border border-slate-500">+ Linha</button>
                     </div>
-                    <div className="overflow-x-auto shadow-sm rounded border border-slate-300">
+                    <div className="overflow-x-auto border border-t-0 border-[#cbd5e1]">
                       <table className="w-full text-left border-collapse bg-white">
                         <thead>
                           <tr>
                             <th className={thStyle}>Instituição Financeira</th>
                             <th className={thStyle}>Modalidade do Risco</th>
                             <th className={`${thStyle} w-44 text-right`}>Saldo Devedor (R$)</th>
-                            <th className={`${thStyle} w-10`}>Del</th>
+                            <th className={`${thStyle} w-8`}>Del</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -541,49 +586,44 @@ function MesaAnaliseConteudo() {
                             <tr key={i}>
                               <td className={tdStyle}><input type="text" value={div.instituicao} onChange={(e) => { const a = [...analise.dados_endividamento]; a[i].instituicao = e.target.value; setAnalise({ ...analise, dados_endividamento: a }); }} className={`${cellStyle} uppercase font-bold`} /></td>
                               <td className={tdStyle}><input type="text" value={div.modalidade} onChange={(e) => { const a = [...analise.dados_endividamento]; a[i].modalidade = e.target.value; setAnalise({ ...analise, dados_endividamento: a }); }} className={cellStyle} /></td>
-                              <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e) => { const a = [...analise.dados_endividamento]; a[i].saldo = Number(e.target.value); setAnalise({ ...analise, dados_endividamento: a }); }} className={`${cellStyle} text-right text-red-600 font-mono font-bold`} /></td>
-                              <td className={`${tdStyle} text-center`}><button onClick={() => rmBanco(i)} className="text-red-500 font-black px-2 py-1 hover:bg-red-100 rounded">✕</button></td>
+                              <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e) => { const a = [...analise.dados_endividamento]; a[i].saldo = Number(e.target.value); setAnalise({ ...analise, dados_endividamento: a }); }} className={`${numStyle} text-red-700 font-bold`} /></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={() => rmBanco(i)} className="text-red-500 font-bold px-1 py-0.5 hover:bg-red-50 text-[10px]">X</button></td>
                             </tr>
                           ))}
-                          <tr className="bg-slate-100 border-t-2 border-slate-300">
-                            <td colSpan={2} className="p-3 text-right font-black uppercase text-[10px] text-slate-700 tracking-widest">Alavancagem Bancária Total</td>
-                            <td className="p-3 text-right font-mono font-black text-red-600">R$ {totBancos.toLocaleString("pt-BR")}</td>
-                            <td></td>
-                          </tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  {/* FUNDOS FIDC */}
+                  {/* FUNDOS FIDC E REFERENCIAS */}
                   <div>
-                    <div className="flex justify-between items-center mb-1 border-b border-slate-300 pb-2">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Referências de Mercado (Fundos e FIDCs)</span>
-                      <button onClick={addFundo} className="bg-indigo-50 text-indigo-700 border border-indigo-200 font-black px-3 py-1 rounded-md text-[10px] uppercase hover:bg-indigo-100">+ Add Referência</button>
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
+                      <span>9. Referências de Mercado (Fundos e Securitizadoras)</span>
+                      <button onClick={addFundo} className="bg-slate-600 hover:bg-slate-500 text-white px-2 py-0.5 rounded text-[9px] border border-slate-500">+ Linha</button>
                     </div>
-                    <div className="overflow-x-auto shadow-sm rounded border border-slate-300">
+                    <div className="overflow-x-auto border border-t-0 border-[#cbd5e1]">
                       <table className="w-full text-left border-collapse min-w-[900px] bg-white">
                         <thead>
                           <tr>
                             <th className={thStyle}>Fundo / Parceiro</th>
                             <th className={`${thStyle} w-20`}>RNX</th>
-                            <th className={`${thStyle} w-24`}>Desde</th>
-                            <th className={`${thStyle} w-32 text-right`}>Limite (R$)</th>
-                            <th className={`${thStyle} w-32 text-right`}>Risco (R$)</th>
-                            <th className={thStyle}>Comportamento (Atrasos/Liq)</th>
-                            <th className={`${thStyle} w-10`}>Del</th>
+                            <th className={`${thStyle} w-20`}>Desde</th>
+                            <th className={`${thStyle} w-28 text-right`}>Limite (R$)</th>
+                            <th className={`${thStyle} w-28 text-right`}>Risco (R$)</th>
+                            <th className={thStyle}>Comportamento / Observação</th>
+                            <th className={`${thStyle} w-8`}>Del</th>
                           </tr>
                         </thead>
                         <tbody>
                           {analise.dados_referencias.map((ref, i) => (
                             <tr key={i}>
                               <td className={tdStyle}><input type="text" value={ref.fundo} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].fundo = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} font-bold uppercase`} /></td>
-                              <td className={tdStyle}><input type="text" value={ref.rnx} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].rnx = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-center uppercase`} placeholder="Ex: Opera" /></td>
-                              <td className={tdStyle}><input type="text" value={ref.cliente_desde} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].cliente_desde = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-center`} placeholder="Ano" /></td>
-                              <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].limite_global = Number(e.target.value); setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-right font-mono text-indigo-600 font-bold`} /></td>
-                              <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].risco_total = Number(e.target.value); setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-right font-mono text-red-600 font-bold`} /></td>
-                              <td className={tdStyle}><input type="text" value={ref.obs} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].obs = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={cellStyle} placeholder="Ex: Liquidez alta, recompra OK" /></td>
-                              <td className={`${tdStyle} text-center`}><button onClick={() => rmFundo(i)} className="text-red-500 font-black px-2 py-1 hover:bg-red-100 rounded">✕</button></td>
+                              <td className={tdStyle}><input type="text" value={ref.rnx} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].rnx = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-center uppercase`} /></td>
+                              <td className={tdStyle}><input type="text" value={ref.cliente_desde} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].cliente_desde = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={`${cellStyle} text-center`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].limite_global = Number(e.target.value); setAnalise({ ...analise, dados_referencias: a }); }} className={`${numStyle} text-blue-700 font-bold`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].risco_total = Number(e.target.value); setAnalise({ ...analise, dados_referencias: a }); }} className={`${numStyle} text-red-700 font-bold`} /></td>
+                              <td className={tdStyle}><input type="text" value={ref.obs} onChange={(e) => { const a = [...analise.dados_referencias]; a[i].obs = e.target.value; setAnalise({ ...analise, dados_referencias: a }); }} className={cellStyle} /></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={() => rmFundo(i)} className="text-red-500 font-bold px-1 py-0.5 hover:bg-red-50 text-[10px]">X</button></td>
                             </tr>
                           ))}
                         </tbody>
@@ -597,39 +637,39 @@ function MesaAnaliseConteudo() {
               {/* ABA 5: RESTRITIVOS E JURÍDICO */}
               {/* ========================================================= */}
               {abaAtiva === "restritivos" && (
-                <div className="space-y-8">
+                <div className="space-y-6">
                   {/* RESTRITIVOS FINANCEIROS */}
                   <div>
-                    <div className="flex justify-between items-center mb-1 border-b border-slate-300 pb-2">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Registros Ofensores Financeiros (Serasa, Pefin, Protestos)</span>
-                      <button onClick={addRest} className="bg-indigo-50 text-indigo-700 border border-indigo-200 font-black px-3 py-1 rounded-md text-[10px] uppercase hover:bg-indigo-100">+ Add Registro</button>
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
+                      <span>10. Registros Restritivos (Pefin, Protestos, etc)</span>
+                      <button onClick={addRest} className="bg-slate-600 hover:bg-slate-500 text-white px-2 py-0.5 rounded text-[9px] border border-slate-500">+ Linha</button>
                     </div>
-                    <div className="overflow-x-auto shadow-sm rounded border border-slate-300">
+                    <div className="overflow-x-auto border border-t-0 border-[#cbd5e1]">
                       <table className="w-full text-left border-collapse bg-white">
                         <thead>
                           <tr>
                             <th className={thStyle}>CNPJ/CPF Ofensor</th>
                             <th className={thStyle}>Natureza</th>
                             <th className={`${thStyle} w-16 text-center`}>Qtd</th>
-                            <th className={`${thStyle} w-36 text-right`}>Valor (R$)</th>
+                            <th className={`${thStyle} w-32 text-right`}>Valor (R$)</th>
                             <th className={thStyle}>Órgão / Observação</th>
-                            <th className={`${thStyle} w-10`}>Del</th>
+                            <th className={`${thStyle} w-8`}>Del</th>
                           </tr>
                         </thead>
                         <tbody>
                           {analise.dados_restritivos.map((rest, i) => (
                             <tr key={i}>
                               <td className={tdStyle}><input type="text" value={rest.origem || ""} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].origem = e.target.value; setAnalise({ ...analise, dados_restritivos: a }); }} className={`${cellStyle} uppercase font-bold`} /></td>
-                              <td className={tdStyle}><input type="text" value={rest.tipo} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].tipo = e.target.value; setAnalise({ ...analise, dados_restritivos: a }); }} className={`${cellStyle} text-amber-700 font-bold uppercase`} placeholder="Protesto, Refin..." /></td>
-                              <td className={tdStyle}><input type="number" value={rest.qtd} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].qtd = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: a }); }} className={`${cellStyle} text-center`} /></td>
-                              <td className={tdStyle}><input type="number" value={rest.valor} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].valor = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: a }); }} className={`${cellStyle} text-right text-red-600 font-mono font-bold`} /></td>
-                              <td className={tdStyle}><input type="text" value={rest.obs} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].obs = e.target.value; setAnalise({ ...analise, dados_restritivos: a }); }} className={cellStyle} placeholder="Ex: Cartório SP" /></td>
-                              <td className={`${tdStyle} text-center`}><button onClick={() => rmRest(i)} className="text-red-500 font-black px-2 py-1 hover:bg-red-100 rounded">✕</button></td>
+                              <td className={tdStyle}><input type="text" value={rest.tipo} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].tipo = e.target.value; setAnalise({ ...analise, dados_restritivos: a }); }} className={`${cellStyle} text-yellow-700 font-bold uppercase`} /></td>
+                              <td className={tdStyle}><input type="number" value={rest.qtd} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].qtd = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: a }); }} className={`${numStyle} text-center`} /></td>
+                              <td className={tdStyle}><input type="number" value={rest.valor} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].valor = Number(e.target.value); setAnalise({ ...analise, dados_restritivos: a }); }} className={`${numStyle} text-red-600 font-bold`} /></td>
+                              <td className={tdStyle}><input type="text" value={rest.obs} onChange={(e) => { const a = [...analise.dados_restritivos]; a[i].obs = e.target.value; setAnalise({ ...analise, dados_restritivos: a }); }} className={cellStyle} /></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={() => rmRest(i)} className="text-red-500 font-bold px-1 py-0.5 hover:bg-red-50 text-[10px]">X</button></td>
                             </tr>
                           ))}
-                          <tr className="bg-slate-100 border-t-2 border-slate-300">
-                            <td colSpan={3} className="p-3 text-right font-black uppercase text-[10px] text-slate-700 tracking-widest">Total Financeiro Exposto</td>
-                            <td className="p-3 text-right font-mono font-black text-red-600">R$ {totRest.toLocaleString("pt-BR")}</td>
+                          <tr className="bg-slate-200 border-t-2 border-slate-400">
+                            <td colSpan={3} className="p-1.5 text-right font-bold uppercase text-[10px] text-slate-800">Total Exposto</td>
+                            <td className="p-1.5 text-right font-mono font-bold text-red-700 text-[11px]">R$ {totRest.toLocaleString("pt-BR")}</td>
                             <td colSpan={2}></td>
                           </tr>
                         </tbody>
@@ -637,68 +677,64 @@ function MesaAnaliseConteudo() {
                     </div>
                   </div>
 
-                  {/* PESQUISA DE MÍDIA E PROCESSOS */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* JURIDICO E NOTICIAS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-black text-red-700 uppercase tracking-widest mb-1 border-b border-red-200 pb-1">🔴 Em Tramitação (Fiscais, Cíveis, Rec. Jud.)</label>
-                      <textarea value={analise.dados_qualitativos?.processos_tramitacao || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, processos_tramitacao: e.target.value } })} className="w-full h-32 p-3 bg-white border border-slate-300 rounded shadow-sm text-xs focus:border-red-400 outline-none resize-none font-sans" placeholder="Cole aqui o resumo do Kappi/Datajud..." />
+                      <div className="bg-red-800 text-white text-[10px] font-bold uppercase p-1.5 border border-red-900">11. Processos em Tramitação (Ativos)</div>
+                      <textarea value={analise.dados_qualitativos?.processos_tramitacao || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, processos_tramitacao: e.target.value } })} className="w-full h-32 p-2 bg-white border border-[#cbd5e1] border-t-0 text-[11px] outline-none resize-none font-sans" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-1 border-b border-emerald-200 pb-1">🟢 Arquivados e Extintos</label>
-                      <textarea value={analise.dados_qualitativos?.processos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, processos_arquivados: e.target.value } })} className="w-full h-32 p-3 bg-white border border-slate-300 rounded shadow-sm text-xs focus:border-emerald-400 outline-none resize-none font-sans" placeholder="Processos quitados e resolvidos..." />
+                      <div className="bg-green-800 text-white text-[10px] font-bold uppercase p-1.5 border border-green-900">12. Processos Arquivados / Extintos</div>
+                      <textarea value={analise.dados_qualitativos?.processos_arquivados || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, processos_arquivados: e.target.value } })} className="w-full h-32 p-2 bg-white border border-[#cbd5e1] border-t-0 text-[11px] outline-none resize-none font-sans" />
                     </div>
                     <div className="col-span-1 md:col-span-2">
-                      <label className="block text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 border-b border-slate-300 pb-1">📰 Pesquisa de Mídia e Notícias (Reputacional)</label>
-                      <textarea value={analise.dados_qualitativos?.noticias_midia || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, noticias_midia: e.target.value } })} className="w-full h-20 p-3 bg-white border border-slate-300 rounded shadow-sm text-xs focus:border-indigo-400 outline-none resize-none font-sans" placeholder="Ataques ambientais, fraudes em portais, reclame aqui..." />
+                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">13. Pesquisa Reputacional (Notícias, Mídia, Reclame Aqui)</div>
+                      <textarea value={analise.dados_qualitativos?.noticias_midia || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, noticias_midia: e.target.value } })} className="w-full h-20 p-2 bg-white border border-[#cbd5e1] border-t-0 text-[11px] outline-none resize-none font-sans" />
                     </div>
                   </div>
                 </div>
               )}
 
               {/* ========================================================= */}
-              {/* ABA 6: PARECER FINAL */}
+              {/* ABA 6: PARECER FINAL E VISITAS */}
               {/* ========================================================= */}
               {abaAtiva === "parecer" && (
-                <div className="max-w-5xl mx-auto space-y-6">
+                <div className="space-y-6">
                   
                   {/* RECOMENDAÇÃO DO ANALISTA */}
-                  <div className="bg-white border-2 border-indigo-200 p-6 rounded-xl shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
-                    <h3 className="text-[11px] font-black text-indigo-800 uppercase tracking-widest mb-4 border-b border-indigo-100 pb-2">Veredito Sugerido ao Comitê</h3>
+                  <div className="bg-white border-2 border-blue-400 p-4 shadow-sm">
+                    <h3 className="text-[11px] font-bold text-blue-900 uppercase tracking-widest mb-3 border-b border-blue-200 pb-1">14. Veredito e Parecer Técnico</h3>
                     
-                    <div className="mb-6">
+                    <div className="mb-4">
                       <select 
                         value={analise.recomendacao_analista || ""} 
                         onChange={(e) => setAnalise({...analise, recomendacao_analista: e.target.value})} 
-                        className="w-full p-4 border-2 border-indigo-300 rounded-lg font-black text-indigo-900 bg-indigo-50/50 outline-none text-base cursor-pointer focus:ring-4 focus:ring-indigo-500/20 transition-all"
+                        className="w-full p-2 border-2 border-blue-300 font-bold text-blue-900 bg-blue-50 outline-none text-sm cursor-pointer"
                       >
-                        <option value="Aprovação Integral">✅ APROVAÇÃO INTEGRAL</option>
-                        <option value="Aprovação com Condicionantes">⚠️ APROVAÇÃO COM CONDICIONANTES (Redução de Limite/Garantia)</option>
-                        <option value="Reprovação">❌ REPROVAÇÃO TÉCNICA (Fora do Perfil)</option>
+                        <option value="Aprovação Integral">APROVAÇÃO INTEGRAL</option>
+                        <option value="Aprovação com Condicionantes">APROVAÇÃO COM CONDICIONANTES</option>
+                        <option value="Reprovação">REPROVAÇÃO TÉCNICA (FORA DO PERFIL)</option>
                       </select>
-                      <p className="text-xs text-slate-500 mt-2 font-medium">Esta recomendação será o grande destaque do relatório HTML lido pela Diretoria.</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="block text-[11px] font-black text-slate-700 uppercase tracking-widest">Parecer Analítico Consolidado</label>
+                    <div>
                       <textarea 
                         value={analise.parecer_comite || ""} 
                         onChange={(e) => setAnalise({...analise, parecer_comite: e.target.value})}
-                        className="w-full p-5 border border-slate-300 rounded-lg h-72 font-sans text-sm focus:border-indigo-500 outline-none resize-none leading-relaxed text-slate-700 shadow-inner"
-                        placeholder="Elabore a justificativa técnica. Explique os pontos fortes (rating, evolução de fat), pontos de atenção (alavancagem, processos) e conclua justificando o veredito acima..."
+                        className="w-full p-3 border border-[#cbd5e1] h-64 font-sans text-[12px] outline-none resize-none leading-relaxed text-slate-800 bg-[#f8fafc]"
+                        placeholder="Escreva a justificativa da sua análise aqui..."
                       />
                     </div>
                   </div>
 
-                  {/* PARECER DIRETOR / VISITA (OPCIONAL) */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div className="bg-white border border-slate-300 p-5 rounded-xl shadow-sm">
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1">📍 Relatório de Visitas In-loco</label>
-                      <textarea value={analise.dados_qualitativos?.relatorio_visita || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, relatorio_visita: e.target.value } })} className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded text-xs outline-none resize-none" placeholder="Aparência da fachada, maquinário visto operando..." />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">15. Relatório de Visitas In-loco</div>
+                      <textarea value={analise.dados_qualitativos?.relatorio_visita || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, relatorio_visita: e.target.value } })} className="w-full h-32 p-2 bg-white border border-[#cbd5e1] border-t-0 text-[11px] outline-none resize-none font-sans" />
                     </div>
-                    <div className="bg-slate-800 border border-slate-900 p-5 rounded-xl shadow-sm">
-                      <label className="block text-[10px] font-black text-slate-300 uppercase tracking-widest mb-2 border-b border-slate-700 pb-1">👨‍💼 Espaço Reservado: Comitê / Diretoria</label>
-                      <textarea value={analise.dados_qualitativos?.parecer_diretor || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, parecer_diretor: e.target.value } })} className="w-full h-32 p-3 bg-slate-700 border border-slate-600 text-slate-200 rounded text-xs outline-none resize-none placeholder-slate-500" placeholder="Este campo geralmente é preenchido pós-comitê pela diretoria. Se houver pré-aprovação, digite aqui." />
+                    <div>
+                      <div className="bg-slate-900 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-950">16. Parecer Diretoria / Comitê Final</div>
+                      <textarea value={analise.dados_qualitativos?.parecer_diretor || ""} onChange={(e) => setAnalise({ ...analise, dados_qualitativos: { ...analise.dados_qualitativos, parecer_diretor: e.target.value } })} className="w-full h-32 p-2 bg-slate-100 border border-[#cbd5e1] border-t-0 text-[11px] outline-none resize-none font-sans" />
                     </div>
                   </div>
 
@@ -717,7 +753,7 @@ function MesaAnaliseConteudo() {
 export default function MesaAnalisePage() {
   return (
     <div className="font-sans antialiased text-slate-800">
-      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center font-mono text-xs text-indigo-500 animate-pulse">⚡ Inicializando Motor de Análise V8...</div>}>
+      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center font-mono text-xs text-blue-500 animate-pulse">⚡ Inicializando Motor Excel V8...</div>}>
         <MesaAnaliseConteudo />
       </Suspense>
     </div>
