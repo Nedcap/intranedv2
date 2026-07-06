@@ -24,11 +24,10 @@ interface AnaliseData {
   dados_endividamento: Array<{ instituicao: string; modalidade: string; saldo: number }>;
   dados_restritivos: Array<{ origem: string; tipo: string; qtd: number; valor: number; obs: string }>;
   dados_estrutura_societaria: Array<{ s_nome: string; s_perc: number; s_cargo: string; s_aval: boolean; b_bens: string; b_valor: number }>;
-  dados_juridico: { processos_tramitacao?: string; processes_arquivados?: string };
+  dados_juridico: { processos_tramitacao?: string; processos_arquivados?: string };
   parecer_comite: string;
 }
 
-// 📦 DADOS REAIS EXTRAÍDOS DA SUA PLANILHA DA RECAPADORA TOTALCAP
 const DADOS_MODELO_TOTALCAP: AnaliseData = {
   id: null,
   cnpj: "11.127.136/0001-83",
@@ -55,7 +54,7 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
     processos_tramitacao: "🔴 7 Processos em Tramitação / Suspensos\n- 4 Fiscal / Tributário: Execuções Fiscais movidas pela União (ações de R$ 695k e R$ 288k) e Curitiba (R$ 75k).\n- 1 Cível: Ação Monitória movida pelo Banco Itaú cobrando CCB de R$ 410.878,49.\n- 2 Tributário: Ações de defesa atacando a União com créditos a receber.",
     processos_arquivados: "🟢 ~6 Processos Extintos / Arquivados Definitivamente\n- Cobranças bancárias antigas quitadas e encerradas junto ao Sicredi (R$ 37k)."
   },
-  parecer_comite: "Conclusão: Empresa apresenta faturamento em crescimento, com 39% de incremento nos 5 primeiros meses de 2025 em comparação ao ano anterior. Operação 100% bancarizada e sem vencidos no SCR. Empresa e sócio possuem 1 Refin da Caixa Econômica, mas o restritivo advém da pessoa física e não da empresa.\n\nNa parte processual, notei 1 processo que demanda um pouco de atenção: uma ação monitória do Itaú por uma CCB não paga no valor de R$ 410k. No entanto, tal valor não consta no SCR, possivelmente devido ao grau do processo ou por possuírem liminar para ocultação do valor.\n\nCom exceção desse ponto mencionado, por tratar-se de uma dívida bancária em discussão, não vejo impeditivos para a aprovação do cadastro do cliente. Considerando o porte da empresa e o limite baixo solicitado de R$ 100k, recomendo a aprovação conforme o pleito."
+  parecer_comite: "Conclusão: Empresa apresenta faturamento em crescimento, com 39% de incremento nos 5 primeiros meses de 2025 em comparação ao ano anterior. Operação 100% bancarizada e sem vencidos no SCR. Empresa e sócio possuem 1 Refin da Caixa Econômica, mas o restritivo advém da pessoa física.\n\nNa parte processual, a ação monitória do Itaú (R$ 410k) está sendo discutida judicialmente e não impacta o SCR atual. Recomendo aprovação do limite solicitado de R$ 80k devido ao forte fluxo de caixa."
 };
 
 function MesaAnaliseConteudo() {
@@ -171,7 +170,7 @@ function MesaAnaliseConteudo() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       
-      {/* SEÇÃO DA ESQUERDA: A FILA DE EMPRESAS EM TEMPO REAL */}
+      {/* SEÇÃO DA ESQUERDA */}
       <div className="lg:col-span-3 space-y-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col min-h-[650px]">
           <span className="font-black text-slate-800 uppercase text-[10px] tracking-widest block border-b pb-2 mb-3">
@@ -218,7 +217,7 @@ function MesaAnaliseConteudo() {
         </div>
       </div>
 
-      {/* SEÇÃO DA DIREITA: O EXCEL VIRTUAL COMPLETO */}
+      {/* SEÇÃO DA DIREITA */}
       <div className="lg:col-span-9 space-y-4">
         {loadingAnalise ? (
           <div className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-sm min-h-[650px] flex flex-col items-center justify-center">
@@ -232,7 +231,8 @@ function MesaAnaliseConteudo() {
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"}`}>
                   {idSelecionado ? "Edição de Registro Ativo (Supabase)" : "Visualização de Estrutura Técnica (Estático)"}
                 </span>
-                <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social</h2>
+                {/* Corrigido o fechamento da tag de chaves abaixo! */}
+                <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
                 <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade || "Curitiba"}/{analise.uf}</p>
               </div>
               <button onClick={persistirNoBanco} disabled={salvando} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2 rounded-lg text-xs uppercase tracking-widest disabled:opacity-50 shadow-md cursor-pointer transition-all">
