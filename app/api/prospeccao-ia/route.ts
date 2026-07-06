@@ -107,7 +107,7 @@ export async function POST(req: Request) {
          data_abertura ASC`;
 
     // ⚠️ AJUSTE AQUI: Substitua pelo caminho correto da sua tabela no BigQuery (projeto.dataset.tabela)
-    const TABELA_BIGQUERY = "`seu_projeto_google.seu_dataset.sua_tabela`";
+    const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
 
     const sqlQuery = `
       SELECT 
