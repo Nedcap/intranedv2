@@ -607,14 +607,16 @@ export default function ImportacaoPage() {
       for (const item of dadosFinais.juros.sec) mesclarLancamento(item);
 
       if (loteFinancas.length > 0) {
-        const periodosAfetados = new Set(loteFinancas.map(i => `${i.empresa}|${i.mes_ano}`));
+        // 🎯 FIX 1: Limpeza cirúrgica do extrato por cedente
+        const periodosCedentes = new Set(loteFinancas.map(i => `${i.empresa}|${i.mes_ano}|${i.cedente}`));
 
-        for (const periodo of periodosAfetados) {
-          const [empresa, mes_ano] = periodo.split("|");
+        for (const pc of periodosCedentes) {
+          const [empresa, mes_ano, cedente] = pc.split("|");
           await supabase.from("extrato_financeiro")
             .delete()
             .eq("empresa", empresa)
-            .eq("mes_ano", mes_ano);
+            .eq("mes_ano", mes_ano)
+            .eq("cedente", cedente);
         }
 
         const chunkFinancas = 500;
@@ -623,23 +625,26 @@ export default function ImportacaoPage() {
           if (errExtrato) throw errExtrato;
         }
 
-        // 🎯 FIX: Nova agregação matemática para dash_vop prevenindo zeramento incorreto
+        // 🎯 FIX 2: Nova agregação matemática para dash_vop prevenindo zeramento incorreto
         const { data: dbVop } = await supabase.from('dash_vop').select('*');
         const vopMap = new Map();
         
         dbVop?.forEach(row => {
           const key = `${row.mes_ano}_${row.cedente}`;
-          const zerarSec = periodosAfetados.has(`SEC|${row.mes_ano}`);
-          const zerarFidc = periodosAfetados.has(`FIDC|${row.mes_ano}`);
-          
-          vopMap.set(key, {
-            mes_ano: row.mes_ano,
-            cedente: row.cedente,
-            vop_sec: zerarSec ? 0 : (row.vop_sec || 0),
-            vop_fidc: zerarFidc ? 0 : (row.vop_fidc || 0)
-          });
+          vopMap.set(key, { ...row });
         });
 
+        // Zera apenas os cedentes afetados por essa atualização
+        for (const pc of periodosCedentes) {
+          const [empresa, mes_ano, cedente] = pc.split("|");
+          const key = `${mes_ano}_${cedente}`;
+          if (vopMap.has(key)) {
+            if (empresa === 'SEC') vopMap.get(key).vop_sec = 0;
+            if (empresa === 'FIDC') vopMap.get(key).vop_fidc = 0;
+          }
+        }
+
+        // Soma os novos dados
         loteFinancas.forEach(item => {
           if (item.vop > 0) {
             const key = `${item.mes_ano}_${item.cedente}`;
@@ -671,15 +676,24 @@ export default function ImportacaoPage() {
       // ========================================================================
       // 3. GRAVAR CARTEIRA DETALHADA EM ABERTO (FOTOS DIÁRIAS)
       // ========================================================================
+      
+      // 🎯 FIX 3: Delete cirúrgico da carteira apenas dos cedentes importados
       if (dadosFinais.carteira.sec.length > 0) {
-        await supabase.from("carteira_sec").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        const cedentesSec = [...new Set(dadosFinais.carteira.sec.map((c: any) => c.cedente))];
+        
+        await supabase.from("carteira_sec").delete().in("cedente", cedentesSec);
+        
         const chunk = 500;
         for (let i = 0; i < dadosFinais.carteira.sec.length; i += chunk) {
           await supabase.from("carteira_sec").insert(dadosFinais.carteira.sec.slice(i, i + chunk));
         }
       }
+
       if (dadosFinais.carteira.fidc.length > 0) {
-        await supabase.from("carteira_fidc").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        const cedentesFidc = [...new Set(dadosFinais.carteira.fidc.map((c: any) => c.cedente))];
+        
+        await supabase.from("carteira_fidc").delete().in("cedente", cedentesFidc);
+        
         const chunk = 500;
         for (let i = 0; i < dadosFinais.carteira.fidc.length; i += chunk) {
           await supabase.from("carteira_fidc").insert(dadosFinais.carteira.fidc.slice(i, i + chunk));
