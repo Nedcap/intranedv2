@@ -1,38 +1,31 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 🚜 MODO TRATOR: Ignora erros de Typescript no Build para garantir o Deploy
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // 🚜 MODO TRATOR: Ignora erros no Build
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
   
-  // 🚜 MODO TRATOR: Ignora fiscais de Linting no Build
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-
-  // 📦 EXTENSÃO NATIVA: Impede que a Vercel tente empacotar o DuckDB como JS comum, evitando o erro de Build
+  // 📦 EXTENSÃO NATIVA
   serverExternalPackages: ['duckdb'],
 
-  // 🖼️ CONFIGURAÇÃO DE MÍDIA: Permite o carregamento seguro de imagens do Supabase
+  // 🥷 TRUQUE NINJA: Obriga a Vercel a enviar o DuckDB para o servidor sem que o compilador analise o C++
+  experimental: {
+    outputFileTracingIncludes: {
+      '/api/**/*': ['./node_modules/duckdb/**/*'],
+    },
+  },
+
+  // 🖼️ CONFIGURAÇÃO DE MÍDIA
   images: {
     remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "*.supabase.co", // Libera qualquer subdomínio do seu banco de dados
-        port: "",
-        pathname: "/storage/v1/object/public/**", // Focado estritamente na rota de arquivos públicos
-      },
+      { protocol: "https", hostname: "*.supabase.co", port: "", pathname: "/storage/v1/object/public/**" },
     ],
   },
 
-  // 🚀 TÚNEL DE REDE: Cria um atalho estável que a Vercel aceita nativamente
+  // 🚀 TÚNEL DE REDE
   async rewrites() {
     return [
-      {
-        source: '/api/lemmit-bypass/:path*',
-        destination: 'https://api.lemit.com.br/api/v1/consulta/:path*',
-      },
+      { source: '/api/lemmit-bypass/:path*', destination: 'https://api.lemit.com.br/api/v1/consulta/:path*' },
     ];
   },
 };
