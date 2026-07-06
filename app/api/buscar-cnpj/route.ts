@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { BigQuery } from "@google-cloud/bigquery";
+import fs from "fs";
+import path from "path";
 
 export const dynamic = 'force-dynamic';
 
@@ -7,10 +9,9 @@ const obterClienteBigQuery = () => {
   const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
   try {
-    // 💡 Variável definida no singular:
     const credenciais = JSON.parse(jsonCredenciais);
     return new BigQuery({
-      projectId: credenciais.project_id, // 💥 Corrigido de credentials para credenciais!
+      projectId: credenciais.project_id,
       credentials: {
         client_email: credenciais.client_email,
         private_key: credenciais.private_key,
@@ -49,13 +50,42 @@ export async function POST(req: Request) {
     }
 
     const row = rows[0];
+    let nomeCidadeReal = "Não localizada";
+
+    // =========================================================================
+    // 📖 PLUG DIRETO DA TABELA TOM LOCAL (Dicionário de Código -> Nome Extenso)
+    // =========================================================================
+    try {
+      const filePath = path.join(process.cwd(), 'tabela_tom.json');
+      if (fs.existsSync(filePath)) {
+        const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const codigoBuscado = String(row.municipio_rf).trim();
+
+        // Inverte o dicionário para achar a chave (NOME-UF) pelo valor (CÓDIGO TOM)
+        const chaveEncontrada = Object.keys(tabelaTomBase).find(
+          (key) => String(tabelaTomBase[key]).trim() === codigoBuscado
+        );
+
+        if (chaveEncontrada) {
+          // Remove a sigla do estado final para pegar só o nome limpo (Ex: "ABADIANIA-GO" -> "ABADIANIA")
+          nomeCidadeReal = chaveEncontrada.split("-")[0].trim();
+        } else {
+          console.warn(`[Aviso] Código de município '${codigoBuscado}' não encontrado no dicionário local.`);
+          nomeCidadeReal = `CÓDIGO ${codigoBuscado}`;
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao ler ou processar tabela_tom.json local:", err);
+      nomeCidadeReal = `CÓDIGO ${row.municipio_rf}`;
+    }
+
     return NextResponse.json({
       found: true,
       empresa: {
         cnpj: row.cnpj,
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? row.uf.toUpperCase() : "PR",
-        cidadeExtenso: row.municipio_rf || "Curitiba",
+        cidadeExtenso: nomeCidadeReal, // Envia o nome traduzido bonitinho via JSON local
         capital_social: row.capital_social ? parseFloat(row.capital_social) : 0
       }
     });
