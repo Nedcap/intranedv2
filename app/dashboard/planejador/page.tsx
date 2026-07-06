@@ -153,7 +153,7 @@ export default function PlanejadorRotasPage() {
     }
   };
 
-  // 🎯 URL DO MAPS CORRIGIDA COM PARSER DE WAYPOINTS OFICIAL DA GOOGLE URL API
+// 🎯 Mágica para abrir o Google Maps Real com a Rota Completa contendo apenas as Cidades Ativas
   const abrirGoogleMapsComCidadesAtivas = () => {
     if (cidadesDaVisao.length === 0) return;
     
@@ -161,14 +161,19 @@ export default function PlanejadorRotasPage() {
     const pontoB = cidadesDaVisao[cidadesDaVisao.length - 1];
     const intermediarias = cidadesDaVisao.slice(1, -1);
     
+    // Padrão de busca estruturado para o motor do Maps não se perder
     const origemParam = encodeURIComponent(`${pontoA.nome}, ${pontoA.uf}, Brasil`);
     const destinoParam = encodeURIComponent(`${pontoB.nome}, ${pontoB.uf}, Brasil`);
     
+    // No padrão moderno (dir), os waypoints são separados por barras '/' ou pipes '|' dependendo da API
+    // Para links de navegação direta abertos no navegador/app, o parâmetro oficial é '&waypoints='
     const waypointsParam = intermediarias.length > 0 
       ? `&waypoints=${intermediarias.map(c => encodeURIComponent(`${c.nome}, ${c.uf}, Brasil`)).join('|')}`
       : "";
       
+    // 🔥 URL ATUALIZADA: Usando o endpoint oficial moderno '/dir/?api=1' que força o modo de rotas com paradas
     const urlMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origemParam}&destination=${destinoParam}${waypointsParam}&travelmode=driving`;
+    
     window.open(urlMapsUrl, "_blank");
   };
 
