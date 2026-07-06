@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import UploadDocs from "@/components/UploadDocs";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 interface Empresa {
   cnpj: string;
@@ -20,6 +21,7 @@ interface FilaItem {
 }
 
 export default function MotorCreditoPage() {
+  const router = useRouter();
   const [cnpjBusca, setCnpjBusca] = useState("");
   const [loading, setLoading] = useState(false);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
@@ -32,7 +34,7 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
-      // 📊 Integração direta com a tabela public.analises informada
+      // 📊 Garantindo leitura estrita da tabela 'analises'
       const { data, error } = await supabase
         .from("analises")
         .select("id, empresa_nome, status, criado_em")
@@ -87,7 +89,6 @@ export default function MotorCreditoPage() {
     }
   };
 
-  // 🔥 Cria o registro na tabela public.analises após a confirmação do upload bem-sucedido
   const registrarAnaliseNoSupabase = async () => {
     if (!empresaSelecionada) return;
 
@@ -98,15 +99,14 @@ export default function MotorCreditoPage() {
         .from("analises")
         .insert({
           empresa_nome: empresaSelecionada.razao_social.toUpperCase(),
-          caminho_local: `clientes/${cnpjLimpo}/`, // Caminho base dos arquivos salvos no R2
-          status: "aberta", // Assume o padrão configurado na trigger da sua esteira
+          caminho_local: `clientes/${cnpjLimpo}/`, 
+          status: "aberta", 
           comercial: "Mesa V8 Auto",
-          data_recebimento: new Date().toISOString().split('T')[0] // Formato YYYY-MM-DD
+          data_recebimento: new Date().toISOString().split('T')[0] 
         });
 
       if (error) throw error;
 
-      // Limpa os estados e recarrega a grid com a nova empresa já inclusa
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
@@ -155,7 +155,7 @@ export default function MotorCreditoPage() {
           </div>
         </div>
 
-        {/* BOX DE SOLICITAÇÃO ESTREITA POR CNPJ */}
+        {/* BOX DE CNPJ */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all"></div>
           
@@ -224,14 +224,13 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* O UploadDocs agora é purificado; ao terminar, ele chama a função local para registrar a análise */}
                 <UploadDocs empresa={empresaSelecionada} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL */}
+        {/* TABELA DE STATUS */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
@@ -279,11 +278,12 @@ export default function MotorCreditoPage() {
                         {new Date(item.criado_em).toLocaleDateString("pt-BR")}
                       </td>
                       <td className="p-3.5 text-center">
+                        {/* 🔥 LIBERADO PARA MASTER COM LINK DE REDIRECIONAMENTO DIRETO PARA A MESA */}
                         <button
-                          disabled={true}
-                          className="bg-slate-100 text-slate-400 border border-slate-200 font-bold px-3 py-1 rounded text-[11px] cursor-not-allowed flex items-center gap-1 mx-auto"
+                          onClick={() => router.push(`/dashboard/motor-credito/mesa-analise?id=${item.id}`)}
+                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] flex items-center gap-1 mx-auto shadow-sm cursor-pointer transition-all"
                         >
-                          🔒 Restrito Admin
+                          🔓 Abrir Auditoria v8
                         </button>
                       </td>
                     </tr>
