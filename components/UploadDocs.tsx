@@ -46,73 +46,51 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
     const documentosRegistrados: { nome: string; path: string }[] = [];
 
-    // 1. Loop de Uploads em Lote para o Cloudflare R2
+    // 1. Envia os arquivos em lote sequencial para o seu próprio Backend
     for (let i = 0; i < arquivos.length; i++) {
       const item = arquivos[i];
       if (item.status === "sucesso") continue;
 
-      setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Assinando cofre R2..." } : a));
+      setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Enviando arquivo para o servidor..." } : a));
 
       try {
+        const formData = new FormData();
+        formData.append("file", item.file);
+        formData.append("analiseId", cnpjLimpo);
+
+        // Faz o POST para a sua rota local. O CORS não afeta requisições de mesma origem.
         const res = await fetch("/api/upload", {
           method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          body: JSON.stringify({
-            fileName: item.file.name,
-            fileType: item.file.type,
-            analiseId: cnpjLimpo,
-          }),
-        }).catch(err => {
-          throw new Error(`A rota local /api/upload está inacessível ou fora do ar: ${err.message}`);
+          body: formData,
         });
 
         const data = await res.json();
 
-        if (!res.ok || data.error || !data.signedUrl) {
-          throw new Error(data.error || `HTTP ${res.status}: Servidor rejeitou os parâmetros R2.`);
+        if (!res.ok || data.error) {
+          throw new Error(data.error || `Erro HTTP ${res.status}`);
         }
 
-        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Transferindo binário para o R2..." } : a));
-
-        const uploadRes = await fetch(data.signedUrl, {
-          method: "PUT",
-          headers: { 
-            "Content-Type": item.file.type 
-          },
-          body: item.file,
-        }).catch(err => {
-          throw new Error(`Falha física de upload no R2 (Verifique o CORS): ${err.message}`);
-        });
-
-        if (!uploadRes.ok) {
-          throw new Error(`Cloudflare R2 rejeitou o arquivo: ${uploadRes.statusText}`);
-        }
-
-        // Armazena o path retornado pelo seu R2 para registrar na tabela
+        // Guarda os caminhos retornados pelo backend para salvar no banco
         documentosRegistrados.push({ nome: item.file.name, path: data.path || "" });
 
-        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Gravado com sucesso!" } : a));
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Salvo com sucesso!" } : a));
 
       } catch (err: any) {
-        console.error(`Erro no arquivo ${item.file.name}:`, err);
+        console.error(err);
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "erro", mensagem: err.message } : a));
       }
     }
 
-    // 2. Inserção do Registro no Supabase caso pelo menos um arquivo tenha subido
+    // 2. Cria o registro unificado no Supabase se pelo menos um arquivo subiu
     if (documentosRegistrados.length > 0) {
       try {
-        setArquivos(prev => prev.map(a => a.status === "sucesso" ? { ...a, messaging: "Criando cartão na esteira..." } : a));
+        setArquivos(prev => prev.map(a => a.status === "sucesso" ? { ...a, mensagem: "Criando cartão na esteira..." } : a));
         
         const { error: supaError } = await supabase.from("analises_credito").insert({
           cnpj: cnpjLimpo,
           razao_social: empresa.razao_social,
           uf: empresa.uf,
           status: "robo_processando",
-          // Se sua coluna aceitar JSONB, injeta o array de arquivos salvos
           dados_documentos: documentosRegistrados
         });
 
@@ -124,8 +102,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         }, 1500);
 
       } catch (dbErr: any) {
-        console.error("Erro ao registrar na tabela do Supabase:", dbErr);
-        alert(`⚠️ Arquivos salvos no R2, mas falhou ao criar cartão no banco: ${dbErr.message}`);
+        console.error("Erro ao salvar no Supabase:", dbErr);
+        alert(`⚠️ Arquivos armazenados, mas falhou ao atualizar a esteira: ${dbErr.message}`);
       }
     }
 
@@ -191,7 +169,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         disabled={uploading || arquivos.length === 0}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "Processando Lote no R2..." : "🚀 Disparar Documentos para a Mesa V8"}
+        {uploading ? "Processando Lote..." : "🚀 Disparar Documentos para a Mesa V8"}
       </button>
     </div>
   );
