@@ -35,9 +35,11 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
+      // 📊 Comercial SÓ vê o que já foi finalizado ou devolvido
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status, created_at")
+        .in("status", ["aprovado", "reprovado", "aguardando_docs"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -70,7 +72,7 @@ export default function MotorCreditoPage() {
       if (data.found && data.empresa) {
         setEmpresas([data.empresa]);
       } else {
-        alert("❌ CNPJ não localizado na base oficial do BigQuery.\n💡 Liberando modo de entrada manual assistida.");
+        alert("❌ CNPJ não localizado na base oficial.\n💡 Liberando modo de entrada manual.");
         setEmpresas([{
           cnpj: cnpjLimpo,
           razao_social: "EMPRESA DIGITADA MANUALMENTE",
@@ -99,7 +101,7 @@ export default function MotorCreditoPage() {
         .insert({
           cnpj: cnpjLimpo,
           razao_social: empresaSelecionada.razao_social.toUpperCase(),
-          status: "robo_processando", 
+          status: "em_revisao_humana", // Entra direto para a mesa de análise
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
             cidade: empresaSelecionada.cidadeExtenso || "Curitiba",
@@ -128,12 +130,12 @@ export default function MotorCreditoPage() {
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
-      await carregarFilaComercial();
+      await carregarFilaComercial(); // Atualiza a tabela (embora a nova não vá aparecer, garante que a view está certa)
 
     } catch (err: any) {
       console.error("Erro ao inserir na tabela analises_credito:", err);
       alert("⚠️ Erro ao registrar na esteira: " + err.message);
-    } {
+    } finally {
       setLoading(false);
     }
   };
@@ -250,11 +252,11 @@ export default function MotorCreditoPage() {
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL */}
+        {/* TABELA DE STATUS DO COMERCIAL (SÓ MOSTRA FINALIZADOS OU PENDENTES) */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px]">
-              📊 Status do Fluxo da Equipe Comercial ({filaReal.length})
+              📊 Retorno da Mesa de Risco ({filaReal.length})
             </span>
           </div>
 
@@ -264,16 +266,16 @@ export default function MotorCreditoPage() {
                 <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
                   <th className="p-3.5">Razão Social da Empresa</th>
                   <th className="p-3.5">CNPJ Oficial</th>
-                  <th className="p-3.5">Estágio Atual</th>
+                  <th className="p-3.5">Veredito / Status</th>
                   <th className="p-3.5 text-center">Data de Entrada</th>
-                  <th className="p-3.5 text-center">Painel Detalhado</th>
+                  <th className="p-3.5 text-center">Parecer</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-xs">
                 {filaReal.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-slate-400 font-bold bg-slate-50/50">
-                      Nenhuma análise em andamento na esteira comercial por enquanto.
+                      Nenhum resultado processado pela mesa no momento.
                     </td>
                   </tr>
                 ) : (
@@ -284,25 +286,17 @@ export default function MotorCreditoPage() {
                       <td className="p-3.5">
                         {item.status === "aguardando_docs" ? (
                           <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            📥 Aguardando Docs
-                          </span>
-                        ) : item.status === "robo_processando" ? (
-                          <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
-                            🤖 Robô Processando OCR
-                          </span>
-                        ) : item.status === "em_revisao_humana" ? (
-                          <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            🕵️ Auditoria do Comitê
+                            📥 Devolvido - Falta Docs
                           </span>
                         ) : item.status === "aprovado" ? (
                           <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             ✅ Aprovado
                           </span>
-                        ) : (
+                        ) : item.status === "reprovado" ? (
                           <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             ❌ Reprovado
                           </span>
-                        )}
+                        ) : null}
                       </td>
                       <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
                         {new Date(item.created_at).toLocaleDateString("pt-BR")}
@@ -312,7 +306,7 @@ export default function MotorCreditoPage() {
                           onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
                           className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] flex items-center gap-1 mx-auto shadow-sm cursor-pointer transition-all"
                         >
-                          🔓 Abrir Auditoria v8
+                          👁️ Ver Detalhes
                         </button>
                       </td>
                     </tr>
