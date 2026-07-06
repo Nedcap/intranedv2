@@ -44,7 +44,7 @@ export default function MotorCreditoPage() {
     }
   };
 
-  const handleBuscarPorCnpj = async (e: React.FormEvent) => {
+const handleBuscarPorCnpj = async (e: React.FormEvent) => {
     e.preventDefault();
     const cnpjLimpo = cnpjBusca.replace(/\D/g, "");
     if (cnpjLimpo.length < 14) {
@@ -54,41 +54,36 @@ export default function MotorCreditoPage() {
 
     setLoading(true);
     try {
-      // Modificamos o prompt enviado para forçar a IA a entender que é uma busca direta por CNPJ, 
-      // ou para que o seu BigQuery filtre diretamente se a string contiver 14 dígitos.
-      const res = await fetch("/api/prospeccao-ia", {
+      // Batendo agora na API nova focada 100% em correspondência exata!
+      const res = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          promptUsuario: `Buscar estritamente a empresa do CNPJ ${cnpjLimpo}. Ela está localizada no estado do ${cnpjBusca.length === 18 ? "PR" : "PR"}.`, // Garantindo contexto de UF pro validador da sua rota
-          limite: 1 
-        }),
+        body: JSON.stringify({ cnpj: cnpjLimpo }),
       });
       
       const data = await res.json();
       
-      // Se a sua API antiga rejeitar a string do CNPJ, limpamos e forçamos o mapeamento com os dados oficiais do BigQuery
       if (data.error) {
-        console.warn("API de Prospecção rejeitou busca direta. Redirecionando fluxo...");
+        throw new Error(data.error);
       }
 
-      if (data.leads && data.leads.length > 0) {
-        // Encontrou na base otimizada
-        setEmpresas(data.leads);
+      if (data.found && data.empresa) {
+        // Encontrou a empresa real e exata no BigQuery
+        setEmpresas([data.empresa]);
       } else {
-        // Fallback de segurança: Se o BigQuery otimizado falhar na leitura do CNPJ limpo por causa do prompt da IA, 
-        // criamos o objeto de match temporário para não travar o comercial se o CNPJ for real
-        alert("❌ CNPJ não localizado automaticamente pela IA de Prospecção.\n💡 Cadastrando como entrada manual assistida para destravar o upload.");
+        // Fallback assistido para o comercial não travar se o CNPJ for muito recente e não estiver no parquet
+        alert("❌ CNPJ não localizado na base oficial do BigQuery.\n💡 Liberando modo de entrada manual assistida para não travar o envio.");
         setEmpresas([{
           cnpj: cnpjLimpo,
-          razao_social: "EMPRESA SOLICITADA EM AUDITORIA",
+          razao_social: "EMPRESA DIGITADA MANUALMENTE",
           uf: "PR",
-          cidadeExtenso: "Curitiba"
+          cidadeExtenso: "Curitiba",
+          capital_social: 0
         }]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao buscar CNPJ:", err);
-      alert("Erro na comunicação com o servidor.");
+      alert("❌ Falha na conexão: " + err.message);
     } finally {
       setLoading(false);
     }
