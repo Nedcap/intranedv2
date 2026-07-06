@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
-import { supabase } from "@/lib/supabase";
 
 interface UploadDocsProps {
   empresa: {
@@ -34,62 +33,48 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setMensagem("🔄 Gerando autorização no cofre Cloudflare R2...");
 
     const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
-    let pathDocumento = `clientes/${cnpjLimpo}/${Date.now()}_${file.name}`;
 
     try {
-      // 1. Pede a URL assinada para a sua API oficial do R2
+      // 1. Pede a URL assinada para a nossa API do R2 (app/api/upload/route.ts)
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileType: file.type,
-          analiseId: cnpjLimpo,
+          analiseId: cnpjLimpo, // Passa o CNPJ limpo para cair na pasta certa
         }),
       });
 
       if (!res.ok) throw new Error("Falha ao gerar URL de upload no R2.");
       
       const data = await res.json();
+      
       if (data.signedUrl) {
-        setMensagem("📁 Transferindo arquivo para o Cloudflare R2...");
-        // 2. Upload direto no bucket do R2
+        setMensagem("📁 Transferindo documento diretamente para o Cloudflare R2...");
+        
+        // 2. Transfere o arquivo via PUT direto para o storage da Cloudflare, usando as credenciais da Vercel
         const uploadRes = await fetch(data.signedUrl, {
           method: "PUT",
           headers: { "Content-Type": file.type },
           body: file,
         });
+
         if (!uploadRes.ok) throw new Error("Erro na gravação do bucket R2.");
-        if (data.path) pathDocumento = data.path;
+        
+        setMensagem("✅ Sucesso! Arquivo armazenado e disponibilizado para análise.");
+        setFile(null);
+        
+        // Callback para a tela pai resetar a busca do comercial
+        setTimeout(() => {
+          onSucesso();
+        }, 1500);
+      } else {
+        throw new Error(data.error || "Assinatura R2 não retornada.");
       }
-    } catch (networkError: any) {
-      console.warn("Aviso R2:", networkError.message);
-    }
-
-    setMensagem("🚀 Injetando solicitação na esteira de crédito...");
-
-    try {
-      // 3. Inserção Cirúrgica: Apenas o estritamente necessário para criar o registro do comercial
-      const { error: supaError } = await supabase.from("analises_credito").insert({
-        cnpj: cnpjLimpo,
-        razao_social: empresa.razao_social,
-        uf: empresa.uf,
-        status: "robo_processando",
-        dados_documentos: [{ nome: file.name, path: pathDocumento }]
-      });
-
-      if (supaError) throw supaError;
-
-      setMensagem("✅ Sucesso! Empresa enviada para a Mesa de Análise.");
-      setFile(null);
-      
-      setTimeout(() => {
-        onSucesso();
-      }, 1200);
-
     } catch (err: any) {
-      console.error("Erro Supabase:", err);
-      setMensagem("❌ Erro de Inserção: " + err.message);
+      console.error("Erro no Upload R2:", err);
+      setMensagem("❌ Falha no Envio: " + err.message);
     } finally {
       setUploading(false);
     }
@@ -111,10 +96,10 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
       <button
         onClick={handleUpload}
-        disabled={uploading}
-        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer"
+        disabled={uploading || !file}
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "Sincronizando..." : "🚀 Disparar Esteira de Crédito"}
+        {uploading ? "Transmitindo ao Storage..." : "🚀 Enviar Documentação para Análise"}
       </button>
 
       {mensagem && (
