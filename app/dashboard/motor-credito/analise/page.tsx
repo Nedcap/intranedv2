@@ -40,6 +40,7 @@ interface AnaliseData {
   uf: string;
   cidade: string;
   capital_social: number;
+  status?: string;
   dados_gerais: { fundacao?: string; ramo?: string; site?: string; relacionamento?: string; gerente?: string };
   proposta: { modalidade: string; limite: number; prazo: number; tranche: number; taxa: number; garantia: string; rating: string };
   dados_faturamento: Record<string, Record<string, number>>;
@@ -75,7 +76,7 @@ const DADOS_MODELO_TOTALCAP: AnaliseData = {
     { origem: "Sidnei (PF)", tipo: "Refin", qtd: 1, valor: 4681.44, obs: "Caixa Econômica" }
   ],
   dados_estrutura_societaria: [
-    { s_nome: "Sidnei da Silva", s_perc: 100, s_cargo: "Sócio Administrador", s_aval: true, b_bens: "1 imóvel + 1 terreno (IRPF)", b_valor: 199425.89 }
+    { s_nome: "Sidnei da Silva", s_perc: 100, s_cargo: "Sócio Administrador", s_aval: true, b_bens: "1 imóvel + 1 terrain (IRPF)", b_valor: 199425.89 }
   ],
   dados_juridico: {
     processos_tramitacao: "🔴 7 Processos em Tramitação / Suspensos\n- 4 Fiscal: Execuções Fiscais movidas pela União (ações de R$ 695k e R$ 288k) e Curitiba (R$ 75k).\n- 1 Cível: Ação Monitória do Banco Itaú cobrando CCB de R$ 410.878,49.\n- 2 Tributário: Ações de defesa atacando a União com créditos a receber.",
@@ -93,21 +94,33 @@ function MesaAnaliseConteudo() {
   const [loadingFila, setLoadingFila] = useState(true);
   const [loadingAnalise, setLoadingAnalise] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [recusando, setRecusando] = useState(false);
 
+  // 🔄 Polling Automático e Inicialização
   useEffect(() => {
-    buscarFilaSupabase();
+    buscarFilaSupabase(true); // Ativa spinner apenas na primeira carga
+
+    const intervalo = setInterval(() => {
+      buscarFilaSupabase(false); // Atualiza em background sem piscar a tela
+    }, 10000); // 10 segundos
+
+    return () => clearInterval(intervalo);
   }, []);
 
-  const buscarFilaSupabase = async () => {
+  const buscarFilaSupabase = async (comSpinner = false) => {
     try {
-      setLoadingFila(true);
-      const { data, error } = await supabase.from("analises_credito").select("id, razao_social, cnpj, status").order("criado_em", { ascending: false });
+      if (comSpinner) setLoadingFila(true);
+      const { data, error } = await supabase
+        .from("analises_credito")
+        .select("id, razao_social, cnpj, status")
+        .order("criado_em", { ascending: false });
+        
       if (error) throw error;
       if (data) setFila(data);
     } catch (err) {
-      console.error(err);
+      console.error("Erro de sincronização da fila:", err);
     } finally {
-      setLoadingFila(false);
+      if (comSpinner) setLoadingFila(false);
     }
   };
 
@@ -154,7 +167,7 @@ function MesaAnaliseConteudo() {
       const { error } = await supabase.from("analises_credito").update({ ...analise }).eq("id", analise.id);
       if (error) throw error;
       alert("✅ Excel v8 persistido no Supabase!");
-      buscarFilaSupabase();
+      buscarFilaSupabase(false);
     } catch (err: any) {
       alert("❌ Erro: " + err.message);
     } finally {
@@ -162,8 +175,50 @@ function MesaAnaliseConteudo() {
     }
   };
 
+  // ⚠️ RECUSA OPERACIONAL: Devolve o status da empresa para pendência
+  const devolverParaComercialPendente = async () => {
+    if (!idSelecionado || !analise.id) {
+      alert("Mude para uma empresa real da esteira para executar a recusa.");
+      return;
+    }
+
+    const justificativa = prompt("Digite o motivo da devolução (Ex: Falta balanço de 2025 ou extratos ilegíveis):");
+    if (justificativa === null) return; // Cancelou o prompt
+    if (!justificativa.trim()) {
+      alert("⚠️ Você precisa informar uma justificativa para o comercial ajustar.");
+      return;
+    }
+
+    try {
+      setRecusando(true);
+      
+      // Altera o status para 'aberta' (ou o seu status inicial da esteira) e anexa a obs no parecer
+      const { error } = await supabase
+        .from("analises_credito")
+        .update({ 
+          status: "aberta", 
+          parecer_comite: `🚨 DEVOLVIDO PARA PENDÊNCIA:\nMotivo: ${justificativa}\n\n` + analise.parecer_comite
+        })
+        .eq("id", analise.id);
+
+      if (error) throw error;
+
+      alert("📥 Empresa devolvida para a fila pendente do comercial com sucesso!");
+      
+      // Reseta a visualização
+      setIdSelecionado(null);
+      setAnalise(DADOS_MODELO_TOTALCAP);
+      await buscarFilaSupabase(true);
+
+    } catch (err: any) {
+      alert("❌ Falha ao processar devolução: " + err.message);
+    } finally {
+      setRecusando(false);
+    }
+  };
+
   // =========================================================================
-  // 🎛️ GERENCIADOR DE GRADES DINÂMICAS (INSERÇÃO / REMOÇÃO ESTILO EXCEL)
+  // 🎛️ GERENCIADOR DE GRADES DINÂMICAS
   // =========================================================================
   const adicionarLinhaSocios = () => {
     const nova = { s_nome: "Novo Sócio", s_perc: 0, s_cargo: "Diretor", s_aval: true, b_bens: "", b_valor: 0 };
@@ -174,7 +229,7 @@ function MesaAnaliseConteudo() {
   };
 
   const adicionarLinhaEndividamento = () => {
-    const nova = { item: "", instituicao: "Novo Banco", modalidade: "Giro", saldo: 0 };
+    const nova = { instituicao: "Novo Banco", modalidade: "Giro", saldo: 0 };
     setAnalise({ ...analise, dados_endividamento: [...analise.dados_endividamento, nova] });
   };
   const removerLinhaEndividamento = (index: number) => {
@@ -218,12 +273,23 @@ function MesaAnaliseConteudo() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       
-      {/* SIDEBAR DA FILA */}
+      {/* SIDEBAR DA FILA VIVA */}
       <div className="lg:col-span-3">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col min-h-[680px]">
-          <span className="font-black text-slate-800 uppercase text-[10px] tracking-widest block border-b pb-2 mb-3">
-            📥 Fila do Comitê de Risco ({fila.length})
-          </span>
+          <div className="flex justify-between items-center border-b pb-2 mb-3">
+            <span className="font-black text-slate-800 uppercase text-[10px] tracking-widest block">
+              📥 Fila do Comitê de Risco ({fila.length})
+            </span>
+            {/* Botão de Atualização Manual Rápida */}
+            <button 
+              onClick={() => buscarFilaSupabase(true)} 
+              className="text-indigo-600 hover:text-indigo-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+              title="Sincronizar Manualmente"
+            >
+              🔄 Atualizar
+            </button>
+          </div>
+
           <div className="space-y-2 overflow-y-auto max-h-[600px] pr-1">
             <div 
               onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO_TOTALCAP); }}
@@ -233,16 +299,27 @@ function MesaAnaliseConteudo() {
               <p className="text-[10px] font-mono text-slate-500 mt-0.5">Planilha TOTALCAP Completa</p>
             </div>
 
-            {fila.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => selecionarEmpresaDaEsteira(item.id)}
-                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${idSelecionado === item.id ? "bg-indigo-600 border-indigo-700 text-white" : "bg-white border-slate-200 hover:border-slate-300"}`}
-              >
-                <p className={`text-xs font-black uppercase truncate ${idSelecionado === item.id ? "text-white" : "text-slate-900"}`}>{item.razao_social}</p>
-                <p className={`text-[10px] font-mono mt-0.5 ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-400"}`}>CNPJ: {item.cnpj}</p>
-              </div>
-            ))}
+            {loadingFila ? (
+              <div className="text-center py-6 text-slate-400 font-mono text-[11px]">Sincronizando esteira...</div>
+            ) : fila.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs font-bold">Nenhum card na mesa.</div>
+            ) : (
+              fila.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => selecionarEmpresaDaEsteira(item.id)}
+                  className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${idSelecionado === item.id ? "bg-indigo-600 border-indigo-700 text-white" : "bg-white border-slate-200 hover:border-slate-300"}`}
+                >
+                  <p className={`text-xs font-black uppercase truncate ${idSelecionado === item.id ? "text-white" : "text-slate-900"}`}>{item.razao_social}</p>
+                  <div className="flex justify-between items-center mt-1">
+                    <p className={`text-[10px] font-mono ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-400"}`}>CNPJ: {item.cnpj}</p>
+                    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded ${idSelecionado === item.id ? "bg-indigo-800 text-white" : "bg-amber-100 text-amber-800"}`}>
+                      {item.status || "robo"}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -260,14 +337,32 @@ function MesaAnaliseConteudo() {
             <div className="border-b border-slate-200 pb-3 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
               <div>
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${idSelecionado ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"}`}>
-                  {idSelecionado ? "Planilha de Registro Ativo (Supabase)" : "Visualização de Estrutura Técnica (Estático)"}
+                  {idSelecionado ? `Card Ativo (${analise.status || "Mesa"})` : "Visualização de Estrutura Técnica (Estático)"}
                 </span>
                 <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{analise.razao_social}</h2>
-                <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | CEP LOCAL: {analise.cidade}/{analise.uf}</p>
+                <p className="text-xs font-mono font-bold text-slate-500">CNPJ: {analise.cnpj} | LOCALIZAÇÃO: {analise.cidade}/{analise.uf}</p>
               </div>
-              <button onClick={persistirNoBanco} disabled={salvando} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2 rounded-lg text-xs uppercase tracking-widest shadow-md cursor-pointer transition-all">
-                {salvando ? "Sincronizando..." : idSelecionado ? "💾 Salvar Planilha (Supabase)" : "💡 Testar Fórmulas e Inserções"}
-              </button>
+              
+              <div className="flex items-center gap-2">
+                {/* Botão Dinâmico de Devolução Operacional */}
+                {idSelecionado && (
+                  <button 
+                    onClick={devolverParaComercialPendente} 
+                    disabled={recusando} 
+                    className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-black px-4 py-2 rounded-lg text-xs uppercase tracking-widest cursor-pointer transition-all disabled:opacity-40"
+                  >
+                    {recusando ? "Devolvendo..." : "🚨 Devolver Pendente"}
+                  </button>
+                )}
+                
+                <button 
+                  onClick={persistirNoBanco} 
+                  disabled={salvando} 
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2 rounded-lg text-xs uppercase tracking-widest shadow-md cursor-pointer transition-all disabled:opacity-40"
+                >
+                  {salvando ? "Sincronizando..." : idSelecionado ? "💾 Salvar Planilha (Supabase)" : "💡 Testar Fórmulas e Inserções"}
+                </button>
+              </div>
             </div>
 
             {/* ABAS EXCEL ENGINE */}
@@ -295,7 +390,6 @@ function MesaAnaliseConteudo() {
               </div>
 
               <div className="p-5 min-h-[480px]">
-                {/* ABA 1: PROPOSTA */}
                 {abaAtiva === "proposta" && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
@@ -314,10 +408,9 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 2: DADOS EMPRESA */}
                 {abaAtiva === "dados_gerais" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4 max-w-[800px]">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b pb-1">Ficha Cadastral Oficiais</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b pb-1">Ficha Cadastral Oficial</span>
                     <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
                       <div><span className="text-slate-400 font-bold block mb-1">Fundação</span><input type="date" value={analise.dados_gerais.fundacao || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, fundacao: e.target.value } })} className="w-full p-2 border bg-white rounded" /></div>
                       <div><span className="text-slate-400 font-bold block mb-1">Ramo Atividade</span><input type="text" value={analise.dados_gerais.ramo || ""} onChange={(e) => setAnalise({ ...analise, dados_gerais: { ...analise.dados_gerais, ramo: e.target.value } })} className="w-full p-2 border bg-white rounded uppercase" /></div>
@@ -327,7 +420,6 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 3: SÓCIOS DINÂMICO (INSERÇÃO COMPLETA) */}
                 {abaAtiva === "estrutura" && (
                   <div className="space-y-3">
                     <div className="flex justify-between items-center mb-1">
@@ -363,7 +455,6 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 4: FATURAMENTO (EXCELZÃO) */}
                 {abaAtiva === "fat" && (
                   <div className="border border-slate-200 rounded-lg overflow-hidden max-w-[1200px]">
                     <table className="w-full border-collapse text-left">
@@ -415,7 +506,6 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 5: POTENCIAL */}
                 {abaAtiva === "potencial" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 max-w-[700px] space-y-4">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block border-b pb-1">Capacidade Operacional de Cessão</span>
@@ -430,7 +520,6 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 6: ENDIVIDAMENTO DINÂMICO (INSERÇÃO COMPLETA) */}
                 {abaAtiva === "endividamento" && (
                   <div className="space-y-4 max-w-[850px]">
                     <div className="flex justify-between items-center">
@@ -471,11 +560,10 @@ function MesaAnaliseConteudo() {
                   </div>
                 )}
 
-                {/* ABA 7: RESTRITIVOS DINÂMICO (INSERÇÃO COMPLETA) */}
                 {abaAtiva === "restritivos" && (
                   <div className="space-y-4 max-w-[950px]">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Apontamentos Comerciais, Protestos de Cartórios e Serasa</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Apontamentos Comerciais, Protestos e Serasa</span>
                       <button onClick={adicionarLinhaRestritivos} className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] hover:bg-indigo-100 cursor-pointer">+ Inserir Registro Ofensor</button>
                     </div>
                     <div className="border border-slate-200 rounded-lg overflow-hidden">

@@ -14,9 +14,9 @@ interface Empresa {
 
 interface FilaItem {
   id: string;
-  razao_social: string;
-  cnpj: string;
+  empresa_nome: string;
   status: string;
+  criado_em: string;
 }
 
 export default function MotorCreditoPage() {
@@ -32,14 +32,14 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
-      // 🛠️ CORREÇÃO CRÍTICA: Mudado de 'criado_em' para 'created_at' para eliminar o erro 42703 (Bad Request)
+      // 📊 Integração direta com a tabela public.analises informada
       const { data, error } = await supabase
-        .from("analises_credito")
-        .select("id, razao_social, cnpj, status")
-        .order("created_at", { ascending: false });
+        .from("analises")
+        .select("id, empresa_nome, status, criado_em")
+        .order("criado_em", { ascending: false });
 
       if (error) throw error;
-      if (data) setFilaReal(data);
+      if (data) setFilaReal(data as any);
     } catch (err) {
       console.error("Erro ao carregar esteira comercial:", err);
     }
@@ -87,6 +87,37 @@ export default function MotorCreditoPage() {
     }
   };
 
+  // 🔥 Cria o registro na tabela public.analises após a confirmação do upload bem-sucedido
+  const registrarAnaliseNoSupabase = async () => {
+    if (!empresaSelecionada) return;
+
+    try {
+      const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
+      
+      const { error } = await supabase
+        .from("analises")
+        .insert({
+          empresa_nome: empresaSelecionada.razao_social.toUpperCase(),
+          caminho_local: `clientes/${cnpjLimpo}/`, // Caminho base dos arquivos salvos no R2
+          status: "aberta", // Assume o padrão configurado na trigger da sua esteira
+          comercial: "Mesa V8 Auto",
+          data_recebimento: new Date().toISOString().split('T')[0] // Formato YYYY-MM-DD
+        });
+
+      if (error) throw error;
+
+      // Limpa os estados e recarrega a grid com a nova empresa já inclusa
+      setEmpresaSelecionada(null);
+      setEmpresas([]);
+      setCnpjBusca("");
+      await carregarFilaComercial();
+
+    } catch (err: any) {
+      console.error("Erro ao inserir na tabela analises:", err);
+      alert("⚠️ Arquivos enviados, mas falhou ao registrar cartão no Supabase: " + err.message);
+    }
+  };
+
   const formatarCnpj = (cnpj: string) => {
     const limpo = cnpj.replace(/\D/g, "");
     if (limpo.length !== 14) return cnpj;
@@ -101,13 +132,6 @@ export default function MotorCreditoPage() {
     if (limpo.length > 8) masc = `${masc.substring(0, 10)}/${masc.substring(10)}`;
     if (limpo.length > 12) masc = `${masc.substring(0, 15)}-${masc.substring(15)}`;
     setCnpjBusca(masc);
-  };
-
-  const resetarAposSucesso = () => {
-    setEmpresaSelecionada(null);
-    setEmpresas([]);
-    setCnpjBusca("");
-    carregarFilaComercial();
   };
 
   return (
@@ -200,13 +224,14 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                <UploadDocs empresa={empresaSelecionada} onSucesso={resetarAposSucesso} />
+                {/* O UploadDocs agora é purificado; ao terminar, ele chama a função local para registrar a análise */}
+                <UploadDocs empresa={empresaSelecionada} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL INTEGRA COM CABEÇALHOS DO PROJETO */}
+        {/* TABELA DE STATUS DO COMERCIAL */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
@@ -219,8 +244,8 @@ export default function MotorCreditoPage() {
               <thead>
                 <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
                   <th className="p-3.5">Razão Social da Empresa</th>
-                  <th className="p-3.5">CNPJ Oficial</th>
                   <th className="p-3.5">Estágio Atual</th>
+                  <th className="p-3.5 text-center">Data de Entrada</th>
                   <th className="p-3.5 text-center">Painel Detalhado</th>
                 </tr>
               </thead>
@@ -234,22 +259,24 @@ export default function MotorCreditoPage() {
                 ) : (
                   filaReal.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[300px]">{item.razao_social}</td>
-                      <td className="p-3.5 font-mono font-bold text-slate-600">{formatarCnpj(item.cnpj)}</td>
+                      <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[400px]">{item.empresa_nome}</td>
                       <td className="p-3.5">
-                        {item.status === "robo_processando" ? (
+                        {item.status === "aberta" || item.status === "aberto" ? (
+                          <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                            📥 Aberta / Pendente
+                          </span>
+                        ) : item.status === "robo_processando" ? (
                           <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
                             🤖 Robô Extraindo Dados
-                          </span>
-                        ) : item.status === "em_revisao_humana" ? (
-                          <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            🕵️ Em Auditoria de Risco
                           </span>
                         ) : (
                           <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             {item.status.toUpperCase().replace("_", " ")}
                           </span>
                         )}
+                      </td>
+                      <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
+                        {new Date(item.criado_em).toLocaleDateString("pt-BR")}
                       </td>
                       <td className="p-3.5 text-center">
                         <button
