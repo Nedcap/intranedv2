@@ -1,18 +1,14 @@
-// C:\Users\Alyson\intranet-webv2\app\api\prospeccao-ia\route.ts
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { BigQuery } from "@google-cloud/bigquery";
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-// Inicializa o BigQuery usando o JSON da variável de ambiente
 const obterClienteBigQuery = () => {
   const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-  
-  if (!jsonCredenciais) {
-    throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
-  }
-
+  if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
   try {
     const credenciais = JSON.parse(jsonCredenciais);
     return new BigQuery({
@@ -23,7 +19,7 @@ const obterClienteBigQuery = () => {
       },
     });
   } catch (err: any) {
-    throw new Error("Falha ao processar o JSON das credenciais do Google: " + err.message);
+    throw new Error("Falha ao processar o JSON das credenciais: " + err.message);
   }
 };
 
@@ -40,23 +36,23 @@ export async function POST(req: Request) {
     });
 
     // =========================================================================
-    // 🧠 1. INTELIGÊNCIA ARTIFICIAL: EXTRAÇÃO DOS DADOS
+    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Sem inventar Código TOM)
     // =========================================================================
     const promptSistema = `
-      Você é um analista especialista em prospecção B2B e conhece a fundo a tabela de CNAEs e municípios da Receita Federal do Brasil.
+      Você é um analista especialista em prospecção B2B.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       
-      ATENÇÃO PARA A CIDADE: Na propriedade "codigo_municipio", você deve mapear o nome da cidade citada para o CÓDIGO DO MUNICÍPIO DA RECEITA FEDERAL (Tabela TOM de 4 dígitos utilizada no campo municipio_rf). Exemplo: Curitiba é "7535", Maringá é "7691". Se nenhuma cidade for citada, retorne null.
+      ATENÇÃO PARA A CIDADE: Na propriedade "cidade_nome", retorne apenas o nome da cidade solicitada, EM LETRAS MAIÚSCULAS e SEM ACENTOS. Exemplo: "SAO PAULO", "CURITIBA", "MARINGA". Se não pedir cidade específica, retorne null.
+      (NÃO INVENTE CÓDIGOS TOM. Apenas retorne o nome limpo).
 
       ATENÇÃO PARA O CNAE:
-      - Se o usuário pedir um nicho específico, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
+      - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
       - Se for busca aberta/geral, retorne o array VAZIO [].
       
       Retorne ESTRITAMENTE um JSON:
       {
         "atividade": "descrição",
-        "cidade_nome": "Nome extenso",
-        "codigo_municipio": "TOM de 4 dígitos ou null",
+        "cidade_nome": "NOME DA CIDADE",
         "uf": "UF",
         "codigos_cnae": []
       }
@@ -79,7 +75,33 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 2. BIGQUERY: CONSULTA DIRETA NA NUVEM DO GOOGLE
+    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito)
+    // =========================================================================
+    let codigoRealDaReceita = null;
+    let nomeCidadeReal = perfilMercado.cidade_nome;
+
+    if (nomeCidadeReal) {
+      try {
+        // Lendo o JSON que criamos e colocamos na pasta do projeto
+        const filePath = path.join(process.cwd(), 'tabela_tom.json');
+        const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        
+        // Formatar o nome para garantir o match (Tira acentos e deixa tudo em caixa alta)
+        const cidadeSanitizada = nomeCidadeReal.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+        const chaveBusca = `${cidadeSanitizada}-${perfilMercado.uf.toUpperCase()}`;
+        
+        codigoRealDaReceita = tabelaTomBase[chaveBusca];
+
+        if (!codigoRealDaReceita) {
+          console.warn(`[Aviso] Cidade '${cidadeSanitizada}' não encontrada no dicionário local.`);
+        }
+      } catch (err) {
+        console.error("Erro ao ler tabela_tom.json local, prosseguindo com busca estadual ampla", err);
+      }
+    }
+
+    // =========================================================================
+    // 🚀 3. BIGQUERY: CONSULTA (Agora com Latitude e Longitude)
     // =========================================================================
     const bigquery = obterClienteBigQuery();
 
@@ -106,7 +128,6 @@ export async function POST(req: Request) {
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // ⚠️ AJUSTE AQUI: Substitua pelo caminho correto da sua tabela no BigQuery (projeto.dataset.tabela)
     const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
 
     const sqlQuery = `
@@ -114,11 +135,12 @@ export async function POST(req: Request) {
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
-        google_nome, google_categoria, google_endereco, google_website
+        google_nome, google_categoria, google_endereco, google_website,
+        lat, lng -- 👈 INCLUÍDO AS COORDENADAS AQUI (Ajuste o nome se na sua tabela for 'latitude', 'longitude')
       FROM ${TABELA_BIGQUERY}
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
-        AND ('${perfilMercado.codigo_municipio || "NULL"}' = 'NULL' OR municipio_rf = '${perfilMercado.codigo_municipio}')
+        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
         ${filtroCnaeClausula}
       ORDER BY ${ordenacaoEstrategica}
       LIMIT ${limiteSeguro}
@@ -126,13 +148,10 @@ export async function POST(req: Request) {
 
     const [rows] = await bigquery.query({ query: sqlQuery });
 
-    // =========================================================================
-    // 🗺️ 3. MAPEAMENTO E ENVIO PARA O FRONTEND
-    // =========================================================================
     const leads = rows.map((row: any) => {
       let dataAberturaStr = row.data_abertura;
       if (row.data_abertura && row.data_abertura.value) {
-        dataAberturaStr = row.data_abertura.value; // Ajuste para o formato de data do BigQuery
+        dataAberturaStr = row.data_abertura.value; 
       }
 
       return {
@@ -154,13 +173,14 @@ export async function POST(req: Request) {
         google_categoria: row.google_categoria,
         google_endereco: row.google_endereco,
         website: row.google_website,
-        lat: null,
-        lng: null
+        lat: row.lat ? parseFloat(row.lat) : null, // 👈 LATITUDE REAL DA TABELA
+        lng: row.lng ? parseFloat(row.lng) : null, // 👈 LONGITUDE REAL DA TABELA
+        cidadeExtenso: nomeCidadeReal || undefined // Devolvemos o nome mapeado para o front
       };
     });
 
     return NextResponse.json({
-      perfilAI: perfilMercado,
+      perfilAI: { ...perfilMercado, codigo_municipio: codigoRealDaReceita },
       leads: leads
     });
 

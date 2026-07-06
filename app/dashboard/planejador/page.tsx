@@ -1,661 +1,578 @@
-// C:\Users\Alyson\intranet-webv2\app\dashboard\planejador\page.tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
-
-interface CidadeRota {
-  nome: string;
-  uf: string;
-  ordem: number;
-}
-
-interface RotaAlternativa {
-  id_rota: number;
-  nome_rota: string;
-  distancia: string;
-  duracao: string;
-  polyline_geral: string;
-  cidades: CidadeRota[];
-}
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface Lead {
   cnpj: string;
-  cnpj_raiz?: string;
-  matriz_filial?: string;
-  situacao: string;
-  data_abertura?: string;
+  cnpj_raiz: string; 
+  matriz_filial: string; 
+  situacao: string; 
+  data_abertura: string; 
   cnae_principal: string;
   cnaes_secundarios?: string;
   bairro: string;
-  cep?: string;
+  cep: string; 
   uf: string;
-  municipio_rf?: string;
-  razao_social: string;
-  nome_fantasia?: string;
+  municipio_rf: string; 
+  razao_social: string; 
+  nome_fantasia?: string; 
   natureza_juridica?: string;
   capital_social?: number;
   google_categoria?: string;
   google_endereco?: string;
   website?: string;
-  parada_origem?: string;
-  observacaoCommercial?: string; // Observação inserida pelo vendedor
+  lat?: number;
+  lng?: number;
+  score?: number; 
+  cidadeExtenso?: string;
 }
 
-export default function PlanejadorRotasPage() {
-  const [origem, setOrigem] = useState("");
-  const [destino, setDestino] = useState("");
-  const [limiteCidade, setLimiteCidade] = useState(30);
-  const [filtroNicho, setFiltroNicho] = useState("Empresas Gerais"); // Filtro dinâmico passado para a IA
+interface PerfilAI {
+  atividade: string;
+  cidade_nome: string | null;
+  codigo_municipio: string | null;
+  uf: string;
+  codigos_cnae?: string[];
+  familias_cnae?: string[];
+  termos_fortes?: string[];
+  termos_fracos?: string[];
+}
 
-  const [calculandoRota, setCalculandoRota] = useState(false);
-  const [carregandoCidadeId, setCarregandoCidadeId] = useState<string | null>(null);
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
 
-  // Estados das Rotas calculadas
-  const [todasAsRotas, setTodasAsRotas] = useState<RotaAlternativa[]>([]);
-  const [rotaSelecionada, setRotaSelecionada] = useState<RotaAlternativa | null>(null);
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
+
+export default function ProspeccaoIAPage() {
+  const [prompt, setPrompt] = useState("");
+  const [limite, setLimite] = useState(150);
+  const [carregando, setCarregando] = useState(false);
   
-  // Lista mutável de cidades para permitir exclusão ativa pelo comercial
-  const [cidadesDaVisao, setCidadesDaVisao] = useState<CidadeRota[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [perfilAI, setPerfilAI] = useState<PerfilAI | null>(null);
+  const [leadSelecionado, setLeadSelecionado] = useState<Lead | null>(null);
 
-  // Mapeamento de Leads por Cidade: { "Sorocaba": [Leads...] } -> Cache de memória local
-  const [bancoLeadsPorCidade, setBancoLeadsPorCidade] = useState<Record<string, Lead[]>>({});
-  const [cidadeAbAtiva, setCidadeAbAtiva] = useState<string>("");
+  const [equipeDisponivel, setEquipeDisponivel] = useState<{id: string, nome: string}[]>([]);
+  const [agenteAlvo, setAgenteAlvo] = useState<string>("");
+  const [vinculando, setVinculando] = useState(false);
 
-  // O Carrinho / Roteiro Final do Comercial
-  const [roteiroFinal, setRoteiroFinal] = useState<Lead[]>([]);
-  const [abaPrincipalVisualizacao, setAbaPrincipalVisualizacao] = useState<"PROSPECCAO" | "MEU_ROTEIRO">("PROSPECCAO");
+  useEffect(() => {
+    carregarEquipeDoUsuario();
+    
+    const leadsSalvos = localStorage.getItem("ned_leads_minerados");
+    const perfilSalvo = localStorage.getItem("ned_perfil_minerado");
+    
+    if (leadsSalvos) setLeads(JSON.parse(leadsSalvos));
+    if (perfilSalvo) setPerfilAI(JSON.parse(perfilSalvo));
+  }, []);
 
-  // 1. Passo 1: Buscar o esqueleto rodoviário expandido via gpt-4o híbrido no backend
-  const mapearMalhaRodoviaria = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!origem || !destino) return;
+  useEffect(() => {
+    if (leads.length > 0) {
+      localStorage.setItem("ned_leads_minerados", JSON.stringify(leads));
+    } else {
+      localStorage.removeItem("ned_leads_minerados");
+    }
+  }, [leads]);
 
-    setCalculandoRota(true);
-    setTodasAsRotas([]);
-    setRotaSelecionada(null);
-    setCidadesDaVisao([]);
-    setBancoLeadsPorCidade({});
-    setCidadeAbAtiva("");
+  useEffect(() => {
+    if (perfilAI) {
+      localStorage.setItem("ned_perfil_minerado", JSON.stringify(perfilAI));
+    } else {
+      localStorage.removeItem("ned_perfil_minerado");
+    }
+  }, [perfilAI]);
 
+  const carregarEquipeDoUsuario = async () => {
     try {
-      const res = await fetch("/api/planejador-rotas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          action: "GERAR_ROTA", 
-          origem, 
-          destino 
-        }),
-      });
-
-      const dados = await res.json();
-      if (dados.error) throw new Error(dados.error);
-
-      if (dados.rotas && dados.rotas.length > 0) {
-        setTodasAsRotas(dados.rotas);
-        setRotaSelecionada(dados.rotas[0]);
-        setCidadesDaVisao(dados.rotas[0].cidades);
-        setCidadeAbAtiva(dados.rotas[0].cidades[0]?.nome || "");
-      } else {
-        alert("Nenhuma rota cadastrada ou encontrada para o trecho informado.");
-      }
-    } catch (err: any) {
-      alert("❌ Erro ao cruzar malha logística: " + err.message);
-    } finally {
-      setCalculandoRota(false);
-    }
-  };
-
-  // Permite ao vendedor remover uma cidade indesejada do fluxo de abas
-  const excluirCidadeDaRota = (nomeCidade: string) => {
-    const filtradas = cidadesDaVisao.filter((c) => c.nome !== nomeCidade);
-    setCidadesDaVisao(filtradas);
-    
-    if (cidadeAbAtiva === nomeCidade) {
-      setCidadeAbAtiva(filtradas[0]?.nome || "");
-    }
-  };
-
-  // 2. Passo 2: LAZY LOADING Conectado ao BigQuery parametrizado + Cluster espacial
-  const processarProspeccaoCidadeAtiva = async (nomeCidade: string, ufCidade: string) => {
-    if (bancoLeadsPorCidade[nomeCidade]) return; // Evita requests duplicados se já buscou
-
-    setCarregandoCidadeId(nomeCidade);
-
-    try {
-      // Montamos o prompt contextualizado combinando o nicho desejado pelo vendedor e a cidade alvo
-      const promptConstruido = `${filtroNicho} em ${nomeCidade} - ${ufCidade}`;
-
-      const res = await fetch("/api/prospeccao-ia", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          promptUsuario: promptConstruido,
-          limite: limiteCidade
-        }),
-      });
-
-      const dados = await res.json();
-      if (dados.error) throw new Error(dados.error);
-
-      // Leitura correta do array mapeado da nossa nova view otimizada do BigQuery
-      const obtidos = dados.leads || [];
-      const tratados = obtidos.map((l: any) => ({
-        ...l,
-        cidadeExtenso: nomeCidade,
-        uf: ufCidade,
-        parada_origem: nomeCidade,
-        observacaoCommercial: "",
-      }));
-
-      setBancoLeadsPorCidade((prev) => ({
-        ...prev,
-        [nomeCidade]: tratados,
-      }));
-    } catch (err: any) {
-      alert(`❌ Falha ao prospectar ${nomeCidade}: ` + err.message);
-    } finally {
-      setCarregandoCidadeId(null);
-    }
-  };
-
-  // 🎯 Mágica para abrir o Google Maps Real com a Rota Completa contendo apenas as Cidades Ativas
-  const abrirGoogleMapsComCidadesAtivas = () => {
-    if (cidadesDaVisao.length === 0) return;
-    
-    const pontoA = cidadesDaVisao[0];
-    const pontoB = cidadesDaVisao[cidadesDaVisao.length - 1];
-    const intermediarias = cidadesDaVisao.slice(1, -1);
-    
-    const origemParam = encodeURIComponent(`${pontoA.nome}, ${pontoA.uf}, Brasil`);
-    const destinoParam = encodeURIComponent(`${pontoB.nome}, ${pontoB.uf}, Brasil`);
-    
-    // Une as cidades do meio usando o caractere pipe '|' como delimitador regulamentar da API do Google Maps
-    const waypointsParam = intermediarias.length > 0 
-      ? `&waypoints=${intermediarias.map(c => encodeURIComponent(`${c.nome}, ${c.uf}, Brasil`)).join('|')}`
-      : "";
+      const userStr = localStorage.getItem("intraned_user");
+      if (!userStr) return;
       
-    const urlMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origemParam}&destination=${destinoParam}${waypointsParam}&travelmode=driving`;
-    window.open(urlMapsUrl, "_blank");
-  };
+      const user = JSON.parse(userStr);
+      const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-  // 3. Gerenciamento do Roteiro Final
-  const adicionarAoRoteiro = (lead: Lead) => {
-    if (roteiroFinal.some((item) => item.cnpj === lead.cnpj)) {
-      alert("Esta empresa já está integrada ao seu roteiro de viagem.");
-      return;
+      if (cargoUser !== "master" && cargoUser !== "diretor" && cargoUser !== "gerente") {
+        setEquipeDisponivel([{ id: user.id, nome: user.nome }]);
+        setAgenteAlvo(user.nome);
+        return;
+      }
+
+      const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+      
+      if (todosUsuarios) {
+        if (cargoUser === "master" || cargoUser === "diretor") {
+          setEquipeDisponivel(todosUsuarios);
+        } else {
+          const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
+          const time = todosUsuarios.filter(u => idsPermitidos.includes(u.id));
+          setEquipeDisponivel(time);
+        }
+        setAgenteAlvo(user.nome);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar hierarquia:", err);
     }
-    setRoteiroFinal((prev) => [...prev, lead]);
   };
 
-  const removerDoRoteiro = (cnpj: string) => {
-    setRoteiroFinal((prev) => prev.filter((item) => item.cnpj !== cnpj));
+  const executarMineraaoInteligente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+
+    setCarregando(true);
+    setLeadSelecionado(null);
+
+    try {
+      const response = await fetch("/api/prospeccao-ia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptUsuario: prompt, limite }),
+      });
+
+      const textoPuro = await response.text();
+      let dados;
+      
+      try {
+        dados = JSON.parse(textoPuro);
+      } catch (jsonErr) {
+        console.error("Erro no retorno da API:", textoPuro);
+        throw new Error("A API retornou HTML ou erro fatal. Veja o console (F12).");
+      }
+
+      if (dados.error) throw new Error(dados.error);
+
+      const mapeamentoAI: PerfilAI = dados.perfilAI || null;
+
+      const leadsTratados = (dados.leads || []).map((l: any) => {
+        const cidadeReal = mapeamentoAI && l.municipio_rf === mapeamentoAI.codigo_municipio
+          ? mapeamentoAI.cidade_nome
+          : l.municipio_rf ? `CÓDIGO ${l.municipio_rf}` : "Não identificada";
+
+        return {
+          ...l,
+          cidadeExtenso: l.cidadeExtenso || cidadeReal,
+          score: l.score || 10 
+        };
+      });
+
+      setLeads(prev => {
+        const cnpjsExistentes = new Set(prev.map(item => item.cnpj));
+        const novosFiltrados = leadsTratados.filter((item: any) => !cnpjsExistentes.has(item.cnpj));
+        return [...prev, ...novosFiltrados];
+      });
+      
+      setPerfilAI(mapeamentoAI);
+    } catch (err: any) {
+      alert("❌ Falha na mineração: " + err.message);
+    } finally {
+      setCarregando(false);
+    }
   };
 
-  const atualizarObservacao = (cnpj: string, texto: string) => {
-    setRoteiroFinal((prev) =>
-      prev.map((item) => (item.cnpj === cnpj ? { ...item, observacaoCommercial: texto } : item))
-    );
+  const eliminarLeadDaLista = (cnpjParaRemover: string) => {
+    if (leadSelecionado?.cnpj === cnpjParaRemover) setLeadSelecionado(null);
+    setLeads(prev => prev.filter(l => l.cnpj !== cnpjParaRemover));
   };
 
-  const exportarParaCSV = () => {
-    const listaAlvo = abaPrincipalVisualizacao === "MEU_ROTEIRO" ? roteiroFinal : bancoLeadsPorCidade[cidadeAbAtiva] || [];
-    if (listaAlvo.length === 0) return;
+  const limparTodaAEstreia = () => {
+    if (!confirm("Tem certeza que deseja limpar toda a lista da tela e recomeçar do zero?")) return;
+    setLeads([]);
+    setPerfilAI(null);
+    setLeadSelecionado(null);
+    localStorage.removeItem("ned_leads_minerados");
+    localStorage.removeItem("ned_perfil_minerado");
+  };
 
-    const headers = ["Cidade Parada", "CNPJ", "Razão Social", "Nome Fantasia", "Bairro", "CNAE Principal", "Situação RF", "Capital Social", "Website Google", "Obs Planejamento"];
-    const rows = listaAlvo.map((lead) => [
-      `"${lead.parada_origem || ""}"`,
-      `"${lead.cnpj || ""}"`,
-      `"${(lead.razao_social || "").replace(/"/g, '""')}"`,
-      `"${(lead.nome_fantasia || "").replace(/"/g, '""')}"`,
-      `"${(lead.bairro || "").replace(/"/g, '""')}"`,
-      `"${lead.cnae_principal || ""}"`,
-      `"${lead.situacao || ""}"`,
-      `"${lead.capital_social || 0}"`,
-      `"${lead.website || ""}"`,
-      `"${(lead.observacaoCommercial || "").replace(/"/g, '""')}"`,
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const exportarListaParaCSV = () => {
+    if (leads.length === 0) return;
+    
+    const cabecalho = "CNPJ;Razao Social;Nome Comercial;Cidade;UF;CNAE;Bairro;Situacao;Website;Lat;Lng\n";
+    const linhas = leads.map(l => 
+      `"${l.cnpj}";"${l.razao_social}";"${l.nome_fantasia || ''}";"${l.cidadeExtenso}";"${l.uf}";"${l.cnae_principal}";"${l.bairro || ''}";"${l.situacao}";"${l.website || ''}";"${l.lat || ''}";"${l.lng || ''}"`
+    ).join("\n");
+    
+    const blob = new Blob([cabecalho + linhas], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url;
-    link.download = `${abaPrincipalVisualizacao === "MEU_ROTEIRO" ? "Roteiro_Final_FIDC" : `Leads_Otimizados_${cidadeAbAtiva}`}.csv`;
+    link.setAttribute("href", url);
+    link.setAttribute("download", `leads_minerados_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(link);
   };
 
-  const leadsExibicaoAba = bancoLeadsPorCidade[cidadeAbAtiva] || [];
-  const objetoCidadeAtiva = cidadesDaVisao.find((c) => c.nome === cidadeAbAtiva);
+  const enviarParaNedHub = async () => {
+    if (!leadSelecionado || !agenteAlvo) return;
+    
+    try {
+      setVinculando(true);
+      const agenteId = equipeDisponivel.find(e => e.nome === agenteAlvo)?.id || null;
 
-  // Métricas do Roteiro para o Dashboard Lateral
-  const totalEmpresasMapeadasNoCache = Object.values(bancoLeadsPorCidade).reduce((acc, curr) => acc + curr.length, 0);
-  const totalCapitalSocialRoteiroFinal = roteiroFinal.reduce((acc, curr) => acc + (curr.capital_social || 0), 0);
+      const { error } = await supabase.from("crm_leads").insert({
+        responsavel_id: agenteId,
+        responsavel_nome: agenteAlvo,
+        razaoSocial: (leadSelecionado.razao_social || leadSelecionado.cnpj).toUpperCase(),
+        cnpj: leadSelecionado.cnpj,
+        estagio: "Prospecção", 
+        campos_customizados: {
+          origem_lead: "BigQuery Cloud Mining (Rico em Dados)",
+          score_ia: leadSelecionado.score || 10,
+          cnae_principal: leadSelecionado.cnae_principal,
+          descricao_ramo: perfilAI?.atividade || "Mapeado via AI",
+          cidade: leadSelecionado.cidadeExtenso || leadSelecionado.municipio_rf,
+          uf: leadSelecionado.uf,
+          bairro: leadSelecionado.bairro,
+          situacao_cadastral: leadSelecionado.situacao,
+          data_abertura: leadSelecionado.data_abertura,
+          capital_social: leadSelecionado.capital_social || 0,
+          website: leadSelecionado.website || "",
+          google_categoria: leadSelecionado.google_categoria || "",
+          lat: leadSelecionado.lat, // Adicionado
+          lng: leadSelecionado.lng  // Adicionado
+        }
+      });
+
+      if (error) throw error;
+
+      alert(`🚀 Sensacional! Card criado no NedHub de ${agenteAlvo}.`);
+      eliminarLeadDaLista(leadSelecionado.cnpj);
+    } catch (err: any) {
+      alert(`❌ Erro ao enviar para o NedHub: ${err.message}`);
+    } finally {
+      setVinculando(false);
+    }
+  };
+
+  const formatarCnpj = (cnpj: string) => {
+    const limpo = cnpj.replace(/\D/g, "");
+    if (limpo.length !== 14) return cnpj;
+    return `${limpo.substring(0, 2)}.${limpo.substring(2, 5)}.${limpo.substring(5, 8)}/${limpo.substring(8, 12)}-${limpo.substring(12, 14)}`;
+  };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-700 p-6 font-sans antialiased text-[13px]">
-      <div className="max-w-[1750px] mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 text-slate-700 p-6 font-sans antialiased text-[13px]">
+      <div className="max-w-[1700px] mx-auto space-y-6">
         
-        {/* TOP BRANDING BAR */}
-        <div className="border-b border-slate-200 pb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        {/* HEADER */}
+        <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="bg-indigo-600 text-white font-extrabold px-2 py-0.5 rounded text-[10px] tracking-wider uppercase shadow-sm">
-                Proprietary Core v2.5
+              <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase animate-pulse">
+                Google BigQuery Active
               </span>
-              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded text-[10px] uppercase">
-                BigQuery Spatially Clustered
+              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase">
+                GPT-4o-Mini Active
               </span>
             </div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-2">
-              GeoProspector AI — Inteligência de Campo & Roteirização FIDC
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
+              🧠 Motor de Prospecção Avançada <span className="text-indigo-600">BigQuery Mining v2</span>
             </h1>
           </div>
         </div>
 
-        {/* CONTROLE INPUT DE ROTAS */}
-        <div className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-sm">
-          <form onSubmit={mapearMalhaRodoviaria} className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
+        {/* BOX DE ENTRADA / PROMPT */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all group-hover:h-full"></div>
+          
+          <form onSubmit={executarMineraaoInteligente} className="space-y-4">
             <div>
-              <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-1.5">Cidade de Origem</label>
-              <input type="text" value={origem} onChange={(e) => setOrigem(e.target.value)} placeholder="Ex: São Paulo / SP" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:bg-white focus:border-indigo-600 focus:shadow-sm transition-all" />
+              <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-2">
+                Descreva o Alvo Comercial (Segmento, Nicho, Produto e Região)
+              </label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Ex: Quero indústrias farmacêuticas ou laboratórios de manipulação em Maringá PR..."
+                className="w-full p-4 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[85px] resize-none"
+                disabled={carregando}
+              />
             </div>
-            <div>
-              <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-1.5">Cidade de Destino</label>
-              <input type="text" value={destino} onChange={(e) => setDestino(e.target.value)} placeholder="Ex: Maringá / PR" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:bg-white focus:border-indigo-600 focus:shadow-sm transition-all" />
+
+            <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 pt-4 border-t border-slate-200 mt-4">
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-slate-500 text-[11px] uppercase tracking-wider">Profundidade da busca:</span>
+                <select 
+                  value={limite} 
+                  onChange={(e) => setLimite(Number(e.target.value))}
+                  className="p-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-700 font-bold outline-none focus:border-indigo-500 cursor-pointer shadow-sm"
+                  disabled={carregando}
+                >
+                  <option value={50}>50 registros (Rápido)</option>
+                  <option value={150}>150 registros (Recomendado)</option>
+                  <option value={300}>300 registros (Profundo)</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                disabled={carregando || !prompt.trim()}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {carregando ? "Minerando Base BigQuery Cloud..." : "⚡ Iniciar Extração Inteligente"}
+              </button>
             </div>
-            <button type="submit" disabled={calculandoRota || !origem || !destino} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-all cursor-pointer shadow-sm disabled:opacity-40">
-              {calculandoRota ? "🧠 Decodificando Malha e Rodovias..." : "🛣️ Construir Itinerário Inteligente"}
-            </button>
           </form>
         </div>
 
-        {/* LISTAGEM DE ROTAS ALTERNATIVAS DA API DO MAPS */}
-        {todasAsRotas.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-            <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest">Rotas Reais Encontradas (Selecione uma para trabalhar):</span>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {todasAsRotas.map((rota) => (
-                <div
-                  key={rota.id_rota}
-                  onClick={() => {
-                    setRotaSelecionada(rota);
-                    setCidadesDaVisao(rota.cidades);
-                    setCidadeAbAtiva(rota.cidades[0]?.nome || "");
-                  }}
-                  className={`p-3.5 border rounded-xl cursor-pointer transition-all ${
-                    rotaSelecionada?.id_rota === rota.id_rota
-                      ? "border-indigo-600 bg-indigo-50/30 shadow-sm ring-1 ring-indigo-500"
-                      : "border-slate-200 bg-slate-50/50 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-black text-xs text-slate-900 uppercase">🛣️ Via {rota.nome_rota}</span>
-                    <span className="bg-slate-200 text-slate-800 rounded px-1.5 py-0.5 text-[9px] font-mono font-bold shadow-sm">{rota.distancia}</span>
-                  </div>
-                  <p className="text-slate-500 text-[11px] mt-1 font-medium">Tempo estimado de pista: <span className="text-slate-800 font-bold">{rota.duracao}</span></p>
-                </div>
-              ))}
+        {/* METADADOS DA INTERPRETAÇÃO DA IA */}
+        {perfilAI && (
+          <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 shadow-sm">
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nicho Mapeado</span>
+              <div className="text-xs font-bold text-slate-800 capitalize truncate">{perfilAI.atividade || "Busca Geral"}</div>
             </div>
-          </div>
-        )}
-
-        {/* NAVEGAÇÃO DE MODOS FLUXO COMERCIAL */}
-        {rotaSelecionada && (
-          <div className="flex gap-2 border-b border-slate-200 pt-2">
-            <button
-              onClick={() => setAbaPrincipalVisualizacao("PROSPECCAO")}
-              className={`px-5 py-2.5 font-black text-xs uppercase rounded-t-xl transition-all ${
-                abaPrincipalVisualizacao === "PROSPECCAO" 
-                  ? "bg-slate-900 text-white shadow-sm" 
-                  : "bg-slate-200/50 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              🚀 Prospecção Territorial ({cidadesDaVisao.length} Cidades Otimizadas)
-            </button>
-            <button
-              onClick={() => setAbaPrincipalVisualizacao("MEU_ROTEIRO")}
-              className={`px-5 py-2.5 font-black text-xs uppercase rounded-t-xl transition-all flex items-center gap-2.5 ${
-                abaPrincipalVisualizacao === "MEU_ROTEIRO" 
-                  ? "bg-indigo-600 text-white shadow-sm" 
-                  : "bg-slate-200/50 text-indigo-600 hover:bg-slate-200"
-              }`}
-            >
-              💼 Roteiro de Campo Fechado
-              <span className="bg-white text-slate-900 px-2 py-0.2 rounded font-mono font-black text-[10px] shadow-sm">
-                {roteiroFinal.length}
-              </span>
-            </button>
-          </div>
-        )}
-
-        {/* MÓDULO 1: SALA DE PROSPECÇÃO COM LAYOUT SPLIT (60% TABELA / 40% RADAR MAPA/PREVIEW) */}
-        {rotaSelecionada && abaPrincipalVisualizacao === "PROSPECCAO" && (
-          <div className="grid grid-cols-1 xl:grid-cols-10 gap-6 items-start">
-            
-            {/* PAINEL ESQUERDO: MINERAÇÃO E TABELA (60% DA TELA) */}
-            <div className="xl:col-span-6 space-y-4">
-              
-              {/* COMPONENTE DE ABAS GEOGRÁFICAS DE FLUXO CONTÍNUO */}
-              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-                <span className="block font-black text-slate-400 uppercase text-[10px] tracking-widest">
-                  Selecione uma parada logística na rodovia para trabalhar os leads:
-                </span>
-                <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-                  {cidadesDaVisao.map((cidade, idx) => {
-                    const jaTemLeads = !!bancoLeadsPorCidade[cidade.nome];
-                    const estaAtiva = cidadeAbAtiva === cityKey(cidade.nome);
-
-                    return (
-                      <div key={idx} className={`flex items-center flex-shrink-0 border rounded-lg shadow-sm pl-1 pr-2 py-1 transition-all ${
-                        estaAtiva ? "border-indigo-500 bg-indigo-50/20" : "border-slate-200 bg-white"
-                      }`}>
-                        <button
-                          onClick={() => setCidadeAbAtiva(cidade.nome)}
-                          className={`px-2 py-1 rounded font-black text-[11px] uppercase transition-all flex items-center gap-1.5 ${
-                            estaAtiva ? "text-indigo-700" : "text-slate-600"
-                          }`}
-                        >
-                          {jaTemLeads ? "✅" : "📍"} {cidade.nome}
-                          {jaTemLeads && (
-                            <span className="bg-emerald-600 text-white font-mono px-1.5 py-0.2 rounded text-[9px] font-black">
-                              {bancoLeadsPorCidade[cidade.nome].length}
-                            </span>
-                          )}
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); excluirCidadeDaRota(cidade.nome); }} 
-                          className="ml-1 text-slate-300 hover:text-red-600 font-black px-1 text-[11px] cursor-pointer transition-colors"
-                          title="Excluir cidade deste planejamento de rota"
-                        >
-                          ✕
-                        </button>
-                        {idx < cidadesDaVisao.length - 1 && <span className="text-slate-300 font-bold ml-2.5">➔</span>}
-                      </div>
-                    );
-                  })}
-                </div>
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Região Alvo</span>
+              <div className="text-xs font-bold text-indigo-600 uppercase">
+                {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf || "Indefinido"}`}
               </div>
-
-              {/* CONTEÚDO DINÂMICO DA TABELA DE CAPTAÇÃO */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="bg-slate-50 p-3.5 border-b border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                  <div>
-                    <h3 className="font-black text-slate-900 uppercase text-xs">
-                      Parada Ativa: <span className="text-indigo-600">{cidadeAbAtiva || "Nenhuma"}</span>
-                    </h3>
-                  </div>
-
-                  {/* MINERAÇÃO INTEGRADA DE NICHO E LIMITE */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-500 text-[10px] uppercase">Nicho Prospecção:</span>
-                      <input 
-                        type="text" 
-                        value={filtroNicho} 
-                        onChange={(e) => setFiltroNicho(e.target.value)} 
-                        className="p-1 px-2 bg-white border border-slate-200 rounded text-xs font-bold w-[130px] outline-none focus:border-indigo-500 text-slate-800" 
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <span className="font-bold text-slate-500 text-[10px] uppercase">Leads/Req:</span>
-                      <select value={limiteCidade} onChange={(e) => setLimiteCidade(Number(e.target.value))} className="p-1 bg-white border border-slate-200 rounded text-xs font-bold outline-none text-slate-800">
-                        <option value={15}>15</option>
-                        <option value={30}>30</option>
-                        <option value={50}>50</option>
-                        <option value={100}>100</option>
-                      </select>
-                    </div>
-
-                    <button onClick={exportarParaCSV} disabled={leadsExibicaoAba.length === 0} className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded text-[11px] uppercase tracking-wider transition-colors disabled:opacity-40 cursor-pointer shadow-sm">
-                      📊 Exportar Aba
-                    </button>
-                  </div>
-                </div>
-
-                {/* CONTROLE DE FLUXO DE ACIONAMENTO DO BIGQUERY */}
-                {carregandoCidadeId === cidadeAbAtiva ? (
-                  <div className="p-16 text-center space-y-3 bg-white">
-                    <div className="animate-spin text-2xl inline-block text-indigo-600">⚡</div>
-                    <p className="font-black text-slate-500 uppercase tracking-widest text-xs">
-                      BigQuery varrendo o Cluster {cidadeAbAtiva} via IA Otimizada...
-                    </p>
-                  </div>
-                ) : !cidadeAbAtiva ? (
-                  <div className="p-16 text-center text-slate-400 font-bold uppercase tracking-wider bg-slate-50/40">
-                    Defina e mapeie um itinerário no formulário superior.
-                  </div>
-                ) : leadsExibicaoAba.length === 0 ? (
-                  <div className="p-16 text-center bg-slate-50/30 space-y-4">
-                    <div className="text-slate-400 font-black text-xs uppercase tracking-widest">Base de Dados Aguardando Comando</div>
-                    <p className="text-slate-400 max-w-md mx-auto text-xs font-medium">
-                      A partição do BigQuery para <span className="text-slate-700 font-bold">{cidadeAbAtiva}</span> ainda não sofreu o request por etapas. Dispare a extração via IA abaixo.
-                    </p>
-                    <button
-                      onClick={() => objetoCidadeAtiva && processarProspeccaoCidadeAtiva(objetoCidadeAtiva.nome, objetoCidadeAtiva.uf)}
-                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest shadow-md transition-all cursor-pointer"
-                    >
-                      🔍 Extrair CNPJs de {cidadeAbAtiva}
-                    </button>
-                  </div>
+            </div>
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CNAEs Sniper Detectados</span>
+              <div className="flex flex-wrap gap-1 mt-0.5">
+                {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 0 ? (
+                  (perfilAI.codigos_cnae || perfilAI.familias_cnae || []).map(c => (
+                    <span key={c} className="bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200">
+                      {c}*
+                    </span>
+                  ))
                 ) : (
-                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                    <table className="w-full text-left border-collapse relative">
-                      <thead>
-                        <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200 sticky top-0 bg-opacity-100 backdrop-blur shadow-sm z-10">
-                          <th className="p-3 bg-slate-50">Ação</th>
-                          <th className="p-3 bg-slate-50">CNPJ / Situação</th>
-                          <th className="p-3 bg-slate-50">Razão Social / Nome Fantasia</th>
-                          <th className="p-3 bg-slate-50">Bairro</th>
-                          <th className="p-3 bg-slate-50">Capital Social</th>
-                          <th className="p-3 bg-slate-50">Pesquisa</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium text-xs bg-white">
-                        {leadsExibicaoAba.map((lead) => {
-                          const jaEstaNoRoteiro = roteiroFinal.some((r) => r.cnpj === lead.cnpj);
-                          return (
-                            <tr key={lead.cnpj} className="hover:bg-indigo-50/20 transition-all">
-                              <td className="p-3">
-                                <button
-                                  onClick={() => adicionarAoRoteiro(lead)}
-                                  className={`px-2.5 py-1 rounded font-black text-[10px] uppercase transition-all cursor-pointer shadow-sm border ${
-                                    jaEstaNoRoteiro
-                                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-not-allowed"
-                                      : "bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700"
-                                  }`}
-                                  disabled={jaEstaNoRoteiro}
-                                >
-                                  {jaEstaNoRoteiro ? "✓ Selecionada" : "➕ Roteiro"}
-                                </button>
-                              </td>
-                              <td className="p-3 space-y-0.5">
-                                <div className="font-mono font-bold text-slate-600">{lead.cnpj}</div>
-                                <span className="inline-block bg-emerald-50 text-emerald-700 font-extrabold px-1.5 rounded text-[9px] uppercase border border-emerald-200">
-                                  Ativa
-                                </span>
-                              </td>
-                              <td className="p-3 truncate max-w-[280px]">
-                                <div className="font-black text-slate-900 uppercase truncate" title={lead.razao_social}>{lead.razao_social}</div>
-                                <div className="text-indigo-600 font-bold uppercase text-[11px] truncate">{lead.nome_fantasia || "—"}</div>
-                              </td>
-                              <td className="p-3 text-slate-500 uppercase font-bold">{lead.bairro || "Centro"}</td>
-                              <td className="p-3 text-slate-900 font-mono font-bold">
-                                {lead.capital_social ? lead.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "R$ 0,00"}
-                              </td>
-                              <td className="p-3">
-                                <button 
-                                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social + " " + lead.cidadeExtenso)}`, "_blank")} 
-                                  className="bg-white border border-slate-300 font-black px-2 py-1 rounded text-[10px] uppercase hover:bg-slate-50 shadow-sm transition-colors cursor-pointer"
-                                >
-                                  🔍 Google
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <span className="text-xs font-semibold text-slate-400">Busca abrangente</span>
                 )}
               </div>
             </div>
-
-            {/* PAINEL DIREITO: CONTROLADOR DE INTELIGÊNCIA LOGÍSTICA (40% DA TELA) */}
-            <div className="xl:col-span-4 space-y-4">
-              
-              {/* CARD PREVIEW DE MAPEAMENTO E DIRETRIZES MAPS */}
-              <div className="bg-slate-900 text-white rounded-xl p-5 shadow-md border border-slate-800 space-y-4">
-                <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                  <div>
-                    <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">Painel de Campo</span>
-                    <h2 className="text-base font-black text-white uppercase tracking-tight mt-1">Sala de Situação Logística</h2>
-                  </div>
-                  <button
-                    onClick={abrirGoogleMapsComCidadesAtivas}
-                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 border border-indigo-500 text-white font-black rounded-lg text-[11px] uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 shadow-md"
-                  >
-                    📍 Abrir Rota no Google Maps
-                  </button>
-                </div>
-
-                {/* MÉTRICAS ACUMULADAS DA SESSÃO */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-800/60 border border-slate-800 p-3 rounded-lg">
-                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Leads em Memória</span>
-                    <span className="text-xl font-mono font-black text-indigo-400 mt-1 block">{totalEmpresasMapeadasNoCache}</span>
-                  </div>
-                  <div className="bg-slate-800/60 border border-slate-800 p-3 rounded-lg">
-                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Destinos Salvos</span>
-                    <span className="text-xl font-mono font-black text-emerald-400 mt-1 block">{roteiroFinal.length}</span>
-                  </div>
-                </div>
-
-                {/* VISUAL PREVIEW: RASTREADOR DE PROGRESSO LOGÍSTICO DA ESTRADA */}
-                <div className="space-y-2 pt-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Progresso Físico do Trajeto:</span>
-                  <div className="bg-slate-800/40 border border-slate-800 p-4 rounded-xl space-y-3 max-h-[300px] overflow-y-auto scrollbar-thin">
-                    {cidadesDaVisao.map((c, i) => {
-                      const cidadeMinerada = !!bancoLeadsPorCidade[c.nome];
-                      const cidadeAtivaNoMomento = cidadeAbAtiva === c.nome;
-                      
-                      return (
-                        <div key={i} className="flex items-center gap-3">
-                          <div className="flex flex-col items-center">
-                            <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center font-mono text-[8px] font-black shadow-sm ${
-                              cidadeAtivaNoMomento 
-                                ? "bg-indigo-500 text-white ring-4 ring-indigo-500/30 animate-pulse" 
-                                : cidadeMinerada ? "bg-emerald-500 text-white" : "bg-slate-700 text-slate-400"
-                            }`}>
-                              {i + 1}
-                            </div>
-                            {i < cidadesDaVisao.length - 1 && <div className="w-0.5 h-5 bg-slate-700 my-0.5" />}
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={`text-xs font-black uppercase ${cidadeAtivaNoMomento ? "text-indigo-400 font-extrabold" : "text-slate-300"}`}>
-                              {c.nome} / {c.uf}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-medium font-mono">
-                              {cidadeMinerada ? `✔ ${bancoLeadsPorCidade[c.nome].length} leads em cache` : "⏳ Aguardando leitura de banco"}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-            </div>
           </div>
         )}
 
-        {/* MÓDULO 2: VISÃO COBRANÇA / CONSOLIDAÇÃO DO ROTEIRO FECHADO */}
-        {abaPrincipalVisualizacao === "MEU_ROTEIRO" && (
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <div className="bg-indigo-950 p-4.5 text-white flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-indigo-900">
-              <div>
-                <h2 className="text-base font-black uppercase tracking-wider">💼 Itinerário Consolidado e Carteira Logística Fechada</h2>
-                <p className="text-indigo-200/80 text-xs mt-0.5 font-medium">
-                  Visão executiva e higienizada pronta para o vendedor levar para a estrada com anotações estratégicas salvando em real-time.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="bg-indigo-900/60 px-3 py-1.5 rounded-lg border border-indigo-800 text-right">
-                  <span className="block text-[9px] font-black text-indigo-300 uppercase tracking-widest">Capital Social Global</span>
-                  <span className="text-sm font-mono font-black text-emerald-400">
-                    {totalCapitalSocialRoteiroFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                  </span>
+        {/* CONTEÚDO PRINCIPAL */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          
+          <div className={`bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden transition-all duration-300 ${
+            leadSelecionado ? "lg:col-span-2" : "lg:col-span-3"
+          }`}>
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+              <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
+                🎯 Área de Trabalho Ativa <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-mono font-bold text-[10px]">{leads.length} leads</span>
+              </span>
+              
+              {leads.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={exportarListaParaCSV}
+                    className="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
+                  >
+                    📥 Exportar CSV
+                  </button>
+                  <button 
+                    onClick={limparTodaAEstreia}
+                    className="bg-red-50 border border-red-200 text-red-600 font-bold px-3 py-1 rounded hover:bg-red-100 text-[11px] cursor-pointer"
+                  >
+                    🗑️ Limpar Lista
+                  </button>
                 </div>
-                <button onClick={exportarParaCSV} disabled={roteiroFinal.length === 0} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-colors disabled:opacity-40 cursor-pointer shadow-md">
-                  📊 Exportar Planilha de Viagem (.CSV)
-                </button>
-              </div>
+              )}
             </div>
 
-            {roteiroFinal.length === 0 ? (
-              <div className="p-16 text-center text-slate-400 font-bold uppercase tracking-wider bg-slate-50/40">
-                Seu roteiro final está vazio. Navegue pelas abas da estrada e adicione empresas de interesse.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
-                      <th className="p-3.5">Parada / Cidade</th>
-                      <th className="p-3.5">Identificação do Target</th>
-                      <th className="p-3.5">Bairro</th>
-                      <th className="p-3.5 text-indigo-700 bg-indigo-50/50">✍️ Observações Estratégicas e Agendamento (Salva em Cache Local)</th>
-                      <th className="p-3.5 text-center">Gestão</th>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
+                    <th className="p-3.5">Score</th>
+                    <th className="p-3.5">CNPJ</th>
+                    <th className="p-3.5">Razão Social / Identificação</th>
+                    <th className="p-3.5">Cidade/UF</th>
+                    <th className="p-3.5">CNAE Principal</th>
+                    <th className="p-3.5 text-center">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-xs">
+                  {leads.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-12 text-slate-500 font-bold bg-slate-50">
+                        {carregando ? "Cruzando tabelas na nuvem do Google BigQuery..." : "Área de trabalho vazia. Descreva um alvo acima para minerar e acumular leads aqui!"}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium text-xs bg-white">
-                    {roteiroFinal.map((lead) => (
-                      <tr key={lead.cnpj} className="hover:bg-slate-50 transition-colors">
+                  ) : (
+                    leads.map((lead) => (
+                      <tr 
+                        key={lead.cnpj} 
+                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${
+                          leadSelecionado?.cnpj === lead.cnpj ? "bg-indigo-50 border-l-2 border-l-indigo-500" : ""
+                        }`}
+                        onClick={() => setLeadSelecionado(lead)}
+                      >
                         <td className="p-3.5">
-                          <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 font-black px-2.5 py-1 rounded-md text-[10px] uppercase shadow-sm">
-                            📍 {lead.parada_origem}
+                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded font-black font-mono text-[10px]">
+                            {lead.score} PTS
                           </span>
                         </td>
-                        <td className="p-3.5 space-y-0.5">
-                          <div className="font-black text-slate-900 uppercase truncate max-w-[320px]">{lead.razao_social}</div>
-                          <div className="text-[11px] font-mono text-slate-400 font-bold">{lead.cnpj}</div>
+                        <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
+                        <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[280px]">
+                          <div>{lead.razao_social}</div>
+                          {lead.nome_fantasia && lead.nome_fantasia !== lead.razao_social && (
+                            <div className="text-[10px] text-indigo-500 font-semibold lowercase truncate tracking-tight">⭐ {lead.nome_fantasia}</div>
+                          )}
                         </td>
-                        <td className="p-3.5 text-slate-500 uppercase font-bold">{lead.bairro || "Centro"}</td>
-                        <td className="p-3.5 w-[42%] bg-indigo-50/10">
-                          <input
-                            type="text"
-                            value={lead.observacaoCommercial || ""}
-                            onChange={(e) => atualizarObservacao(lead.cnpj, e.target.value)}
-                            placeholder="Ex: Agendado com Diretor Carlos às 14h / Levar proposta de antecipação..."
-                            className="w-full p-2.5 bg-white border border-slate-300 rounded font-bold text-slate-800 outline-none focus:border-indigo-600 focus:shadow-sm shadow-inner transition-all text-xs"
-                          />
+                        <td className="p-3.5 uppercase text-slate-500">{lead.cidadeExtenso} / {lead.uf}</td>
+                        <td className="p-3.5 text-slate-500 max-w-[250px] truncate">
+                          <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] mr-1.5 border border-slate-200">
+                            {lead.cnae_principal}
+                          </span>
                         </td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-3.5 text-center flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => removerDoRoteiro(lead.cnpj)}
-                            className="p-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded text-[10px] font-black uppercase transition-colors cursor-pointer shadow-sm"
+                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social || lead.cnpj)}`, "_blank")}
+                            className="bg-white text-slate-700 border border-slate-300 font-bold px-2 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
                           >
-                            ❌ Remover
+                            Google
+                          </button>
+                          <button
+                            onClick={() => eliminarLeadDaLista(lead.cnpj)}
+                            className="bg-white text-red-500 border border-red-200 font-bold px-2 py-1 rounded hover:bg-red-50 text-[11px] cursor-pointer"
+                            title="Remover da lista"
+                          >
+                            ✕
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
 
+          {/* SIDE GAVETA: DETALHES COMPLETOS DO LEAD SELECIONADO */}
+          {leadSelecionado && (
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-lg animate-in slide-in-from-right-5 duration-200 lg:col-span-1 sticky top-6">
+              <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Painel de Auditoria Enriquecido</span>
+                <button 
+                  onClick={() => setLeadSelecionado(null)}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-xs p-1 cursor-pointer"
+                >
+                  ✕ Fechar
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight leading-tight">
+                    {leadSelecionado.razao_social}
+                  </h3>
+                  {leadSelecionado.nome_fantasia && leadSelecionado.nome_fantasia !== leadSelecionado.razao_social && (
+                    <div className="text-xs font-bold text-indigo-600 uppercase mt-0.5">Fantasia: {leadSelecionado.nome_fantasia}</div>
+                  )}
+                  <span className="font-mono font-bold text-slate-500 text-xs">{formatarCnpj(leadSelecionado.cnpj)}</span>
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500 font-bold">Região</span>
+                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.cidadeExtenso} - {leadSelecionado.uf}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500 font-bold">Bairro</span>
+                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.bairro || "NÃO INFORMADO"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500 font-bold">Situação Cadastral</span>
+                    <span className="text-slate-800 uppercase font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">
+                      STATUS {leadSelecionado.situacao}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500 font-bold">CNAE Principal</span>
+                    <span className="text-indigo-600 font-mono font-bold">{leadSelecionado.cnae_principal}</span>
+                  </div>
+                  {leadSelecionado.lat && leadSelecionado.lng && (
+                    <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                      <span className="text-slate-500 font-bold">Coordenadas (Mapas)</span>
+                      <span className="text-emerald-600 font-mono font-bold text-[10px]">
+                        {leadSelecionado.lat}, {leadSelecionado.lng}
+                      </span>
+                    </div>
+                  )}
+                  {leadSelecionado.capital_social && leadSelecionado.capital_social > 0 ? (
+                    <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                      <span className="text-slate-500 font-bold">Capital Social</span>
+                      <span className="text-emerald-600 font-bold">
+                        {leadSelecionado.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      </span>
+                    </div>
+                  ) : null}
+                  {leadSelecionado.website && (
+                    <div className="flex justify-between pt-0.5 items-center">
+                      <span className="text-slate-500 font-bold">Website</span>
+                      <a 
+                        href={leadSelecionado.website.startsWith("http") ? leadSelecionado.website : `https://${leadSelecionado.website}`}
+                        target="_blank" 
+                        className="text-indigo-600 font-bold hover:underline text-[11px] truncate max-w-[150px]"
+                      >
+                        {leadSelecionado.website} 🔗
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {leadSelecionado.google_categoria && (
+                  <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg">
+                    <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block mb-0.5">Classificação Comercial Google</span>
+                    <span className="text-xs font-semibold text-slate-800 capitalize">{leadSelecionado.google_categoria}</span>
+                  </div>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-2 mt-4">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Delegar Lead no NedHub para:
+                  </label>
+                  <select 
+                    value={agenteAlvo}
+                    onChange={(e) => setAgenteAlvo(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-300 rounded text-xs text-slate-800 outline-none cursor-pointer focus:border-indigo-500 uppercase font-bold shadow-sm"
+                  >
+                    {equipeDisponivel.map(membro => (
+                      <option key={membro.id} value={membro.nome}>{membro.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <button
+                    onClick={() => {
+                      const cnpjLimpo = leadSelecionado.cnpj.replace(/\D/g, "");
+                      window.open(`https://cnpj.biz/${cnpjLimpo}`, "_blank");
+                    }}
+                    className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-lg font-bold text-center hover:bg-slate-50 text-[11px] cursor-pointer shadow-sm"
+                  >
+                    Cartão CNPJ ⚡
+                  </button>
+                  <button
+                    onClick={enviarParaNedHub}
+                    disabled={vinculando}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-black text-center shadow-md transition-colors cursor-pointer text-[11px] disabled:opacity-50"
+                  >
+                    {vinculando ? "⏳ Gravando..." : "📤 Enviar p/ NedHub"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
-}
-
-function cityKey(name: string): string {
-  return name ? name.trim() : "";
 }
