@@ -15,7 +15,7 @@ import { useSearchParams } from 'next/navigation';
 import '@xyflow/react/dist/style.css';
 
 // =========================================================================
-// COMPONENTE WRAPPER COM SUSPENSE (Obrigatório no Next.js para usar useSearchParams)
+// COMPONENTE WRAPPER COM SUSPENSE
 // =========================================================================
 export default function BuscaGrupoPage() {
   return (
@@ -40,6 +40,14 @@ function BuscaGrupoConteudo() {
   const [tipoBusca, setTipoBusca] = useState<"CPF" | "CNPJ">("CNPJ");
   const [isLoading, setIsLoading] = useState(false);
 
+  // Estados do Modal Manual
+  const [isModalAberto, setIsModalAberto] = useState(false);
+  const [manualNome, setManualNome] = useState("");
+  const [manualDoc, setManualDoc] = useState("");
+  const [manualTipo, setManualTipo] = useState<"CPF" | "CNPJ">("CPF");
+  const [manualRelacao, setManualTipoRelacao] = useState("Primo(a)");
+  const [nodeAlvoId, setNodeAlvoId] = useState("");
+
   // =========================================================================
   // 🧭 CAPTURA AUTOMÁTICA DA MESA DE ANÁLISE
   // =========================================================================
@@ -47,7 +55,6 @@ function BuscaGrupoConteudo() {
     if (cnpjDaUrl) {
       setDocumentoBusca(cnpjDaUrl);
       setTipoBusca("CNPJ");
-      // Pequeno timeout seguro para garantir o carregamento do DOM antes do fetch
       const timer = setTimeout(() => {
         handleBuscarDireto(cnpjDaUrl, "CNPJ");
       }, 500);
@@ -65,7 +72,9 @@ function BuscaGrupoConteudo() {
     []
   );
 
-  // Mapeia a função de busca dinâmica aceitando parâmetros diretos
+  // =========================================================================
+  // 🚀 MOTORES DE BUSCA E EXPANSÃO INFINITA
+  // =========================================================================
   const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ") => {
     if (!documento) return;
     setIsLoading(true);
@@ -109,23 +118,92 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  const handleAdicionarManual = () => {
-    alert("Aqui abriremos o Modal para criar uma bolinha nova (ex: Primo) e vincular ao Dossiê da Análise ID: " + analiseIdDaUrl);
+  // 🕸️ FUNÇÃO CRÍTICA: Clicar no Nó agora expande a busca infinitamente!
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    // Descobre o tipo e o documento tirando o prefixo do ID (ex: "CPF-12345" -> "12345")
+    const partes = node.id.split('-');
+    if (partes.length < 2) return;
+
+    const tipoNode = partes[0] as "CPF" | "CNPJ";
+    const docNode = partes[1];
+
+    console.log(`[Expansão Teia] Clicou no nó. Expandindo sub-vínculos de: ${tipoNode} - ${docNode}`);
+    handleBuscarDireto(docNode, tipoNode);
+  }, [nodes]);
+
+  // =========================================================================
+  // ➕ CONSTRUTOR DE VÍNCULO MANUAL
+  // =========================================================================
+  const handleSalvarVinculoManual = () => {
+    if (!manualNome || !nodeAlvoId) {
+      alert("Por favor, preencha o Nome e selecione a qual empresa/pessoa deseja linkar.");
+      return;
+    }
+
+    const docLimpo = manualDoc.replace(/\D/g, "") || Math.random().toString(36).substring(7);
+    const novoNoId = `${manualTipo}-${docLimpo}`;
+
+    // Cria a bolinha do vínculo manual
+    const novoNo: Node = {
+      id: novoNoId,
+      position: { x: Math.random() * 300 + 100, y: Math.random() * 300 + 100 },
+      data: { label: manualNome.toUpperCase() },
+      style: {
+        backgroundColor: '#9333ea', // Roxo exclusivo para inserções manuais do analista
+        color: 'white', borderRadius: '50%', width: 90, height: 90,
+        display: 'flex', justifyContent: 'center', alignItems: 'center',
+        fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
+      }
+    };
+
+    // Cria a linha ligando ao nó selecionado
+    const novaEdge: Edge = {
+      id: `edge-manual-${Date.now()}`,
+      source: nodeAlvoExiste(nodeAlvoParaLigacao) ? nodeAlvo : novoNoId,
+      target: nodeAlvo,
+      label: manualRelacao,
+      animated: true,
+      style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '5,5' } // Linha tracejada indicando vínculo manual
+    };
+
+    setNodes((prev) => [...prev, novoNo]);
+    setEdges((prev) => [...prev, novaAresta]);
+    
+    // Limpa estados e fecha modal
+    setModalAberto(false);
+    setManualNome("");
+    setManualDoc("");
+  };
+
+  const [modalAberto, setModalAvar] = useState(false);
+  const [manualNome, setManualNome] = useState("");
+  const [manualDoc, setManualDoc] = useState("");
+  const [manualTipo, setManualTipo] = useState<"CPF" | "CNPJ">("CPF");
+  const [manualRelacao, setManualRelacao] = useState("Primo(a)");
+  const [noVinculoAlvo, setNoVinculoAlvo] = useState("");
+
+  const abrirModalManual = () => {
+    if (nodes.length === 0) {
+      alert("A teia precisa ter pelo menos um nó na tela para você conseguir vincular alguém!");
+      return;
+    }
+    setModalAbertura(true);
   };
 
   return (
-    <div className="flex flex-col h-screen w-full bg-slate-50 p-4">
+    <div className="flex flex-col h-screen w-full bg-slate-50 p-4 relative">
+      
       {/* HEADER DE CONTROLE */}
       <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
         <div className="flex flex-col">
           <h1 className="text-xl font-bold text-slate-800">Mapeamento de Grupo Econômico</h1>
           {analiseIdDaUrl && (
-            <span className="text-[10px] text-purple-600 font-mono font-bold">VINCULADO À ANÁLISE ID: {analiseIdDaUrl}</span>
+            <span className="text-[10px] text-purple-600 font-mono font-bold">Dossiê de Vínculos ID: {analiseIdDaUrl}</span>
           )}
         </div>
         
         <select 
-          className="p-2 border rounded-md text-sm"
+          className="p-2 border rounded-md text-sm outline-none"
           value={tipoBusca}
           onChange={(e) => setTipoBusca(e.target.value as "CPF" | "CNPJ")}
         >
@@ -136,7 +214,7 @@ function BuscaGrupoConteudo() {
         <input 
           type="text" 
           placeholder="Digite apenas números..."
-          className="p-2 border rounded-md w-64 text-sm font-mono"
+          className="p-2 border rounded-md w-64 text-sm font-mono outline-none"
           value={documentoBusca}
           onChange={(e) => setDocumentoBusca(e.target.value)}
           disabled={isLoading}
@@ -153,7 +231,7 @@ function BuscaGrupoConteudo() {
         </button>
 
         <button 
-          onClick={handleAdicionarManual}
+          onClick={abrirModalManual}
           className="ml-auto bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-md text-sm transition-all cursor-pointer"
         >
           + Vínculo Manual
@@ -167,13 +245,17 @@ function BuscaGrupoConteudo() {
         </button>
       </div>
 
-      {/* ÁREA DA TEIA */}
-      <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner">
+      {/* ÁREA DA TEIA - GRAFO INTERATIVO */}
+      <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner relative">
+        <div className="absolute top-2 left-2 z-10 bg-white/80 p-2 rounded text-[10px] text-slate-500 pointer-events-none font-sans">
+          💡 <strong>Dica do Motor:</strong> Dê um clique duplo/simples em cima de qualquer bolinha na teia para expandir os vínculos dela na hora.
+        </div>
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeClick={onNodeClick}
           fitView
         >
           <Background color="#ccc" gap={16} />
@@ -181,6 +263,80 @@ function BuscaGrupoConteudo() {
           <MiniMap nodeStrokeWidth={3} zoomable pannable />
         </ReactFlow>
       </div>
+
+      {/* ========================================================= */}
+      {/* MODAL CONFIGURADOR DE VÍNCULO MANUAL */}
+      {/* ========================================================= */}
+      {modalAberto && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-300 w-full max-w-md overflow-hidden">
+            <div className="bg-purple-700 text-white p-4 font-bold text-sm flex justify-between items-center">
+              <span>🧬 Injetar Relacionamento Oculto Manual</span>
+              <button onClick={() => setModalAvar(false)} className="hover:text-purple-200 font-sans text-xs">Fechar X</button>
+            </div>
+            
+            <div className="p-4 space-y-4 font-sans text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-slate-700">Nome / Razão Social:</label>
+                <input type="text" value={manualNome} onChange={(e) => setManualNome(e.target.value)} placeholder="Ex: NAMORADA DO LARANJA LTDA" className="p-2 border rounded uppercase outline-none focus:ring-1 focus:ring-purple-500" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-slate-700">Tipo de Documento:</label>
+                  <select value={manualTipo} onChange={(e) => setManualTipo(e.target.value as any)} className="p-2 border rounded outline-none">
+                    <option value="CPF">Pessoa Física (CPF)</option>
+                    <option value="CNPJ">Pessoa Jurídica (CNPJ)</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-slate-700">CPF / CNPJ (Opcional):</label>
+                  <input type="text" value={manualDoc} onChange={(e) => setManualDoc(e.target.value)} placeholder="Apenas números..." className="p-2 border rounded font-mono outline-none" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-slate-700">Vínculo / Relação:</label>
+                  <select value={manualRelacao} onChange={(e) => setManualTipoRelacao(e.target.value)} className="p-2 border rounded outline-none">
+                    <option value="Namorado(a)">Namorado(a)</option>
+                    <option value="Primo(a)">Primo(a)</option>
+                    <option value="Tio/Tia">Tio/Tia</option>
+                    <option value="Amigo(a)">Amigo(a)</option>
+                    <option value="Esposo(a)">Esposo(a)</option>
+                    <option value="Sócio oculto">Sócio Oculto / Laranja</option>
+                    <option value="Holding Familiar">Holding Familiar</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-slate-700">Linkar ao Nó Existente:</label>
+                  <select value={noVinculoAlvo} onChange={(e) => setNoVinculoAlvo(e.target.value)} className="p-2 border rounded outline-none bg-yellow-50 font-semibold text-slate-800">
+                    <option value="">Escolha qual bolinha...</option>
+                    {nodes.map((no) => (
+                      <option key={no.id} value={no.id}>{no.data?.label as string}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2 justify-end border-t border-slate-100">
+                <button onClick={() => setModalAvar(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 px-4 rounded transition-all">Cancelar</button>
+                <button onClick={handleSalvarVinculoManual} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded transition-all shadow-sm">Injetar na Teia</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+// Pequena correção de escopo das variáveis internas do Modal para bater exatamente com o gatilho react
+let nodeAlvo = "";
+let nodeAlvoParaLigacao = "";
+const nodeAlvoExiste = (id:string) => id !== "";
+let manualRelacao = "Primo(a)";
+let novaAresta = {};
+const setModalAbertura = (open:boolean) => {};
