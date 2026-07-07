@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     const promptSistema = `
       Você é um analista especialista em prospecção B2B. Extraia os critérios do texto.
       cidade_nome: Nome da cidade em MAIÚSCULAS e sem acentos, ou null.
-      uf: Sigla de 2 letras do estado. Deduza se a cidade for óbvia.
+      uf: Sigla de 2 letras do estado. Deduza se a cidade for conhecida.
       codigos_cnae: Array de strings com prefixos numéricos de CNAE.
       Retorne ESTRITAMENTE um JSON:
       {"atividade": "descrição", "cidade_nome": "CIDADE", "uf": "UF", "codigos_cnae": []}
@@ -114,10 +114,10 @@ export async function POST(req: Request) {
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // 🔥 OTIMIZAÇÃO HISTÓRICA: O DuckDB bate direto no arquivo flat sem JOIN nenhum na nuvem!
+    // ⚡ O arquivo unificado já possui Razão Social injetada. Query ultra veloz!
     const sqlQuery = `
       SELECT 
-        cnpj, '02' AS situacao, data_abertura, cnae_principal, cnaes_secundarios, 
+        cnpj, cnpj_basico, data_abertura, cnae_principal, cnaes_secundarios, 
         bairro, cep, uf, municipio_rf, razao_social, nome_fantasia, natureza_juridica, capital_social
       FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet')
       WHERE uf = '${estadoAlvo}'

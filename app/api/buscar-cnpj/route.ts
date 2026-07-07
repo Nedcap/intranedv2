@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const cnpjLimpo = cnpj.replace(/\D/g, "");
     const bucketName = process.env.R2_BUCKET_NAME;
 
-    // 🔥 EXPLICAÇÃO: Batendo direto no arquivo unificado master. Velocidade máxima!
+    // ⚡ Aponta direto pro arquivo consolidado. Sem JOIN de tabelas na nuvem!
     const sqlQuery = `
       SELECT cnpj, razao_social, uf, municipio_rf, capital_social
       FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet')
