@@ -40,13 +40,13 @@ function BuscaGrupoConteudo() {
   const [tipoBusca, setTipoBusca] = useState<"CPF" | "CNPJ">("CNPJ");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Estados do Modal Manual
-  const [isModalAberto, setIsModalAberto] = useState(false);
+  // Estados Unificados do Modal Manual
+  const [modalAberto, setModalAberto] = useState(false);
   const [manualNome, setManualNome] = useState("");
   const [manualDoc, setManualDoc] = useState("");
   const [manualTipo, setManualTipo] = useState<"CPF" | "CNPJ">("CPF");
-  const [manualRelacao, setManualTipoRelacao] = useState("Primo(a)");
-  const [nodeAlvoId, setNodeAlvoId] = useState("");
+  const [manualRelacao, setManualRelacao] = useState("Primo(a)");
+  const [noVinculoAlvo, setNoVinculoAlvo] = useState("");
 
   // =========================================================================
   // 🧭 CAPTURA AUTOMÁTICA DA MESA DE ANÁLISE
@@ -118,24 +118,23 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  // 🕸️ FUNÇÃO CRÍTICA: Clicar no Nó agora expande a busca infinitamente!
+  // Clicar no Nó expande a busca automaticamente
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    // Descobre o tipo e o documento tirando o prefixo do ID (ex: "CPF-12345" -> "12345")
     const partes = node.id.split('-');
     if (partes.length < 2) return;
 
     const tipoNode = partes[0] as "CPF" | "CNPJ";
     const docNode = partes[1];
 
-    console.log(`[Expansão Teia] Clicou no nó. Expandindo sub-vínculos de: ${tipoNode} - ${docNode}`);
+    console.log(`[Expansão Teia] Clicou no nó: ${tipoNode} - ${docNode}`);
     handleBuscarDireto(docNode, tipoNode);
-  }, [nodes]);
+  }, []);
 
   // =========================================================================
-  // ➕ CONSTRUTOR DE VÍNCULO MANUAL
+  // ➕ SALVAR VÍNCULO MANUAL
   // =========================================================================
   const handleSalvarVinculoManual = () => {
-    if (!manualNome || !nodeAlvoId) {
+    if (!manualNome || !noVinculoAlvo) {
       alert("Por favor, preencha o Nome e selecione a qual empresa/pessoa deseja linkar.");
       return;
     }
@@ -143,51 +142,41 @@ function BuscaGrupoConteudo() {
     const docLimpo = manualDoc.replace(/\D/g, "") || Math.random().toString(36).substring(7);
     const novoNoId = `${manualTipo}-${docLimpo}`;
 
-    // Cria a bolinha do vínculo manual
     const novoNo: Node = {
       id: novoNoId,
       position: { x: Math.random() * 300 + 100, y: Math.random() * 300 + 100 },
       data: { label: manualNome.toUpperCase() },
       style: {
-        backgroundColor: '#9333ea', // Roxo exclusivo para inserções manuais do analista
+        backgroundColor: '#9333ea', // Roxo analista
         color: 'white', borderRadius: '50%', width: 90, height: 90,
         display: 'flex', justifyContent: 'center', alignItems: 'center',
         fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
       }
     };
 
-    // Cria a linha ligando ao nó selecionado
-    const novaEdge: Edge = {
+    const novaAresta: Edge = {
       id: `edge-manual-${Date.now()}`,
-      source: nodeAlvoExiste(nodeAlvoParaLigacao) ? nodeAlvo : novoNoId,
-      target: nodeAlvo,
+      source: noVinculoAlvo, // Conecta ao nó selecionado como alvo
+      target: novoNoId,     // Aponta para a nova bolinha criada
       label: manualRelacao,
       animated: true,
-      style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '5,5' } // Linha tracejada indicando vínculo manual
+      style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '5,5' }
     };
 
     setNodes((prev) => [...prev, novoNo]);
     setEdges((prev) => [...prev, novaAresta]);
     
-    // Limpa estados e fecha modal
     setModalAberto(false);
     setManualNome("");
     setManualDoc("");
   };
-
-  const [modalAberto, setModalAvar] = useState(false);
-  const [manualNome, setManualNome] = useState("");
-  const [manualDoc, setManualDoc] = useState("");
-  const [manualTipo, setManualTipo] = useState<"CPF" | "CNPJ">("CPF");
-  const [manualRelacao, setManualRelacao] = useState("Primo(a)");
-  const [noVinculoAlvo, setNoVinculoAlvo] = useState("");
 
   const abrirModalManual = () => {
     if (nodes.length === 0) {
       alert("A teia precisa ter pelo menos um nó na tela para você conseguir vincular alguém!");
       return;
     }
-    setModalAbertura(true);
+    setModalAberto(true);
   };
 
   return (
@@ -248,7 +237,7 @@ function BuscaGrupoConteudo() {
       {/* ÁREA DA TEIA - GRAFO INTERATIVO */}
       <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner relative">
         <div className="absolute top-2 left-2 z-10 bg-white/80 p-2 rounded text-[10px] text-slate-500 pointer-events-none font-sans">
-          💡 <strong>Dica do Motor:</strong> Dê um clique duplo/simples em cima de qualquer bolinha na teia para expandir os vínculos dela na hora.
+          💡 <strong>Dica do Motor:</strong> Dê um clique em cima de qualquer bolinha na teia para expandir os vínculos dela na hora.
         </div>
         <ReactFlow
           nodes={nodes}
@@ -268,11 +257,11 @@ function BuscaGrupoConteudo() {
       {/* MODAL CONFIGURADOR DE VÍNCULO MANUAL */}
       {/* ========================================================= */}
       {modalAberto && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-300 w-full max-w-md overflow-hidden">
             <div className="bg-purple-700 text-white p-4 font-bold text-sm flex justify-between items-center">
               <span>🧬 Injetar Relacionamento Oculto Manual</span>
-              <button onClick={() => setModalAvar(false)} className="hover:text-purple-200 font-sans text-xs">Fechar X</button>
+              <button onClick={() => setModalAberto(false)} className="hover:text-purple-200 font-sans text-xs">Fechar X</button>
             </div>
             
             <div className="p-4 space-y-4 font-sans text-xs">
@@ -298,7 +287,7 @@ function BuscaGrupoConteudo() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
                   <label className="font-bold text-slate-700">Vínculo / Relação:</label>
-                  <select value={manualRelacao} onChange={(e) => setManualTipoRelacao(e.target.value)} className="p-2 border rounded outline-none">
+                  <select value={manualRelacao} onChange={(e) => setManualRelacao(e.target.value)} className="p-2 border rounded outline-none">
                     <option value="Namorado(a)">Namorado(a)</option>
                     <option value="Primo(a)">Primo(a)</option>
                     <option value="Tio/Tia">Tio/Tia</option>
@@ -321,7 +310,7 @@ function BuscaGrupoConteudo() {
               </div>
 
               <div className="pt-2 flex gap-2 justify-end border-t border-slate-100">
-                <button onClick={() => setModalAvar(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 px-4 rounded transition-all">Cancelar</button>
+                <button onClick={() => setModalAberto(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 px-4 rounded transition-all">Cancelar</button>
                 <button onClick={handleSalvarVinculoManual} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded transition-all shadow-sm">Injetar na Teia</button>
               </div>
             </div>
@@ -332,11 +321,3 @@ function BuscaGrupoConteudo() {
     </div>
   );
 }
-
-// Pequena correção de escopo das variáveis internas do Modal para bater exatamente com o gatilho react
-let nodeAlvo = "";
-let nodeAlvoParaLigacao = "";
-const nodeAlvoExiste = (id:string) => id !== "";
-let manualRelacao = "Primo(a)";
-let novaAresta = {};
-const setModalAbertura = (open:boolean) => {};
