@@ -3,25 +3,21 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
 if (credentialsEnv) {
   try {
-    // Transformamos a string de volta em um objeto JavaScript
     credentials = JSON.parse(credentialsEnv);
   } catch (err) {
     console.error("Erro ao fazer parse do GOOGLE_APPLICATION_CREDENTIALS_JSON:", err);
   }
 }
 
-// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
     client_email: credentials.client_email,
-    // O JSON.parse já resolve automaticamente o problema das quebras de linha (\n)
     private_key: credentials.private_key, 
   }
 });
@@ -42,7 +38,6 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
-      // ⚡ Busca os dados da Empresa Matriz
       const sqlEmpresa = `
         SELECT razao_social 
         FROM \`credito-489113.dados_receita.empresas_master\` 
@@ -56,7 +51,6 @@ export async function POST(req: Request) {
       
       const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : `CNPJ Base: ${cnpjBasico}`;
 
-      // Cria o Nó Central (A Empresa)
       nodes.push({
         id: `CNPJ-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -68,7 +62,6 @@ export async function POST(req: Request) {
         }
       });
 
-      // ⚡ Busca todos os Sócios vinculados a este CNPJ
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
         FROM \`credito-489113.dados_receita.socios_master\`
@@ -81,10 +74,12 @@ export async function POST(req: Request) {
       
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
-      // Cria os Nós Satélites (Os Sócios)
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
-        const idSocio = socio.cnpj_cpf_socio ? `CPF-${socio.cnpj_cpf_socio}` : `NOME-${socio.nome_socio_razao_social}`;
+        
+        // ⚡ A CORREÇÃO DA MÁGICA TÁ AQUI: Limpa os asteriscos (***) da Receita antes de gerar o ID!
+        const docSocioLimpo = socio.cnpj_cpf_socio ? String(socio.cnpj_cpf_socio).replace(/\D/g, "") : "";
+        const idSocio = docSocioLimpo ? `CPF-${docSocioLimpo}` : `NOME-${socio.nome_socio_razao_social}`;
 
         nodes.push({
           id: idSocio,
@@ -98,7 +93,7 @@ export async function POST(req: Request) {
         });
 
         edges.push({
-          id: `edge-${docLimpo}-${socio.cnpj_cpf_socio || index}`,
+          id: `edge-${docLimpo}-${docSocioLimpo || index}`,
           source: `CNPJ-${docLimpo}`, target: idSocio,
           label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
           animated: true, style: { stroke: '#94a3b8', strokeWidth: 2 }
@@ -107,7 +102,6 @@ export async function POST(req: Request) {
 
     } else if (tipoBusca === "CPF") {
       
-      // Cria o Nó Central (O Sócio)
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -119,8 +113,6 @@ export async function POST(req: Request) {
         }
       });
 
-      // ⚡ Busca todas as Empresas onde este CPF é Sócio
-      // O CONCAT ajuda a fazer o filtro LIKE com o parâmetro de forma segura
       const sqlEmpresas = `
         SELECT s.cnpj_basico, e.razao_social
         FROM \`credito-489113.dados_receita.socios_master\` s
@@ -136,10 +128,8 @@ export async function POST(req: Request) {
 
       const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
 
-      // Cria os Nós Satélites (As Empresas)
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
-        // Remonta o CNPJ Matriz assumindo final 0001-00 para exibição
         const idEmpresa = `CNPJ-${emp.cnpj_basico}000100`;
 
         nodes.push({
