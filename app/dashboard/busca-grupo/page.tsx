@@ -75,7 +75,8 @@ function BuscaGrupoConteudo() {
   // =========================================================================
   // 🚀 MOTORES DE BUSCA E EXPANSÃO INFINITA
   // =========================================================================
-  const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ") => {
+  // ⚡ Alteração: Adicionada a "posicaoOrigem" para desenhar ao redor de quem foi clicado
+  const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ", posicaoOrigem?: { x: number, y: number }) => {
     if (!documento) return;
     setIsLoading(true);
     
@@ -94,19 +95,45 @@ function BuscaGrupoConteudo() {
         return;
       }
 
+      // Calcula o deslocamento. Se não for expansão de clique, usa o centro padrão.
+      const xOffset = posicaoOrigem ? posicaoOrigem.x - 400 : 0;
+      const yOffset = posicaoOrigem ? posicaoOrigem.y - 300 : 0;
+
+      let novosNosAdicionados = 0;
+      let novasArestasAdicionadas = 0;
+
       setNodes((prevNodes) => {
         const novosNodes = data.nodes.filter(
           (novoNo: Node) => !prevNodes.find((noAntigo) => noAntigo.id === novoNo.id)
         );
-        return [...prevNodes, ...novosNodes];
+        
+        novosNosAdicionados = novosNodes.length;
+
+        // Ajusta as coordenadas para nascerem em volta do nó clicado
+        const nodesAjustados = novosNodes.map((n: Node) => ({
+          ...n,
+          position: {
+            x: n.position.x + xOffset,
+            y: n.position.y + yOffset
+          }
+        }));
+
+        return [...prevNodes, ...nodesAjustados];
       });
 
       setEdges((prevEdges) => {
         const novasEdges = data.edges.filter(
           (novaAresta: Edge) => !prevEdges.find((arestaAntiga) => arestaAntiga.id === novaAresta.id)
         );
+        
+        novasArestasAdicionadas = novasEdges.length;
         return [...prevEdges, ...novasEdges];
       });
+
+      // Feedback inteligente caso a busca termine num "beco sem saída"
+      if (posicaoOrigem && novosNosAdicionados === 0 && novasArestasAdicionadas === 0) {
+        setTimeout(() => alert("Fim da linha! Nenhuma nova ligação foi encontrada para este documento."), 100);
+      }
 
     } catch (error) {
       console.error("Erro na requisição:", error);
@@ -118,16 +145,25 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  // Clicar no Nó expande a busca automaticamente
+  // ⚡ Alteração: Lógica blindada para evitar cliques em "Nomes" e enviar a posição do nó
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
 
-    const tipoNode = partes[0] as "CPF" | "CNPJ";
-    const docNode = partes[1];
+    const tipoNode = partes[0];
+    const docNode = partes.slice(1).join('-'); // Evita quebra se o nome tiver traços
+
+    if (tipoNode === "NOME") {
+      alert("⚠️ Este sócio está registrado na Receita apenas pelo Nome (sem CPF oculto). Não é possível puxar as empresas dele automaticamente.");
+      return;
+    }
+
+    if (tipoNode !== "CPF" && tipoNode !== "CNPJ") return;
 
     console.log(`[Expansão Teia] Clicou no nó: ${tipoNode} - ${docNode}`);
-    handleBuscarDireto(docNode, tipoNode);
+    
+    // Dispara a busca enviando a posição exata de onde o usuário clicou (node.position)
+    handleBuscarDireto(docNode, tipoNode as "CPF" | "CNPJ", node.position);
   }, []);
 
   // =========================================================================
