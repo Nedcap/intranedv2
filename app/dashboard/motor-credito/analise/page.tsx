@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import GerarAnalise from "@/components/gerar-analise";
 
 // =========================================================================
-// INTERFACES (ESPELHO DO NOVO EXCEL)
+// INTERFACES
 // =========================================================================
 interface FilaItem {
   id: string;
@@ -93,13 +93,14 @@ interface AnaliseData {
   razao_social: string; 
   status?: string;
 
-  // CAPA / DADOS EMPRESA
+  // CAPA
   data_analise: string;
   relacionamento: string;
   analista: string;
   gerente: string;
   rating: string;
   
+  // DADOS DA EMPRESA (CADASTRO)
   fundacao: string;
   capital_social: number;
   localizacao: string;
@@ -135,18 +136,16 @@ interface AnaliseData {
   restritivos_quadro: { pefin: number; refin: number; protesto: number; div_vencida: number; acao_judicial: number; cheque_sem_fundo: number };
   restritivos: RestritivoItem[];
   
-  // TEXTOS, JURÍDICO E MÍDIA
+  // TEXTOS E LINKS
   resumo_visita: string;
   juridico_tramitacao: string;
   juridico_ia: string;
   noticias_midia: string;
   parecer_analista: string;
-  parecer_diretor: string;
-
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
-
   recomendacao_analista?: string;
-  [key: string]: any; // Permissivo para novos campos dinâmicos
+
+  [key: string]: any;
 }
 
 const DADOS_MODELO: AnaliseData = {
@@ -171,7 +170,7 @@ const DADOS_MODELO: AnaliseData = {
   restritivos_quadro: { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 },
   restritivos: [],
   
-  resumo_visita: "", juridico_tramitacao: "", juridico_ia: "", noticias_midia: "", parecer_analista: "", parecer_diretor: "", recomendacao_analista: "",
+  resumo_visita: "", juridico_tramitacao: "", juridico_ia: "", noticias_midia: "", parecer_analista: "", recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" }
 };
 
@@ -230,7 +229,6 @@ function MesaAnaliseConteudo() {
         const dc = data.dados_consolidados || {};
         if (data.status === "robo_processando") await supabase.from("analises_credito").update({ status: "em_revisao_humana" }).eq("id", id);
         
-        // Merge profundo para não perder sub-objetos vazios
         setAnalise({ ...DADOS_MODELO, ...dc, anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, id: data.id, cnpj: data.cnpj, razao_social: data.razao_social, status: "em_revisao_humana" });
       }
     } catch (err) { console.error(err); } finally { setLoadingAnalise(false); }
@@ -254,7 +252,7 @@ function MesaAnaliseConteudo() {
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
-      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação antes de enviar ao comitê.");
+      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê.");
       return;
     }
     const confirmacao = window.confirm(`Encaminhar para o Comitê de Crédito com parecer de: [${analise.recomendacao_analista.toUpperCase()}]?`);
@@ -285,7 +283,6 @@ function MesaAnaliseConteudo() {
     } catch (err: any) { alert("❌ Falha na devolução."); } finally { setProcessandoDecisao(false); }
   };
 
-  // GERENCIAMENTO DE LINHAS GENÉRICO (Permissivo para qualquer nova tabela)
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
     const novoArray = [...(analise[campo] as any[])];
     novoArray[index][subCampo] = valor;
@@ -297,7 +294,6 @@ function MesaAnaliseConteudo() {
     setAnalise({ ...analise, [campoPai]: { ...(analise[campoPai] as any), [campoFilho]: valor } });
   };
 
-  // CÁLCULOS
   const handleFat = (ano: string, mes: string, val: string) => {
     const fatAtual = { ...analise.dados_faturamento };
     if (!fatAtual[ano]) fatAtual[ano] = {};
@@ -322,7 +318,6 @@ function MesaAnaliseConteudo() {
   const totBancosDet = analise.endividamento_detalhado.reduce((acc, d) => acc + Number(d.saldo), 0);
   const totRestritivos = analise.restritivos.reduce((acc, r) => acc + Number(r.valor), 0);
 
-  // CLASSES CSS (Padrão Excel)
   const cellStyle = "w-full h-full py-1 px-1.5 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-sans text-[11px] transition-all";
   const numStyle = "w-full h-full py-1 px-1.5 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-mono text-[11px] text-right transition-all";
   const thStyle = "p-1.5 bg-[#e2e8f0] border border-[#94a3b8] font-bold text-[10px] text-slate-800 text-center";
@@ -354,7 +349,7 @@ function MesaAnaliseConteudo() {
         </div>
       </div>
 
-      {/* WORKSPACE ESTILO PLANILHA */}
+      {/* WORKSPACE */}
       <div className="flex-1 w-full bg-white border border-slate-400 shadow-md flex flex-col h-[calc(100vh-2rem)] overflow-hidden">
         {loadingAnalise ? (
           <div className="flex-1 flex flex-col items-center justify-center">
@@ -363,7 +358,7 @@ function MesaAnaliseConteudo() {
           </div>
         ) : (
           <>
-            {/* TOOLBAR EXCEL */}
+            {/* TOOLBAR */}
             <div className="p-2 border-b border-slate-400 bg-[#f1f5f9] flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-2">
                 <div className="bg-green-700 text-white px-2 py-1 text-[10px] font-bold rounded-sm">AUTO-SAVE</div>
@@ -374,12 +369,6 @@ function MesaAnaliseConteudo() {
               </div>
               
               <div className="flex items-center gap-1.5">
-                <select value={analise.recomendacao_analista || ""} onChange={(e)=>setAnalise({...analise, recomendacao_analista: e.target.value})} className="bg-yellow-100 border border-yellow-400 text-yellow-900 font-bold px-2 py-1 text-[10px] outline-none">
-                  <option value="">Status / Decisão...</option>
-                  <option value="Aprovado">Aprovado</option>
-                  <option value="Reprovado">Reprovado</option>
-                  <option value="Em Análise">Em Análise</option>
-                </select>
                 <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className="bg-slate-200 border border-slate-400 hover:bg-slate-300 text-slate-800 font-bold px-3 py-1 text-[10px] shadow-sm cursor-pointer">
                   💾 Salvar
                 </button>
@@ -401,11 +390,12 @@ function MesaAnaliseConteudo() {
             <div className="bg-[#e2e8f0] border-b border-slate-400 flex gap-0.5 px-1 pt-1 overflow-x-auto">
               {[
                 { id: "capa", label: "Capa & Proposta" },
-                { id: "societario", label: "Empresas & Societário" },
+                { id: "cadastro", label: "Dados da Empresa" },
+                { id: "societario", label: "Societário & Patrimônio" },
                 { id: "fat", label: "Faturamento & Potencial" },
                 { id: "endividamento", label: "Endividamento & Refs" },
                 { id: "restritivos", label: "Restritivos & Jurídico" },
-                { id: "parecer", label: "Parecer & Anexos" }
+                { id: "parecer", label: "Parecer Final" }
               ].map((tab) => (
                 <button key={tab.id} onClick={() => setAbaAtiva(tab.id)} className={`px-4 py-1.5 font-bold text-[10px] border border-b-0 cursor-pointer whitespace-nowrap ${abaAtiva === tab.id ? "bg-white text-slate-900 border-slate-400 border-t-2 border-t-green-600 shadow-[0_1px_0_white] z-10" : "bg-[#cbd5e1] border-[#94a3b8] text-slate-600 hover:bg-slate-300"}`}>
                   {tab.label}
@@ -413,7 +403,7 @@ function MesaAnaliseConteudo() {
               ))}
             </div>
 
-            {/* ÁREA DE TRABALHO DA PLANILHA */}
+            {/* CONTEÚDO */}
             <div className="flex-1 overflow-y-auto p-4 bg-white relative">
               
               {/* ========================================================= */}
@@ -421,7 +411,7 @@ function MesaAnaliseConteudo() {
               {/* ========================================================= */}
               {abaAtiva === "capa" && (
                 <div className="max-w-6xl space-y-6">
-                  {/* CABEÇALHO */}
+                  {/* CABEÇALHO BÁSICO */}
                   <table className="w-full border-collapse border border-slate-400">
                     <tbody>
                       <tr>
@@ -442,34 +432,12 @@ function MesaAnaliseConteudo() {
                         <td className={`${thStyle} text-right`}>Analista</td><td className={tdStyle}><input value={analise.analista} onChange={(e)=>setAnalise({...analise, analista: e.target.value})} className={cellStyle} /></td>
                       </tr>
                       <tr>
-                        <td className={`${thStyle} text-right`}>RATING</td>
-                        <td className={tdStyle}>
+                        <td className={`${thStyle} text-right`}>RATING FINAL</td>
+                        <td colSpan={3} className={tdStyle}>
                           <select value={analise.rating} onChange={(e)=>setAnalise({...analise, rating: e.target.value})} className={`${cellStyle} font-bold text-yellow-700 bg-yellow-50`}>
                             <option value="A - Risco reduzido">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
                           </select>
                         </td>
-                        <td className={`${thStyle} text-right`}>Fundação / Idade</td><td className={tdStyle}><input value={analise.fundacao} onChange={(e)=>setAnalise({...analise, fundacao: e.target.value})} className={cellStyle} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Capital Social (R$)</td><td className={tdStyle}><input type="number" value={analise.capital_social} onChange={(e)=>setAnalise({...analise, capital_social: Number(e.target.value)})} className={numStyle} /></td>
-                        <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
-                        <td className={`${thStyle} text-right`}>Licenças/Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Balanço Auditado?</td>
-                        <td className={tdStyle}>
-                          <select value={analise.balanco_auditado} onChange={(e)=>setAnalise({...analise, balanco_auditado: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                        </td>
-                        <td className={`${thStyle} text-right`}>Consultoria/Gestão?</td>
-                        <td className={tdStyle}>
-                          <select value={analise.consultoria_gestao} onChange={(e)=>setAnalise({...analise, consultoria_gestao: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Site da Empresa</td><td colSpan={3} className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
                       </tr>
                     </tbody>
                   </table>
@@ -507,11 +475,73 @@ function MesaAnaliseConteudo() {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* RELATÓRIO DE VISITAS */}
+                  <div>
+                    <div className="bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">Relatório de Visitas</div>
+                    <textarea 
+                      value={analise.resumo_visita} 
+                      onChange={(e) => setAnalise({...analise, resumo_visita: e.target.value})}
+                      className="w-full p-2 border border-slate-400 h-40 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
+                      placeholder="Detalhes da visita..."
+                    />
+                  </div>
                 </div>
               )}
 
               {/* ========================================================= */}
-              {/* ABA 2: EMPRESAS E SOCIETÁRIO */}
+              {/* ABA 2: DADOS DA EMPRESA (CADASTRO) */}
+              {/* ========================================================= */}
+              {abaAtiva === "cadastro" && (
+                <div className="max-w-6xl space-y-6">
+                  {/* DADOS CADASTRAIS */}
+                  <div>
+                    <div className="bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">Dados Cadastrais e Financeiros Básicos</div>
+                    <table className="w-full border-collapse border border-slate-400">
+                      <tbody>
+                        <tr>
+                          <td className={`${thStyle} text-right w-1/6`}>Fundação / Idade</td><td className={`${tdStyle} w-2/6`}><input value={analise.fundacao} onChange={(e)=>setAnalise({...analise, fundacao: e.target.value})} className={cellStyle} /></td>
+                          <td className={`${thStyle} text-right w-1/6`}>Capital Social (R$)</td><td className={`${tdStyle} w-2/6`}><input type="number" value={analise.capital_social} onChange={(e)=>setAnalise({...analise, capital_social: Number(e.target.value)})} className={numStyle} /></td>
+                        </tr>
+                        <tr>
+                          <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} placeholder="(Rua, Número, CEP, Cidade, Estado...)" /></td>
+                          <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
+                        </tr>
+                        <tr>
+                          <td className={`${thStyle} text-right`}>Licenças/Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
+                          <td className={`${thStyle} text-right`}>Balanço Auditado?</td>
+                          <td className={tdStyle}>
+                            <select value={analise.balanco_auditado} onChange={(e)=>setAnalise({...analise, balanco_auditado: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className={`${thStyle} text-right`}>Consultoria/Gestão?</td>
+                          <td className={tdStyle}>
+                            <select value={analise.consultoria_gestao} onChange={(e)=>setAnalise({...analise, consultoria_gestao: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                          </td>
+                          <td className={`${thStyle} text-right`}>Site da Empresa</td><td className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ANEXOS / URLs */}
+                  <div>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Organograma, Fotos e Endereços Externos (URLs)</div>
+                    <table className="w-full border-collapse border border-slate-400">
+                      <tbody>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Satélite (Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================= */}
+              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
               {/* ========================================================= */}
               {abaAtiva === "societario" && (
                 <div className="space-y-6">
@@ -610,7 +640,7 @@ function MesaAnaliseConteudo() {
               )}
 
               {/* ========================================================= */}
-              {/* ABA 3: FATURAMENTO E POTENCIAL */}
+              {/* ABA 4: FATURAMENTO E POTENCIAL */}
               {/* ========================================================= */}
               {abaAtiva === "fat" && (
                 <div className="space-y-6">
@@ -642,7 +672,6 @@ function MesaAnaliseConteudo() {
                               </tr>
                             );
                           })}
-                          {/* TOTAIS E MÉDIAS */}
                           <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400">TOTAL ANO</td>
                             <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td><td className="border border-slate-400"></td>
@@ -675,8 +704,6 @@ function MesaAnaliseConteudo() {
                           <tr><td className={`${thStyle} text-right w-1/2`}>Ticket Médio (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e)=>updateNested("dados_potencial", "ticket_medio", Number(e.target.value))} className={numStyle} /></td></tr>
                           <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Dpls</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_dpls", e.target.value)} className={cellStyle} /></td></tr>
                           <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Comissária</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_comissaria", e.target.value)} className={cellStyle} /></td></tr>
-                          
-                          {/* Forma e Composição */}
                           <tr className="bg-slate-100 border-t-2 border-slate-300">
                             <td className={`${thStyle} text-right`}>Forma Receb. (À Vista %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.forma_recebimento_vista} onChange={(e)=>updateNested("dados_potencial", "forma_recebimento_vista", Number(e.target.value))} className={`${numStyle} text-blue-700`} /></td>
@@ -706,7 +733,7 @@ function MesaAnaliseConteudo() {
               )}
 
               {/* ========================================================= */}
-              {/* ABA 4: ENDIVIDAMENTO E REFERÊNCIAS */}
+              {/* ABA 5: ENDIVIDAMENTO E REFERÊNCIAS */}
               {/* ========================================================= */}
               {abaAtiva === "endividamento" && (
                 <div className="space-y-6">
@@ -780,7 +807,7 @@ function MesaAnaliseConteudo() {
                     </div>
                   </div>
 
-                  {/* REFERÊNCIAS COMPLETAS */}
+                  {/* REFERÊNCIAS */}
                   <div>
                     <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
                       <span>Informações com Fundos / Referências</span>
@@ -834,7 +861,7 @@ function MesaAnaliseConteudo() {
               )}
 
               {/* ========================================================= */}
-              {/* ABA 5: RESTRITIVOS E JURÍDICO */}
+              {/* ABA 6: RESTRITIVOS E JURÍDICO */}
               {/* ========================================================= */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-6">
@@ -894,7 +921,7 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  {/* JURIDICO */}
+                  {/* JURIDICO E MÍDIAS */}
                   <div className="grid grid-cols-1 gap-4">
                     <div>
                       <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Pesquisa de Ações | Jurídico (Manual)</div>
@@ -913,53 +940,38 @@ function MesaAnaliseConteudo() {
               )}
 
               {/* ========================================================= */}
-              {/* ABA 6: PARECER, VISITAS E ANEXOS */}
+              {/* ABA 7: PARECER FINAL */}
               {/* ========================================================= */}
               {abaAtiva === "parecer" && (
                 <div className="space-y-6 max-w-5xl">
                   
-                  {/* PARECERES */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-white border-2 border-slate-400 p-3">
-                      <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer do Analista</h3>
-                      <textarea 
-                        value={analise.parecer_analista} 
-                        onChange={(e) => setAnalise({...analise, parecer_analista: e.target.value})}
-                        className="w-full p-2 border border-slate-300 h-64 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
-                      />
-                    </div>
-                    <div className="bg-white border-2 border-slate-400 p-3">
-                      <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer do Diretor de Crédito</h3>
-                      <textarea 
-                        value={analise.parecer_diretor} 
-                        onChange={(e) => setAnalise({...analise, parecer_diretor: e.target.value})}
-                        className="w-full p-2 border border-slate-300 h-64 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
-                        placeholder="De acordo com o analista..."
-                      />
-                    </div>
-                  </div>
-
-                  {/* RESUMO DA VISITA */}
+                  {/* PARECER DO ANALISTA */}
                   <div className="bg-white border-2 border-slate-400 p-3">
-                    <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Relatório de Visitas</h3>
+                    <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer do Analista de Crédito</h3>
                     <textarea 
-                      value={analise.resumo_visita} 
-                      onChange={(e) => setAnalise({...analise, resumo_visita: e.target.value})}
-                      className="w-full p-2 border border-slate-300 h-32 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
+                      value={analise.parecer_analista} 
+                      onChange={(e) => setAnalise({...analise, parecer_analista: e.target.value})}
+                      className="w-full p-2 border border-slate-300 h-96 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
+                      placeholder="Elabore sua conclusão, análise de viabilidade e justificativa final aqui..."
                     />
                   </div>
 
-                  {/* ANEXOS / FOTOS */}
-                  <div>
-                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Organograma, Fotos e Fachadas (URLs)</div>
-                    <table className="w-full border-collapse border border-[#cbd5e1]">
-                      <tbody>
-                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Satélite (Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Cole o link..." /></td></tr>
-                      </tbody>
-                    </table>
+                  {/* DECISÃO DO COMITÊ */}
+                  <div className="bg-slate-100 border-2 border-slate-400 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-[12px] font-bold text-slate-800 uppercase">Sugestão / Decisão Final para o Comitê:</h3>
+                      <p className="text-[10px] text-slate-500">Esta decisão será registrada e encaminhada no momento do envio.</p>
+                    </div>
+                    <select 
+                      value={analise.recomendacao_analista || ""} 
+                      onChange={(e)=>setAnalise({...analise, recomendacao_analista: e.target.value})} 
+                      className="bg-yellow-100 border border-yellow-500 text-yellow-900 font-bold px-4 py-2 text-[12px] outline-none cursor-pointer shadow-sm w-full md:w-64"
+                    >
+                      <option value="">Escolha o Veredito...</option>
+                      <option value="Aprovado">✅ Aprovado</option>
+                      <option value="Reprovado">❌ Reprovado</option>
+                      <option value="Em Análise">⏳ Em Análise / Pendente</option>
+                    </select>
                   </div>
 
                 </div>
