@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         
-        // ⚡ A CORREÇÃO DA MÁGICA TÁ AQUI: Limpa os asteriscos (***) da Receita antes de gerar o ID!
+        // Limpa asteriscos para garantir ID único e imutável entre cliques
         const docSocioLimpo = socio.cnpj_cpf_socio ? String(socio.cnpj_cpf_socio).replace(/\D/g, "") : "";
         const idSocio = docSocioLimpo ? `CPF-${docSocioLimpo}` : `NOME-${socio.nome_socio_razao_social}`;
 
@@ -102,19 +102,9 @@ export async function POST(req: Request) {
 
     } else if (tipoBusca === "CPF") {
       
-      nodes.push({
-        id: `CPF-${docLimpo}`,
-        position: { x: centerX, y: centerY },
-        data: { label: `Sócio: ${docLimpo}` },
-        style: {
-          backgroundColor: '#db2777', color: 'white', borderRadius: '50%', width: 100, height: 100,
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
-        }
-      });
-
+      // ⚡ NOVIDADE: Busca todas as empresas do sócio e aproveita para descobrir o NOME dele no banco
       const sqlEmpresas = `
-        SELECT s.cnpj_basico, e.razao_social
+        SELECT s.cnpj_basico, e.razao_social, s.nome_socio_razao_social
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
@@ -124,6 +114,24 @@ export async function POST(req: Request) {
       const [empresasRes] = await bigquery.query({
         query: sqlEmpresas,
         params: { docLimpo }
+      });
+
+      // Descobre o nome real do sócio cruzando as linhas retornadas, ou usa o CPF de fallback
+      const nomeRealSocio = empresasRes.length > 0 && empresasRes[0].nome_socio_razao_social
+        ? empresasRes[0].nome_socio_razao_social
+        : `SÓCIO: ***${docLimpo}**`;
+
+      // Cria o Nó Central (O Sócio) com o NOME correto e o CPF mascarado logo abaixo
+      nodes.push({
+        id: `CPF-${docLimpo}`,
+        position: { x: centerX, y: centerY },
+        data: { label: `${nomeRealSocio}\n(***${docLimpo}**)` },
+        style: {
+          backgroundColor: '#db2777', color: 'white', borderRadius: '50%', width: 100, height: 100,
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px',
+          whiteSpace: 'pre-wrap' // Permite a quebra de linha (\n) para o CPF ficar embaixo do nome
+        }
       });
 
       const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
