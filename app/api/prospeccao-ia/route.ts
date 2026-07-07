@@ -36,19 +36,21 @@ export async function POST(req: Request) {
     });
 
     // =========================================================================
-    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE
+    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Com trava de Código TOM)
     // =========================================================================
     const promptSistema = `
       Você é um analista especialista em prospecção B2B.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       
-      ATENÇÃO PARA A LOCALIZAÇÃO (CRÍTICO):
-      - Na propriedade "cidade_nome", retorne apenas o nome da cidade, EM LETRAS MAIÚSCULAS e SEM ACENTOS. Exemplo: "SAO PAULO", "CURITIBA". Se não pedir cidade, retorne null.
+      ATENÇÃO PARA A CIDADE: Na propriedade "cidade_nome", retorne apenas o nome da cidade solicitada, EM LETRAS MAIÚSCULAS e SEM ACENTOS. Exemplo: "SAO PAULO", "CURITIBA", "MARINGA". Se não pedir cidade específica, retorne null.
+      (NÃO INVENTE CÓDIGOS TOM. Apenas retorne o nome limpo).
+
+      ATENÇÃO PARA A LOCALIZAÇÃO:
       - Na propriedade "uf", você DEVE OBRIGATORIAMENTE retornar a sigla do estado com 2 letras (ex: "SP", "PR"). 
       - REGRA DE OURO: Se o usuário citar apenas o nome de uma cidade conhecida, DEDUZA a qual estado ela pertence e preencha a "uf" corretamente. Se não houver indicativo de local de forma alguma, retorne null.
 
       ATENÇÃO PARA O CNAE:
-      - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 2 a 7 dígitos na propriedade "codigos_cnae". (Ex: "47" para varejo, "56" para alimentação, "620" para TI).
+      - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae". Evite usar apenas 2 dígitos para não trazer resultados genéricos.
       - Se for busca aberta/geral, retorne o array VAZIO [].
       
       Retorne ESTRITAMENTE um JSON:
@@ -77,7 +79,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 📖 2. DICIONÁRIO TOM LOCAL
+    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito)
     // =========================================================================
     let codigoRealDaReceita = null;
     let nomeCidadeReal = perfilMercado.cidade_nome;
@@ -101,26 +103,36 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. BIGQUERY: CONSULTA
+    // 🚀 3. BIGQUERY: CONSULTA BLINDADA
     // =========================================================================
     const bigquery = obterClienteBigQuery();
 
     let filtroCnaeClausula = "";
+    let filtroNegativacaoConsultoria = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
-      // Correção: Converte pra string pra evitar crash de tipagem e permite CNAEs de 2 dígitos (macro categorias)
+      // String(c) evita erro 500 se o GPT devolver números
       const cnaesLimpos = perfilMercado.codigos_cnae
         .map((c: any) => String(c).replace(/\D/g, ''))
-        .filter((c: string) => c.length >= 2);
+        .filter((c: string) => c.length >= 3);
 
       if (cnaesLimpos.length > 0) {
-        // Correção: Verifica CNAE principal E também nos secundários para maior assertividade
+        // Verifica no Principal E Secundários de forma segura usando Regex
         const cnaesPrecisos = cnaesLimpos.map((c: string) => 
-          `(cnae_principal LIKE '${c}%' OR cnaes_secundarios LIKE '%${c}%')`
+          `(cnae_principal LIKE '${c}%' OR REGEXP_CONTAINS(cnaes_secundarios, r'(^|[^0-9])' || '${c}'))`
         ).join(' OR ');
         
         filtroCnaeClausula = `AND (${cnaesPrecisos})`;
+
+        // O "Escudo" contra lixo em buscas industriais
+        const buscaMinusculo = (perfilMercado.atividade || "").toLowerCase();
+        if (buscaMinusculo.includes("industria") || buscaMinusculo.includes("fabrica")) {
+          filtroNegativacaoConsultoria = `
+            AND NOT REGEXP_CONTAINS(UPPER(razao_social), r'(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)')
+            AND NOT REGEXP_CONTAINS(UPPER(COALESCE(google_nome, '')), r'(CONSULTORIA|ASSESSORIA)')
+          `;
+        }
       }
     }
 
@@ -146,6 +158,7 @@ export async function POST(req: Request) {
         AND situacao = '02'
         AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
         ${filtroCnaeClausula}
+        ${filtroNegativacaoConsultoria}
       ORDER BY ${ordenacaoEstrategica}
       LIMIT ${limiteSeguro}
     `;
