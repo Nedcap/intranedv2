@@ -23,6 +23,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🛡️ CRÉDITO E RISCO (Sincronizado com a nova pasta!)
   { nome: "Solicitar Análise", path: "/dashboard/motor-credito/envio-analise", icone: "🚀", categoria: "Crédito", defaultMaster: true },
   { nome: "Mesa de Crédito V8", path: "/dashboard/motor-credito/analise", icone: "🕵️", categoria: "Crédito", defaultMaster: true },
+  { nome: "Busca Grupo", path: "/dashboard/motor-credito/busca-grupo", icone: "🕸️", categoria: "Crédito", defaultMaster: true },
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Crédito", defaultMaster: true },
   { nome: "Carteira Dinâmica", path: "/dashboard/carteira", icone: "📈", categoria: "Crédito", defaultMaster: true },

@@ -151,6 +151,9 @@ interface AnaliseData {
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
   recomendacao_analista?: string;
 
+  // GRAFO DE GRUPO ECONÔMICO (JSON DAS BOLINHAS DA TEIA)
+  organograma_json?: { nodes: any[], edges: any[] } | null;
+
   [key: string]: any;
 }
 
@@ -177,7 +180,8 @@ const DADOS_MODELO: AnaliseData = {
   restritivos: [],
   
   resumo_visita: "", juridico_tramitacao: "", noticias_midia: "", parecer_analista: "", recomendacao_analista: "",
-  anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" }
+  anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
+  organograma_json: null
 };
 
 // =========================================================================
@@ -313,14 +317,8 @@ function MesaAnaliseConteudo() {
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
   const mesesPreenchidos = (ano: string) => meses.filter(m => analise.dados_faturamento[ano]?.[m] > 0).length;
   const calcMedia = (ano: string) => { const pre = mesesPreenchidos(ano); return pre === 0 ? 0 : calcTotAno(ano) / 12; }; 
-  const calcMediaYTD = (ano: string, mesesCount: number) => { 
-    if(mesesCount === 0) return 0;
-    const totYTD = meses.slice(0, mesesCount).reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
-    return totYTD / mesesCount;
-  };
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
-  const mesesYTD2026 = mesesPreenchidos("2026");
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
   const totRestritivos = analise.restritivos.reduce((acc, r) => acc + Number(r.valor), 0);
@@ -332,7 +330,7 @@ function MesaAnaliseConteudo() {
   const potencialRealCalculado = faturamentoMedioReferencia * (Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100);
 
   // =========================================================================
-  // COMPOSIÇÃO DO ENDIVIDAMENTO DINÂMICO (VIEW AGRUPADA DO DETALHAMENTO)
+  // COMPOSIÇÃO DO ENDIVIDAMENTO DINÂMICO
   // =========================================================================
   const totEndivGeral = analise.endividamento_detalhado.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivCurtoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
@@ -344,7 +342,6 @@ function MesaAnaliseConteudo() {
   const percBancos = totEndivGeral > 0 ? (totalBancos / totEndivGeral) * 100 : 0;
   const percFundos = totEndivGeral > 0 ? (totalFundos / totEndivGeral) * 100 : 0;
   
-  // Meios de desconto CP para dpls_curto_perc (ex: modalidades contendo Desconto ou Duplicata)
   const totalDplsCP = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
 
@@ -555,7 +552,33 @@ function MesaAnaliseConteudo() {
                     <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Organograma, Fotos e Endereços Externos (URLs)</div>
                     <table className="w-full border-collapse border border-slate-400">
                       <tbody>
-                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Link do Organograma Dinâmico..." /></td></tr>
+                        {/* NOVO CAMPO DO GRAFO JSON INTEGRADO */}
+                        <tr>
+                          <td className={`${thStyle} w-1/4 text-right bg-purple-50 text-purple-900 border-purple-200`}>Organograma Interativo (Teia JSON)</td>
+                          <td className={`${tdStyle} bg-purple-50/30`}>
+                            <div className="flex gap-2 items-center h-full px-2">
+                              <button
+                                onClick={() => {
+                                  if(!analise.id) return alert("💡 Salve a análise no banco antes de gerar a teia!");
+                                  const cnpjLimpo = analise.cnpj.replace(/\D/g, '');
+                                  window.open(`/dashboard/busca-grupo?analise_id=${analise.id}&cnpj=${cnpjLimpo}`, '_blank');
+                                }}
+                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 text-[10px] rounded transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                              >
+                                🕸️ Abrir Gerador de Teia
+                              </button>
+                              
+                              {analise.organograma_json && analise.organograma_json.nodes?.length > 0 ? (
+                                <span className="text-green-600 font-bold text-[10px] flex items-center gap-1">
+                                  ✅ Teia vinculada ao Dossiê! ({analise.organograma_json.nodes.length} nós)
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-[10px] italic">Sem teia mapeada</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma (Imagem estática)</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Link da Imagem..." /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Link do Google Street View..." /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>URL Satélite (Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Link da Visão do Satélite..." /></td></tr>
                         <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Pasta de Evidências Fotográficas..." /></td></tr>
