@@ -1,25 +1,39 @@
 import { NextResponse } from "next/server";
-import { BigQuery } from "@google-cloud/bigquery";
 import fs from "fs";
 import path from "path";
+// Lembre de rodar: npm install duckdb
+import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
-const obterClienteBigQuery = () => {
-  const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-  if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
-  try {
-    const credenciais = JSON.parse(jsonCredenciais);
-    return new BigQuery({
-      projectId: credenciais.project_id,
-      credentials: {
-        client_email: credenciais.client_email,
-        private_key: credenciais.private_key,
-      },
+// =========================================================================
+// 🦆 INICIALIZAÇÃO DO DUCKDB E CONFIG DO CLOUDFLARE R2
+// =========================================================================
+const db = new duckdb.Database(':memory:');
+
+// Usando exatamente as variáveis do seu print do Vercel
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+const accessKey = process.env.R2_ACCESS_KEY_ID;
+const secretKey = process.env.R2_SECRET_ACCESS_KEY;
+const bucketName = process.env.R2_BUCKET_NAME;
+
+// Configura o DuckDB para acessar o R2 via protocolo S3 seguro
+db.run(`INSTALL httpfs;`);
+db.run(`LOAD httpfs;`);
+db.run(`SET s3_endpoint='${accountId}.r2.cloudflarestorage.com';`);
+db.run(`SET s3_access_key_id='${accessKey}';`);
+db.run(`SET s3_secret_access_key='${secretKey}';`);
+db.run(`SET s3_region='auto';`);
+db.run(`SET s3_url_style='path';`);
+
+// Função helper para usar async/await no DuckDB
+const queryDB = (query: string): Promise<any[]> => {
+  return new Promise((resolve, reject) => {
+    db.all(query, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
     });
-  } catch (err: any) {
-    throw new Error("Falha ao processar o JSON das credenciais: " + err.message);
-  }
+  });
 };
 
 export async function POST(req: Request) {
@@ -30,20 +44,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "O número do CNPJ é obrigatório." }, { status: 400 });
     }
 
+    // Limpa a formatação
     const cnpjLimpo = cnpj.replace(/\D/g, "");
 
-    const bigquery = obterClienteBigQuery();
-    const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
-
+    // =========================================================================
+    // ⚡ QUERY DIRETA NO R2 (Lendo o seu Parquet)
+    // =========================================================================
+    // Como você já tem um arquivo completo (estabelecimentos_completo.parquet), 
+    // a query fica super simples e direta:
     const sqlQuery = `
       SELECT 
         cnpj, razao_social, uf, municipio_rf, capital_social
-      FROM ${TABELA_BIGQUERY}
+      FROM read_parquet('s3://${bucketName}/estabelecimentos_completo.parquet')
       WHERE cnpj = '${cnpjLimpo}'
       LIMIT 1
     `;
 
-    const [rows] = await bigquery.query({ query: sqlQuery });
+    const rows = await queryDB(sqlQuery);
 
     if (rows.length === 0) {
       return NextResponse.json({ found: false, message: "Empresa não localizada na base da Receita." });
@@ -53,7 +70,7 @@ export async function POST(req: Request) {
     let nomeCidadeReal = "Não localizada";
 
     // =========================================================================
-    // 📖 PLUG DIRETO DA TABELA TOM LOCAL (Dicionário de Código -> Nome Extenso)
+    // 📖 TABELA TOM LOCAL (Mantido intacto)
     // =========================================================================
     try {
       const filePath = path.join(process.cwd(), 'tabela_tom.json');
@@ -61,21 +78,18 @@ export async function POST(req: Request) {
         const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         const codigoBuscado = String(row.municipio_rf).trim();
 
-        // Inverte o dicionário para achar a chave (NOME-UF) pelo valor (CÓDIGO TOM)
         const chaveEncontrada = Object.keys(tabelaTomBase).find(
           (key) => String(tabelaTomBase[key]).trim() === codigoBuscado
         );
 
         if (chaveEncontrada) {
-          // Remove a sigla do estado final para pegar só o nome limpo (Ex: "ABADIANIA-GO" -> "ABADIANIA")
           nomeCidadeReal = chaveEncontrada.split("-")[0].trim();
         } else {
-          console.warn(`[Aviso] Código de município '${codigoBuscado}' não encontrado no dicionário local.`);
           nomeCidadeReal = `CÓDIGO ${codigoBuscado}`;
         }
       }
     } catch (err) {
-      console.error("Erro ao ler ou processar tabela_tom.json local:", err);
+      console.error("Erro ao ler tabela_tom.json local:", err);
       nomeCidadeReal = `CÓDIGO ${row.municipio_rf}`;
     }
 
@@ -85,13 +99,14 @@ export async function POST(req: Request) {
         cnpj: row.cnpj,
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? row.uf.toUpperCase() : "PR",
-        cidadeExtenso: nomeCidadeReal, // Envia o nome traduzido bonitinho via JSON local
-        capital_social: row.capital_social ? parseFloat(row.capital_social) : 0
+        cidadeExtenso: nomeCidadeReal,
+        // Como o seu parquet já deve ter as colunas tratadas, só convertemos:
+        capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0
       }
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de busca direta de CNPJ:", error);
+    console.error("Erro na rota de busca do R2:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
