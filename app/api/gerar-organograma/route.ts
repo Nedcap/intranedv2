@@ -3,6 +3,7 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
+// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
@@ -14,6 +15,7 @@ if (credentialsEnv) {
   }
 }
 
+// 2. Inicializa o cliente do BigQuery
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -77,7 +79,7 @@ export async function POST(req: Request) {
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         
-        // Limpa asteriscos para garantir ID único e imutável entre cliques
+        // Limpa asteriscos para ID imutável
         const docSocioLimpo = socio.cnpj_cpf_socio ? String(socio.cnpj_cpf_socio).replace(/\D/g, "") : "";
         const idSocio = docSocioLimpo ? `CPF-${docSocioLimpo}` : `NOME-${socio.nome_socio_razao_social}`;
 
@@ -94,17 +96,21 @@ export async function POST(req: Request) {
 
         edges.push({
           id: `edge-${docLimpo}-${docSocioLimpo || index}`,
-          source: `CNPJ-${docLimpo}`, target: idSocio,
+          source: `CNPJ-${docLimpo}`, 
+          target: idSocio,
           label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
-          animated: true, style: { stroke: '#94a3b8', strokeWidth: 2 }
+          animated: true, 
+          // ⚡ Linhas fluidas e elegantes (tipo bezier padrão, sem travar quinas)
+          type: 'default', 
+          style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
 
     } else if (tipoBusca === "CPF") {
       
-      // ⚡ NOVIDADE: Busca todas as empresas do sócio e aproveita para descobrir o NOME dele no banco
+      // Busca o CNPJ completo real unificado da tabela master
       const sqlEmpresas = `
-        SELECT s.cnpj_basico, e.razao_social, s.nome_socio_razao_social
+        SELECT e.cnpj, s.cnpj_basico, e.razao_social, s.nome_socio_razao_social
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
@@ -116,12 +122,10 @@ export async function POST(req: Request) {
         params: { docLimpo }
       });
 
-      // Descobre o nome real do sócio cruzando as linhas retornadas, ou usa o CPF de fallback
       const nomeRealSocio = empresasRes.length > 0 && empresasRes[0].nome_socio_razao_social
         ? empresasRes[0].nome_socio_razao_social
         : `SÓCIO: ***${docLimpo}**`;
 
-      // Cria o Nó Central (O Sócio) com o NOME correto e o CPF mascarado logo abaixo
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -130,7 +134,7 @@ export async function POST(req: Request) {
           backgroundColor: '#db2777', color: 'white', borderRadius: '50%', width: 100, height: 100,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
           fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px',
-          whiteSpace: 'pre-wrap' // Permite a quebra de linha (\n) para o CPF ficar embaixo do nome
+          whiteSpace: 'pre-wrap'
         }
       });
 
@@ -138,7 +142,10 @@ export async function POST(req: Request) {
 
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
-        const idEmpresa = `CNPJ-${emp.cnpj_basico}000100`;
+        
+        // Usa o CNPJ real e completo retornado pelo JOIN do BigQuery
+        const cnpjCompleto = emp.cnpj ? emp.cnpj.replace(/\D/g, "") : `${emp.cnpj_basico}000100`;
+        const idEmpresa = `CNPJ-${cnpjCompleto}`;
 
         nodes.push({
           id: idEmpresa,
@@ -152,9 +159,14 @@ export async function POST(req: Request) {
         });
 
         edges.push({
-          id: `edge-${docLimpo}-${emp.cnpj_basico}`,
-          source: `CPF-${docLimpo}`, target: idEmpresa,
-          label: `Participação`, animated: true, style: { stroke: '#94a3b8', strokeWidth: 2 }
+          id: `edge-${docLimpo}-${cnpjCompleto}`,
+          source: `CPF-${docLimpo}`, 
+          target: idEmpresa,
+          label: `Participação`, 
+          animated: true, 
+          // ⚡ Linhas fluidas e elegantes (tipo bezier padrão, sem travar quinas)
+          type: 'default', 
+          style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
     }
