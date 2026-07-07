@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     });
 
     // =========================================================================
-    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Com dedução de UF aprimorada)
+    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE
     // =========================================================================
     const promptSistema = `
       Você é um analista especialista em prospecção B2B.
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       - REGRA DE OURO: Se o usuário citar apenas o nome de uma cidade conhecida, DEDUZA a qual estado ela pertence e preencha a "uf" corretamente. Se não houver indicativo de local de forma alguma, retorne null.
 
       ATENÇÃO PARA O CNAE:
-      - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
+      - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 2 a 7 dígitos na propriedade "codigos_cnae". (Ex: "47" para varejo, "56" para alimentação, "620" para TI).
       - Se for busca aberta/geral, retorne o array VAZIO [].
       
       Retorne ESTRITAMENTE um JSON:
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito)
+    // 📖 2. DICIONÁRIO TOM LOCAL
     // =========================================================================
     let codigoRealDaReceita = null;
     let nomeCidadeReal = perfilMercado.cidade_nome;
@@ -109,12 +109,17 @@ export async function POST(req: Request) {
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
+      // Correção: Converte pra string pra evitar crash de tipagem e permite CNAEs de 2 dígitos (macro categorias)
       const cnaesLimpos = perfilMercado.codigos_cnae
-        .map((c: string) => c.replace(/\D/g, ''))
-        .filter((c: string) => c.length >= 3);
+        .map((c: any) => String(c).replace(/\D/g, ''))
+        .filter((c: string) => c.length >= 2);
 
       if (cnaesLimpos.length > 0) {
-        const cnaesPrecisos = cnaesLimpos.map((c: string) => `cnae_principal LIKE '${c}%'`).join(' OR ');
+        // Correção: Verifica CNAE principal E também nos secundários para maior assertividade
+        const cnaesPrecisos = cnaesLimpos.map((c: string) => 
+          `(cnae_principal LIKE '${c}%' OR cnaes_secundarios LIKE '%${c}%')`
+        ).join(' OR ');
+        
         filtroCnaeClausula = `AND (${cnaesPrecisos})`;
       }
     }
