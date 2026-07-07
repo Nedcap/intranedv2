@@ -3,7 +3,6 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
@@ -15,7 +14,6 @@ if (credentialsEnv) {
   }
 }
 
-// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -31,9 +29,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
     }
 
-    // Remove qualquer caractere que não seja número para não quebrar as buscas por LIKE
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
-
     const nodes: any[] = [];
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
@@ -41,50 +37,58 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
-      // ⚡ Busca os dados da Empresa Matriz
+      // ⚡ Busca os dados da Empresa (Tenta pegar a Matriz unificada pelo básico)
       const sqlEmpresa = `
-        SELECT razao_social 
+        SELECT cnpj, cnpj_basico, razao_social, nome_fantasia, uf, bairro
         FROM \`credito-489113.dados_receita.empresas_master\` 
-        WHERE cnpj_basico = @cnpjBasico 
-        LIMIT 1
+        WHERE cnpj_basico = @cnpjBasico
       `;
-      const [empresaRes] = await bigquery.query({
-        query: sqlEmpresa,
-        params: { cnpjBasico }
-      });
+      const [empresaRes] = await bigquery.query({ query: sqlEmpresa, params: { cnpjBasico } });
       
-      const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : `CNPJ Base: ${cnpjBasico}`;
+      if (empresaRes.length === 0) {
+        return NextResponse.json({ error: "Empresa não localizada na base master." }, { status: 404 });
+      }
 
-      // Cria o Nó Central (A Empresa)
+      // Separa quem é a matriz (ou usa o primeiro registro como cabeça do nó)
+      const dadosPrincipais = empresaRes[0];
+      
+      // Esquematiza a lista de filiais ocultas para mandar pro front armazenar
+      const listaFiliais = empresaRes.map((emp: any) => ({
+        cnpj: emp.cnpj,
+        uf: emp.uf,
+        bairro: emp.bairro,
+        nome_fantasia: emp.nome_fantasia || dadosPrincipais.razao_social
+      }));
+
       nodes.push({
-        id: `CNPJ-${docLimpo}`,
+        id: `CNPJ-${cnpjBasico}`, // ID unificado pelo básico!
         position: { x: centerX, y: centerY },
-        data: { label: razaoSocial },
+        data: { 
+          label: dadosPrincipais.razao_social,
+          isMatriz: true,
+          totalFiliais: listaFiliais.length,
+          filiais: listaFiliais // Enviado para renderizar em tabela no front
+        },
         style: {
-          backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 100, height: 100,
+          backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 110, height: 110,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '10px'
+          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '10px',
+          border: '4px solid #1d4ed8'
         }
       });
 
-      // ⚡ Busca todos os Sócios vinculados a este CNPJ básico
+      // Busca os Sócios vinculados
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
         FROM \`credito-489113.dados_receita.socios_master\`
         WHERE cnpj_basico = @cnpjBasico
       `;
-      const [sociosRes] = await bigquery.query({
-        query: sqlSocios,
-        params: { cnpjBasico }
-      });
+      const [sociosRes] = await bigquery.query({ query: sqlSocios, params: { cnpjBasico } });
       
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
-      // Cria os Nós Satélites (Os Sócios)
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
-        
-        // Remove os asteriscos (***) para gerar um ID imutável e limpo
         const docSocioLimpo = socio.cnpj_cpf_socio ? String(socio.cnpj_cpf_socio).replace(/\D/g, "") : "";
         const idSocio = docSocioLimpo ? `CPF-${docSocioLimpo}` : `NOME-${socio.nome_socio_razao_social}`;
 
@@ -100,8 +104,8 @@ export async function POST(req: Request) {
         });
 
         edges.push({
-          id: `edge-${docLimpo}-${docSocioLimpo || index}`,
-          source: `CNPJ-${docLimpo}`, 
+          id: `edge-${cnpjBasico}-${docSocioLimpo || index}`,
+          source: `CNPJ-${cnpjBasico}`, 
           target: idSocio,
           label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
           animated: true, 
@@ -111,26 +115,28 @@ export async function POST(req: Request) {
 
     } else if (tipoBusca === "CPF") {
       
-      // ⚡ O SEGREDO TÁ AQUI: Usa LIKE com % nas duas pontas para ignorar os asteriscos da LGPD e cruzar os dados
+      // ⚡ REVOLUÇÃO: Agrupamento Inteligente usando ARRAY_AGG para trazer TODAS as filiais compactadas em 1 única linha!
       const sqlEmpresas = `
-        SELECT e.cnpj, s.cnpj_basico, e.razao_social, s.nome_socio_razao_social
+        SELECT 
+          s.cnpj_basico, 
+          MAX(e.razao_social) AS razao_social, 
+          MAX(s.nome_socio_razao_social) AS nome_socio_razao_social,
+          ARRAY_AGG(STRUCT(e.cnpj, e.uf, e.bairro)) AS todas_as_filiais
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
         WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo, '%')
-        LIMIT 50
+        GROUP BY s.cnpj_basico
+        LIMIT 100
       `;
-      const [empresasRes] = await bigquery.query({
-        query: sqlEmpresas,
-        params: { docLimpo }
-      });
+      const [empresasRes] = await bigquery.query({ query: sqlEmpresas, params: { docLimpo } });
 
-      // Pega o nome do primeiro registro para batizar a bolinha central com o NOME, não com o número
-      const nomeRealSocio = empresasRes.length > 0 && empresasRes[0].nome_socio_razao_social
-        ? empresasRes[0].nome_socio_razao_social
-        : `SÓCIO: ***${docLimpo}**`;
+      if (empresasRes.length === 0) {
+        return NextResponse.json({ nodes: [], edges: [] });
+      }
 
-      // Cria o Nó Central (O Sócio) com quebra de linha para o CPF mascarado ficar embaixo
+      const nomeRealSocio = empresasRes[0].nome_socio_razao_social || `SÓCIO: ***${docLimpo}**`;
+
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -143,29 +149,34 @@ export async function POST(req: Request) {
         }
       });
 
-      const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
+      const angleStep = (2 * Math.PI) / empresasRes.length;
 
-      // Cria as Empresas Satélites onde esse CPF é sócio/diretor
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
-        
-        // Evita inventar final fixo. Se o join trouxer o CNPJ master, usa ele completo, senão faz fallback seguro
-        const cnpjCompleto = emp.cnpj ? emp.cnpj.replace(/\D/g, "") : `${emp.cnpj_basico}000100`;
-        const idEmpresa = `CNPJ-${cnpjCompleto}`;
+        const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
+
+        // Filtra nulos caso o LEFT JOIN traga lixo do BigQuery
+        const filiaisValidas = (emp.todas_as_filiais || []).filter((f: any) => f.cnpj !== null);
 
         nodes.push({
           id: idEmpresa,
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
-          data: { label: emp.razao_social || `CNPJ Base: ${emp.cnpj_basico}` },
+          data: { 
+            label: `${emp.razao_social}\n(${filiaisValidas.length} Unid.)`,
+            totalFiliais: filiaisValidas.length,
+            filiais: filiaisValidas
+          },
           style: {
-            backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 90, height: 90,
+            backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 95, height: 95,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
-            fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
+            fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px',
+            whiteSpace: 'pre-wrap',
+            border: filiaisValidas.length > 1 ? '3px double #93c5fd' : 'none'
           }
         });
 
         edges.push({
-          id: `edge-${docLimpo}-${cnpjCompleto}`,
+          id: `edge-${docLimpo}-${emp.cnpj_basico}`,
           source: `CPF-${docLimpo}`, 
           target: idEmpresa,
           label: `Participação`, 
