@@ -5,12 +5,27 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// Inicializa o cliente do BigQuery.
-// Ele vai puxar automaticamente o ID do projeto e as credenciais das variáveis de ambiente.
+// 1. Puxa a string da variável de ambiente da Vercel
+const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+let credentials: any = {};
+
+if (credentialsEnv) {
+  try {
+    // Transformamos a string de volta em um objeto JavaScript
+    credentials = JSON.parse(credentialsEnv);
+  } catch (err) {
+    console.error("Erro ao fazer parse do GOOGLE_APPLICATION_CREDENTIALS_JSON:", err);
+  }
+}
+
+// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
-  // Se for rodar local, descomente a linha abaixo e aponte para o seu JSON de credenciais:
-  // keyFilename: path.join(process.cwd(), 'credentials.json'), 
+  credentials: {
+    client_email: credentials.client_email,
+    // O JSON.parse já resolve automaticamente o problema das quebras de linha (\n)
+    private_key: credentials.private_key, 
+  }
 });
 
 export async function POST(req: Request) {
