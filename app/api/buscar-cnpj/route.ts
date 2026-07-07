@@ -6,7 +6,6 @@ import duckdb from "duckdb";
 export const dynamic = 'force-dynamic';
 
 let cachedDb: duckdb.Database | null = null;
-
 async function getDuckDB() {
   if (cachedDb) return cachedDb;
   return new Promise<duckdb.Database>((resolve, reject) => {
@@ -46,31 +45,16 @@ const queryDB = async (query: string): Promise<any[]> => {
 export async function POST(req: Request) {
   try {
     const { cnpj } = await req.json();
-    if (!cnpj) return NextResponse.json({ error: "O número do CNPJ é obrigatório." }, { status: 400 });
+    if (!cnpj) return NextResponse.json({ error: "CNPJ obrigatório." }, { status: 400 });
 
     const cnpjLimpo = cnpj.replace(/\D/g, "");
-    const cnpjBasico = cnpjLimpo.substring(0, 8);
-    const cnpjOrdem = cnpjLimpo.substring(8, 12);
-    const cnpjDv = cnpjLimpo.substring(12, 14);
     const bucketName = process.env.R2_BUCKET_NAME;
 
-    // ⚡ OTIMIZAÇÃO CRÍTICA: Removido o '**' global. 
-    // Como buscamos por um CNPJ exato, o DuckDB lê eficientemente os metadados do arquivo único/direto de Empresas.
-    // Para Estabelecimentos, se o volume total do Brasil estiver pesado, o ideal é passar a UF no request se você a tiver.
-    // Caso não tenha, apontar diretamente para a raiz sem o padrão recursivo profundo agiliza a leitura de dicionários do Parquet.
+    // 🔥 EXPLICAÇÃO: Batendo direto no arquivo unificado master. Velocidade máxima!
     const sqlQuery = `
-      SELECT 
-        CONCAT(COALESCE(e.cnpj_basico, ''), COALESCE(e.cnpj_ordem, ''), COALESCE(e.cnpj_dv, '')) AS cnpj, 
-        emp.razao_social, 
-        e.uf, 
-        e.municipio AS municipio_rf, 
-        emp.capital_social
-      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Estabelecimentos/*/*.parquet', hive_partitioning=1) e
-      LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/*.parquet') emp
-        ON e.cnpj_basico = emp.cnpj_basico
-      WHERE e.cnpj_basico = '${cnpjBasico}' 
-        AND e.cnpj_ordem = '${cnpjOrdem}' 
-        AND e.cnpj_dv = '${cnpjDv}'
+      SELECT cnpj, razao_social, uf, municipio_rf, capital_social
+      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet')
+      WHERE cnpj = '${cnpjLimpo}'
       LIMIT 1
     `;
 
@@ -93,7 +77,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       found: true,
       empresa: {
-        cnpj: row.cnpj || cnpjLimpo,
+        cnpj: row.cnpj,
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? String(row.uf).toUpperCase() : "NI",
         cidadeExtenso: nomeCidadeReal,

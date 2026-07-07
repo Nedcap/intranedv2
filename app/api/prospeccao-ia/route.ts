@@ -46,15 +46,14 @@ const queryDB = async (query: string): Promise<any[]> => {
 export async function POST(req: Request) {
   try {
     const { promptUsuario, limite = 200 } = await req.json();
-    if (!promptUsuario) return NextResponse.json({ error: "O texto de busca é obrigatório." }, { status: 400 });
+    if (!promptUsuario) return NextResponse.json({ error: "Texto de busca obrigatório." }, { status: 400 });
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
     const promptSistema = `
       Você é um analista especialista em prospecção B2B. Extraia os critérios do texto.
-      cidade_nome: Apenas o nome da cidade em MAIÚSCULAS e sem acentos, ou null.
-      uf: OBRIGATÓRIO sigla de 2 letras. Deduza a UF se o usuário citar uma cidade conhecida.
-      codigos_cnae: Array de strings contendo apenas números de prefixos CNAE.
+      cidade_nome: Nome da cidade em MAIÚSCULAS e sem acentos, ou null.
+      uf: Sigla de 2 letras do estado. Deduza se a cidade for óbvia.
+      codigos_cnae: Array de strings com prefixos numéricos de CNAE.
       Retorne ESTRITAMENTE um JSON:
       {"atividade": "descrição", "cidade_nome": "CIDADE", "uf": "UF", "codigos_cnae": []}
     `;
@@ -91,50 +90,38 @@ export async function POST(req: Request) {
     if (temNichoEspecifico) {
       const cnaesLimpos = perfilMercado.codigos_cnae.map((c: any) => String(c).replace(/\D/g, '')).filter((c: string) => c.length >= 2);
       if (cnaesLimpos.length > 0) {
-        const cnaesPrecisos = cnaesLimpos.map((c: string) => `(e.cnae_fiscal_principal LIKE '${c}%' OR regexp_matches(COALESCE(e.cnae_fiscal_secundaria, ''), '${c}'))`).join(' OR ');
+        const cnaesPrecisos = cnaesLimpos.map((c: string) => `(cnae_principal LIKE '${c}%' OR regexp_matches(cnaes_secundarios, '(^|[^0-9])' || '${c}'))`).join(' OR ');
         filtroCnaeClausula = `AND (${cnaesPrecisos})`;
 
         const buscaMinusculo = (perfilMercado.atividade || "").toLowerCase();
         if (buscaMinusculo.includes("industria") || buscaMinusculo.includes("fabrica") || buscaMinusculo.includes("metalurgica")) {
           filtroNegativacaoConsultoria = `
-            AND regexp_matches(UPPER(COALESCE(emp.razao_social, '')), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)') = false
-            AND regexp_matches(UPPER(COALESCE(e.nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)') = false
+            AND regexp_matches(UPPER(COALESCE(razao_social, '')), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)') = false
+            AND regexp_matches(UPPER(COALESCE(nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)') = false
           `;
         }
       } else {
-        return NextResponse.json({ error: "CNAEs gerados inválidos." }, { status: 400 });
+        return NextResponse.json({ error: "CNAEs inválidos." }, { status: 400 });
       }
     }
 
     const limiteSeguro = Math.min(limite, 1000);
 
     let ordenacaoEstrategica = temNichoEspecifico 
-      ? `CASE WHEN e.nome_fantasia IS NOT NULL AND e.nome_fantasia != '' THEN 0 ELSE 1 END, e.data_inicio_atividade ASC`
-      : `CASE WHEN emp.natureza_juridica = '2135' THEN 1 ELSE 0 END ASC,
-         CASE WHEN regexp_matches(COALESCE(e.cnae_fiscal_principal, ''), '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
-              WHEN SUBSTR(e.cnae_fiscal_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
-         e.data_inicio_atividade ASC`;
+      ? `CASE WHEN nome_fantasia IS NOT NULL AND nome_fantasia != '' THEN 0 ELSE 1 END, data_abertura ASC`
+      : `CASE WHEN natureza_juridica = '2135' THEN 1 ELSE 0 END ASC,
+         CASE WHEN regexp_matches(COALESCE(cnae_principal, ''), '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+              WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
+         data_abertura ASC`;
 
-    // 🚀 A MÁGICA DA ALTA PERFORMANCE: Apontando direto para 'uf=${estadoAlvo}/*.parquet'
-    // Força o DuckDB a ler única e exclusivamente os blocos daquele estado no Cloudflare R2!
+    // 🔥 OTIMIZAÇÃO HISTÓRICA: O DuckDB bate direto no arquivo flat sem JOIN nenhum na nuvem!
     const sqlQuery = `
       SELECT 
-        e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv AS cnpj, 
-        e.identificador_matriz_filial AS matriz_filial, 
-        e.situacao_cadastral AS situacao, 
-        e.data_inicio_atividade AS data_abertura, 
-        e.cnae_fiscal_principal AS cnae_principal, 
-        e.cnae_fiscal_secundaria AS cnaes_secundarios, 
-        e.bairro, e.cep, e.uf, e.municipio AS municipio_rf,
-        emp.razao_social, 
-        emp.natureza_juridica, 
-        emp.capital_social,
-        e.nome_fantasia AS google_nome
-      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Estabelecimentos/uf=${estadoAlvo}/*.parquet') e
-      LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/*.parquet') emp
-        ON e.cnpj_basico = emp.cnpj_basico
-      WHERE e.situacao_cadastral = '02'
-        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR e.municipio = '${codigoRealDaReceita}')
+        cnpj, '02' AS situacao, data_abertura, cnae_principal, cnaes_secundarios, 
+        bairro, cep, uf, municipio_rf, razao_social, nome_fantasia, natureza_juridica, capital_social
+      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet')
+      WHERE uf = '${estadoAlvo}'
+        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
         ${filtroCnaeClausula}
         ${filtroNegativacaoConsultoria}
       ORDER BY ${ordenacaoEstrategica}
@@ -144,18 +131,18 @@ export async function POST(req: Request) {
     const rows = await queryDB(sqlQuery);
     const leads = rows.map((row: any) => ({
       cnpj: row.cnpj,
-      cnpj_raiz: row.cnpj ? String(row.cnpj).substring(0, 8) : "",
-      matriz_filial: row.matriz_filial,
-      situacao: row.situacao,
+      cnpj_raiz: row.cnpj_basico,
+      matriz_filial: null,
+      situacao: "02",
       data_abertura: row.data_abertura,
       cnae_principal: row.cnae_principal,
       cnaes_secundarios: row.cnaes_secundarios,
       bairro: row.bairro,
       cep: row.cep,
-      uf: row.uf || estadoAlvo,
+      uf: row.uf,
       municipio_rf: row.municipio_rf,
       razao_social: row.razao_social || "Razão Social indisponível",
-      nome_fantasia: row.google_nome && row.google_nome.trim() !== "" ? row.google_nome : row.razao_social,
+      nome_fantasia: row.nome_fantasia && row.nome_fantasia.trim() !== "" ? row.nome_fantasia : row.razao_social,
       natureza_juridica: row.natureza_juridica,
       capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
       google_categoria: null, google_endereco: null, website: null, lat: null, lng: null,

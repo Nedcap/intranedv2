@@ -43,7 +43,7 @@ const queryDB = async (query: string): Promise<any[]> => {
 export async function POST(req: Request) {
   try {
     const { documentoBusca, tipoBusca } = await req.json();
-    if (!documentoBusca || !tipoBusca) return NextResponse.json({ error: "Documentos obrigatórios." }, { status: 400 });
+    if (!documentoBusca || !tipoBusca) return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
 
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
     const bucketName = process.env.R2_BUCKET_NAME;
@@ -55,10 +55,9 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
-      // ⚡ Remoção do '**' - Busca direta na raiz estruturada da tabela
       const sqlEmpresa = `
-        SELECT cnpj_basico, razao_social 
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/*.parquet') 
+        SELECT razao_social 
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet') 
         WHERE cnpj_basico = '${cnpjBasico}' 
         LIMIT 1
       `;
@@ -77,8 +76,8 @@ export async function POST(req: Request) {
       });
 
       const sqlSocios = `
-        SELECT identificador_socio, nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Socios/*.parquet')
+        SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/socios_master.parquet')
         WHERE cnpj_basico = '${cnpjBasico}'
       `;
       const sociosRes = await queryDB(sqlSocios);
@@ -120,9 +119,9 @@ export async function POST(req: Request) {
       });
 
       const sqlEmpresas = `
-        SELECT s.cnpj_basico, e.razao_social, s.qualificacao_socio
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Socios/*.parquet') s
-        LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/*.parquet') e 
+        SELECT s.cnpj_basico, e.razao_social
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/socios_master.parquet') s
+        LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet') e 
           ON s.cnpj_basico = e.cnpj_basico
         WHERE s.cnpj_cpf_socio LIKE '%${docLimpo}'
         LIMIT 30
