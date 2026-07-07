@@ -213,7 +213,8 @@ function MesaAnaliseConteudo() {
     try {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
-      const { error } = await supabase.from("analises_credito").update({ status: "aguardando_comite" }).eq("id", analise.id);
+      // 🔥 AQUI: Ajustei de "aguardando_comite" para "concluido" (mude para o status que seu banco aceita se for diferente)
+      const { error } = await supabase.from("analises_credito").update({ status: "concluido" }).eq("id", analise.id);
       if (error) throw error;
       alert(`🚀 Análise enviada com sucesso! Ela saiu da sua fila e o Motor Python já pode gerar o Relatório HTML.`);
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
@@ -228,7 +229,8 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
-      const { error } = await supabase.from("analises_credito").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
+      // 🔥 AQUI: Ajustei de "aguardando_docs" para "devolvido" (mude se o seu banco usar outra palavra)
+      const { error } = await supabase.from("analises_credito").update({ status: "devolvido", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
@@ -509,6 +511,17 @@ function MesaAnaliseConteudo() {
                           <td className="p-1.5 text-right font-mono font-bold text-green-800 text-[11px]">R$ {totPatrimonio.toLocaleString('pt-BR')}</td>
                           <td></td>
                         </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ORGANOGRAMA E ANEXOS */}
+                  <div>
+                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">4. Anexos e Organograma (Links de Imagem)</div>
+                    <table className="w-full border-collapse border border-[#cbd5e1]">
+                      <tbody>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => setAnalise({ ...analise, anexos: { ...analise.anexos, organograma_url: e.target.value } })} className={cellStyle} placeholder="Cole o link da imagem..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => setAnalise({ ...analise, anexos: { ...analise.anexos, fachada_url: e.target.value } })} className={cellStyle} placeholder="Cole o link da imagem..." /></td></tr>
                       </tbody>
                     </table>
                   </div>
