@@ -1,41 +1,26 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
+import { BigQuery } from "@google-cloud/bigquery";
 import fs from 'fs';
 import path from 'path';
-import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
-// 🦆 Inicialização do DuckDB em Memória
-const db = new duckdb.Database(':memory:');
-
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-const accessKey = process.env.R2_ACCESS_KEY_ID;
-const secretKey = process.env.R2_SECRET_ACCESS_KEY;
-const bucketName = process.env.R2_BUCKET_NAME;
-
-// 🛠️ Correção Crítica para o Ambiente Serverless (Vercel)
-db.run(`SET home_directory='/tmp';`);
-db.run(`SET extension_directory='/tmp';`);
-
-// Instalação do módulo HTTP/S3
-db.run(`INSTALL httpfs;`);
-db.run(`LOAD httpfs;`);
-
-// Configuração de credenciais do Cloudflare R2
-db.run(`SET s3_endpoint='${accountId}.r2.cloudflarestorage.com';`);
-db.run(`SET s3_access_key_id='${accessKey}';`);
-db.run(`SET s3_secret_access_key='${secretKey}';`);
-db.run(`SET s3_region='auto';`);
-db.run(`SET s3_url_style='path';`);
-
-const queryDB = (query: string): Promise<any[]> => {
-  return new Promise((resolve, reject) => {
-    db.all(query, (err, res) => {
-      if (err) reject(err);
-      else resolve(res);
+const obterClienteBigQuery = () => {
+  const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
+  try {
+    const credenciais = JSON.parse(jsonCredenciais);
+    return new BigQuery({
+      projectId: credenciais.project_id,
+      credentials: {
+        client_email: credenciais.client_email,
+        private_key: credenciais.private_key,
+      },
     });
-  });
+  } catch (err: any) {
+    throw new Error("Falha ao processar o JSON das credenciais: " + err.message);
+  }
 };
 
 export async function POST(req: Request) {
@@ -51,7 +36,7 @@ export async function POST(req: Request) {
     });
 
     // =========================================================================
-    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Com Dedução Inteligente de UF)
+    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Com dedução de UF aprimorada)
     // =========================================================================
     const promptSistema = `
       Você é um analista especialista em prospecção B2B.
@@ -92,7 +77,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito de Cidade)
+    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito)
     // =========================================================================
     let codigoRealDaReceita = null;
     let nomeCidadeReal = perfilMercado.cidade_nome;
@@ -116,8 +101,10 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. DUCKDB: CONSULTA ESTRATÉGICA NO CLOUDFLARE R2
+    // 🚀 3. BIGQUERY: CONSULTA
     // =========================================================================
+    const bigquery = obterClienteBigQuery();
+
     let filtroCnaeClausula = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
 
@@ -134,13 +121,14 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Adaptado para o dialeto DuckDB ('regexp_matches' ao invés de 'REGEXP_CONTAINS')
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
-         CASE WHEN regexp_matches(cnae_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+         CASE WHEN REGEXP_CONTAINS(cnae_principal, r'^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
+
+    const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
 
     const sqlQuery = `
       SELECT 
@@ -148,7 +136,7 @@ export async function POST(req: Request) {
         cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
         razao_social, natureza_juridica, capital_social,
         google_nome, google_categoria, google_endereco, google_website
-      FROM read_parquet('s3://${bucketName}/estabelecimentos_completo.parquet')
+      FROM ${TABELA_BIGQUERY}
       WHERE uf = '${perfilMercado.uf.toUpperCase()}'
         AND situacao = '02'
         AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
@@ -157,7 +145,7 @@ export async function POST(req: Request) {
       LIMIT ${limiteSeguro}
     `;
 
-    const rows = await queryDB(sqlQuery);
+    const [rows] = await bigquery.query({ query: sqlQuery });
 
     const leads = rows.map((row: any) => {
       let dataAberturaStr = row.data_abertura;
@@ -180,7 +168,7 @@ export async function POST(req: Request) {
         razao_social: row.razao_social || "Razão Social indisponível",
         nome_fantasia: row.google_nome && row.google_nome.trim() !== "" ? row.google_nome : row.razao_social,
         natureza_juridica: row.natureza_juridica,
-        capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
+        capital_social: row.capital_social ? parseFloat(row.capital_social) : 0,
         google_categoria: row.google_categoria,
         google_endereco: row.google_endereco,
         website: row.google_website,
@@ -196,7 +184,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via DuckDB:", error);
+    console.error("Erro na rota de prospecção via BigQuery:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
