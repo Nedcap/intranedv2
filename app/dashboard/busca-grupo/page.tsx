@@ -40,7 +40,7 @@ function BuscaGrupoConteudo() {
   const [tipoBusca, setTipoBusca] = useState<"CPF" | "CNPJ">("CNPJ");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Estados Unificados do Modal Manual
+  // Estados do Modal Manual
   const [modalAberto, setModalAberto] = useState(false);
   const [manualNome, setManualNome] = useState("");
   const [manualDoc, setManualDoc] = useState("");
@@ -48,9 +48,7 @@ function BuscaGrupoConteudo() {
   const [manualRelacao, setManualRelacao] = useState("Primo(a)");
   const [noVinculoAlvo, setNoVinculoAlvo] = useState("");
 
-  // =========================================================================
-  // 🧭 CAPTURA AUTOMÁTICA DA MESA DE ANÁLISE
-  // =========================================================================
+  // Captura automática da URL
   useEffect(() => {
     if (cnpjDaUrl) {
       setDocumentoBusca(cnpjDaUrl);
@@ -62,7 +60,6 @@ function BuscaGrupoConteudo() {
     }
   }, [cnpjDaUrl]);
 
-  // CONTROLE DE ARRASTAR E SOLTAR
   const onNodesChange = useCallback(
     (changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)),
     []
@@ -73,9 +70,8 @@ function BuscaGrupoConteudo() {
   );
 
   // =========================================================================
-  // 🚀 MOTORES DE BUSCA E EXPANSÃO INFINITA
+  // 🚀 MOTOR DE BUSCA CORRIGIDO (FRONT-END)
   // =========================================================================
-  // ⚡ Alteração: Adicionada a "posicaoOrigem" para desenhar ao redor de quem foi clicado
   const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ", posicaoOrigem?: { x: number, y: number }) => {
     if (!documento) return;
     setIsLoading(true);
@@ -95,12 +91,11 @@ function BuscaGrupoConteudo() {
         return;
       }
 
-      // Calcula o deslocamento. Se não for expansão de clique, usa o centro padrão.
+      // Se clicou numa bolinha, calcula o espalhamento ao redor dela para não sobrepor
       const xOffset = posicaoOrigem ? posicaoOrigem.x - 400 : 0;
       const yOffset = posicaoOrigem ? posicaoOrigem.y - 300 : 0;
 
       let novosNosAdicionados = 0;
-      let novasArestasAdicionadas = 0;
 
       setNodes((prevNodes) => {
         const novosNodes = data.nodes.filter(
@@ -109,7 +104,6 @@ function BuscaGrupoConteudo() {
         
         novosNosAdicionados = novosNodes.length;
 
-        // Ajusta as coordenadas para nascerem em volta do nó clicado
         const nodesAjustados = novosNodes.map((n: Node) => ({
           ...n,
           position: {
@@ -125,19 +119,25 @@ function BuscaGrupoConteudo() {
         const novasEdges = data.edges.filter(
           (novaAresta: Edge) => !prevEdges.find((arestaAntiga) => arestaAntiga.id === novaAresta.id)
         );
+
+        // ⚡ CORREÇÃO VISUAL: Força TODAS as linhas que entram na tela a serem do tipo 'straight'
+        // Isso remove as quinas duras/dobras e faz a linha seguir o centro perfeitamente ao arrastar!
+        const edgesAjustadas = novasEdges.map((e: Edge) => ({
+          ...e,
+          type: 'straight',
+          style: { stroke: '#94a3b8', strokeWidth: 2 }
+        }));
         
-        novasArestasAdicionadas = novasEdges.length;
-        return [...prevEdges, ...novasEdges];
+        return [...prevEdges, ...edgesAjustadas];
       });
 
-      // Feedback inteligente caso a busca termine num "beco sem saída"
-      if (posicaoOrigem && novosNosAdicionados === 0 && novasArestasAdicionadas === 0) {
-        setTimeout(() => alert("Fim da linha! Nenhuma nova ligação foi encontrada para este documento."), 100);
+      if (posicaoOrigem && novosNosAdicionados === 0) {
+        setTimeout(() => alert("Nenhuma nova empresa ou sócio oculto pendente para este nó."), 100);
       }
 
     } catch (error) {
       console.error("Erro na requisição:", error);
-      alert("Ocorreu um erro ao buscar o grupo econômico.");
+      alert("Erro ao expandir teia.");
     } finally {
       setIsLoading(false);
     }
@@ -145,33 +145,32 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  // ⚡ Alteração: Lógica blindada para evitar cliques em "Nomes" e enviar a posição do nó
+  // ⚡ CORREÇÃO CRÍTICA DO CLIQUE: Captura o ID limpo sem quebrar a string do documento
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
 
     const tipoNode = partes[0];
-    const docNode = partes.slice(1).join('-'); // Evita quebra se o nome tiver traços
+    // Pega o resto do ID inteiro caso o CNPJ ou CPF venha com traços ou caracteres
+    const docNode = partes.slice(1).join('-'); 
 
     if (tipoNode === "NOME") {
-      alert("⚠️ Este sócio está registrado na Receita apenas pelo Nome (sem CPF oculto). Não é possível puxar as empresas dele automaticamente.");
+      alert("⚠️ Sócio sem documento atrelado na base da Receita. Impossível expandir.");
       return;
     }
 
     if (tipoNode !== "CPF" && tipoNode !== "CNPJ") return;
 
-    console.log(`[Expansão Teia] Clicou no nó: ${tipoNode} - ${docNode}`);
+    console.log(`[Expansão] Puxando links de: ${tipoNode} - ${docNode}`);
     
-    // Dispara a busca enviando a posição exata de onde o usuário clicou (node.position)
+    // Dispara passando o documento limpo extraído do ID e as coordenadas atuais da bolinha
     handleBuscarDireto(docNode, tipoNode as "CPF" | "CNPJ", node.position);
   }, []);
 
-  // =========================================================================
-  // ➕ SALVAR VÍNCULO MANUAL
-  // =========================================================================
+  // Vínculo manual
   const handleSalvarVinculoManual = () => {
     if (!manualNome || !noVinculoAlvo) {
-      alert("Por favor, preencha o Nome e selecione a qual empresa/pessoa deseja linkar.");
+      alert("Preencha o nome e selecione o alvo.");
       return;
     }
 
@@ -183,8 +182,7 @@ function BuscaGrupoConteudo() {
       position: { x: Math.random() * 300 + 100, y: Math.random() * 300 + 100 },
       data: { label: manualNome.toUpperCase() },
       style: {
-        backgroundColor: '#9333ea', // Roxo analista
-        color: 'white', borderRadius: '50%', width: 90, height: 90,
+        backgroundColor: '#9333ea', color: 'white', borderRadius: '50%', width: 90, height: 90,
         display: 'flex', justifyContent: 'center', alignItems: 'center',
         fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
       }
@@ -192,26 +190,23 @@ function BuscaGrupoConteudo() {
 
     const novaAresta: Edge = {
       id: `edge-manual-${Date.now()}`,
-      source: noVinculoAlvo, // Conecta ao nó selecionado como alvo
-      target: novoNoId,     // Aponta para a nova bolinha criada
+      source: noVinculoAlvo,
+      target: novoNoId,
       label: manualRelacao,
       animated: true,
+      type: 'straight', // Mantém o padrão fluido nas manuais também
       style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '5,5' }
     };
 
     setNodes((prev) => [...prev, novoNo]);
     setEdges((prev) => [...prev, novaAresta]);
-    
     setModalAberto(false);
     setManualNome("");
     setManualDoc("");
   };
 
   const abrirModalManual = () => {
-    if (nodes.length === 0) {
-      alert("A teia precisa ter pelo menos um nó na tela para você conseguir vincular alguém!");
-      return;
-    }
+    if (nodes.length === 0) return;
     setModalAberto(true);
   };
 
@@ -270,7 +265,7 @@ function BuscaGrupoConteudo() {
         </button>
       </div>
 
-      {/* ÁREA DA TEIA - GRAFO INTERATIVO */}
+      {/* ÁREA DA TEIA */}
       <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner relative">
         <div className="absolute top-2 left-2 z-10 bg-white/80 p-2 rounded text-[10px] text-slate-500 pointer-events-none font-sans">
           💡 <strong>Dica do Motor:</strong> Dê um clique em cima de qualquer bolinha na teia para expandir os vínculos dela na hora.
@@ -289,9 +284,7 @@ function BuscaGrupoConteudo() {
         </ReactFlow>
       </div>
 
-      {/* ========================================================= */}
-      {/* MODAL CONFIGURADOR DE VÍNCULO MANUAL */}
-      {/* ========================================================= */}
+      {/* MODAL CONFIGURADOR */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-300 w-full max-w-md overflow-hidden">
