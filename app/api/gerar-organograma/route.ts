@@ -15,7 +15,7 @@ if (credentialsEnv) {
   }
 }
 
-// 2. Inicializa o cliente do BigQuery
+// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -31,6 +31,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
     }
 
+    // Remove qualquer caractere que não seja número para não quebrar as buscas por LIKE
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
 
     const nodes: any[] = [];
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
+      // ⚡ Busca os dados da Empresa Matriz
       const sqlEmpresa = `
         SELECT razao_social 
         FROM \`credito-489113.dados_receita.empresas_master\` 
@@ -53,6 +55,7 @@ export async function POST(req: Request) {
       
       const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : `CNPJ Base: ${cnpjBasico}`;
 
+      // Cria o Nó Central (A Empresa)
       nodes.push({
         id: `CNPJ-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -64,6 +67,7 @@ export async function POST(req: Request) {
         }
       });
 
+      // ⚡ Busca todos os Sócios vinculados a este CNPJ básico
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
         FROM \`credito-489113.dados_receita.socios_master\`
@@ -76,10 +80,11 @@ export async function POST(req: Request) {
       
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
+      // Cria os Nós Satélites (Os Sócios)
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         
-        // Limpa asteriscos para ID imutável
+        // Remove os asteriscos (***) para gerar um ID imutável e limpo
         const docSocioLimpo = socio.cnpj_cpf_socio ? String(socio.cnpj_cpf_socio).replace(/\D/g, "") : "";
         const idSocio = docSocioLimpo ? `CPF-${docSocioLimpo}` : `NOME-${socio.nome_socio_razao_social}`;
 
@@ -100,32 +105,32 @@ export async function POST(req: Request) {
           target: idSocio,
           label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
           animated: true, 
-          // ⚡ Linhas fluidas e elegantes (tipo bezier padrão, sem travar quinas)
-          type: 'default', 
           style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
 
     } else if (tipoBusca === "CPF") {
       
-      // Busca o CNPJ completo real unificado da tabela master
+      // ⚡ O SEGREDO TÁ AQUI: Usa LIKE com % nas duas pontas para ignorar os asteriscos da LGPD e cruzar os dados
       const sqlEmpresas = `
         SELECT e.cnpj, s.cnpj_basico, e.razao_social, s.nome_socio_razao_social
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
-        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo)
-        LIMIT 30
+        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo, '%')
+        LIMIT 50
       `;
       const [empresasRes] = await bigquery.query({
         query: sqlEmpresas,
         params: { docLimpo }
       });
 
+      // Pega o nome do primeiro registro para batizar a bolinha central com o NOME, não com o número
       const nomeRealSocio = empresasRes.length > 0 && empresasRes[0].nome_socio_razao_social
         ? empresasRes[0].nome_socio_razao_social
         : `SÓCIO: ***${docLimpo}**`;
 
+      // Cria o Nó Central (O Sócio) com quebra de linha para o CPF mascarado ficar embaixo
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -140,10 +145,11 @@ export async function POST(req: Request) {
 
       const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
 
+      // Cria as Empresas Satélites onde esse CPF é sócio/diretor
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
         
-        // Usa o CNPJ real e completo retornado pelo JOIN do BigQuery
+        // Evita inventar final fixo. Se o join trouxer o CNPJ master, usa ele completo, senão faz fallback seguro
         const cnpjCompleto = emp.cnpj ? emp.cnpj.replace(/\D/g, "") : `${emp.cnpj_basico}000100`;
         const idEmpresa = `CNPJ-${cnpjCompleto}`;
 
@@ -164,8 +170,6 @@ export async function POST(req: Request) {
           target: idEmpresa,
           label: `Participação`, 
           animated: true, 
-          // ⚡ Linhas fluidas e elegantes (tipo bezier padrão, sem travar quinas)
-          type: 'default', 
           style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
