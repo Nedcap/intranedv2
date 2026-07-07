@@ -2,46 +2,15 @@ import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import fs from 'fs';
 import path from 'path';
-import duckdb from "duckdb";
+import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-let cachedDb: duckdb.Database | null = null;
-async function getDuckDB() {
-  if (cachedDb) return cachedDb;
-  return new Promise<duckdb.Database>((resolve, reject) => {
-    const db = new duckdb.Database(':memory:');
-    const run = (query: string) => new Promise<void>((res, rej) => {
-      db.run(query, (err) => err ? rej(err) : res());
-    });
-    const setupDB = async () => {
-      try {
-        await run(`SET home_directory='/tmp';`);
-        await run(`SET extension_directory='/tmp';`);
-        await run(`INSTALL httpfs;`);
-        await run(`LOAD httpfs;`);
-        await run(`SET s3_endpoint='${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com';`);
-        await run(`SET s3_access_key_id='${process.env.R2_ACCESS_KEY_ID}';`);
-        await run(`SET s3_secret_access_key='${process.env.R2_SECRET_ACCESS_KEY}';`);
-        await run(`SET s3_region='auto';`);
-        await run(`SET s3_url_style='path';`);
-        cachedDb = db;
-        resolve(db);
-      } catch (error) { reject(error); }
-    };
-    setupDB();
-  });
-}
-
-const queryDB = async (query: string): Promise<any[]> => {
-  const db = await getDuckDB();
-  return new Promise((resolve, reject) => {
-    db.all(query, (err, res) => {
-      if (err) reject(err);
-      else resolve(res);
-    });
-  });
-};
+// Inicializa o cliente do BigQuery puxando o seu projeto
+const bigquery = new BigQuery({
+  projectId: 'credito-489113',
+  // keyFilename: path.join(process.cwd(), 'credentials.json'), // Descomente e ajuste se for testar localmente
+});
 
 export async function POST(req: Request) {
   try {
@@ -78,26 +47,44 @@ export async function POST(req: Request) {
         const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         const cidadeSanitizada = nomeCidadeReal.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
         const chaveBusca = `${cidadeSanitizada}-${estadoAlvo}`;
-        codigoRealDaReceita = tabelaTomBase[chaveBusca];
-      } catch (err) { console.error(err); }
+        codigoRealDaReceita = tabelaTomBase[chaveBusca] || null;
+      } catch (err) { console.error("Erro ao ler tabela_tom.json:", err); }
     }
 
-    const bucketName = process.env.R2_BUCKET_NAME;
+    // ⚡ Preparando os parâmetros de forma segura para o BigQuery
+    const queryParams: Record<string, any> = {
+      estadoAlvo,
+      codigoRealDaReceita,
+      limiteSeguro: Math.min(limite, 1000)
+    };
+
     let filtroCnaeClausula = "";
     let filtroNegativacaoConsultoria = "";
     const temNichoEspecifico = Array.isArray(perfilMercado.codigos_cnae) && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
-      const cnaesLimpos = perfilMercado.codigos_cnae.map((c: any) => String(c).replace(/\D/g, '')).filter((c: string) => c.length >= 2);
+      const cnaesLimpos = perfilMercado.codigos_cnae
+        .map((c: any) => String(c).replace(/\D/g, ''))
+        .filter((c: string) => c.length >= 2);
+
       if (cnaesLimpos.length > 0) {
-        const cnaesPrecisos = cnaesLimpos.map((c: string) => `(cnae_principal LIKE '${c}%' OR regexp_matches(cnaes_secundarios, '(^|[^0-9])' || '${c}'))`).join(' OR ');
-        filtroCnaeClausula = `AND (${cnaesPrecisos})`;
+        // Monta as condições dinamicamente e alimenta o objeto de parâmetros
+        const cnaeConditions: string[] = [];
+        cnaesLimpos.forEach((c: string, index: number) => {
+          queryParams[`cnae_prefix_${index}`] = `${c}%`;
+          queryParams[`cnae_regex_${index}`] = `(^|[^0-9])${c}`;
+          
+          // No BigQuery, usamos REGEXP_CONTAINS em vez de regexp_matches
+          cnaeConditions.push(`(cnae_principal LIKE @cnae_prefix_${index} OR REGEXP_CONTAINS(cnaes_secundarios, @cnae_regex_${index}))`);
+        });
+
+        filtroCnaeClausula = `AND (${cnaeConditions.join(' OR ')})`;
 
         const buscaMinusculo = (perfilMercado.atividade || "").toLowerCase();
         if (buscaMinusculo.includes("industria") || buscaMinusculo.includes("fabrica") || buscaMinusculo.includes("metalurgica")) {
           filtroNegativacaoConsultoria = `
-            AND regexp_matches(UPPER(COALESCE(razao_social, '')), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)') = false
-            AND regexp_matches(UPPER(COALESCE(nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)') = false
+            AND NOT REGEXP_CONTAINS(UPPER(COALESCE(razao_social, '')), r'(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)')
+            AND NOT REGEXP_CONTAINS(UPPER(COALESCE(nome_fantasia, '')), r'(CONSULTORIA|ASSESSORIA)')
           `;
         }
       } else {
@@ -105,36 +92,40 @@ export async function POST(req: Request) {
       }
     }
 
-    const limiteSeguro = Math.min(limite, 1000);
-
+    // Ajuste da ordenação para o dialeto do BigQuery (usando REGEXP_CONTAINS nativo)
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN nome_fantasia IS NOT NULL AND nome_fantasia != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `CASE WHEN natureza_juridica = '2135' THEN 1 ELSE 0 END ASC,
-         CASE WHEN regexp_matches(COALESCE(cnae_principal, ''), '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+         CASE WHEN REGEXP_CONTAINS(COALESCE(cnae_principal, ''), r'^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // ⚡ O arquivo unificado já possui Razão Social injetada. Query ultra veloz!
+    // ⚡ A query veloz apontando para a sua base nativa do BigQuery
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_basico, data_abertura, cnae_principal, cnaes_secundarios, 
         bairro, cep, uf, municipio_rf, razao_social, nome_fantasia, natureza_juridica, capital_social
-      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet')
-      WHERE uf = '${estadoAlvo}'
-        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
+      FROM \`credito-489113.dados_receita.empresas_master\`
+      WHERE uf = @estadoAlvo
+        AND (@codigoRealDaReceita IS NULL OR municipio_rf = @codigoRealDaReceita)
         ${filtroCnaeClausula}
         ${filtroNegativacaoConsultoria}
       ORDER BY ${ordenacaoEstrategica}
-      LIMIT ${limiteSeguro}
+      LIMIT @limiteSeguro
     `;
 
-    const rows = await queryDB(sqlQuery);
+    // Executa no BigQuery com os parâmetros blindados
+    const [rows] = await bigquery.query({
+      query: sqlQuery,
+      params: queryParams
+    });
+
     const leads = rows.map((row: any) => ({
       cnpj: row.cnpj,
       cnpj_raiz: row.cnpj_basico,
       matriz_filial: null,
       situacao: "02",
-      data_abertura: row.data_abertura,
+      data_abertura: row.data_abertura?.value || row.data_abertura, // BigQuery Date object format safety
       cnae_principal: row.cnae_principal,
       cnaes_secundarios: row.cnaes_secundarios,
       bairro: row.bairro,
@@ -151,6 +142,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ perfilAI: { ...perfilMercado, codigo_municipio: codigoRealDaReceita }, leads });
   } catch (error: any) {
+    console.error("Erro na busca de leads:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

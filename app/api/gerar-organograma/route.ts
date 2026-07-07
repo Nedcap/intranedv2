@@ -1,52 +1,22 @@
 import { NextResponse } from "next/server";
-import duckdb from "duckdb";
+import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-let cachedDb: duckdb.Database | null = null;
-async function getDuckDB() {
-  if (cachedDb) return cachedDb;
-  return new Promise<duckdb.Database>((resolve, reject) => {
-    const db = new duckdb.Database(':memory:');
-    const run = (query: string) => new Promise<void>((res, rej) => {
-      db.run(query, (err) => err ? rej(err) : res());
-    });
-    const setupDB = async () => {
-      try {
-        await run(`SET home_directory='/tmp';`);
-        await run(`SET extension_directory='/tmp';`);
-        await run(`INSTALL httpfs;`);
-        await run(`LOAD httpfs;`);
-        await run(`SET s3_endpoint='${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com';`);
-        await run(`SET s3_access_key_id='${process.env.R2_ACCESS_KEY_ID}';`);
-        await run(`SET s3_secret_access_key='${process.env.R2_SECRET_ACCESS_KEY}';`);
-        await run(`SET s3_region='auto';`);
-        await run(`SET s3_url_style='path';`);
-        cachedDb = db;
-        resolve(db);
-      } catch (error) { reject(error); }
-    };
-    setupDB();
-  });
-}
-
-const queryDB = async (query: string): Promise<any[]> => {
-  const db = await getDuckDB();
-  return new Promise((resolve, reject) => {
-    db.all(query, (err, res) => {
-      if (err) reject(err);
-      else resolve(res);
-    });
-  });
-};
+// Inicializa o cliente do BigQuery puxando o seu projeto
+const bigquery = new BigQuery({
+  projectId: 'credito-489113',
+  // keyFilename: path.join(process.cwd(), 'credentials.json'), // Descomente e ajuste se for testar localmente
+});
 
 export async function POST(req: Request) {
   try {
     const { documentoBusca, tipoBusca } = await req.json();
-    if (!documentoBusca || !tipoBusca) return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
+    if (!documentoBusca || !tipoBusca) {
+      return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
+    }
 
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
-    const bucketName = process.env.R2_BUCKET_NAME;
 
     const nodes: any[] = [];
     const edges: any[] = [];
@@ -55,15 +25,21 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
+      // ⚡ Busca os dados da Empresa Matriz
       const sqlEmpresa = `
         SELECT razao_social 
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet') 
-        WHERE cnpj_basico = '${cnpjBasico}' 
+        FROM \`credito-489113.dados_receita.empresas_master\` 
+        WHERE cnpj_basico = @cnpjBasico 
         LIMIT 1
       `;
-      const empresaRes = await queryDB(sqlEmpresa);
+      const [empresaRes] = await bigquery.query({
+        query: sqlEmpresa,
+        params: { cnpjBasico }
+      });
+      
       const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : `CNPJ Base: ${cnpjBasico}`;
 
+      // Cria o Nó Central (A Empresa)
       nodes.push({
         id: `CNPJ-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -75,14 +51,20 @@ export async function POST(req: Request) {
         }
       });
 
+      // ⚡ Busca todos os Sócios vinculados a este CNPJ
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/socios_master.parquet')
-        WHERE cnpj_basico = '${cnpjBasico}'
+        FROM \`credito-489113.dados_receita.socios_master\`
+        WHERE cnpj_basico = @cnpjBasico
       `;
-      const sociosRes = await queryDB(sqlSocios);
+      const [sociosRes] = await bigquery.query({
+        query: sqlSocios,
+        params: { cnpjBasico }
+      });
+      
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
+      // Cria os Nós Satélites (Os Sócios)
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         const idSocio = socio.cnpj_cpf_socio ? `CPF-${socio.cnpj_cpf_socio}` : `NOME-${socio.nome_socio_razao_social}`;
@@ -107,6 +89,8 @@ export async function POST(req: Request) {
       });
 
     } else if (tipoBusca === "CPF") {
+      
+      // Cria o Nó Central (O Sócio)
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -118,19 +102,27 @@ export async function POST(req: Request) {
         }
       });
 
+      // ⚡ Busca todas as Empresas onde este CPF é Sócio
+      // O CONCAT ajuda a fazer o filtro LIKE com o parâmetro de forma segura
       const sqlEmpresas = `
         SELECT s.cnpj_basico, e.razao_social
-        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/socios_master.parquet') s
-        LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/receita_federal_master.parquet') e 
+        FROM \`credito-489113.dados_receita.socios_master\` s
+        LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
-        WHERE s.cnpj_cpf_socio LIKE '%${docLimpo}'
+        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo)
         LIMIT 30
       `;
-      const empresasRes = await queryDB(sqlEmpresas);
+      const [empresasRes] = await bigquery.query({
+        query: sqlEmpresas,
+        params: { docLimpo }
+      });
+
       const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
 
+      // Cria os Nós Satélites (As Empresas)
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
+        // Remonta o CNPJ Matriz assumindo final 0001-00 para exibição
         const idEmpresa = `CNPJ-${emp.cnpj_basico}000100`;
 
         nodes.push({
@@ -154,6 +146,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ nodes, edges });
   } catch (error: any) {
+    console.error("Erro na montagem do grafo:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
