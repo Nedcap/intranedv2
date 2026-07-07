@@ -1,26 +1,61 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
-import { BigQuery } from "@google-cloud/bigquery";
 import fs from 'fs';
 import path from 'path';
+import duckdb from "duckdb"; // Lembre-se: npm install duckdb
 
 export const dynamic = 'force-dynamic';
 
-const obterClienteBigQuery = () => {
-  const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-  if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
-  try {
-    const credenciais = JSON.parse(jsonCredenciais);
-    return new BigQuery({
-      projectId: credenciais.project_id,
-      credentials: {
-        client_email: credenciais.client_email,
-        private_key: credenciais.private_key,
-      },
+// =========================================================================
+// 🦆 GERENCIADOR DE CONEXÃO DUCKDB (SINGLETON OTIMIZADO PARA VERCEL)
+// =========================================================================
+let cachedDb: duckdb.Database | null = null;
+
+async function getDuckDB() {
+  if (cachedDb) return cachedDb;
+
+  return new Promise<duckdb.Database>((resolve, reject) => {
+    const db = new duckdb.Database(':memory:');
+
+    const run = (query: string) => new Promise<void>((res, rej) => {
+      db.run(query, (err) => err ? rej(err) : res());
     });
-  } catch (err: any) {
-    throw new Error("Falha ao processar o JSON das credenciais: " + err.message);
-  }
+
+    const setupDB = async () => {
+      try {
+        console.log("[DuckDB - Prospecção] Configurando ambiente...");
+        await run(`SET home_directory='/tmp';`);
+        await run(`SET extension_directory='/tmp';`);
+        
+        await run(`INSTALL httpfs;`);
+        await run(`LOAD httpfs;`);
+
+        console.log("[DuckDB - Prospecção] Autenticando com Cloudflare R2...");
+        await run(`SET s3_endpoint='${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com';`);
+        await run(`SET s3_access_key_id='${process.env.R2_ACCESS_KEY_ID}';`);
+        await run(`SET s3_secret_access_key='${process.env.R2_SECRET_ACCESS_KEY}';`);
+        await run(`SET s3_region='auto';`);
+        await run(`SET s3_url_style='path';`);
+        
+        cachedDb = db;
+        resolve(db);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    setupDB();
+  });
+}
+
+const queryDB = async (query: string): Promise<any[]> => {
+  const db = await getDuckDB();
+  return new Promise((resolve, reject) => {
+    db.all(query, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
+    });
+  });
 };
 
 export async function POST(req: Request) {
@@ -104,9 +139,9 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. BIGQUERY: CONSULTA BLINDADA (Com trava de segurança)
+    // 🚀 3. DUCKDB: CONSULTA BLINDADA (Lendo Data Lake no R2)
     // =========================================================================
-    const bigquery = obterClienteBigQuery();
+    const bucketName = process.env.R2_BUCKET_NAME;
 
     let filtroCnaeClausula = "";
     let filtroNegativacaoConsultoria = "";
@@ -119,53 +154,63 @@ export async function POST(req: Request) {
         .filter((c: string) => c.length >= 2);
 
       if (cnaesLimpos.length > 0) {
+        // Adaptado para Dialeto DuckDB: regexp_matches
         const cnaesPrecisos = cnaesLimpos.map((c: string) => 
-          `(cnae_principal LIKE '${c}%' OR REGEXP_CONTAINS(cnaes_secundarios, r'(^|[^0-9])' || '${c}'))`
+          `(cnae_fiscal_principal LIKE '${c}%' OR regexp_matches(cnae_fiscal_secundaria, '(^|[^0-9])' || '${c}'))`
         ).join(' OR ');
         
         filtroCnaeClausula = `AND (${cnaesPrecisos})`;
 
         const buscaMinusculo = (perfilMercado.atividade || "").toLowerCase();
         if (buscaMinusculo.includes("industria") || buscaMinusculo.includes("fabrica") || buscaMinusculo.includes("metalurgica")) {
+          // Adaptado para Dialeto DuckDB: regexp_matches e tratamento seguro de NULL
           filtroNegativacaoConsultoria = `
-            AND NOT REGEXP_CONTAINS(UPPER(razao_social), r'(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)')
-            AND NOT REGEXP_CONTAINS(UPPER(COALESCE(google_nome, '')), r'(CONSULTORIA|ASSESSORIA)')
+            AND NOT regexp_matches(UPPER(emp.razao_social), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)')
+            AND NOT regexp_matches(UPPER(COALESCE(e.nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)')
           `;
         }
       } else {
-        // TRAVA DE SEGURANÇA: Se o usuário pediu nicho, mas a IA retornou lixo que foi apagado no `.filter()`, nós abortamos a busca para não puxar a cidade inteira.
         return NextResponse.json({ error: "Erro na IA: Os códigos CNAE gerados foram inválidos. Tente detalhar mais o setor." }, { status: 400 });
       }
     }
 
     const limiteSeguro = Math.min(limite, 1000);
 
+    // Adaptado para o DuckDB (Atenção aos nomes das colunas que mudaram no arquivo original da Receita)
     let ordenacaoEstrategica = temNichoEspecifico 
-      ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
-      : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
-         CASE WHEN REGEXP_CONTAINS(cnae_principal, r'^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
-              WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
-         data_abertura ASC`;
+      ? `CASE WHEN e.nome_fantasia IS NOT NULL AND e.nome_fantasia != '' THEN 0 ELSE 1 END, e.data_inicio_atividade ASC`
+      : `CASE WHEN emp.natureza_juridica = '2135' THEN 1 ELSE 0 END ASC,
+         CASE WHEN regexp_matches(e.cnae_fiscal_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+              WHEN SUBSTR(e.cnae_fiscal_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
+         e.data_inicio_atividade ASC`;
 
-    const TABELA_BIGQUERY = "`credito-489113.banco_receita_us.estabelecimentos_otimizado`";
-
+    // A Query agora cruza o Estabelecimento com a Empresa para buscar Razão Social e Capital Social
     const sqlQuery = `
       SELECT 
-        cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
-        cnae_principal, cnaes_secundarios, bairro, cep, uf, municipio_rf,
-        razao_social, natureza_juridica, capital_social,
-        google_nome, google_categoria, google_endereco, google_website
-      FROM ${TABELA_BIGQUERY}
-      WHERE uf = '${perfilMercado.uf.toUpperCase()}'
-        AND situacao = '02'
-        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR municipio_rf = '${codigoRealDaReceita}')
+        e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv AS cnpj, 
+        e.identificador_matriz_filial AS matriz_filial, 
+        e.situacao_cadastral AS situacao, 
+        e.data_inicio_atividade AS data_abertura, 
+        e.cnae_fiscal_principal AS cnae_principal, 
+        e.cnae_fiscal_secundaria AS cnaes_secundarios, 
+        e.bairro, e.cep, e.uf, e.municipio AS municipio_rf,
+        emp.razao_social, 
+        emp.natureza_juridica, 
+        emp.capital_social,
+        e.nome_fantasia AS google_nome
+      FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Estabelecimentos/**/*.parquet', hive_partitioning=1) e
+      LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/**/*.parquet') emp
+        ON e.cnpj_basico = emp.cnpj_basico
+      WHERE e.uf = '${perfilMercado.uf.toUpperCase()}'
+        AND e.situacao_cadastral = '02'
+        AND ('${codigoRealDaReceita || "NULL"}' = 'NULL' OR e.municipio = '${codigoRealDaReceita}')
         ${filtroCnaeClausula}
         ${filtroNegativacaoConsultoria}
       ORDER BY ${ordenacaoEstrategica}
       LIMIT ${limiteSeguro}
     `;
 
-    const [rows] = await bigquery.query({ query: sqlQuery });
+    const rows = await queryDB(sqlQuery);
 
     const leads = rows.map((row: any) => {
       let dataAberturaStr = row.data_abertura;
@@ -175,7 +220,7 @@ export async function POST(req: Request) {
 
       return {
         cnpj: row.cnpj,
-        cnpj_raiz: row.cnpj_raiz,
+        cnpj_raiz: row.cnpj ? String(row.cnpj).substring(0, 8) : "",
         matriz_filial: row.matriz_filial,
         situacao: row.situacao,
         data_abertura: dataAberturaStr,
@@ -183,15 +228,16 @@ export async function POST(req: Request) {
         cnaes_secundarios: row.cnaes_secundarios,
         bairro: row.bairro,
         cep: row.cep,
-        uf: row.uf,
+        uf: row.uf ? String(row.uf).toUpperCase() : "",
         municipio_rf: row.municipio_rf,
         razao_social: row.razao_social || "Razão Social indisponível",
         nome_fantasia: row.google_nome && row.google_nome.trim() !== "" ? row.google_nome : row.razao_social,
         natureza_juridica: row.natureza_juridica,
-        capital_social: row.capital_social ? parseFloat(row.capital_social) : 0,
-        google_categoria: row.google_categoria,
-        google_endereco: row.google_endereco,
-        website: row.google_website,
+        capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
+        // Como paramos de usar o Google BQ (onde você enriqueceu os dados do Google), as colunas exclusivas ficam nulas.
+        google_categoria: null,
+        google_endereco: null,
+        website: null,
         lat: null, 
         lng: null, 
         cidadeExtenso: nomeCidadeReal || undefined 
@@ -204,7 +250,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Erro na rota de prospecção via BigQuery:", error);
+    console.error("Erro na rota de prospecção via DuckDB (R2):", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

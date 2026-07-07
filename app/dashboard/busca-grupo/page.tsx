@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { 
   ReactFlow, 
   Background, 
@@ -11,26 +11,51 @@ import {
   Node,
   Edge
 } from '@xyflow/react';
+import { useSearchParams } from 'next/navigation';
 import '@xyflow/react/dist/style.css';
 
 // =========================================================================
-// 🎨 CUSTOMIZAÇÃO VISUAL DAS BOLINHAS (NÓS)
+// COMPONENTE WRAPPER COM SUSPENSE (Obrigatório no Next.js para usar useSearchParams)
 // =========================================================================
-const initialNodes: Node[] = [];
-const initialEdges: Edge[] = [];
-
 export default function BuscaGrupoPage() {
-  const [nodes, setNodes] = useState<Node[]>(initialNodes);
-  const [edges, setEdges] = useState<Edge[]>(initialEdges);
+  return (
+    <Suspense fallback={<div className="h-screen w-full flex items-center justify-center text-sm font-mono text-purple-600 animate-pulse">⚡ Carregando ambiente de grafos...</div>}>
+      <BuscaGrupoConteudo />
+    </Suspense>
+  );
+}
+
+// =========================================================================
+// COMPONENTE PRINCIPAL COM A LÓGICA DA TEIA
+// =========================================================================
+function BuscaGrupoConteudo() {
+  const searchParams = useSearchParams();
+  const cnpjDaUrl = searchParams.get('cnpj');
+  const analiseIdDaUrl = searchParams.get('analise_id');
+
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   
-  // Estados dos inputs de busca e UI
   const [documentoBusca, setDocumentoBusca] = useState("");
   const [tipoBusca, setTipoBusca] = useState<"CPF" | "CNPJ">("CNPJ");
   const [isLoading, setIsLoading] = useState(false);
 
   // =========================================================================
-  // 🕹️ CONTROLE DE ARRASTAR E SOLTAR DA TEIA
+  // 🧭 CAPTURA AUTOMÁTICA DA MESA DE ANÁLISE
   // =========================================================================
+  useEffect(() => {
+    if (cnpjDaUrl) {
+      setDocumentoBusca(cnpjDaUrl);
+      setTipoBusca("CNPJ");
+      // Pequeno timeout seguro para garantir o carregamento do DOM antes do fetch
+      const timer = setTimeout(() => {
+        handleBuscarDireto(cnpjDaUrl, "CNPJ");
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [cnpjDaUrl]);
+
+  // CONTROLE DE ARRASTAR E SOLTAR
   const onNodesChange = useCallback(
     (changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)),
     []
@@ -40,42 +65,27 @@ export default function BuscaGrupoPage() {
     []
   );
 
-  // =========================================================================
-  // 🚀 FUNÇÃO DE BUSCA NA API (Conectado ao route.ts)
-  // =========================================================================
-  const handleBuscar = async () => {
-    if (!documentoBusca) return;
-    
+  // Mapeia a função de busca dinâmica aceitando parâmetros diretos
+  const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ") => {
+    if (!documento) return;
     setIsLoading(true);
-    console.log(`Buscando ${tipoBusca}: ${documentoBusca}`);
     
     try {
       const response = await fetch('/api/gerar-organograma', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          documentoBusca,
-          tipoBusca
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentoBusca: documento, tipoBusca: tipo }),
       });
 
-      if (!response.ok) {
-        throw new Error('Falha ao buscar dados no backend');
-      }
-
+      if (!response.ok) throw new Error('Falha ao buscar dados no backend');
       const data = await response.json();
 
       if (data.error) {
         alert(data.error);
-        setIsLoading(false);
         return;
       }
 
-      // Adiciona os novos nós e arestas aos que já existem na tela (para permitir expansão infinita)
       setNodes((prevNodes) => {
-        // Evita duplicatas caso a pessoa busque algo que já está na tela
         const novosNodes = data.nodes.filter(
           (novoNo: Node) => !prevNodes.find((noAntigo) => noAntigo.id === novoNo.id)
         );
@@ -83,7 +93,6 @@ export default function BuscaGrupoPage() {
       });
 
       setEdges((prevEdges) => {
-        // Evita duplicatas nas linhas
         const novasEdges = data.edges.filter(
           (novaAresta: Edge) => !prevEdges.find((arestaAntiga) => arestaAntiga.id === novaAresta.id)
         );
@@ -98,22 +107,25 @@ export default function BuscaGrupoPage() {
     }
   };
 
-  // =========================================================================
-  // ➕ ADICIONAR LIGAÇÃO MANUAL ("Primo", "Laranja", etc)
-  // =========================================================================
+  const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
+
   const handleAdicionarManual = () => {
-    // Isso vai abrir um Modal para você preencher os dados do "Primo" e ligar aos nós existentes
-    alert("Aqui abriremos o Modal para criar uma bolinha nova (ex: Primo) e ligar num CNPJ/CPF existente da tela!");
+    alert("Aqui abriremos o Modal para criar uma bolinha nova (ex: Primo) e vincular ao Dossiê da Análise ID: " + analiseIdDaUrl);
   };
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50 p-4">
       {/* HEADER DE CONTROLE */}
       <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
-        <h1 className="text-xl font-bold text-slate-800 mr-4">Mapeamento de Grupo Econômico</h1>
+        <div className="flex flex-col">
+          <h1 className="text-xl font-bold text-slate-800">Mapeamento de Grupo Econômico</h1>
+          {analiseIdDaUrl && (
+            <span className="text-[10px] text-purple-600 font-mono font-bold">VINCULADO À ANÁLISE ID: {analiseIdDaUrl}</span>
+          )}
+        </div>
         
         <select 
-          className="p-2 border rounded-md"
+          className="p-2 border rounded-md text-sm"
           value={tipoBusca}
           onChange={(e) => setTipoBusca(e.target.value as "CPF" | "CNPJ")}
         >
@@ -124,7 +136,7 @@ export default function BuscaGrupoPage() {
         <input 
           type="text" 
           placeholder="Digite apenas números..."
-          className="p-2 border rounded-md w-64"
+          className="p-2 border rounded-md w-64 text-sm font-mono"
           value={documentoBusca}
           onChange={(e) => setDocumentoBusca(e.target.value)}
           disabled={isLoading}
@@ -133,7 +145,7 @@ export default function BuscaGrupoPage() {
         <button 
           onClick={handleBuscar}
           disabled={isLoading}
-          className={`font-semibold py-2 px-6 rounded-md transition-all text-white ${
+          className={`font-semibold py-2 px-6 rounded-md text-sm transition-all text-white cursor-pointer ${
             isLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
           }`}
         >
@@ -142,21 +154,20 @@ export default function BuscaGrupoPage() {
 
         <button 
           onClick={handleAdicionarManual}
-          className="ml-auto bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-md transition-all"
+          className="ml-auto bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-md text-sm transition-all cursor-pointer"
         >
           + Vínculo Manual
         </button>
         
-        {/* Botão de Limpar Tela */}
         <button 
           onClick={() => { setNodes([]); setEdges([]); }}
-          className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-md transition-all"
+          className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-md text-sm transition-all cursor-pointer"
         >
           Limpar Teia
         </button>
       </div>
 
-      {/* ÁREA DA TEIA (GRAFO INTERATIVO) */}
+      {/* ÁREA DA TEIA */}
       <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner">
         <ReactFlow
           nodes={nodes}
