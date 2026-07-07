@@ -1,23 +1,58 @@
 import { NextResponse } from "next/server";
-import { BigQuery } from "@google-cloud/bigquery";
+import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
-const obterClienteBigQuery = () => {
-  const jsonCredenciais = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-  if (!jsonCredenciais) throw new Error("A variável GOOGLE_APPLICATION_CREDENTIALS_JSON não está configurada.");
-  try {
-    const credenciais = JSON.parse(jsonCredenciais);
-    return new BigQuery({
-      projectId: credenciais.project_id,
-      credentials: {
-        client_email: credenciais.client_email,
-        private_key: credenciais.private_key,
-      },
+// =========================================================================
+// 🦆 GERENCIADOR DE CONEXÃO DUCKDB (SINGLETON OTIMIZADO PARA VERCEL)
+// =========================================================================
+let cachedDb: duckdb.Database | null = null;
+
+async function getDuckDB() {
+  if (cachedDb) return cachedDb;
+
+  return new Promise<duckdb.Database>((resolve, reject) => {
+    const db = new duckdb.Database(':memory:');
+
+    const run = (query: string) => new Promise<void>((res, rej) => {
+      db.run(query, (err) => err ? rej(err) : res());
     });
-  } catch (err: any) {
-    throw new Error("Falha ao processar o JSON das credenciais: " + err.message);
-  }
+
+    const setupDB = async () => {
+      try {
+        console.log("[DuckDB - Organograma] Configurando ambiente temporário...");
+        await run(`SET home_directory='/tmp';`);
+        await run(`SET extension_directory='/tmp';`);
+        
+        await run(`INSTALL httpfs;`);
+        await run(`LOAD httpfs;`);
+
+        console.log("[DuckDB - Organograma] Autenticando com Cloudflare R2...");
+        await run(`SET s3_endpoint='${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com';`);
+        await run(`SET s3_access_key_id='${process.env.R2_ACCESS_KEY_ID}';`);
+        await run(`SET s3_secret_access_key='${process.env.R2_SECRET_ACCESS_KEY}';`);
+        await run(`SET s3_region='auto';`);
+        await run(`SET s3_url_style='path';`);
+        
+        cachedDb = db;
+        resolve(db);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    setupDB();
+  });
+}
+
+const queryDB = async (query: string): Promise<any[]> => {
+  const db = await getDuckDB();
+  return new Promise((resolve, reject) => {
+    db.all(query, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
+    });
+  });
 };
 
 export async function POST(req: Request) {
@@ -29,64 +64,54 @@ export async function POST(req: Request) {
     }
 
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
-    const bigquery = obterClienteBigQuery();
-
-    // ⚠️ ATENÇÃO: Confirme se o nome das tabelas de Sócios e Empresas no seu BQ estão exatamente assim.
-    // Usei os nomes padrão da Receita, ajuste se necessário para o seu dataset.
-    const TABELA_SOCIOS = "`credito-489113.banco_receita_us.socios`";
-    const TABELA_EMPRESAS = "`credito-489113.banco_receita_us.empresas`";
+    const bucketName = process.env.R2_BUCKET_NAME;
 
     const nodes: any[] = [];
     const edges: any[] = [];
     
-    // Posição central da busca inicial (o meio da tela)
     const centerX = 400;
     const centerY = 300;
-    const raio = 250; // Distância que as bolinhas filhas vão nascer do centro
+    const raio = 250;
 
     if (tipoBusca === "CNPJ") {
-      // 1. Busca a Empresa Principal
-      // Pega os primeiros 8 dígitos do CNPJ para buscar na tabela de sócios e empresas
       const cnpjBasico = docLimpo.substring(0, 8);
 
+      // 1. Busca a Razão Social da Empresa Principal no Parquet do R2
       const sqlEmpresa = `
         SELECT cnpj_basico, razao_social 
-        FROM ${TABELA_EMPRESAS} 
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/**/*.parquet') 
         WHERE cnpj_basico = '${cnpjBasico}' 
         LIMIT 1
       `;
-      const [empresaRes] = await bigquery.query({ query: sqlEmpresa });
-      const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : "Empresa Desconhecida";
+      const empresaRes = await queryDB(sqlEmpresa);
+      const razaoSocial = empresaRes.length > 0 ? empresaRes[0].razao_social : `CNPJ Base: ${cnpjBasico}`;
 
-      // Adiciona o Nó Central (A Empresa)
       nodes.push({
         id: `CNPJ-${docLimpo}`,
         position: { x: centerX, y: centerY },
         data: { label: razaoSocial },
         style: {
-          backgroundColor: '#2563eb', // Azul para Empresa
+          backgroundColor: '#2563eb',
           color: 'white', borderRadius: '50%', width: 100, height: 100,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
+          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '10px'
         }
       });
 
-      // 2. Busca os Sócios dessa Empresa
+      // 2. Busca os Sócios vinculados a esse CNPJ Básico no Parquet do R2
       const sqlSocios = `
-        SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
-        FROM ${TABELA_SOCIOS}
+        SELECT identificador_socio, nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Socios/**/*.parquet')
         WHERE cnpj_basico = '${cnpjBasico}'
       `;
-      const [sociosRes] = await bigquery.query({ query: sqlSocios });
+      const sociosRes = await queryDB(sqlSocios);
 
-      // Distribui os sócios em um círculo ao redor da empresa
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
-        const idSocio = `CPF-${socio.cnpj_cpf_socio}`;
+        const idSocio = socio.cnpj_cpf_socio ? `CPF-${socio.cnpj_cpf_socio}` : `NOME-${socio.nome_socio_razao_social}`;
 
-        // Cria o Nó do Sócio
         nodes.push({
           id: idSocio,
           position: { 
@@ -95,33 +120,31 @@ export async function POST(req: Request) {
           },
           data: { label: socio.nome_socio_razao_social },
           style: {
-            backgroundColor: '#db2777', // Rosa para Pessoa/Sócio
+            backgroundColor: '#db2777',
             color: 'white', borderRadius: '50%', width: 90, height: 90,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
           }
         });
 
-        // Cria a Linha (Aresta) ligando a Empresa ao Sócio
         edges.push({
-          id: `edge-${docLimpo}-${socio.cnpj_cpf_socio}`,
+          id: `edge-${docLimpo}-${socio.cnpj_cpf_socio || index}`,
           source: `CNPJ-${docLimpo}`,
           target: idSocio,
-          label: `Sócio (Cód: ${socio.qualificacao_socio})`, // Mostra o nível de ligação na linha
+          label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
           animated: true,
           style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
 
     } else if (tipoBusca === "CPF") {
-      // 1. Busca todas as empresas que esse CPF (ou CNPJ Sócio) participa
-      // Adiciona o Nó Central (A Pessoa)
+      // Busca todas as empresas onde esse CPF/CNPJ de sócio aparece
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
-        data: { label: `Pessoa/Sócio: ${docLimpo}` },
+        data: { label: `Sócio: ${docLimpo}` },
         style: {
-          backgroundColor: '#db2777', // Rosa
+          backgroundColor: '#db2777',
           color: 'white', borderRadius: '50%', width: 100, height: 100,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
           fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
@@ -130,41 +153,40 @@ export async function POST(req: Request) {
 
       const sqlEmpresas = `
         SELECT s.cnpj_basico, e.razao_social, s.qualificacao_socio
-        FROM ${TABELA_SOCIOS} s
-        LEFT JOIN ${TABELA_EMPRESAS} e ON s.cnpj_basico = e.cnpj_basico
-        WHERE s.cnpj_cpf_socio = '${docLimpo}'
-        LIMIT 50 -- Limite de segurança para laranjas gigantes
+        FROM read_parquet('s3://${bucketName}/dados_convertidos_parquet/Socios/**/*.parquet') s
+        LEFT JOIN read_parquet('s3://${bucketName}/dados_convertidos_parquet/Empresas/**/*.parquet') e 
+          ON s.cnpj_basico = e.cnpj_basico
+        WHERE s.cnpj_cpf_socio LIKE '%${docLimpo}'
+        LIMIT 30
       `;
-      const [empresasRes] = await bigquery.query({ query: sqlEmpresas });
+      const empresasRes = await queryDB(sqlEmpresas);
 
       const angleStep = (2 * Math.PI) / (empresasRes.length || 1);
 
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
-        const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
+        const idEmpresa = `CNPJ-${emp.cnpj_basico}000100`;
 
-        // Cria o Nó da Empresa Ligada
         nodes.push({
           id: idEmpresa,
           position: { 
             x: centerX + Math.cos(angle) * raio, 
             y: centerY + Math.sin(angle) * raio 
           },
-          data: { label: emp.razao_social || `CNPJ: ${emp.cnpj_basico}` },
+          data: { label: emp.razao_social || `CNPJ Base: ${emp.cnpj_basico}` },
           style: {
-            backgroundColor: '#2563eb', // Azul
+            backgroundColor: '#2563eb',
             color: 'white', borderRadius: '50%', width: 90, height: 90,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
           }
         });
 
-        // Cria a Linha
         edges.push({
           id: `edge-${docLimpo}-${emp.cnpj_basico}`,
           source: `CPF-${docLimpo}`,
           target: idEmpresa,
-          label: `Participação (Cód: ${emp.qualificacao_socio})`,
+          label: `Participação`,
           animated: true,
           style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
@@ -174,7 +196,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ nodes, edges });
 
   } catch (error: any) {
-    console.error("Erro ao gerar grafo de grupo econômico:", error);
+    console.error("Erro na rota do organograma:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

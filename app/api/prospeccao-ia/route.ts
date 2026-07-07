@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import fs from 'fs';
 import path from 'path';
-import duckdb from "duckdb"; // Lembre-se: npm install duckdb
+import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
@@ -148,25 +148,23 @@ export async function POST(req: Request) {
     const temNichoEspecifico = Array.isArray(perfilMercado.codigos_cnae) && perfilMercado.codigos_cnae.length > 0;
 
     if (temNichoEspecifico) {
-      // Limpeza segura aceitando 2 dígitos (ex: 24 para metalurgia)
       const cnaesLimpos = perfilMercado.codigos_cnae
         .map((c: any) => String(c).replace(/\D/g, ''))
         .filter((c: string) => c.length >= 2);
 
       if (cnaesLimpos.length > 0) {
-        // Adaptado para Dialeto DuckDB: regexp_matches
         const cnaesPrecisos = cnaesLimpos.map((c: string) => 
-          `(cnae_fiscal_principal LIKE '${c}%' OR regexp_matches(cnae_fiscal_secundaria, '(^|[^0-9])' || '${c}'))`
+          `(e.cnae_fiscal_principal LIKE '${c}%' OR regexp_matches(COALESCE(e.cnae_fiscal_secundaria, ''), '${c}'))`
         ).join(' OR ');
         
         filtroCnaeClausula = `AND (${cnaesPrecisos})`;
 
         const buscaMinusculo = (perfilMercado.atividade || "").toLowerCase();
         if (buscaMinusculo.includes("industria") || buscaMinusculo.includes("fabrica") || buscaMinusculo.includes("metalurgica")) {
-          // Adaptado para Dialeto DuckDB: regexp_matches e tratamento seguro de NULL
+          // Ajustado dialeto de negação booleana para DuckDB
           filtroNegativacaoConsultoria = `
-            AND NOT regexp_matches(UPPER(emp.razao_social), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)')
-            AND NOT regexp_matches(UPPER(COALESCE(e.nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)')
+            AND regexp_matches(UPPER(COALESCE(emp.razao_social, '')), '(CONSULTORIA|ASSESSORIA|SERVICOS ADM|HOLDING|PARTICIPACOES)') = false
+            AND regexp_matches(UPPER(COALESCE(e.nome_fantasia, '')), '(CONSULTORIA|ASSESSORIA)') = false
           `;
         }
       } else {
@@ -176,15 +174,13 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Adaptado para o DuckDB (Atenção aos nomes das colunas que mudaram no arquivo original da Receita)
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN e.nome_fantasia IS NOT NULL AND e.nome_fantasia != '' THEN 0 ELSE 1 END, e.data_inicio_atividade ASC`
       : `CASE WHEN emp.natureza_juridica = '2135' THEN 1 ELSE 0 END ASC,
-         CASE WHEN regexp_matches(e.cnae_fiscal_principal, '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
+         CASE WHEN regexp_matches(COALESCE(e.cnae_fiscal_principal, ''), '^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
               WHEN SUBSTR(e.cnae_fiscal_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          e.data_inicio_atividade ASC`;
 
-    // A Query agora cruza o Estabelecimento com a Empresa para buscar Razão Social e Capital Social
     const sqlQuery = `
       SELECT 
         e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv AS cnpj, 
@@ -234,7 +230,6 @@ export async function POST(req: Request) {
         nome_fantasia: row.google_nome && row.google_nome.trim() !== "" ? row.google_nome : row.razao_social,
         natureza_juridica: row.natureza_juridica,
         capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
-        // Como paramos de usar o Google BQ (onde você enriqueceu os dados do Google), as colunas exclusivas ficam nulas.
         google_categoria: null,
         google_endereco: null,
         website: null,

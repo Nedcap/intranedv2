@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import duckdb from "duckdb"; // Lembre-se de ter o duckdb instalado: npm install duckdb
+import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,6 @@ async function getDuckDB() {
   return new Promise<duckdb.Database>((resolve, reject) => {
     const db = new duckdb.Database(':memory:');
 
-    // Helper para rodar comandos setup de forma sequencial
     const run = (query: string) => new Promise<void>((res, rej) => {
       db.run(query, (err) => err ? rej(err) : res());
     });
@@ -48,7 +47,6 @@ async function getDuckDB() {
   });
 }
 
-// Helper para executar a query final
 const queryDB = async (query: string): Promise<any[]> => {
   const db = await getDuckDB();
   return new Promise((resolve, reject) => {
@@ -69,8 +67,10 @@ export async function POST(req: Request) {
 
     const cnpjLimpo = cnpj.replace(/\D/g, "");
     
-    // A Receita Federal divide o CNPJ em 3 partes no banco de dados. 
-    // Precisamos separar para a busca bater exatamente com os Parquets.
+    if (cnpjLimpo.length !== 14) {
+      return NextResponse.json({ error: "O CNPJ deve conter exatamente 14 dígitos." }, { status: 400 });
+    }
+
     const cnpjBasico = cnpjLimpo.substring(0, 8);
     const cnpjOrdem = cnpjLimpo.substring(8, 12);
     const cnpjDv = cnpjLimpo.substring(12, 14);
@@ -78,13 +78,15 @@ export async function POST(req: Request) {
     const bucketName = process.env.R2_BUCKET_NAME;
 
     // =========================================================================
-    // ⚡ QUERY DIRECIONADA NO DATA LAKE (Cloudflare R2 + Particionamento Hive)
+    // ⚡ QUERY DIRECIONADA NO DATA LAKE (Tratamento de CONCAT contra valores NULL)
     // =========================================================================
-    // Aqui usamos o wildcard '**' para varrer as subpastas criadas pelo script Python.
-    // O hive_partitioning=1 faz a mágica de entender que a pasta "uf=SP" é uma coluna!
     const sqlQuery = `
       SELECT 
-        e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv AS cnpj, 
+        CONCAT(
+          COALESCE(e.cnpj_basico, ''), 
+          COALESCE(e.cnpj_ordem, ''), 
+          COALESCE(e.cnpj_dv, '')
+        ) AS cnpj, 
         emp.razao_social, 
         e.uf, 
         e.municipio AS municipio_rf, 
@@ -108,7 +110,7 @@ export async function POST(req: Request) {
     let nomeCidadeReal = "Não localizada";
 
     // =========================================================================
-    // 📖 PLUG DIRETO DA TABELA TOM LOCAL (Dicionário de Código -> Nome Extenso)
+    // 📖 PLUG DIRETO DA TABELA TOM LOCAL
     // =========================================================================
     try {
       const filePath = path.join(process.cwd(), 'tabela_tom.json');
@@ -116,13 +118,11 @@ export async function POST(req: Request) {
         const tabelaTomBase = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         const codigoBuscado = String(row.municipio_rf).trim();
 
-        // Inverte o dicionário para achar a chave (NOME-UF) pelo valor (CÓDIGO TOM)
         const chaveEncontrada = Object.keys(tabelaTomBase).find(
           (key) => String(tabelaTomBase[key]).trim() === codigoBuscado
         );
 
         if (chaveEncontrada) {
-          // Remove a sigla do estado final para pegar só o nome limpo (Ex: "ABADIANIA-GO" -> "ABADIANIA")
           nomeCidadeReal = chaveEncontrada.split("-")[0].trim();
         } else {
           console.warn(`[Aviso] Código de município '${codigoBuscado}' não encontrado no dicionário local.`);
@@ -137,11 +137,10 @@ export async function POST(req: Request) {
     return NextResponse.json({
       found: true,
       empresa: {
-        cnpj: row.cnpj,
+        cnpj: row.cnpj || cnpjLimpo, // Fallback de segurança para o input do usuário
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? String(row.uf).toUpperCase() : "NI",
         cidadeExtenso: nomeCidadeReal,
-        // O DuckDB traz os números de forma bruta, convertendo o decimal se houver vírgula
         capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0
       }
     });
