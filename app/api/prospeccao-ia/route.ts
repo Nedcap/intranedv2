@@ -2,14 +2,11 @@ import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import fs from 'fs';
 import path from 'path';
-// Substituímos o BigQuery pelo DuckDB
 import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
-// =========================================================================
-// 🦆 INICIALIZAÇÃO DO DUCKDB E CONFIG DO CLOUDFLARE R2
-// =========================================================================
+// 🦆 Inicialização do DuckDB em Memória
 const db = new duckdb.Database(':memory:');
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -17,8 +14,15 @@ const accessKey = process.env.R2_ACCESS_KEY_ID;
 const secretKey = process.env.R2_SECRET_ACCESS_KEY;
 const bucketName = process.env.R2_BUCKET_NAME;
 
+// 🛠️ Correção Crítica para o Ambiente Serverless (Vercel)
+db.run(`SET home_directory='/tmp';`);
+db.run(`SET extension_directory='/tmp';`);
+
+// Instalação do módulo HTTP/S3
 db.run(`INSTALL httpfs;`);
 db.run(`LOAD httpfs;`);
+
+// Configuração de credenciais do Cloudflare R2
 db.run(`SET s3_endpoint='${accountId}.r2.cloudflarestorage.com';`);
 db.run(`SET s3_access_key_id='${accessKey}';`);
 db.run(`SET s3_secret_access_key='${secretKey}';`);
@@ -47,14 +51,16 @@ export async function POST(req: Request) {
     });
 
     // =========================================================================
-    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Sem inventar Código TOM)
+    // 🧠 1. IA EXTRATORA DE CIDADE / CNAE (Com Dedução Inteligente de UF)
     // =========================================================================
     const promptSistema = `
       Você é um analista especialista em prospecção B2B.
       Analise o texto enviado pelo usuário e extraia os critérios estruturados.
       
-      ATENÇÃO PARA A CIDADE: Na propriedade "cidade_nome", retorne apenas o nome da cidade solicitada, EM LETRAS MAIÚSCULAS e SEM ACENTOS. Exemplo: "SAO PAULO", "CURITIBA", "MARINGA". Se não pedir cidade específica, retorne null.
-      (NÃO INVENTE CÓDIGOS TOM. Apenas retorne o nome limpo).
+      ATENÇÃO PARA A LOCALIZAÇÃO (CRÍTICO):
+      - Na propriedade "cidade_nome", retorne apenas o nome da cidade, EM LETRAS MAIÚSCULAS e SEM ACENTOS. Exemplo: "SAO PAULO", "CURITIBA". Se não pedir cidade, retorne null.
+      - Na propriedade "uf", você DEVE OBRIGATORIAMENTE retornar a sigla do estado com 2 letras (ex: "SP", "PR"). 
+      - REGRA DE OURO: Se o usuário citar apenas o nome de uma cidade conhecida, DEDUZA a qual estado ela pertence e preencha a "uf" corretamente. Se não houver indicativo de local de forma alguma, retorne null.
 
       ATENÇÃO PARA O CNAE:
       - Se o usuário pedir um nicho, retorne os prefixos CNAE correspondentes de 3 a 5 dígitos na propriedade "codigos_cnae".
@@ -86,7 +92,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito)
+    // 📖 2. DICIONÁRIO TOM LOCAL (Garante match perfeito de Cidade)
     // =========================================================================
     let codigoRealDaReceita = null;
     let nomeCidadeReal = perfilMercado.cidade_nome;
@@ -110,7 +116,7 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 🚀 3. DUCKDB: CONSULTA (Buscando no R2)
+    // 🚀 3. DUCKDB: CONSULTA ESTRATÉGICA NO CLOUDFLARE R2
     // =========================================================================
     let filtroCnaeClausula = "";
     const temNichoEspecifico = perfilMercado.codigos_cnae && perfilMercado.codigos_cnae.length > 0;
@@ -128,7 +134,7 @@ export async function POST(req: Request) {
 
     const limiteSeguro = Math.min(limite, 1000);
 
-    // Ajuste SQL: 'REGEXP_CONTAINS' (BigQuery) mudou para 'regexp_matches' (DuckDB)
+    // Adaptado para o dialeto DuckDB ('regexp_matches' ao invés de 'REGEXP_CONTAINS')
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN google_nome IS NOT NULL AND google_nome != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `CASE WHEN natureza_juridica = '213-5' THEN 1 ELSE 0 END ASC,
@@ -136,7 +142,6 @@ export async function POST(req: Request) {
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // Consulta apontando direto para o seu arquivo Parquet hospedado no Cloudflare
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_raiz, matriz_filial, situacao, data_abertura, 
@@ -152,11 +157,9 @@ export async function POST(req: Request) {
       LIMIT ${limiteSeguro}
     `;
 
-    // Executando a query no DuckDB
     const rows = await queryDB(sqlQuery);
 
     const leads = rows.map((row: any) => {
-      // DuckDB geralmente retorna a data direto, mas mantive sua verificação de fallback por segurança
       let dataAberturaStr = row.data_abertura;
       if (row.data_abertura && row.data_abertura.value) {
         dataAberturaStr = row.data_abertura.value; 

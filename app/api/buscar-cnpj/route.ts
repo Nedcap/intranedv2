@@ -1,32 +1,33 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-// Lembre de rodar: npm install duckdb
 import duckdb from "duckdb";
 
 export const dynamic = 'force-dynamic';
 
-// =========================================================================
-// 🦆 INICIALIZAÇÃO DO DUCKDB E CONFIG DO CLOUDFLARE R2
-// =========================================================================
+// 🦆 Inicialização do DuckDB em Memória
 const db = new duckdb.Database(':memory:');
 
-// Usando exatamente as variáveis do seu print do Vercel
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 const accessKey = process.env.R2_ACCESS_KEY_ID;
 const secretKey = process.env.R2_SECRET_ACCESS_KEY;
 const bucketName = process.env.R2_BUCKET_NAME;
 
-// Configura o DuckDB para acessar o R2 via protocolo S3 seguro
+// 🛠️ Correção Crítica para o Ambiente Serverless (Vercel)
+db.run(`SET home_directory='/tmp';`);
+db.run(`SET extension_directory='/tmp';`);
+
+// Instalação do módulo HTTP/S3
 db.run(`INSTALL httpfs;`);
 db.run(`LOAD httpfs;`);
+
+// Configuração de credenciais do Cloudflare R2
 db.run(`SET s3_endpoint='${accountId}.r2.cloudflarestorage.com';`);
 db.run(`SET s3_access_key_id='${accessKey}';`);
 db.run(`SET s3_secret_access_key='${secretKey}';`);
 db.run(`SET s3_region='auto';`);
 db.run(`SET s3_url_style='path';`);
 
-// Função helper para usar async/await no DuckDB
 const queryDB = (query: string): Promise<any[]> => {
   return new Promise((resolve, reject) => {
     db.all(query, (err, res) => {
@@ -44,14 +45,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "O número do CNPJ é obrigatório." }, { status: 400 });
     }
 
-    // Limpa a formatação
     const cnpjLimpo = cnpj.replace(/\D/g, "");
 
-    // =========================================================================
-    // ⚡ QUERY DIRETA NO R2 (Lendo o seu Parquet)
-    // =========================================================================
-    // Como você já tem um arquivo completo (estabelecimentos_completo.parquet), 
-    // a query fica super simples e direta:
+    // ⚡ Query direta e ultra direcionada no Parquet do R2
     const sqlQuery = `
       SELECT 
         cnpj, razao_social, uf, municipio_rf, capital_social
@@ -69,9 +65,7 @@ export async function POST(req: Request) {
     const row = rows[0];
     let nomeCidadeReal = "Não localizada";
 
-    // =========================================================================
-    // 📖 TABELA TOM LOCAL (Mantido intacto)
-    // =========================================================================
+    // 📖 Dicionário de Municípios Local (Tabela TOM)
     try {
       const filePath = path.join(process.cwd(), 'tabela_tom.json');
       if (fs.existsSync(filePath)) {
@@ -100,7 +94,6 @@ export async function POST(req: Request) {
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? row.uf.toUpperCase() : "PR",
         cidadeExtenso: nomeCidadeReal,
-        // Como o seu parquet já deve ter as colunas tratadas, só convertemos:
         capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0
       }
     });
