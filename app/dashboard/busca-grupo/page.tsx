@@ -15,6 +15,7 @@ import {
   useReactFlow
 } from '@xyflow/react';
 import { useSearchParams } from 'next/navigation';
+import { toPng } from 'html-to-image'; // ⚡ Importação do motor de captura real
 import '@xyflow/react/dist/style.css';
 
 // Componente customizado orbital com área de clique total injetada
@@ -46,7 +47,6 @@ export default function BuscaGrupoPage() {
   );
 }
 
-// Necessário envelopar com o ReactFlowProvider para a exportação de imagem funcionar via Hook
 import { ReactFlowProvider } from '@xyflow/react';
 function ReactFlowProviderWrapper() {
   return (
@@ -177,34 +177,36 @@ function BuscaGrupoConteudo() {
     downloadAnchor.remove();
   };
 
-  // 📸 FUNÇÃO DE CAPTURA DE IMAGEM DA TELA (PRINT DO MAPA)
+  // 📸 FUNÇÃO DE CAPTURA REFATORADA E BLINDADA CONTRA PRINT EM BRANCO
   const gerarImagemCaptura = () => {
-    const svgElement = document.querySelector('.react-flow__renderer svg') as window.SVGElement;
-    if (!svgElement) { alert("Não consegui capturar o mapa."); return; }
+    const element = document.querySelector('.react-flow__viewport') as HTMLElement;
+    if (!element) { alert("Não consegui localizar a área do mapa."); return; }
 
-    const svgString = new XMLSerializer().serializeToString(svgElement);
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const URL = window.URL || window.webkitURL || window;
-    const blobURL = URL.createObjectURL(svgBlob);
-    
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = svgElement.clientWidth || 1200;
-      canvas.height = svgElement.clientHeight || 800;
-      const context = canvas.getContext('2d');
-      if (context) {
-        context.fillStyle = '#f8fafc'; // Fundo Slate 50
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(image, 0, 0);
-        const png = canvas.toDataURL('image/png');
-        const downloadAnchor = document.createElement('a');
-        downloadAnchor.download = `captura_teia_${documentoBusca || 'fidc'}.png`;
-        downloadAnchor.href = png;
-        downloadAnchor.click();
-      }
-    };
-    image.src = blobURL;
+    setIsLoading(true);
+
+    // Captura o container inteiro injetando uma cor de fundo sólida
+    toPng(element, {
+      backgroundColor: '#020617', // Cor de fundo do canvas (Slate 950)
+      width: element.offsetWidth,
+      height: element.offsetHeight,
+      style: {
+        transform: 'scale(1)',
+        transformOrigin: 'top left',
+      },
+    })
+    .then((dataUrl) => {
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.download = `captura_teia_${documentoBusca || 'fidc'}.png`;
+      downloadAnchor.href = dataUrl;
+      downloadAnchor.click();
+    })
+    .catch((error) => {
+      console.error("Erro no print do mapa:", error);
+      alert("Erro ao processar imagem da teia.");
+    })
+    .finally(() => {
+      setIsLoading(false);
+    });
   };
 
   const handleSalvarVinculoManual = () => {
@@ -250,7 +252,7 @@ function BuscaGrupoConteudo() {
         </button>
 
         <div className="ml-auto flex gap-2">
-          <button onClick={gerarImagemCaptura} className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-lg text-xs transition-all cursor-pointer border border-slate-600">
+          <button onClick={gerarImagemCaptura} disabled={isLoading} className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-lg text-xs transition-all cursor-pointer border border-slate-600 disabled:opacity-50">
             📸 Capturar Imagem
           </button>
           <button onClick={exportarEstruturaEstrategica} className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all shadow-md shadow-emerald-900/20 cursor-pointer">
