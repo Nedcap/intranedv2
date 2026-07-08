@@ -217,7 +217,7 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA (ATUALIZADA) ===============
+  // =============== COMPONENTE DE TIMELINE MODERNA (AJUSTE SEQUENCIAL) ===============
   const renderTimelineUI = (steps: { key: string; label: string }[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
     const activeLineClass = isFidc ? "bg-purple-500" : "bg-blue-500";
@@ -226,28 +226,32 @@ export default function CadastroPage() {
     const currentPulseBg = isFidc ? "bg-purple-500" : "bg-blue-500";
     const textColorClass = isFidc ? "text-purple-700" : "text-blue-700";
 
-    // Encontra a PRIMEIRA etapa que está vazia na sequencia (Essa será a etapa ATUAL pendente)
+    // Encontra a PRIMEIRA etapa que está vazia na sequência (da esquerda pra direita).
+    // Se o index retornar -1, significa que TODAS as datas foram preenchidas!
     const currentStepIndex = steps.findIndex(step => !item[step.key]);
 
     return (
       <div className="flex w-full relative pt-2 pb-1">
         {steps.map((step, idx) => {
           const isDone = !!item[step.key];
-          // É o step atual se o indice dele for o primeiro vazio encontrado
           const isCurrent = idx === currentStepIndex;
           const isLast = idx === steps.length - 1;
+          
+          // A linha conectora atrás só fica colorida se ela estiver ANTES da etapa que está piscando
+          // (Se currentStepIndex for -1, todas estão completas, então todas as linhas ficam ativas)
+          const isLineActive = currentStepIndex === -1 ? true : idx < currentStepIndex;
 
           return (
             <div key={step.key} className={`relative flex flex-col items-center group ${isLast ? "flex-none w-12" : "flex-1"}`}>
               
               {/* Linha Conectora Traseira (Barra de Progresso) */}
               {!isLast && (
-                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isDone ? activeLineClass : "bg-slate-200 rounded-full"}`} />
+                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isLineActive ? activeLineClass : "bg-slate-200 rounded-full"}`} />
               )}
 
               {/* Elemento da Bolinha */}
               <div className="relative flex items-center justify-center">
-                {/* Efeito visual "Ping" (Radar) se for o step atual */}
+                {/* Efeito visual "Ping" (Radar) se for o step atual piscante */}
                 {isCurrent && (
                   <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />
                 )}
@@ -255,12 +259,13 @@ export default function CadastroPage() {
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 bg-white border-2
                   ${isDone ? `${activeDotClass} text-white shadow-md` : isCurrent ? `border-[3px] ${currentBorderClass} shadow-md` : "border-slate-300"}
                 `}>
+                  {/* Etapa OK (Checkmark) */}
                   {isDone && (
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   )}
-                  {/* Bolinha pulsante sólida no centro da etapa atual */}
+                  {/* Etapa ATUAL (Bolinha menor pulsando no meio) */}
                   {isCurrent && <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />}
                 </div>
               </div>
