@@ -3,7 +3,6 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
@@ -15,7 +14,6 @@ if (credentialsEnv) {
   }
 }
 
-// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -24,14 +22,31 @@ const bigquery = new BigQuery({
   }
 });
 
+// Heurística de validação de nome: limpa sujeiras de digitação, espaços e aceita abreviações seguras
+function validarCorrespondenciaNome(nome1: string, nome2: string): boolean {
+  const n1 = nome1.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+  const n2 = nome2.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+  
+  if (n1 === n2) return true;
+  
+  const tokens1 = n1.split(" ");
+  const tokens2 = n2.split(" ");
+  
+  // Segurança contra homônimos: Primeiro nome e o Último sobrenome PRECISAM ser idênticos
+  if (tokens1[0] !== tokens2[0] || tokens1[tokens1.length - 1] !== tokens2[tokens2.length - 1]) {
+    return false;
+  }
+  
+  return true;
+}
+
 export async function POST(req: Request) {
   try {
-    const { documentoBusca, tipoBusca } = await req.json();
+    const { documentoBusca, tipoBusca, nomeSocio } = await req.json();
     if (!documentoBusca || !tipoBusca) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
     }
 
-    // Limpa o input removendo letras e traços para não quebrar a sintaxe do SQL
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
     const nodes: any[] = [];
     const edges: any[] = [];
@@ -40,7 +55,6 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
-      // Busca todas as unidades (matriz e filiais) da empresa de uma vez só
       const sqlEmpresa = `
         SELECT cnpj, cnpj_basico, razao_social, nome_fantasia, uf, bairro
         FROM \`credito-489113.dados_receita.empresas_master\` 
@@ -49,12 +63,10 @@ export async function POST(req: Request) {
       const [empresaRes] = await bigquery.query({ query: sqlEmpresa, params: { cnpjBasico } });
       
       if (empresaRes.length === 0) {
-        return NextResponse.json({ error: "Empresa não localizada na base master." }, { status: 404 });
+        return NextResponse.json({ error: "Empresa não localizada." }, { status: 404 });
       }
 
       const dadosPrincipais = empresaRes[0];
-      
-      // Compacta as filiais em um array para o front-end renderizar em tabela
       const listaFiliais = empresaRes.map((emp: any) => ({
         cnpj: emp.cnpj,
         uf: emp.uf,
@@ -79,7 +91,6 @@ export async function POST(req: Request) {
         }
       });
 
-      // Busca o Quadro de Sócios e Administradores (QSA)
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
         FROM \`credito-489113.dados_receita.socios_master\`
@@ -97,7 +108,10 @@ export async function POST(req: Request) {
         nodes.push({
           id: idSocio,
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
-          data: { label: socio.nome_socio_razao_social },
+          data: { 
+            label: socio.nome_socio_razao_social,
+            nomeOriginal: socio.nome_socio_razao_social 
+          },
           style: {
             backgroundColor: '#db2777', color: 'white', borderRadius: '50%', width: 90, height: 90,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
@@ -117,9 +131,8 @@ export async function POST(req: Request) {
 
     } else if (tipoBusca === "CPF") {
       
-      // ⚡ A CORREÇÃO SUPREMA ESTÁ NO LIKE CONCAT('%', @docLimpo, '**')
-      // Adicionando os dois asteriscos fixos no final da busca por string, nós barramos 
-      // qualquer CNPJ comercial de entrar no bolo, filtrando estritamente CPFs de pessoas físicas.
+      // ⚡ MUDANÇA CRÍTICA: Trocamos o LIKE pelo operador de igualdade '=' montando a máscara exata da Receita Federal.
+      // Isso blinda a query para buscar somente o bloco idêntico de 11 caracteres estruturados.
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -129,7 +142,7 @@ export async function POST(req: Request) {
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
-        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo, '**')
+        WHERE s.cnpj_cpf_socio = CONCAT('***', @docLimpo, '**')
         GROUP BY s.cnpj_basico
         LIMIT 150
       `;
@@ -139,9 +152,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ nodes: [], edges: [] });
       }
 
-      const nomeRealSocio = empresasRes[0].nome_socio_razao_social || `SÓCIO: ***${docLimpo}**`;
+      // Filtro JS usando a inteligência de nomes para evitar homônimos e erros de digitação
+      let empresasValidadas = empresasRes;
+      if (nomeSocio) {
+        empresasValidadas = empresasRes.filter((emp: any) => 
+          validarCorrespondenciaNome(emp.nome_socio_razao_social, nomeSocio)
+        );
+      }
 
-      // Nó central do Sócio investigado
+      if (empresasValidadas.length === 0) {
+        return NextResponse.json({ nodes: [], edges: [] });
+      }
+
+      const nomeRealSocio = nomeSocio || empresasValidadas[0].nome_socio_razao_social;
+
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -154,10 +178,9 @@ export async function POST(req: Request) {
         }
       });
 
-      const angleStep = (2 * Math.PI) / empresasRes.length;
+      const angleStep = (2 * Math.PI) / empresasValidadas.length;
 
-      // Monta as bolinhas das empresas onde ele realmente tem participação societária ou diretoria
-      empresasRes.forEach((emp: any, index: number) => {
+      empresasValidadas.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
         const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
         const filiaisValidas = (emp.todas_as_filiais || []).filter((f: any) => f.cnpj !== null);
