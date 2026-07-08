@@ -15,7 +15,7 @@ if (credentialsEnv) {
 }
 
 const bigquery = new BigQuery({
-  projectId: 'credito-489113', // Troque pelo seu ID do projeto, se precisar
+  projectId: 'credito-489113', 
   credentials: {
     client_email: credentials.client_email,
     private_key: credentials.private_key, 
@@ -52,7 +52,8 @@ export async function POST(req: Request) {
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
 
-    if (tipoBusca === "CNPJ") {
+    // ⚡ CORREÇÃO AQUI: Agora a API aceita "PJ" (que vem do clique no sócio) do mesmo jeito que "CNPJ"
+    if (tipoBusca === "CNPJ" || tipoBusca === "PJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
       const sqlEmpresa = `
@@ -125,9 +126,8 @@ export async function POST(req: Request) {
         });
       });
 
-    } else if (tipoBusca === "CPF" || tipoBusca === "PF") { // Ajustado para aceitar PF do novo banco
+    } else if (tipoBusca === "CPF" || tipoBusca === "PF") { 
       
-      // ⚡ A QUERY MESTRA: Busca EXATA por igualdade no doc_socio_limpo e trava no tipo_socio 'PF'
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -156,7 +156,7 @@ export async function POST(req: Request) {
       const nomeRealSocio = nomeSocio || empresasValidadas[0].nome_socio_razao_social;
 
       nodes.push({
-        id: `PF-${docLimpo}`, // Usa PF como padrão no novo banco
+        id: `PF-${docLimpo}`,
         position: { x: centerX, y: centerY },
         data: { label: `${nomeRealSocio}\n(***${docLimpo}**)` },
         style: {
