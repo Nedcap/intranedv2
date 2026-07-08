@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
-// Configuração das Etapas das Timelines
+// Configuração ORIGINAL das Etapas (Usada para gerar o Formulário Expansível)
 const STEPS_SEC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
   { key: "dt_documentos_sec", label: "Documentos" },
@@ -15,6 +15,31 @@ const STEPS_SEC = [
 ];
 
 const STEPS_FIDC = [
+  { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
+  { key: "dt_documentos_fidc", label: "Documentos" },
+  { key: "dt_geracao_contrato_fidc", label: "Ger. Contrato" },
+  { key: "dt_assinatura_contrato_fidc", label: "Assinatura" },
+  { key: "dt_envio_gestora_fidc", label: "Envio Gestora" },
+  { key: "dt_aprovacao_gestora_fidc", label: "Aprov. Gestora" },
+  { key: "dt_envio_admin_fidc", label: "Envio Admin" },
+  { key: "dt_aprovacao_admin_fidc", label: "Aprov. Admin" },
+  { key: "dt_apto_fidc", label: "Apto Operar" }
+];
+
+// Configuração VISUAL (Para forçar as Timelines a terem o mesmo tamanho e alinhamento)
+const VISUAL_STEPS_SEC = [
+  { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
+  { key: "dt_documentos_sec", label: "Documentos" },
+  { key: "dt_geracao_contrato_sec", label: "Ger. Contrato" }, // Ajustado nome p/ alinhar c/ FIDC
+  { key: "dt_assinatura_contrato_sec", label: "Assinatura" },
+  { key: "na_1", label: "Envio Gestora", isNA: true },
+  { key: "na_2", label: "Aprov. Gestora", isNA: true },
+  { key: "na_3", label: "Envio Admin", isNA: true },
+  { key: "na_4", label: "Aprov. Admin", isNA: true },
+  { key: "dt_apto_sec", label: "Apto Operar" }
+];
+
+const VISUAL_STEPS_FIDC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
   { key: "dt_documentos_fidc", label: "Documentos" },
   { key: "dt_geracao_contrato_fidc", label: "Ger. Contrato" },
@@ -80,14 +105,10 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
-  // =========================================================================
-  // 🚀 FUNÇÃO MÁGICA: BUSCA APROVADAS DO COMITÊ (TABELA ANALISES)
-  // =========================================================================
   const buscarAprovadasDoComite = async () => {
     try {
       setSincronizando(true);
       
-      // 1. Puxa as análises cadastradas lá no Finalizados (comitê) - AGORA SÓ COM AS COLUNAS REAIS
       const { data: analises, error: errAnalises } = await supabase
         .from("analises")
         .select("empresa_nome, comercial, status, criado_em");
@@ -95,13 +116,11 @@ export default function CadastroPage() {
       if (errAnalises) throw errAnalises;
       if (!analises) return;
 
-      // 2. Filtra somente as aprovadas
       const aprovadas = analises.filter(a => {
         const st = (a.status || "").toLowerCase();
         return st.includes("aprovado") || st.includes("finalizado") || st.includes("com restritivo");
       });
 
-      // 3. Monta um SET com os nomes que já estão na Esteira pra não duplicar
       const nomesNaEsteira = new Set(cedentes.map(c => c.cedente.toUpperCase().trim()));
       const novosCedentes = [];
 
@@ -118,12 +137,10 @@ export default function CadastroPage() {
              dt_aprovacao_comite: dtComiteFormatada,
              atualizado_em: new Date().toISOString()
            });
-           // Adiciona no SET para não duplicar caso haja 2 análises com mesmo nome
            nomesNaEsteira.add(nomeLimpo);
         }
       }
 
-      // 4. Salva no banco as empresas que faltavam e recarrega a tela
       if (novosCedentes.length > 0) {
         const { error } = await supabase.from("cadastro_cedentes").insert(novosCedentes);
         if (error) throw error;
@@ -140,7 +157,6 @@ export default function CadastroPage() {
       setSincronizando(false);
     }
   };
-  // =========================================================================
 
   const handleInputChange = (index: number, campo: string, valor: any) => {
     const novos = [...cedentes]; 
@@ -280,8 +296,8 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA ===============
-  const renderTimelineUI = (steps: { key: string; label: string }[], item: any, type: "SEC" | "FIDC") => {
+  // =============== COMPONENTE DE TIMELINE MODERNA COM FAKE STEPS (INATIVOS) ===============
+  const renderTimelineUI = (visualSteps: any[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
     
     const doneLineClass = isFidc ? "bg-purple-200" : "bg-blue-200";
@@ -293,27 +309,41 @@ export default function CadastroPage() {
 
     const passedEmptyDotClass = isFidc ? "border-purple-300 bg-purple-50" : "border-blue-300 bg-blue-50";
 
-    let lastFilledIndex = -1;
-    for (let i = steps.length - 1; i >= 0; i--) {
-      if (item[steps[i].key]) {
-        lastFilledIndex = i;
+    // Filtra apenas os steps válidos (não N/A) para calcular em que ponto da esteira estamos
+    const validSteps = visualSteps.filter(s => !s.isNA);
+
+    // Encontra o index (dentro do array reduzido) da última etapa válida preenchida
+    let lastFilledValidIndex = -1;
+    for (let i = validSteps.length - 1; i >= 0; i--) {
+      if (item[validSteps[i].key]) {
+        lastFilledValidIndex = i;
         break;
       }
     }
 
-    const currentStepIndex = lastFilledIndex === steps.length - 1 ? -1 : lastFilledIndex + 1;
+    // A etapa atual é a próxima etapa válida disponível
+    const currentValidStepIndex = lastFilledValidIndex === validSteps.length - 1 ? -1 : lastFilledValidIndex + 1;
+    const currentValidStepKey = currentValidStepIndex !== -1 ? validSteps[currentValidStepIndex].key : null;
+    
+    // Descobre o index no array COMPLETO (visual) onde a etapa piscante deve ficar
+    const currentVisualIndex = currentValidStepKey ? visualSteps.findIndex(s => s.key === currentValidStepKey) : -1;
 
     return (
       <div className="flex w-full relative pt-2 pb-1">
-        {steps.map((step, idx) => {
-          const isDone = !!item[step.key];
-          const isCurrent = idx === currentStepIndex;
-          const isLast = idx === steps.length - 1;
-          const isPassedAndEmpty = !isDone && (currentStepIndex === -1 || idx < currentStepIndex);
-          const isLineActive = currentStepIndex === -1 ? true : idx < currentStepIndex;
+        {visualSteps.map((step, idx) => {
+          const isNA = !!step.isNA; // Se for uma etapa fake (apenas para manter o alinhamento visual)
+          const isDone = !isNA && !!item[step.key];
+          const isCurrent = !isNA && idx === currentVisualIndex;
+          const isLast = idx === visualSteps.length - 1;
+          
+          const isPassedAndEmpty = !isNA && !isDone && (currentVisualIndex === -1 || idx < currentVisualIndex);
+          const isLineActive = currentVisualIndex === -1 ? true : idx < currentVisualIndex;
 
           let circleClasses = "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 border-2 ";
-          if (isDone) {
+          if (isNA) {
+            // Estilo para etapas "Fantasma" -> Preenchidas, Apagadinhas e com X
+            circleClasses += "bg-slate-200 border-slate-300 text-slate-400 opacity-60";
+          } else if (isDone) {
             circleClasses += `${doneDotClass} text-white opacity-50`;
           } else if (isCurrent) {
             circleClasses += `bg-white border-[3px] ${currentBorderClass} shadow-md`;
@@ -331,23 +361,32 @@ export default function CadastroPage() {
               <div className="relative flex items-center justify-center">
                 {isCurrent && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
                 <div className={circleClasses}>
-                  {isDone && (
+                  
+                  {isNA ? (
+                    // Ícone de X para etapas Inativas (Fantasma)
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  ) : isDone ? (
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
-                  )}
-                  {isCurrent && <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />}
+                  ) : isCurrent ? (
+                    <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />
+                  ) : null}
+
                 </div>
               </div>
               <span className={`text-[9px] mt-1.5 text-center leading-tight transition-colors absolute top-7 w-20 
-                ${isDone ? "text-slate-400 font-semibold" : 
+                ${isNA ? "text-slate-400 font-medium opacity-60" : 
+                  isDone ? "text-slate-400 font-semibold" : 
                   isCurrent ? `${currentTextClass} font-black` : 
                   isPassedAndEmpty ? "text-slate-700 font-bold" : 
                   "text-slate-400 font-medium"}
               `}>
                 {step.label}
               </span>
-              {isDone && (
+              {isDone && !isNA && (
                 <div className="absolute -top-8 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] py-1 px-2.5 rounded-md shadow-lg pointer-events-none z-50 whitespace-nowrap">
                   {formatarDataBr(item[step.key])}
                   <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
@@ -441,7 +480,7 @@ export default function CadastroPage() {
           </div>
         </div>
 
-        {/* ÁREA DA TABELA COM DESIGN CLEAN */}
+        {/* ÁREA DA TABELA */}
         <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto pb-6">
             <table className="w-full text-left border-collapse min-w-[1300px]">
@@ -532,11 +571,11 @@ export default function CadastroPage() {
                           <div className="flex flex-col gap-6">
                             <div className="flex items-center gap-4">
                               <span className="text-[10px] font-black w-8 text-blue-600 bg-blue-50 py-1 rounded-md text-center">SEC</span>
-                              <div className="flex-1">{renderTimelineUI(STEPS_SEC, item, "SEC")}</div>
+                              <div className="flex-1">{renderTimelineUI(VISUAL_STEPS_SEC, item, "SEC")}</div>
                             </div>
                             <div className="flex items-center gap-4 mt-2">
                               <span className="text-[10px] font-black w-8 text-purple-600 bg-purple-50 py-1 rounded-md text-center">FIDC</span>
-                              <div className="flex-1">{renderTimelineUI(STEPS_FIDC, item, "FIDC")}</div>
+                              <div className="flex-1">{renderTimelineUI(VISUAL_STEPS_FIDC, item, "FIDC")}</div>
                             </div>
                           </div>
                         </td>
@@ -576,6 +615,7 @@ export default function CadastroPage() {
                                     <span className="font-black text-blue-800 text-xs uppercase tracking-wider">🏦 Fluxo Securitizadora</span>
                                   </div>
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 ml-2">
+                                    {/* AQUI CONTINUAMOS RENDERIZANDO APENAS OS STEPS REAIS (5 STEPS) */}
                                     {STEPS_SEC.slice(1).map(step => (
                                       <div key={step.key} className="flex flex-col gap-1.5">
                                         <label className="text-[10px] text-blue-600/80 font-bold uppercase truncate" title={step.label}>{step.label}</label>
