@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
 
-    // ⚡ CORREÇÃO AQUI: Agora a API aceita "PJ" (que vem do clique no sócio) do mesmo jeito que "CNPJ"
+    // Se for busca de Empresa (CNPJ ou Sócia PJ)
     if (tipoBusca === "CNPJ" || tipoBusca === "PJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
@@ -81,10 +81,10 @@ export async function POST(req: Request) {
           totalFiliais: listaFiliais.length, filiais: listaFiliais 
         },
         style: {
-          backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 110, height: 110,
+          backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 120, height: 120,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '10px',
-          border: '4px solid #1d4ed8'
+          fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '12px',
+          border: '4px solid #3b82f6', boxShadow: '0 4px 14px rgba(37,99,235,0.3)'
         }
       });
 
@@ -109,10 +109,12 @@ export async function POST(req: Request) {
             nomeOriginal: socio.nome_socio_razao_social 
           },
           style: {
-            backgroundColor: socio.tipo_socio === 'PJ' ? '#10b981' : '#db2777', // PJ verde, PF rosa
-            color: 'white', borderRadius: '50%', width: 90, height: 90,
+            backgroundColor: socio.tipo_socio === 'PJ' ? '#065f46' : '#9d174d', 
+            color: 'white', borderRadius: '50%', width: 95, height: 95,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
-            fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px'
+            fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px',
+            boxShadow: socio.tipo_socio === 'PJ' ? '0 4px 10px rgba(16,185,129,0.2)' : '0 4px 10px rgba(219,39,119,0.2)',
+            border: socio.tipo_socio === 'PJ' ? '2px solid #10b981' : '2px solid #f472b6'
           }
         });
 
@@ -120,14 +122,14 @@ export async function POST(req: Request) {
           id: `edge-${cnpjBasico}-${socio.doc_socio_limpo || index}`,
           source: `CNPJ-${cnpjBasico}`, 
           target: idSocio,
-          label: `Sócio (Qualif: ${socio.qualificacao_socio || 'NI'})`,
+          label: `Sócio (${socio.qualificacao_socio || 'NI'})`,
           animated: true, 
           style: { stroke: '#94a3b8', strokeWidth: 2 }
         });
       });
 
     } else if (tipoBusca === "CPF" || tipoBusca === "PF") { 
-      
+      // Busca pelo miolo do CPF do Sócio PF
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -146,12 +148,15 @@ export async function POST(req: Request) {
 
       if (empresasRes.length === 0) return NextResponse.json({ nodes: [], edges: [] });
 
+      // ⚡ ANTIDOTO MESTRE CONTRA HOMÔNIMOS: Filtra se bater o nome parcial/completo
       let empresasValidadas = empresasRes;
       if (nomeSocio) {
         empresasValidadas = empresasRes.filter((emp: any) => validarCorrespondenciaNome(nomeSocio, emp.nome_socio_razao_social));
       }
 
-      if (empresasValidadas.length === 0) return NextResponse.json({ error: "Homônimo barrado." }, { status: 404 });
+      if (empresasValidadas.length === 0) {
+        return NextResponse.json({ error: "Vínculos para este homônimo filtrados com segurança." }, { status: 404 });
+      }
 
       const nomeRealSocio = nomeSocio || empresasValidadas[0].nome_socio_razao_social;
 
@@ -160,9 +165,10 @@ export async function POST(req: Request) {
         position: { x: centerX, y: centerY },
         data: { label: `${nomeRealSocio}\n(***${docLimpo}**)` },
         style: {
-          backgroundColor: '#db2777', color: 'white', borderRadius: '50%', width: 100, height: 100,
+          backgroundColor: '#9d174d', color: 'white', borderRadius: '50%', width: 105, height: 105,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px', whiteSpace: 'pre-wrap'
+          fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px', whiteSpace: 'pre-wrap',
+          border: '3px solid #f472b6', boxShadow: '0 4px 14px rgba(219,39,119,0.3)'
         }
       });
 
@@ -181,10 +187,11 @@ export async function POST(req: Request) {
             totalFiliais: filiaisValidas.length, filiais: filiaisValidas
           },
           style: {
-            backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 95, height: 95,
+            backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 100, height: 100,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
-            fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px',
-            whiteSpace: 'pre-wrap', border: filiaisValidas.length > 1 ? '3px double #93c5fd' : 'none'
+            fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px',
+            whiteSpace: 'pre-wrap', border: filiaisValidas.length > 1 ? '3px double #93c5fd' : '1px solid #3b82f6',
+            boxShadow: '0 4px 10px rgba(37,99,235,0.15)'
           }
         });
 
