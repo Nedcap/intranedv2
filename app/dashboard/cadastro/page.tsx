@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
@@ -37,6 +37,7 @@ export default function CadastroPage() {
   const [cedentes, setCedentes] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
   const [usuarioAtual, setUsuarioAtual] = useState<{ nome: string; perfil: string } | null>(null);
   
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
@@ -48,35 +49,98 @@ export default function CadastroPage() {
   });
   const [filtroStatus, setFiltroStatus] = useState<"TODOS" | "PENDENTE_ENVIO" | "AGUARDANDO_ASSINATURA" | "APTO">("TODOS");
 
-  useEffect(() => {
-    async function carregarCadastro() {
-      try {
-        setCarregando(true);
-        const userStr = localStorage.getItem("intraned_user");
-        let query = supabase.from("cadastro_cedentes").select("*");
+  const carregarCadastro = useCallback(async () => {
+    try {
+      setCarregando(true);
+      const userStr = localStorage.getItem("intraned_user");
+      let query = supabase.from("cadastro_cedentes").select("*");
 
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-          setUsuarioAtual({ nome: user.nome, perfil: cargoUser });
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
+        setUsuarioAtual({ nome: user.nome, perfil: cargoUser });
 
-          if (cargoUser === "comercial") {
-            query = query.eq("comercial", user.nome);
-          }
+        if (cargoUser === "comercial") {
+          query = query.eq("comercial", user.nome);
         }
-
-        const { data } = await query;
-        if (data) {
-          setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
-        }
-      } catch (err) { 
-        console.error(err); 
-      } finally { 
-        setCarregando(false); 
       }
+
+      const { data } = await query;
+      if (data) {
+        setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
+      }
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setCarregando(false); 
     }
-    carregarCadastro();
   }, []);
+
+  useEffect(() => {
+    carregarCadastro();
+  }, [carregarCadastro]);
+
+  // =========================================================================
+  // 🚀 FUNÇÃO MÁGICA: BUSCA APROVADAS DO COMITÊ (TABELA ANALISES)
+  // =========================================================================
+  const buscarAprovadasDoComite = async () => {
+    try {
+      setSincronizando(true);
+      
+      // 1. Puxa as análises cadastradas lá no Finalizados (comitê)
+      const { data: analises, error: errAnalises } = await supabase
+        .from("analises")
+        .select("empresa_nome, comercial, status, criado_em, criated_em");
+      
+      if (errAnalises) throw errAnalises;
+      if (!analises) return;
+
+      // 2. Filtra somente as aprovadas
+      const aprovadas = analises.filter(a => {
+        const st = (a.status || "").toLowerCase();
+        return st.includes("aprovado") || st.includes("finalizado") || st.includes("com restritivo");
+      });
+
+      // 3. Monta um SET com os nomes que já estão na Esteira pra não duplicar
+      const nomesNaEsteira = new Set(cedentes.map(c => c.cedente.toUpperCase().trim()));
+      const novosCedentes = [];
+
+      for (const analise of aprovadas) {
+        const nomeLimpo = limparNome(analise.empresa_nome).toUpperCase();
+        
+        if (!nomesNaEsteira.has(nomeLimpo)) {
+           const dtComiteRaw = analise.criado_em || analise.criated_em;
+           const dtComiteFormatada = dtComiteRaw ? dtComiteRaw.split('T')[0] : null;
+
+           novosCedentes.push({
+             cedente: nomeLimpo,
+             comercial: analise.comercial,
+             dt_aprovacao_comite: dtComiteFormatada,
+             atualizado_em: new Date().toISOString()
+           });
+           // Adiciona no SET para não duplicar caso haja 2 análises com mesmo nome
+           nomesNaEsteira.add(nomeLimpo);
+        }
+      }
+
+      // 4. Salva no banco as empresas que faltavam e recarrega a tela
+      if (novosCedentes.length > 0) {
+        const { error } = await supabase.from("cadastro_cedentes").insert(novosCedentes);
+        if (error) throw error;
+        alert(`🎉 Sucesso! ${novosCedentes.length} novas empresas aprovadas no comitê foram integradas à Esteira.`);
+        await carregarCadastro();
+      } else {
+        alert("💡 A Esteira já está atualizada! Nenhuma nova empresa aprovada no comitê para integrar.");
+      }
+
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ Erro ao buscar aprovações do comitê: ${err.message}`);
+    } finally {
+      setSincronizando(false);
+    }
+  };
+  // =========================================================================
 
   const handleInputChange = (index: number, campo: string, valor: any) => {
     const novos = [...cedentes]; 
@@ -163,8 +227,7 @@ export default function CadastroPage() {
       alert("🎉 Alterações gravadas com sucesso!");
       setCedentesEmEdicaoDeNome({});
       setLinhasExpandidas({});
-      const { data } = await supabase.from("cadastro_cedentes").select("*").order("cedente", { ascending: true });
-      if (data) setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
+      await carregarCadastro();
     } catch (err: any) { 
       alert(`❌ Erro ao salvar os dados: ${err.message}`); 
     } finally { 
@@ -217,18 +280,28 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA (AJUSTE SEQUENCIAL) ===============
+  // =============== COMPONENTE DE TIMELINE MODERNA (COM DESIGN DE PENDÊNCIA QUE CRIAMOS) ===============
   const renderTimelineUI = (steps: { key: string; label: string }[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
-    const activeLineClass = isFidc ? "bg-purple-500" : "bg-blue-500";
-    const activeDotClass = isFidc ? "bg-purple-600 border-purple-600 shadow-purple-500/40" : "bg-blue-600 border-blue-600 shadow-blue-500/40";
-    const currentBorderClass = isFidc ? "border-purple-500" : "border-blue-500";
-    const currentPulseBg = isFidc ? "bg-purple-500" : "bg-blue-500";
-    const textColorClass = isFidc ? "text-purple-700" : "text-blue-700";
+    
+    const doneLineClass = isFidc ? "bg-purple-200" : "bg-blue-200";
+    const doneDotClass = isFidc ? "bg-purple-500 border-purple-500" : "bg-blue-500 border-blue-500";
+    
+    const currentBorderClass = isFidc ? "border-purple-600" : "border-blue-600";
+    const currentPulseBg = isFidc ? "bg-purple-600" : "bg-blue-600";
+    const currentTextClass = isFidc ? "text-purple-700" : "text-blue-700";
 
-    // Encontra a PRIMEIRA etapa que está vazia na sequência (da esquerda pra direita).
-    // Se o index retornar -1, significa que TODAS as datas foram preenchidas!
-    const currentStepIndex = steps.findIndex(step => !item[step.key]);
+    const passedEmptyDotClass = isFidc ? "border-purple-300 bg-purple-50" : "border-blue-300 bg-blue-50";
+
+    let lastFilledIndex = -1;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (item[steps[i].key]) {
+        lastFilledIndex = i;
+        break;
+      }
+    }
+
+    const currentStepIndex = lastFilledIndex === steps.length - 1 ? -1 : lastFilledIndex + 1;
 
     return (
       <div className="flex w-full relative pt-2 pb-1">
@@ -236,48 +309,44 @@ export default function CadastroPage() {
           const isDone = !!item[step.key];
           const isCurrent = idx === currentStepIndex;
           const isLast = idx === steps.length - 1;
-          
-          // A linha conectora atrás só fica colorida se ela estiver ANTES da etapa que está piscando
-          // (Se currentStepIndex for -1, todas estão completas, então todas as linhas ficam ativas)
+          const isPassedAndEmpty = !isDone && (currentStepIndex === -1 || idx < currentStepIndex);
           const isLineActive = currentStepIndex === -1 ? true : idx < currentStepIndex;
+
+          let circleClasses = "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 border-2 ";
+          if (isDone) {
+            circleClasses += `${doneDotClass} text-white opacity-50`;
+          } else if (isCurrent) {
+            circleClasses += `bg-white border-[3px] ${currentBorderClass} shadow-md`;
+          } else if (isPassedAndEmpty) {
+            circleClasses += passedEmptyDotClass;
+          } else {
+            circleClasses += "bg-white border-slate-200";
+          }
 
           return (
             <div key={step.key} className={`relative flex flex-col items-center group ${isLast ? "flex-none w-12" : "flex-1"}`}>
-              
-              {/* Linha Conectora Traseira (Barra de Progresso) */}
               {!isLast && (
-                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isLineActive ? activeLineClass : "bg-slate-200 rounded-full"}`} />
+                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isLineActive ? doneLineClass : "bg-slate-200/60 rounded-full"}`} />
               )}
-
-              {/* Elemento da Bolinha */}
               <div className="relative flex items-center justify-center">
-                {/* Efeito visual "Ping" (Radar) se for o step atual piscante */}
-                {isCurrent && (
-                  <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />
-                )}
-
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 bg-white border-2
-                  ${isDone ? `${activeDotClass} text-white shadow-md` : isCurrent ? `border-[3px] ${currentBorderClass} shadow-md` : "border-slate-300"}
-                `}>
-                  {/* Etapa OK (Checkmark) */}
+                {isCurrent && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
+                <div className={circleClasses}>
                   {isDone && (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   )}
-                  {/* Etapa ATUAL (Bolinha menor pulsando no meio) */}
                   {isCurrent && <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />}
                 </div>
               </div>
-
-              {/* Rótulo da Etapa */}
-              <span className={`text-[9px] mt-1.5 font-bold text-center leading-tight transition-colors absolute top-7 w-20 
-                ${isDone ? textColorClass : isCurrent ? "text-slate-800" : "text-slate-400"}
+              <span className={`text-[9px] mt-1.5 text-center leading-tight transition-colors absolute top-7 w-20 
+                ${isDone ? "text-slate-400 font-semibold" : 
+                  isCurrent ? `${currentTextClass} font-black` : 
+                  isPassedAndEmpty ? "text-slate-700 font-bold" : 
+                  "text-slate-400 font-medium"}
               `}>
                 {step.label}
               </span>
-
-              {/* Tooltip com a Data (Aparece no Hover apenas se preenchido) */}
               {isDone && (
                 <div className="absolute -top-8 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] py-1 px-2.5 rounded-md shadow-lg pointer-events-none z-50 whitespace-nowrap">
                   {formatarDataBr(item[step.key])}
@@ -308,18 +377,32 @@ export default function CadastroPage() {
             <span className="text-sm text-slate-500 font-medium ml-12">Monitoramento de cadastro, conversão e emissão de contratos.</span>
           </div>
           
-          <div className="flex gap-3 w-full md:w-auto">
-            <button onClick={adicionarNovaLinha} disabled={salvando} className="flex-1 md:flex-none px-5 py-2.5 bg-white border-2 border-indigo-600 text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
-              Novo Cedente
+          <div className="flex gap-3 w-full md:w-auto flex-wrap md:flex-nowrap">
+            {/* NOVO BOTÃO DE INTEGRAÇÃO COM O COMITÊ */}
+            <button 
+              onClick={buscarAprovadasDoComite} 
+              disabled={sincronizando || carregando} 
+              className="flex-1 md:flex-none px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {sincronizando ? (
+                <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              )}
+              Sincronizar Comitê
             </button>
-            <button onClick={salvarAlteracoes} disabled={salvando} className="flex-1 md:flex-none px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2">
+
+            <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-600 text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+              Novo Manual
+            </button>
+            <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto">
               {salvando ? (
                  <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
               ) : (
                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
               )}
-              {salvando ? "Gravando..." : "Salvar Alterações"}
+              {salvando ? "Gravando..." : "Salvar"}
             </button>
           </div>
         </div>
