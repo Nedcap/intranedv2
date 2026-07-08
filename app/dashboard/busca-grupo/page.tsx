@@ -16,17 +16,27 @@ import {
 import { useSearchParams } from 'next/navigation';
 import '@xyflow/react/dist/style.css';
 
-// ⚡ TRUQUE DE MESTRE: Nó Customizado para as linhas "orbitarem" livremente!
-// Colocamos os Handles (conectores) invisíveis no exato centro (50%). 
-// Assim, as linhas vêm de qualquer direção e param exatamente na borda da bolinha!
+// ⚡ CORREÇÃO SUPREMA: O Nó customizado agora carrega o estilo visual completo!
+// Isso garante que a bolinha exista fisicamente na tela para o mouse conseguir clicar duas vezes.
 const nodeTypes = {
-  bolinha: ({ data }: any) => (
-    <>
-      <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none' }} />
-      {data.label}
-      <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none' }} />
-    </>
-  )
+  bolinha: ({ data, style }: any) => {
+    return (
+      <div style={{
+        ...style,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '100%',
+        height: '100%',
+        position: 'relative'
+      }}>
+        {/* Conectores invisíveis no centro orbital */}
+        <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
+        <span style={{ pointerEvents: 'none' }}>{data.label}</span>
+        <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
+      </div>
+    );
+  }
 };
 
 export default function BuscaGrupoPage() {
@@ -95,7 +105,6 @@ function BuscaGrupoConteudo() {
       setNodes((prevNodes) => {
         const novosNodes = data.nodes.filter((novoNo: Node) => !prevNodes.find((noAntigo) => noAntigo.id === novoNo.id));
         novosNosAdicionados = novosNodes.length;
-        // ⚡ Aplicamos o type 'bolinha' para ativar os conectores centrais livres
         return [...prevNodes, ...novosNodes.map((n: Node) => ({ 
           ...n, 
           type: 'bolinha', 
@@ -120,7 +129,7 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  // 🖱️ CLIQUE SIMPLES: Agora SÓ abre a gaveta de filiais (Não expande mais a teia)
+  // 🖱️ CLIQUE SIMPLES: Abre a gaveta de filiais se for CNPJ
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
@@ -134,7 +143,7 @@ function BuscaGrupoConteudo() {
     }
   }, []);
 
-  // 🖱️🖱️ DUPLO CLIQUE: Dispara a expansão infinita e bate na API
+  // 🖱️🖱️ DUPLO CLIQUE: Dispara a expansão infinita
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
@@ -142,8 +151,7 @@ function BuscaGrupoConteudo() {
     const tipoNode = partes[0];
     const docNode = partes.slice(1).join('-'); 
 
-    // Bloqueia se for apenas "NOME" (Sócio sem CPF revelado)
-    if (tipoNode === "NOME" || (tipoNode !== "CPF" && tipoNode !== "CNPJ" && tipoNode !== "PJ")) return;
+    if (tipoNode === "NOME" || (tipoNode !== "CPF" && tipoNode !== "CNPJ" && tipoNode !== "PJ" && tipoNode !== "PF")) return;
     
     handleBuscarDireto(docNode, tipoNode, node.position);
   }, []);
@@ -166,7 +174,7 @@ function BuscaGrupoConteudo() {
 
     setNodes((prev) => [...prev, {
       id: novoNoId, 
-      type: 'bolinha', // ⚡ Aplicando o conector livre aos manuais
+      type: 'bolinha',
       position: { x: Math.random() * 200 + 200, y: Math.random() * 200 + 200 },
       data: { label: manualNome.toUpperCase() },
       style: { backgroundColor: '#9333ea', color: 'white', borderRadius: '50%', width: 90, height: 90, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px' }
@@ -214,18 +222,18 @@ function BuscaGrupoConteudo() {
       <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner relative">
         <div className="absolute top-2 left-2 z-10 bg-white/90 p-2 rounded text-[10px] text-slate-600 pointer-events-none shadow-sm border border-slate-200">
           💡 <strong>Inteligência de Base:</strong><br/>
-          🖱️ <strong>1 Clique:</strong> Abre filiais da empresa<br/>
-          🖱️🖱️ <strong>2 Cliques:</strong> Expande a rede do CNPJ/Sócio
+          鼠标 <strong>1 Clique:</strong> Abre filiais da empresa<br/>
+          鼠标鼠标 <strong>2 Cliques:</strong> Expande a rede do CNPJ/Sócio
         </div>
         
         <ReactFlow 
           nodes={nodes} 
           edges={edges} 
-          nodeTypes={nodeTypes} /* Injetando nosso nó orbital */
+          nodeTypes={nodeTypes}
           onNodesChange={onNodesChange} 
           onEdgesChange={onEdgesChange} 
           onNodeClick={onNodeClick} 
-          onNodeDoubleClick={onNodeDoubleClick} /* Nova função de expansão dupla */
+          onNodeDoubleClick={onNodeDoubleClick}
           fitView
         >
           <Background color="#cbd5e1" gap={16} />
