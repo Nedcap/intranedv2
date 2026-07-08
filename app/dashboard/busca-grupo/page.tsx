@@ -9,10 +9,25 @@ import {
   applyNodeChanges, 
   applyEdgeChanges,
   Node,
-  Edge
+  Edge,
+  Handle,
+  Position
 } from '@xyflow/react';
 import { useSearchParams } from 'next/navigation';
 import '@xyflow/react/dist/style.css';
+
+// ⚡ TRUQUE DE MESTRE: Nó Customizado para as linhas "orbitarem" livremente!
+// Colocamos os Handles (conectores) invisíveis no exato centro (50%). 
+// Assim, as linhas vêm de qualquer direção e param exatamente na borda da bolinha!
+const nodeTypes = {
+  bolinha: ({ data }: any) => (
+    <>
+      <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none' }} />
+      {data.label}
+      <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none' }} />
+    </>
+  )
+};
 
 export default function BuscaGrupoPage() {
   return (
@@ -57,7 +72,7 @@ function BuscaGrupoConteudo() {
   const onNodesChange = useCallback((changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes: any) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
-  const handleBuscarDireto = async (documento: string, tipo: "CPF" | "CNPJ", posicaoOrigem?: { x: number, y: number }) => {
+  const handleBuscarDireto = async (documento: string, tipo: string, posicaoOrigem?: { x: number, y: number }) => {
     if (!documento) return;
     setIsLoading(true);
     
@@ -80,7 +95,12 @@ function BuscaGrupoConteudo() {
       setNodes((prevNodes) => {
         const novosNodes = data.nodes.filter((novoNo: Node) => !prevNodes.find((noAntigo) => noAntigo.id === novoNo.id));
         novosNosAdicionados = novosNodes.length;
-        return [...prevNodes, ...novosNodes.map((n: Node) => ({ ...n, position: { x: n.position.x + xOffset, y: n.position.y + yOffset } }))];
+        // ⚡ Aplicamos o type 'bolinha' para ativar os conectores centrais livres
+        return [...prevNodes, ...novosNodes.map((n: Node) => ({ 
+          ...n, 
+          type: 'bolinha', 
+          position: { x: n.position.x + xOffset, y: n.position.y + yOffset } 
+        }))];
       });
 
       setEdges((prevEdges) => {
@@ -100,28 +120,34 @@ function BuscaGrupoConteudo() {
 
   const handleBuscar = () => handleBuscarDireto(documentoBusca, tipoBusca);
 
-  // Clique no nó: se for empresa com filiais, abre a tabela. Se for duplo clique ou clique em sócio, expande.
+  // 🖱️ CLIQUE SIMPLES: Agora SÓ abre a gaveta de filiais (Não expande mais a teia)
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
-
     const tipoNode = partes[0];
-    const docNode = partes.slice(1).join('-'); 
-
-    // Intercepta se a empresa tiver dados de filiais guardados
+    
     if (tipoNode === "CNPJ" && node.data?.filiais) {
       setEmpresaInspecionada({
         nome: node.data.label as string,
         lista: node.data.filiais as any[]
       });
     }
-
-    if (tipoNode === "NOME" || (tipoNode !== "CPF" && tipoNode !== "CNPJ")) return;
-    
-    handleBuscarDireto(docNode, tipoNode as "CPF" | "CNPJ", node.position);
   }, []);
 
-  // ⚡ FUTURO: Função stub preparada para você plugar a exportação JSON/Imagem de alta definição
+  // 🖱️🖱️ DUPLO CLIQUE: Dispara a expansão infinita e bate na API
+  const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
+    const partes = node.id.split('-');
+    if (partes.length < 2) return;
+
+    const tipoNode = partes[0];
+    const docNode = partes.slice(1).join('-'); 
+
+    // Bloqueia se for apenas "NOME" (Sócio sem CPF revelado)
+    if (tipoNode === "NOME" || (tipoNode !== "CPF" && tipoNode !== "CNPJ" && tipoNode !== "PJ")) return;
+    
+    handleBuscarDireto(docNode, tipoNode, node.position);
+  }, []);
+
   const exportarEstruturaEstrategica = () => {
     const backupSnapshot = { nodes, edges, exportadoEm: new Date().toISOString() };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupSnapshot));
@@ -139,7 +165,9 @@ function BuscaGrupoConteudo() {
     const novoNoId = `${manualTipo}-${docLimpo}`;
 
     setNodes((prev) => [...prev, {
-      id: novoNoId, position: { x: Math.random() * 200 + 200, y: Math.random() * 200 + 200 },
+      id: novoNoId, 
+      type: 'bolinha', // ⚡ Aplicando o conector livre aos manuais
+      position: { x: Math.random() * 200 + 200, y: Math.random() * 200 + 200 },
       data: { label: manualNome.toUpperCase() },
       style: { backgroundColor: '#9333ea', color: 'white', borderRadius: '50%', width: 90, height: 90, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '10px', textAlign: 'center', padding: '5px' }
     }]);
@@ -184,17 +212,29 @@ function BuscaGrupoConteudo() {
 
       {/* ÁREA INTERATIVA DO GRAFO */}
       <div className="flex-1 bg-slate-100 rounded-xl border border-slate-300 overflow-hidden shadow-inner relative">
-        <div className="absolute top-2 left-2 z-10 bg-white/90 p-2 rounded text-[10px] text-slate-600 pointer-events-none shadow-sm">
-          💡 <strong>Inteligência de Base:</strong> Filiais repetidas foram consolidadas. Clique na empresa para abrir a tabela de unidades.
+        <div className="absolute top-2 left-2 z-10 bg-white/90 p-2 rounded text-[10px] text-slate-600 pointer-events-none shadow-sm border border-slate-200">
+          💡 <strong>Inteligência de Base:</strong><br/>
+          🖱️ <strong>1 Clique:</strong> Abre filiais da empresa<br/>
+          🖱️🖱️ <strong>2 Cliques:</strong> Expande a rede do CNPJ/Sócio
         </div>
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={onNodeClick} fitView>
+        
+        <ReactFlow 
+          nodes={nodes} 
+          edges={edges} 
+          nodeTypes={nodeTypes} /* Injetando nosso nó orbital */
+          onNodesChange={onNodesChange} 
+          onEdgesChange={onEdgesChange} 
+          onNodeClick={onNodeClick} 
+          onNodeDoubleClick={onNodeDoubleClick} /* Nova função de expansão dupla */
+          fitView
+        >
           <Background color="#cbd5e1" gap={16} />
           <Controls />
           <MiniMap nodeStrokeWidth={3} zoomable pannable />
         </ReactFlow>
       </div>
 
-      {/* 📊 TABELA LATERAL DE FILIAIS OCULTAS (GAVETA HUD) */}
+      {/* 📊 TABELA LATERAL DE FILIAIS OCULTAS */}
       {empresaInspecionada && (
         <div className="absolute top-24 right-8 w-96 bg-white rounded-xl shadow-2xl border border-slate-300 z-30 overflow-hidden flex flex-col max-h-[70vh]">
           <div className="bg-slate-800 text-white p-3 font-bold text-xs flex justify-between items-center">
