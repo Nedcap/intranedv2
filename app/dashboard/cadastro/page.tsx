@@ -87,10 +87,10 @@ export default function CadastroPage() {
     try {
       setSincronizando(true);
       
-      // 1. Puxa as análises cadastradas lá no Finalizados (comitê)
+      // 1. Puxa as análises cadastradas lá no Finalizados (comitê) - AGORA SÓ COM AS COLUNAS REAIS
       const { data: analises, error: errAnalises } = await supabase
         .from("analises")
-        .select("empresa_nome, comercial, status, criado_em, criated_em");
+        .select("empresa_nome, comercial, status, criado_em");
       
       if (errAnalises) throw errAnalises;
       if (!analises) return;
@@ -109,7 +109,7 @@ export default function CadastroPage() {
         const nomeLimpo = limparNome(analise.empresa_nome).toUpperCase();
         
         if (!nomesNaEsteira.has(nomeLimpo)) {
-           const dtComiteRaw = analise.criado_em || analise.criated_em;
+           const dtComiteRaw = analise.criado_em;
            const dtComiteFormatada = dtComiteRaw ? dtComiteRaw.split('T')[0] : null;
 
            novosCedentes.push({
@@ -280,7 +280,7 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA (COM DESIGN DE PENDÊNCIA QUE CRIAMOS) ===============
+  // =============== COMPONENTE DE TIMELINE MODERNA ===============
   const renderTimelineUI = (steps: { key: string; label: string }[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
     
@@ -378,7 +378,6 @@ export default function CadastroPage() {
           </div>
           
           <div className="flex gap-3 w-full md:w-auto flex-wrap md:flex-nowrap">
-            {/* NOVO BOTÃO DE INTEGRAÇÃO COM O COMITÊ */}
             <button 
               onClick={buscarAprovadasDoComite} 
               disabled={sincronizando || carregando} 
@@ -407,7 +406,7 @@ export default function CadastroPage() {
           </div>
         </div>
 
-        {/* PAINEL DE KPIs COM DESIGN GLASS/MODERNO */}
+        {/* PAINEL DE KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
           <button onClick={() => setFiltroStatus("TODOS")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md text-slate-800"}`}>
             <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Total em Esteira</span>
@@ -433,7 +432,6 @@ export default function CadastroPage() {
           </button>
 
           <div className="relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl shadow-indigo-600/30 border border-indigo-500">
-             {/* Elemento decorativo de fundo */}
              <svg className="absolute -bottom-4 -right-4 w-24 h-24 text-white opacity-10" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
              <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-100 block mb-2">SLA Médio Aprovação</span>
              <div className="flex items-baseline gap-1.5">
@@ -482,7 +480,6 @@ export default function CadastroPage() {
                   return (
                     <tr key={identificadorUnico} style={{ display: "contents" }}>
                       
-                      {/* LINHA PRINCIPAL (MASTER) */}
                       <tr className={`group transition-all duration-200 ${isOpen ? "bg-indigo-50/30" : "hover:bg-slate-50"} ${item._isNovo ? "bg-amber-50/30" : ""}`}>
                         <td className="px-4 py-3 text-center">
                           <button 
@@ -531,7 +528,6 @@ export default function CadastroPage() {
                             placeholder="0,00%" />
                         </td>
 
-                        {/* COLUNA DA TIMELINE DUPLA RENDERIZADA */}
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-6">
                             <div className="flex items-center gap-4">
@@ -546,13 +542,11 @@ export default function CadastroPage() {
                         </td>
                       </tr>
 
-                      {/* PAINEL DE EXPANSÃO (FORMULÁRIO DE DATAS PREMIUM) */}
                       {isOpen && (
                         <tr>
                           <td colSpan={usuarioAtual?.perfil !== "comercial" ? 6 : 5} className="bg-slate-50 border-b-2 border-indigo-100 p-6 shadow-inner">
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                               
-                              {/* Coluna 1: Comitê e Observações */}
                               <div className="xl:col-span-3 space-y-4">
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                   <div className="flex items-center gap-2 mb-3">
@@ -575,9 +569,7 @@ export default function CadastroPage() {
                                 </div>
                               </div>
 
-                              {/* Coluna 2: Formulários Sec e FIDC */}
                               <div className="xl:col-span-9 space-y-4">
-                                {/* Form SEC */}
                                 <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden">
                                   <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500"></div>
                                   <div className="flex items-center gap-2 mb-4 ml-2">
@@ -594,7 +586,6 @@ export default function CadastroPage() {
                                   </div>
                                 </div>
 
-                                {/* Form FIDC */}
                                 <div className="bg-purple-50/50 p-5 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
                                   <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500"></div>
                                   <div className="flex items-center gap-2 mb-4 ml-2">
