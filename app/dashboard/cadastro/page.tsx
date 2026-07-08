@@ -217,41 +217,52 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA ===============
+  // =============== COMPONENTE DE TIMELINE MODERNA (ATUALIZADA) ===============
   const renderTimelineUI = (steps: { key: string; label: string }[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
-    // Cores modernas em gradiente para o preenchimento
-    const activeLineClass = isFidc ? "bg-gradient-to-r from-purple-400 to-purple-600" : "bg-gradient-to-r from-blue-400 to-blue-600";
+    const activeLineClass = isFidc ? "bg-purple-500" : "bg-blue-500";
     const activeDotClass = isFidc ? "bg-purple-600 border-purple-600 shadow-purple-500/40" : "bg-blue-600 border-blue-600 shadow-blue-500/40";
-    const currentDotClass = isFidc ? "border-purple-400 ring-4 ring-purple-100" : "border-blue-400 ring-4 ring-blue-100";
+    const currentBorderClass = isFidc ? "border-purple-500" : "border-blue-500";
+    const currentPulseBg = isFidc ? "bg-purple-500" : "bg-blue-500";
     const textColorClass = isFidc ? "text-purple-700" : "text-blue-700";
+
+    // Encontra a PRIMEIRA etapa que está vazia na sequencia (Essa será a etapa ATUAL pendente)
+    const currentStepIndex = steps.findIndex(step => !item[step.key]);
 
     return (
       <div className="flex w-full relative pt-2 pb-1">
         {steps.map((step, idx) => {
           const isDone = !!item[step.key];
-          const isNextDone = idx < steps.length - 1 ? !!item[steps[idx + 1].key] : false;
-          // É o step "atual" se não estiver feito, mas o anterior está (ou se for o primeiro e estiver vazio)
-          const isCurrent = !isDone && (idx === 0 || !!item[steps[idx - 1].key]);
+          // É o step atual se o indice dele for o primeiro vazio encontrado
+          const isCurrent = idx === currentStepIndex;
+          const isLast = idx === steps.length - 1;
 
           return (
-            <div key={step.key} className={`relative flex flex-col items-center group ${idx === steps.length - 1 ? "flex-none w-12" : "flex-1"}`}>
+            <div key={step.key} className={`relative flex flex-col items-center group ${isLast ? "flex-none w-12" : "flex-1"}`}>
               
               {/* Linha Conectora Traseira (Barra de Progresso) */}
-              {idx < steps.length - 1 && (
+              {!isLast && (
                 <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isDone ? activeLineClass : "bg-slate-200 rounded-full"}`} />
               )}
 
-              {/* O Ponto / Ícone */}
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 z-10 transition-all duration-300 bg-white
-                ${isDone ? `${activeDotClass} text-white shadow-md` : isCurrent ? currentDotClass : "border-slate-300"}
-              `}>
-                {isDone && (
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
+              {/* Elemento da Bolinha */}
+              <div className="relative flex items-center justify-center">
+                {/* Efeito visual "Ping" (Radar) se for o step atual */}
+                {isCurrent && (
+                  <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />
                 )}
-                {isCurrent && <div className={`w-2 h-2 rounded-full animate-pulse ${isFidc ? "bg-purple-500" : "bg-blue-500"}`} />}
+
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 bg-white border-2
+                  ${isDone ? `${activeDotClass} text-white shadow-md` : isCurrent ? `border-[3px] ${currentBorderClass} shadow-md` : "border-slate-300"}
+                `}>
+                  {isDone && (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  {/* Bolinha pulsante sólida no centro da etapa atual */}
+                  {isCurrent && <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />}
+                </div>
               </div>
 
               {/* Rótulo da Etapa */}
@@ -261,11 +272,10 @@ export default function CadastroPage() {
                 {step.label}
               </span>
 
-              {/* Tooltip com a Data (Aparece no Hover) */}
+              {/* Tooltip com a Data (Aparece no Hover apenas se preenchido) */}
               {isDone && (
                 <div className="absolute -top-8 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] py-1 px-2.5 rounded-md shadow-lg pointer-events-none z-50 whitespace-nowrap">
                   {formatarDataBr(item[step.key])}
-                  {/* Triângulo do Tooltip */}
                   <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
                 </div>
               )}
@@ -288,7 +298,7 @@ export default function CadastroPage() {
               <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
               </div>
-              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Esteira de Cadastro e Aprovações</h2>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Esteira de Operações</h2>
             </div>
             <span className="text-sm text-slate-500 font-medium ml-12">Monitoramento de cadastro, conversão e emissão de contratos.</span>
           </div>
