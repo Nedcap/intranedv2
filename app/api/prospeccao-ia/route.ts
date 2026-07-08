@@ -6,7 +6,6 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
@@ -18,7 +17,6 @@ if (credentialsEnv) {
   }
 }
 
-// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -103,31 +101,25 @@ export async function POST(req: Request) {
       }
     }
 
-    // ⚡ GAMBIARRA SUPREMA: Ordenação penalizando MEIs (CPFs na razão social)
+    // ⚡ ORDENAÇÃO NÍVEL OURO: Usando a flag oficial de MEI do banco (opcao_mei)
     let ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN nome_fantasia IS NOT NULL AND nome_fantasia != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `
-         CASE WHEN REGEXP_CONTAINS(razao_social, r'\\d{11}$') THEN 1 ELSE 0 END ASC, -- Empurra MEIs para o fim da lista
+         CASE WHEN opcao_mei = 'S' THEN 1 ELSE 0 END ASC, -- MEIs vão pro final da fila com base em dados reais
          CASE WHEN REGEXP_CONTAINS(COALESCE(cnae_principal, ''), r'^(46|33|49|50|51|52|77|25|1[0-9]|2[0-9]|3[0-2])') THEN 0 
               WHEN SUBSTR(cnae_principal, 1, 2) = '47' THEN 2 ELSE 1 END ASC,
          data_abertura ASC`;
 
-    // ⚡ Query do BigQuery criando a coluna "natureza_juridica" dinamicamente via Regex
+    // ⚡ QUERY SQL ENXUTA: Chega de Regex para adivinhar, puxamos tudo nativo! E filtramos só as empresas ATIVAS (02).
     const sqlQuery = `
       SELECT 
         cnpj, cnpj_basico, data_abertura, cnae_principal, cnaes_secundarios, 
         bairro, cep, uf, municipio_rf, razao_social, nome_fantasia, capital_social,
-        CASE 
-          WHEN REGEXP_CONTAINS(razao_social, r'\\d{11}$') THEN '2135' -- MEI / Empresário Individual
-          WHEN REGEXP_CONTAINS(UPPER(razao_social), r'\\bLTDA\\.?$|\\bLIMITADA$') THEN '2062' -- LTDA
-          WHEN REGEXP_CONTAINS(UPPER(razao_social), r'\\bS/?A\\.?$|\\bSOCIEDADE ANONIMA$') THEN '2046' -- S.A.
-          WHEN REGEXP_CONTAINS(UPPER(razao_social), r'\\bEIRELI$') THEN '2305' -- EIRELI
-          WHEN REGEXP_CONTAINS(UPPER(razao_social), r'\\bS/?S\\.?$') THEN '2240' -- Sociedade Simples
-          ELSE '0000' -- Outros
-        END AS natureza_juridica
+        natureza_juridica, situacao, opcao_pelo_simples, opcao_mei
       FROM \`credito-489113.dados_receita.empresas_master\`
       WHERE uf = @estadoAlvo
         AND (@codigoRealDaReceita IS NULL OR municipio_rf = @codigoRealDaReceita)
+        AND situacao = '02' -- ⚡ FIDC Mode: Retorna APENAS empresas ATIVAS!
         ${filtroCnaeClausula}
         ${filtroNegativacaoConsultoria}
       ORDER BY ${ordenacaoEstrategica}
@@ -143,7 +135,7 @@ export async function POST(req: Request) {
       cnpj: row.cnpj,
       cnpj_raiz: row.cnpj_basico,
       matriz_filial: null,
-      situacao: "02",
+      situacao: row.situacao, // Vem com a situação real do banco
       data_abertura: row.data_abertura?.value || row.data_abertura,
       cnae_principal: row.cnae_principal,
       cnaes_secundarios: row.cnaes_secundarios,
@@ -153,9 +145,10 @@ export async function POST(req: Request) {
       municipio_rf: row.municipio_rf,
       razao_social: row.razao_social || "Razão Social indisponível",
       nome_fantasia: row.nome_fantasia && row.nome_fantasia.trim() !== "" ? row.nome_fantasia : row.razao_social,
-      // O front-end agora recebe a natureza jurídica normalmente
-      natureza_juridica: row.natureza_juridica, 
+      natureza_juridica: row.natureza_juridica, // Natureza Jurídica nativa (ex: '2062', '2135')
       capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
+      simples_nacional: row.opcao_pelo_simples === 'S',
+      mei: row.opcao_mei === 'S',
       google_categoria: null, google_endereco: null, website: null, lat: null, lng: null,
       cidadeExtenso: nomeCidadeReal || undefined
     }));

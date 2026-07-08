@@ -5,25 +5,21 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
-// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
 if (credentialsEnv) {
   try {
-    // Transformamos a string de volta em um objeto JavaScript
     credentials = JSON.parse(credentialsEnv);
   } catch (err) {
     console.error("Erro ao fazer parse do GOOGLE_APPLICATION_CREDENTIALS_JSON:", err);
   }
 }
 
-// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
     client_email: credentials.client_email,
-    // O JSON.parse já resolve automaticamente o problema das quebras de linha (\n)
     private_key: credentials.private_key, 
   }
 });
@@ -33,11 +29,24 @@ export async function POST(req: Request) {
     const { cnpj } = await req.json();
     if (!cnpj) return NextResponse.json({ error: "CNPJ obrigatório." }, { status: 400 });
 
-    const cnpjLimpo = cnpj.replace(/\D/g, "");
+    const cnpjLimpo = String(cnpj).replace(/\D/g, "");
 
-    // ⚡ Aponta direto pra tabela nativa do BigQuery usando parâmetros de segurança (@cnpj)
+    // ⚡ QUERY TURBINADA FIDC: Trazendo toda a inteligência que consolidamos no novo banco
     const sqlQuery = `
-      SELECT cnpj, razao_social, uf, municipio_rf, capital_social
+      SELECT 
+        cnpj, 
+        razao_social, 
+        uf, 
+        municipio_rf, 
+        capital_social,
+        natureza_juridica,
+        cnae_principal,
+        situacao,
+        data_abertura,
+        bairro,
+        cep,
+        opcao_pelo_simples,
+        opcao_mei
       FROM \`credito-489113.dados_receita.empresas_master\`
       WHERE cnpj = @cnpj
       LIMIT 1
@@ -45,11 +54,9 @@ export async function POST(req: Request) {
 
     const options = {
       query: sqlQuery,
-      // Passando o parâmetro limpo para evitar SQL Injection
       params: { cnpj: cnpjLimpo }, 
     };
 
-    // Roda a query no BigQuery
     const [rows] = await bigquery.query(options);
 
     if (rows.length === 0) {
@@ -74,6 +81,7 @@ export async function POST(req: Request) {
       console.error("Erro ao ler tabela_tom.json:", err);
     }
 
+    // Retorna o perfil completo de crédito da empresa
     return NextResponse.json({
       found: true,
       empresa: {
@@ -81,7 +89,15 @@ export async function POST(req: Request) {
         razao_social: row.razao_social || "Razão Social indisponível",
         uf: row.uf ? String(row.uf).toUpperCase() : "NI",
         cidadeExtenso: nomeCidadeReal,
-        capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0
+        bairro: row.bairro || "NI",
+        cep: row.cep || "NI",
+        capital_social: row.capital_social ? parseFloat(String(row.capital_social).replace(',', '.')) : 0,
+        situacao_cadastral: row.situacao || "NI",
+        data_abertura: row.data_abertura || "NI",
+        cnae: row.cnae_principal || "NI",
+        natureza_juridica: row.natureza_juridica || "NI",
+        simples_nacional: row.opcao_pelo_simples === 'S',
+        mei: row.opcao_mei === 'S'
       }
     });
   } catch (error: any) {
