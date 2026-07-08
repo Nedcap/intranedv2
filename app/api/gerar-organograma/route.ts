@@ -3,6 +3,7 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 export const dynamic = 'force-dynamic';
 
+// 1. Puxa a string da variável de ambiente da Vercel
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 let credentials: any = {};
 
@@ -14,6 +15,7 @@ if (credentialsEnv) {
   }
 }
 
+// 2. Inicializa o cliente do BigQuery blindado para produção
 const bigquery = new BigQuery({
   projectId: 'credito-489113',
   credentials: {
@@ -29,6 +31,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
     }
 
+    // Limpa o input removendo letras e traços para não quebrar a sintaxe do SQL
     const docLimpo = String(documentoBusca).replace(/\D/g, "");
     const nodes: any[] = [];
     const edges: any[] = [];
@@ -37,7 +40,7 @@ export async function POST(req: Request) {
     if (tipoBusca === "CNPJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
-      // ⚡ Busca os dados da Empresa (Tenta pegar a Matriz unificada pelo básico)
+      // Busca todas as unidades (matriz e filiais) da empresa de uma vez só
       const sqlEmpresa = `
         SELECT cnpj, cnpj_basico, razao_social, nome_fantasia, uf, bairro
         FROM \`credito-489113.dados_receita.empresas_master\` 
@@ -49,10 +52,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Empresa não localizada na base master." }, { status: 404 });
       }
 
-      // Separa quem é a matriz (ou usa o primeiro registro como cabeça do nó)
       const dadosPrincipais = empresaRes[0];
       
-      // Esquematiza a lista de filiais ocultas para mandar pro front armazenar
+      // Compacta as filiais em um array para o front-end renderizar em tabela
       const listaFiliais = empresaRes.map((emp: any) => ({
         cnpj: emp.cnpj,
         uf: emp.uf,
@@ -61,13 +63,13 @@ export async function POST(req: Request) {
       }));
 
       nodes.push({
-        id: `CNPJ-${cnpjBasico}`, // ID unificado pelo básico!
+        id: `CNPJ-${cnpjBasico}`,
         position: { x: centerX, y: centerY },
         data: { 
           label: dadosPrincipais.razao_social,
           isMatriz: true,
           totalFiliais: listaFiliais.length,
-          filiais: listaFiliais // Enviado para renderizar em tabela no front
+          filiais: listaFiliais 
         },
         style: {
           backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: 110, height: 110,
@@ -77,7 +79,7 @@ export async function POST(req: Request) {
         }
       });
 
-      // Busca os Sócios vinculados
+      // Busca o Quadro de Sócios e Administradores (QSA)
       const sqlSocios = `
         SELECT nome_socio_razao_social, cnpj_cpf_socio, qualificacao_socio
         FROM \`credito-489113.dados_receita.socios_master\`
@@ -115,7 +117,9 @@ export async function POST(req: Request) {
 
     } else if (tipoBusca === "CPF") {
       
-      // ⚡ REVOLUÇÃO: Agrupamento Inteligente usando ARRAY_AGG para trazer TODAS as filiais compactadas em 1 única linha!
+      // ⚡ A CORREÇÃO SUPREMA ESTÁ NO LIKE CONCAT('%', @docLimpo, '**')
+      // Adicionando os dois asteriscos fixos no final da busca por string, nós barramos 
+      // qualquer CNPJ comercial de entrar no bolo, filtrando estritamente CPFs de pessoas físicas.
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -125,9 +129,9 @@ export async function POST(req: Request) {
         FROM \`credito-489113.dados_receita.socios_master\` s
         LEFT JOIN \`credito-489113.dados_receita.empresas_master\` e 
           ON s.cnpj_basico = e.cnpj_basico
-        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo, '%')
+        WHERE s.cnpj_cpf_socio LIKE CONCAT('%', @docLimpo, '**')
         GROUP BY s.cnpj_basico
-        LIMIT 100
+        LIMIT 150
       `;
       const [empresasRes] = await bigquery.query({ query: sqlEmpresas, params: { docLimpo } });
 
@@ -137,6 +141,7 @@ export async function POST(req: Request) {
 
       const nomeRealSocio = empresasRes[0].nome_socio_razao_social || `SÓCIO: ***${docLimpo}**`;
 
+      // Nó central do Sócio investigado
       nodes.push({
         id: `CPF-${docLimpo}`,
         position: { x: centerX, y: centerY },
@@ -151,18 +156,17 @@ export async function POST(req: Request) {
 
       const angleStep = (2 * Math.PI) / empresasRes.length;
 
+      // Monta as bolinhas das empresas onde ele realmente tem participação societária ou diretoria
       empresasRes.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
         const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
-
-        // Filtra nulos caso o LEFT JOIN traga lixo do BigQuery
         const filiaisValidas = (emp.todas_as_filiais || []).filter((f: any) => f.cnpj !== null);
 
         nodes.push({
           id: idEmpresa,
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
           data: { 
-            label: `${emp.razao_social}\n(${filiaisValidas.length} Unid.)`,
+            label: `${emp.razao_social || 'Razão Social Indisponível'}\n(${filiaisValidas.length} Unid.)`,
             totalFiliais: filiaisValidas.length,
             filiais: filiaisValidas
           },
