@@ -41,7 +41,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setArquivos(prev => prev.filter(a => a.id !== id));
   };
 
-  const ejecutarEsteiraUpload = async () => {
+  const executarEsteiraUpload = async () => {
     if (arquivos.length === 0) return;
     setUploading(true);
 
@@ -60,7 +60,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
 
-        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", message: "Enviando para o Cloudflare R2..." } : a));
+        // ✅ CORRIGIDO: Alterado 'message' para 'mensagem' para sintonizar com a interface e evitar crash
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Enviando para o Cloudflare R2..." } : a));
 
         try {
           const formData = new FormData();
