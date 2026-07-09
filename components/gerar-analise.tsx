@@ -15,15 +15,9 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     try {
       const dataAtual = new Date().toLocaleDateString('pt-BR');
       
-      // ==========================================
-      // 1. ENDEREÇO E MAPS
-      // ==========================================
       const localizacaoReal = analise.localizacao?.trim() || "Brasil";
       const enderecoQuery = encodeURIComponent(localizacaoReal);
 
-      // ==========================================
-      // 2. PROCESSAMENTO DAS TABELAS
-      // ==========================================
       let totalLimites = 0;
       const propostasRows = analise.propostas && analise.propostas.length > 0 
         ? analise.propostas.map((p: any) => {
@@ -88,7 +82,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         }).join("")
         : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhum detalhamento bancário mapeado.</td></tr>`;
 
-      // RESTRITIVOS
       let totalRestritivos = 0, qtdRestritivos = 0;
       const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
         ? analise.restritivos.map((r: any) => {
@@ -116,15 +109,13 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </tr>`).join("")
         : `<tr><td colspan="7" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
 
-      // Parceiros Comerciais (Clientes, Fornecedores, Concorrentes) caso existam no objeto
-      const clientesRows = analise.clientes && analise.clientes.length > 0 
-        ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
-      const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 
-        ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
-      const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 
-        ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+      const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+      const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
+      const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
-      // Faturamento Mensal
+      // ==========================================
+      // AJUSTE: FATURAMENTO MÉDIO (POR MESES PREENCHIDOS)
+      // ==========================================
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
       let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
@@ -152,14 +143,14 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         </tr>`;
       }).join("");
 
-      const med2024 = qtd2024 > 0 ? tot2024 / 12 : 0;
-      const med2025 = qtd2025 > 0 ? tot2025 / 12 : 0;
-      const med2026 = qtd2026 > 0 ? tot2026 / 12 : 0;
+      // Modificado para dividir APENAS pela quantidade de meses com movimento
+      const med2024 = qtd2024 > 0 ? tot2024 / qtd2024 : 0;
+      const med2025 = qtd2025 > 0 ? tot2025 / qtd2025 : 0;
+      const med2026 = qtd2026 > 0 ? tot2026 / qtd2026 : 0;
 
       const faturamentoReferencia = med2026 > 0 ? med2026 : (med2025 > 0 ? med2025 : med2024);
       const alavancagem = faturamentoReferencia > 0 ? (totalBancosDet / faturamentoReferencia).toFixed(2) : "0.00";
 
-      // PREPARAR ARRAYS PROS GRÁFICOS (CHART.JS)
       const arrayFat2024 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2024"]?.[m] || 0));
       const arrayFat2025 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2025"]?.[m] || 0));
       const arrayFat2026 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2026"]?.[m] || 0));
@@ -173,9 +164,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivLabels = JSON.stringify(Object.keys(chartEndivData || {}));
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
-      // ==========================================
-      // 3. HTML BASE INJETADO
-      // ==========================================
       const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
@@ -189,7 +177,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           
           <style>
-              /* FUNDO BRANCO E ESTILIZAÇÃO PREMIUM */
               :root { --bg: #ffffff; --card: #ffffff; --text: #0f172a; --muted: #64748b; --blue: #2563eb; --blue-dark: #1e3a8a; --border: #e2e8f0; --green: #16a34a; --red: #dc2626; --yellow: #ca8a04; }
               body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; font-size: 13px; }
               .container { max-width: 1200px; margin: 0 auto; }
@@ -232,12 +219,29 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(37,99,235,0.3); }
               
               .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #f8fafc; border: 1px dashed #cbd5e1; }
-              
-              /* LISTAS SIMPLES */
               ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
-              ul.simple-list li { margin-bottom: 0.25rem; }
+              
+              /* =========================================
+                 ANIMAÇÃO DOS CARDS JURÍDICOS (HOVER) 
+                 ========================================= */
+              .hover-card { transition: box-shadow 0.3s; }
+              .hover-card:hover { box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+              .expandable-box { position: relative; max-height: 90px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
+              .expandable-fade { position: absolute; bottom: 0; left: 0; right: 0; height: 50px; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1) 90%); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; font-size: 0.75rem; font-weight: 800; color: var(--blue); transition: opacity 0.3s; }
+              .expandable-fade::after { content: "Passar o mouse para expandir ▼"; }
+              
+              .hover-card:hover .expandable-box { max-height: 2000px; }
+              .hover-card:hover .expandable-fade { opacity: 0; pointer-events: none; }
 
-              @media print { .print-break { page-break-before: always; } body { background: white; } .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } .header { padding: 1rem; color: black; background: white; border: 2px solid black; } .header .meta, .header .badge-top { color: black; } }
+              @media print { 
+                  .print-break { page-break-before: always; } 
+                  body { background: white; } 
+                  .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } 
+                  .header { padding: 1rem; color: black; background: white; border: 2px solid black; } 
+                  .header .meta, .header .badge-top { color: black; } 
+                  .expandable-box { max-height: none !important; }
+                  .expandable-fade { display: none !important; }
+              }
           </style>
       </head>
       <body>
@@ -307,7 +311,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
-          <!-- LOCALIZAÇÃO / MAPS -->
           <div class="grid-2" style="margin-top: 1.5rem;">
               <div class="card" style="padding:0; overflow:hidden; position:relative; border: 1px solid #cbd5e1;">
                   <div style="position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.95); padding:6px 12px; border-radius:6px; font-size:0.75rem; font-weight:800; z-index:10; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: var(--blue-dark); text-transform: uppercase;">Satélite</div>
@@ -326,7 +329,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
-          <!-- PARCEIROS COMERCIAIS (OPCIONAL) -->
           ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
           <div class="grid-3" style="margin-top: 1.5rem;">
               <div class="card">
@@ -344,7 +346,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
           ` : ''}
 
-          <!-- ORGANOGRAMA INTERATIVO (VIS.JS) - EM CIRCULOS -->
           <h2 style="margin-top: 3.5rem;">3. Organograma / Teia Societária</h2>
           <div style="margin-bottom: 2.5rem;">
               ${analise.organograma_json && analise.organograma_json.nodes && analise.organograma_json.nodes.length > 0 ? `
@@ -406,7 +407,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           <td class="text-center">${formatarMoeda(tot2024)}</td>
                       </tr>
                       <tr class="row-total" style="background:#f8fafc; border-top: 1px solid var(--border);">
-                          <td>MÉDIA MENSAL</td>
+                          <td>MÉDIA DO PERÍODO</td>
                           <td class="text-center">${formatarMoeda(med2026)}</td>
                           <td class="text-center">--</td>
                           <td class="text-center">${formatarMoeda(med2025)}</td>
@@ -478,7 +479,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <h2>8. Apontamentos Restritivos e Análise Jurídica</h2>
           
-          <!-- CARDS CONSOLIDADOS DE RESTRITIVOS -->
           <div class="grid-2" style="margin-bottom: 1.5rem;">
               <div class="card" style="display:flex; flex-direction:column; justify-content:center; align-items:center; border: 1px solid ${totalRestritivos > 0 ? '#fca5a5' : '#86efac'}; background: ${totalRestritivos > 0 ? '#fef2f2' : '#f0fdf4'};">
                   <div class="metric-label" style="color: ${totalRestritivos > 0 ? '#991b1b' : '#166534'};">Volume Financeiro Restritivo</div>
@@ -501,14 +501,22 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
           ` : ''}
 
+          <!-- AJUSTE: CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
           <div class="grid-2">
-              <div class="card" style="padding:1.5rem; border-left: 4px solid #fca5a5;">
+              <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
                   <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
-                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
+                  <div class="expandable-box">
+                      <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
+                      <div class="expandable-fade"></div>
+                  </div>
               </div>
-              <div class="card" style="padding:1.5rem; border-left: 4px solid #93c5fd;">
+              
+              <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #93c5fd; cursor: pointer;">
                   <div style="font-weight:800; font-size:0.85rem; color:var(--blue-dark); margin-bottom:1rem; text-transform:uppercase;">🔍 Análise de Mídia e Compliance</div>
-                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.noticias_midia || 'Nada consta em pesquisas de desabonadores digitais.'}</div>
+                  <div class="expandable-box">
+                      <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.noticias_midia || 'Nada consta em pesquisas de desabonadores digitais.'}</div>
+                      <div class="expandable-fade"></div>
+                  </div>
               </div>
           </div>
 
@@ -523,7 +531,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       </div>
 
       <script>
-          // SCRIPTS PARA RENDERIZAR OS GRAFICOS
           const endivLabels = ${arrayEndivLabels};
           const endivData = ${arrayEndivData};
           
@@ -562,8 +569,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           }
 
           // ==========================================
-          // SCRIPT DO ORGANOGRAMA INTERATIVO (VIS.JS) 
-          // ATUALIZADO: SHAPE ALTERADA PARA CIRCLES
+          // AJUSTE: ORGANOGRAMA (CÍRCULOS DE MESMO TAMANHO)
           // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
@@ -578,14 +584,16 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       return {
                           id: n.id, 
                           label: labelText,
-                          shape: 'circle', // <--- Alterado para círculo
-                          font: { color: '#ffffff', size: 11, face: 'Inter', multi: 'html', bold: true },
+                          shape: 'circle',
+                          widthConstraint: { minimum: 90, maximum: 90 }, // Trava a largura fixa em 90px
+                          heightConstraint: { minimum: 90, maximum: 90 }, // Trava a altura fixa em 90px
+                          font: { color: '#ffffff', size: 10, face: 'Inter', multi: 'html', bold: true },
                           color: { 
                               background: bgColor, 
                               border: borderColor,
                               highlight: { background: bgColor, border: '#000000' }
                           },
-                          margin: 15, // <--- Ajuste de margem interna do círculo
+                          margin: 0,
                           borderWidth: 1.5,
                           shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 8, x: 0, y: 4 }
                       };
