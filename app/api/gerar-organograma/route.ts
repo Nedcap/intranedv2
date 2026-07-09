@@ -22,7 +22,7 @@ const bigquery = new BigQuery({
   }
 });
 
-// Validação final de nome para matar homônimos com o mesmo miolo de CPF
+// Validação flexível de nome para proteger contra homônimos, permitindo digitações manuais
 function validarCorrespondenciaNome(nomeBusca: string, nomeReceita: string): boolean {
   if (!nomeBusca || !nomeReceita) return false;
   
@@ -30,6 +30,8 @@ function validarCorrespondenciaNome(nomeBusca: string, nomeReceita: string): boo
   const n2 = nomeReceita.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z\s]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
   
   if (n1 === n2) return true;
+  
+  if (n2.includes(n1) || n1.includes(n2)) return true;
   
   const tokens1 = n1.split(" ");
   const tokens2 = n2.split(" ");
@@ -47,7 +49,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
     }
 
-    const docLimpo = String(documentoBusca).replace(/\D/g, "");
+    let docLimpo = String(documentoBusca).replace(/\D/g, "");
+    
+    // Extrai o miolo de 6 dígitos se o CPF for enviado completo
+    if ((tipoBusca === "CPF" || tipoBusca === "PF") && docLimpo.length === 11) {
+      docLimpo = docLimpo.substring(3, 9);
+    }
+
     const nodes: any[] = [];
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
@@ -129,7 +137,6 @@ export async function POST(req: Request) {
       });
 
     } else if (tipoBusca === "CPF" || tipoBusca === "PF") { 
-      // Busca pelo miolo do CPF do Sócio PF
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -148,7 +155,6 @@ export async function POST(req: Request) {
 
       if (empresasRes.length === 0) return NextResponse.json({ nodes: [], edges: [] });
 
-      // ⚡ ANTIDOTO MESTRE CONTRA HOMÔNIMOS: Filtra se bater o nome parcial/completo
       let empresasValidadas = empresasRes;
       if (nomeSocio) {
         empresasValidadas = empresasRes.filter((emp: any) => validarCorrespondenciaNome(nomeSocio, emp.nome_socio_razao_social));

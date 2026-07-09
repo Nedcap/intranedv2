@@ -178,7 +178,7 @@ const DADOS_MODELO: AnaliseData = {
   regra_assinatura: "( ) em conjunto (x) isolada", aval_societario: "", patrimonios: [],
   
   dados_faturamento: { "2024": {}, "2025": {}, "2026": {} }, 
-  dados_potencial: { ticket_medio: 0, prazo_medio_dpls: "45 dias", prazo_medio_comissaria: "45 dias", prazo_medio_intercompany: "", forma_recebimento_vista: 10, forma_recebimento_prazo: 90, composicao_dpls: 70, composicao_comissaria: 30, composicao_intercompany: 0, composicao_outros: 0, potencial_estimado: 0 },
+  dados_potencial: { ticket_medio: 0, prazo_medio_dpls: "60 dias", prazo_medio_comissaria: "0 dias", prazo_medio_intercompany: "", forma_recebimento_vista: 0, forma_recebimento_prazo: 100, composicao_dpls: 100, composicao_comissaria: 0, composicao_intercompany: 0, composicao_outros: 0, potencial_estimado: 0 },
   
   endividamento_resumo: { renegociando: "Não" },
   endividamento_detalhado: [], referencias: [],
@@ -200,11 +200,8 @@ function MathInput({ value, onChange, className }: { value: any, onChange: (v: s
 
   const handleBlur = () => {
     try {
-      // Troca vírgula por ponto para avaliação matemática, tira espaços
       const valStr = String(localVal).replace(/\s/g, '').replace(',', '.');
-      // Se contiver operadores matemáticos permitidos
       if (/[\+\-\*\/]/.test(valStr)) {
-        // Tira tudo que não seja número, ponto ou operadores matemáticos básicos
         const sanitized = valStr.replace(/[^\d\.\+\-\*\/\(\)]/g, '');
         const result = new Function(`'use strict'; return (${sanitized})`)();
         onChange(result.toString());
@@ -396,7 +393,6 @@ function MesaAnaliseConteudo() {
     const novoArray = [...(analise[campo] as any[])];
     novoArray[index][subCampo] = valor;
     
-    // Sincroniza raízes se estiver editando a primeira Empresa Principal
     if (campo === 'empresas_principais' && index === 0) {
        if (subCampo === 'razao_social') setAnalise({ ...analise, [campo]: novoArray, razao_social: valor });
        else if (subCampo === 'cnpj') setAnalise({ ...analise, [campo]: novoArray, cnpj: valor });
@@ -414,32 +410,63 @@ function MesaAnaliseConteudo() {
   const handleFat = (ano: string, mes: string, val: string) => {
     const fatAtual = { ...analise.dados_faturamento };
     if (!fatAtual[ano]) fatAtual[ano] = {};
-    fatAtual[ano][mes] = val; // Agora guarda como string se preferível ou repassa Number. O mathInput retorna string com o calc resolvido.
+    fatAtual[ano][mes] = val; 
     setAnalise({ ...analise, dados_faturamento: fatAtual });
   };
 
+  // =========================================================================
+  // FÓRMULAS DE FATURAMENTO E POTENCIAL
+  // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  
+  // Descobre qual é o último mês preenchido do ano vigente (2026) para corte do YTD
+  let lastFilledIndex26 = -1;
+  for (let i = 11; i >= 0; i--) {
+      if (Number(analise.dados_faturamento["2026"]?.[meses[i]] || 0) > 0) {
+          lastFilledIndex26 = i;
+          break;
+      }
+  }
+  
+  const has26Data = lastFilledIndex26 >= 0;
+  const limitIndex = has26Data ? lastFilledIndex26 : 11; // Se não tem 26, usa o ano todo
+  const mesesYTD = meses.slice(0, limitIndex + 1);
+  const labelMascaraYTD = has26Data ? `MÉDIA ATÉ ${meses[lastFilledIndex26].toUpperCase()}` : "MÉDIA YTD";
+
+  const calcMediaYTD = (ano: string) => {
+      if (mesesYTD.length === 0) return 0;
+      const soma = mesesYTD.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
+      return soma / mesesYTD.length;
+  };
+
+  const mediaYTD26 = has26Data ? calcMediaYTD("2026") : 0;
+  const mediaYTD25 = calcMediaYTD("2025");
+  const mediaYTD24 = calcMediaYTD("2024");
+  
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
-  const mesesPreenchidos = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
-  const calcMedia = (ano: string) => { const pre = mesesPreenchidos(ano); return pre === 0 ? 0 : calcTotAno(ano) / 12; }; 
+  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
+  const calcMediaGeralAno = (ano: string) => { const pre = mesesPreenchidosGeral(ano); return pre === 0 ? 0 : calcTotAno(ano) / 12; }; 
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
-  // Faturamento e Potencial Ajustados
-  const faturamentoMedioReferencia = calcMedia("2026") > 0 ? calcMedia("2026") : calcMedia("2025") > 0 ? calcMedia("2025") : calcMedia("2024");
-  
-  // Extrai apenas os números para ver quantos dias. Ex: "60 dias" -> 60.
-  const prazoDias = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 30;
-  // Multiplicador de ciclo = prazo em dias dividido por 30 (Ex: 60 dias = 2 ciclos mensais de saldo)
-  const fatorCiclo = prazoDias / 30;
-  // Potencial = Faturamento Médio * % Vendido a Prazo * Fator de Ciclo
-  const faturamentoAPrazo = faturamentoMedioReferencia * (Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100);
-  const potencialRealCalculado = faturamentoAPrazo * fatorCiclo;
+  const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
+  const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
-  // Comparativo Período Fechado
-  const mesesComFat26 = meses.filter(m => Number(analise.dados_faturamento["2026"]?.[m] || 0) > 0);
-  const somaParcial26 = mesesComFat26.reduce((acc, m) => acc + Number(analise.dados_faturamento["2026"]?.[m] || 0), 0);
-  const somaParcial25 = mesesComFat26.reduce((acc, m) => acc + Number(analise.dados_faturamento["2025"]?.[m] || 0), 0);
-  const varParcial = somaParcial25 > 0 ? ((somaParcial26 - somaParcial25) / somaParcial25) * 100 : 0;
+  // Usa a média YTD do ano mais recente como Faturamento Base
+  const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
+
+  // === CÁLCULO EXATO DE POTENCIAL DE NEGÓCIOS V8 (Conforme Excel) ===
+  const prazoDiasDpls = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 0;
+  const prazoDiasComissaria = parseInt(String(analise.dados_potencial.prazo_medio_comissaria).replace(/\D/g, "")) || 0;
+  
+  const percAPrazo = Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100;
+  const percDpls = Number(analise.dados_potencial.composicao_dpls || 0) / 100;
+  const percComissaria = Number(analise.dados_potencial.composicao_comissaria || 0) / 100;
+
+  // Fórmula Exata = ((Faturamento Base / 30 dias) * Prazo Médio) * Composição% * % A Prazo
+  const potDpls = (faturamentoMedioReferencia / 30) * prazoDiasDpls * percDpls * percAPrazo;
+  const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
+  const potencialRealCalculado = potDpls + potComissaria;
+
 
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
@@ -899,29 +926,38 @@ function MesaAnaliseConteudo() {
                               </tr>
                             );
                           })}
-                          
-                          <tr className="bg-yellow-50 border-t-2 border-yellow-300 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400 text-slate-700" title="Compara apenas os meses preenchidos em 2026 com os mesmos meses de 2025">COMPARATIVO PERÍODO (2026)</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-yellow-800">{somaParcial26.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-400 text-center ${varParcial > 0 ? 'text-green-600' : varParcial < 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                              {varParcial === 0 ? "-" : `${varParcial.toFixed(1)}%`}
-                            </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono">{somaParcial25.toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-400"></td>
-                            <td className="border border-slate-400 bg-slate-100"></td>
-                          </tr>
 
                           <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400">TOTAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td><td className="border border-slate-400"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono">{calcTotAno("2025").toLocaleString("pt-BR")}</td><td className="border border-slate-400"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-slate-400 text-slate-800">TOTAL ANO</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
                           </tr>
+                          
                           <tr className="bg-slate-200 border-t border-slate-400 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400">MÉDIA 12M</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{calcMedia("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td><td className="border border-slate-400"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono">{calcMedia("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td><td className="border border-slate-400"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono">{calcMedia("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="p-1.5 border border-slate-400 text-slate-800">MÉDIA GERAL ANO</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                          </tr>
+
+                          <tr className="bg-blue-50 border-t-2 border-blue-300 font-bold text-[10px]">
+                            <td className="p-1.5 border border-slate-400 text-blue-900 uppercase" title="Média apenas dos meses correspondentes preenchidos">
+                                {labelMascaraYTD}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-400 text-center ${varYTD26_25 > 0 ? 'text-green-600' : varYTD26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-800">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-400 text-center ${varYTD25_24 > 0 ? 'text-green-600' : varYTD25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-800">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -965,11 +1001,14 @@ function MesaAnaliseConteudo() {
                         </tbody>
                       </table>
                     </div>
-                    <div className="bg-green-50 border border-green-300 p-6 flex flex-col justify-center items-center text-center rounded-sm">
-                      <span className="text-[11px] font-bold text-green-800 uppercase tracking-wider">Potencial Real Estimado (Ciclos A Prazo)</span>
-                      <span className="font-mono text-3xl font-black text-green-700 mt-2">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <p className="text-[9px] text-slate-500 mt-2 italic">Base (Média Vendas): R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:0})} × {analise.dados_potencial.forma_recebimento_prazo}% (A Prazo)</p>
-                      <p className="text-[9px] text-slate-500 mt-0.5 italic">Ciclos Acumulados no Prazo Médio: {(fatorCiclo).toFixed(2)}x ({prazoDias} dias / 30)</p>
+                    <div className="bg-blue-50 border border-blue-300 p-6 flex flex-col justify-center items-center text-center rounded-sm">
+                      <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">Potencial Real Estimado (Vendas a Prazo)</span>
+                      <span className="font-mono text-3xl font-black text-blue-700 mt-2">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      
+                      <div className="text-[9px] text-slate-500 mt-4 space-y-1">
+                          <p><strong>Faturamento Base Ref:</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
+                          <p><strong>Cálculo:</strong> (Fat. Base ÷ 30 dias) × Prazo × Composição(%) × Receb. a Prazo(%)</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1006,7 +1045,7 @@ function MesaAnaliseConteudo() {
                         </tr>
                         <tr>
                           <td colSpan={7} className="p-2 text-center text-[10px] text-slate-500 bg-slate-100 font-sans border border-slate-400">
-                            Alavancagem Cedente / Faturamento: <strong className="text-slate-800 text-xs">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio mensal.
+                            Alavancagem Cedente / Faturamento Base: <strong className="text-slate-800 text-xs">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
                           </td>
                         </tr>
                       </tbody>

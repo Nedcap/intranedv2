@@ -15,8 +15,9 @@ import {
   useReactFlow
 } from '@xyflow/react';
 import { useSearchParams } from 'next/navigation';
-import { toPng } from 'html-to-image'; // ⚡ Importação do motor de captura real
+import { toPng } from 'html-to-image';
 import '@xyflow/react/dist/style.css';
+import { ReactFlowProvider } from '@xyflow/react';
 
 // Componente customizado orbital com área de clique total injetada
 const nodeTypes = {
@@ -47,7 +48,6 @@ export default function BuscaGrupoPage() {
   );
 }
 
-import { ReactFlowProvider } from '@xyflow/react';
 function ReactFlowProviderWrapper() {
   return (
     <ReactFlowProvider>
@@ -177,16 +177,14 @@ function BuscaGrupoConteudo() {
     downloadAnchor.remove();
   };
 
-  // 📸 FUNÇÃO DE CAPTURA REFATORADA E BLINDADA CONTRA PRINT EM BRANCO
   const gerarImagemCaptura = () => {
     const element = document.querySelector('.react-flow__viewport') as HTMLElement;
     if (!element) { alert("Não consegui localizar a área do mapa."); return; }
 
     setIsLoading(true);
 
-    // Captura o container inteiro injetando uma cor de fundo sólida
     toPng(element, {
-      backgroundColor: '#020617', // Cor de fundo do canvas (Slate 950)
+      backgroundColor: '#020617', 
       width: element.offsetWidth,
       height: element.offsetHeight,
       style: {
@@ -211,25 +209,30 @@ function BuscaGrupoConteudo() {
 
   const handleSalvarVinculoManual = () => {
     if (!manualNome || !noVinculoAlvo) return;
-    const docLimpo = manualDoc.replace(/\D/g, "") || Math.random().toString(36).substring(7);
-    const novoNoId = `${manualTipo}-${docLimpo}`;
+    
+    const docLimpo = manualDoc.replace(/\D/g, "");
+    const novoNoId = docLimpo ? `${manualTipo}-${docLimpo}` : `NOME-${Math.random().toString(36).substring(7)}`;
 
     setNodes((prev) => [...prev, {
       id: novoNoId, 
       type: 'bolinha',
       position: { x: Math.random() * 200 + 200, y: Math.random() * 200 + 200 },
-      data: { label: manualNome.toUpperCase() },
+      data: { 
+        label: manualNome.toUpperCase(),
+        nomeOriginal: manualNome.toUpperCase() 
+      },
       style: { backgroundColor: '#6b21a8', color: 'white', borderRadius: '50%', width: 95, height: 95, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '6px', border: '2px solid #a855f7', boxShadow: '0 4px 10px rgba(168,85,247,0.2)' }
     }]);
 
     setEdges((prev) => [...prev, { id: `edge-manual-${Date.now()}`, source: noVinculoAlvo, target: novoNoId, label: manualRelacao, animated: true, type: 'straight', style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '5,5' } }]);
-    setModalAberto(false); setManualNome(""); setManualDoc("");
+    setModalAberto(false); 
+    setManualNome(""); 
+    setManualDoc("");
   };
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-900 p-4 font-sans text-slate-100 selection:bg-blue-500">
       
-      {/* HEADER PREMIUM CONTROLE */}
       <div className="flex flex-wrap gap-3 items-center bg-slate-800 p-4 rounded-xl shadow-lg mb-4 border border-slate-700/50">
         <div className="flex flex-col pr-4 border-r border-slate-700">
           <h1 className="text-lg font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Órbita FIDC</h1>
@@ -264,7 +267,6 @@ function BuscaGrupoConteudo() {
         </div>
       </div>
 
-      {/* ÁREA INTERATIVA DO GRAFO EXPANDIDA (82vh) */}
       <div className="h-[82vh] w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative">
         <div className="absolute top-3 left-3 z-10 bg-slate-900/90 backdrop-blur-sm p-3 rounded-lg text-[10px] text-slate-300 pointer-events-none shadow-md border border-slate-800 space-y-1">
           <p className="font-semibold text-blue-400">🛡️ Filtro Antihomônimo Ativado</p>
@@ -288,7 +290,6 @@ function BuscaGrupoConteudo() {
         </ReactFlow>
       </div>
 
-      {/* HUD GAVETA DE UNIDADES */}
       {empresaInspecionada && (
         <div className="absolute top-28 right-8 w-96 bg-slate-800 rounded-xl shadow-2xl border border-slate-700 z-30 overflow-hidden flex flex-col max-h-[65vh] animate-in fade-in slide-in-from-right duration-200">
           <div className="bg-slate-900 text-slate-100 p-3.5 font-bold text-xs flex justify-between items-center border-b border-slate-700">
@@ -318,7 +319,6 @@ function BuscaGrupoConteudo() {
         </div>
       )}
 
-      {/* MODAL CONFIGURADOR MANUAL */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
           <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs text-slate-200">
