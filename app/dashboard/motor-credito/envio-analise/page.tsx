@@ -25,6 +25,7 @@ export default function MotorCreditoPage() {
   const router = useRouter();
   const [cnpjBusca, setCnpjBusca] = useState("");
   const [loading, setLoading] = useState(false);
+  const [statusTexto, setStatusTexto] = useState("");
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
@@ -35,11 +36,11 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
-      // 📊 Comercial SÓ vê o que já foi finalizado ou devolvido
+      // 📊 Busca os status permitidos pelo escopo comercial e mapeados no banco
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status, created_at")
-        .in("status", ["aprovado", "reprovado", "aguardando_docs"])
+        .in("status", ["aprovado", "reprovado", "aguardando_docs", "em_revisao_humana"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -89,20 +90,28 @@ export default function MotorCreditoPage() {
     }
   };
 
-  const registrarAnaliseNoSupabase = async (urlsDocumentos?: string[]) => {
+  const registrarAnaliseNoSupabase = async (urlsDocumentos: string[]) => {
     if (!empresaSelecionada) return;
 
     setLoading(true);
+    setStatusTexto("🤖 Registrando lote de entrada na mesa...");
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
       
-      // 1. Cria o registro inicial no Supabase com o status focado no Robô
+      // Pega dados do usuário logado
+      const userStr = localStorage.getItem("intraned_user");
+      const user = userStr ? JSON.parse(userStr) : null;
+      const nomeDoAgente = user?.nome || "Comercial Ned";
+
+      // 1. Cria o registro inicial usando o status homologado ("em_revisao_humana")
       const { data: novaAnalise, error } = await supabase
         .from("analises_credito")
         .insert({
           cnpj: cnpjLimpo,
           razao_social: empresaSelecionada.razao_social.toUpperCase(),
-          status: "em_processamento_ia", // 🤖 O status avisa que o robô de IA assumiu
+          status: "em_revisao_humana", // ✅ Evita a violação de CHECK CONSTRAINT
+          comercial_nome: nomeDoAgente,
+          dados_documentos: urlsDocumentos,
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
             cidade: empresaSelecionada.cidadeExtenso || "Curitiba",
@@ -111,15 +120,15 @@ export default function MotorCreditoPage() {
             proposta: { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
             dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
             dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vending_prazo_perc: 100 },
-            dados_endividamento: [],
-            dados_restritivos: [],
-            dados_estrutura_societaria: [],
-            dados_juridico: { processos_tramitacao: "", processos_arquivados: "" },
+            dados_endividamento_resumo: { curto_prazo: 0, longo_prazo: 0 },
+            endividamento_detalhado: [],
+            restritivos: [],
+            socios: [],
+            anexos: { organograma_url: "", fachada_url: "" },
             parecer_comite: ""
-          }, 
-          dados_documentos: urlsDocumentos || [] 
+          }
         })
-        .select("id") // Pede pro Supabase devolver o ID que ele acabou de gerar
+        .select("id")
         .single();
 
       if (error) {
@@ -129,32 +138,36 @@ export default function MotorCreditoPage() {
         throw error;
       }
 
-      // 2. Se temos os documentos em mãos, acorda o Motor V8 no Render em segundo plano!
-      if (novaAnalise && urlsDocumentos && urlsDocumentos.length > 0) {
-        console.log(`[FRONTEND] Acionando Motor V8 para a análise: ${novaAnalise.id}`);
+      // 2. Acorda o Motor V8 no Render enviando as URLs
+      if (novaAnalise && urlsDocumentos.length > 0) {
+        setStatusTexto("🔮 Robô V8 lendo e estruturando dados em background...");
         
-        // Chamada assíncrona para a API do Gateway do Next.js (Repassa pro Render)
-        fetch("/api/motor-ia", {
+        const resIA = await fetch("/api/motor-ia", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             analise_id: novaAnalise.id,
             urls_documentos: urlsDocumentos
           })
-        }).catch(err => console.error("Erro no disparo em background do Motor V8:", err));
+        });
+
+        if (!resIA.ok) {
+          console.error("Aviso: Falha na resposta imediata da IA.");
+        }
       }
 
-      alert("🚀 Empresa enviada! O Motor de IA assumiu a leitura inteligente dos documentos.");
+      alert("🚀 Empresa enviada! O Motor V8 assumiu o processamento inteligente.");
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
-      await carregarFilaComercial(); // Atualiza a tabela (embora a nova não vá aparecer, garante que a view está certa)
+      await carregarFilaComercial();
 
     } catch (err: any) {
       console.error("Erro ao inserir na tabela analises_credito:", err);
       alert("⚠️ Erro ao registrar na esteira: " + err.message);
     } finally {
       setLoading(false);
+      setStatusTexto("");
     }
   };
 
@@ -178,6 +191,13 @@ export default function MotorCreditoPage() {
     <div className="min-h-screen bg-slate-50 text-slate-700 p-6 font-sans antialiased text-[13px]">
       <div className="max-w-[1700px] mx-auto space-y-6">
         
+        {statusTexto && (
+          <div className="fixed inset-0 bg-slate-900/60 z-50 flex flex-col items-center justify-center font-bold text-white text-sm gap-2">
+            <span className="animate-spin text-xl">⚡</span>
+            {statusTexto}
+          </div>
+        )}
+
         {/* HEADER */}
         <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
@@ -186,7 +206,7 @@ export default function MotorCreditoPage() {
                 Cloudflare R2 Active
               </span>
               <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase">
-                Comitê Notificação Ativo
+                Mesa V8 Síncrona
               </span>
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
@@ -195,7 +215,7 @@ export default function MotorCreditoPage() {
           </div>
         </div>
 
-        {/* BOX DE SOLICITAÇÃO ESTREITA POR CNPJ */}
+        {/* BOX DE SOLICITAÇÃO POR CNPJ */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all"></div>
           
@@ -203,7 +223,7 @@ export default function MotorCreditoPage() {
             <form onSubmit={handleBuscarPorCnpj} className="space-y-4">
               <div>
                 <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-2">
-                  Buscar Empresa por CNPJ Oficial (Apenas Números)
+                  Buscar Empresa por CNPJ Oficial
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -264,14 +284,14 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* O onSucesso agora entrega as urls dos documentos para disparar a IA */}
-                <UploadDocs empresa={empresaSelecionada} onSucesso={registrarAnaliseNoSupabase} />
+                {/* Repassa a tipagem unificada de array de links ao callback */}
+                <UploadDocs empresa={empresaSelecionada as any} onSucesso={(urls) => registrarAnaliseNoSupabase(urls)} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL */}
+        {/* TABELA DE RETORNO DO COMERCIAL */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px]">
@@ -307,6 +327,10 @@ export default function MotorCreditoPage() {
                           <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             📥 Devolvido - Falta Docs
                           </span>
+                        ) : item.status === "em_revisao_humana" ? (
+                          <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
+                            🔮 IA Extraindo / Mesa
+                          </span>
                         ) : item.status === "aprovado" ? (
                           <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             ✅ Aprovado
@@ -315,7 +339,11 @@ export default function MotorCreditoPage() {
                           <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
                             ❌ Reprovado
                           </span>
-                        ) : null}
+                        ) : (
+                          <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                            {item.status}
+                          </span>
+                        )}
                       </td>
                       <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
                         {new Date(item.created_at).toLocaleDateString("pt-BR")}
