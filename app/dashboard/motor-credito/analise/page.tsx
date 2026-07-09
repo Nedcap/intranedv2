@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
 import GerarAnalise from "@/components/gerar-analise";
@@ -10,9 +10,14 @@ import GerarAnalise from "@/components/gerar-analise";
 // =========================================================================
 interface FilaItem {
   id: string;
-  empresa_nome: string; // ✅ Adaptado para a tabela nova
+  empresa_nome: string;
   cnpj: string;
   status: string;
+}
+
+interface EmpresaPrincipal {
+  razao_social: string;
+  cnpj: string;
 }
 
 interface PropostaItem {
@@ -45,7 +50,7 @@ interface PatrimonioItem {
 }
 
 interface FaturamentoMes {
-  [mes: string]: number;
+  [mes: string]: number | string;
 }
 
 interface EndividamentoItem {
@@ -93,6 +98,7 @@ interface AnaliseData {
   status?: string;
 
   // CAPA
+  empresas_principais: EmpresaPrincipal[];
   data_analise: string;
   relacionamento: string;
   analista: string;
@@ -159,6 +165,7 @@ interface AnaliseData {
 
 const DADOS_MODELO: AnaliseData = {
   id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA",
+  empresas_principais: [{ razao_social: "EMPRESA MODELO LTDA", cnpj: "00.000.000/0001-00" }],
   data_analise: new Date().toISOString().split("T")[0], 
   relacionamento: "Prospect", analista: "Alyson", gerente: "Luiz", rating: "B - Risco médio", 
   
@@ -184,6 +191,46 @@ const DADOS_MODELO: AnaliseData = {
   organograma_json: null
 };
 
+// =========================================================================
+// COMPONENTES AUXILIARES
+// =========================================================================
+function MathInput({ value, onChange, className }: { value: any, onChange: (v: string) => void, className: string }) {
+  const [localVal, setLocalVal] = useState(value || "");
+  useEffect(() => { setLocalVal(value || ""); }, [value]);
+
+  const handleBlur = () => {
+    try {
+      // Troca vírgula por ponto para avaliação matemática, tira espaços
+      const valStr = String(localVal).replace(/\s/g, '').replace(',', '.');
+      // Se contiver operadores matemáticos permitidos
+      if (/[\+\-\*\/]/.test(valStr)) {
+        // Tira tudo que não seja número, ponto ou operadores matemáticos básicos
+        const sanitized = valStr.replace(/[^\d\.\+\-\*\/\(\)]/g, '');
+        const result = new Function(`'use strict'; return (${sanitized})`)();
+        onChange(result.toString());
+        setLocalVal(result.toString());
+      } else {
+        onChange(localVal);
+      }
+    } catch {
+      onChange(localVal);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={localVal}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={handleBlur}
+      className={className}
+    />
+  );
+}
+
+// =========================================================================
+// PÁGINA PRINCIPAL
+// =========================================================================
 export default function MesaAnalisePage() {
   return (
     <div className="font-sans antialiased text-slate-800">
@@ -197,6 +244,7 @@ export default function MesaAnalisePage() {
 function MesaAnaliseConteudo() {
   const searchParams = useSearchParams();
   const idDaUrl = searchParams.get("id");
+  const uploadJsonRef = useRef<HTMLInputElement>(null);
 
   const [fila, setFila] = useState<FilaItem[]>([]);
   const [analise, setAnalise] = useState<AnaliseData>(DADOS_MODELO);
@@ -220,7 +268,6 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
-      // ✅ Atualizado para a tabela "analises" e usando "empresa_nome" e "criado_em"
       const { data, error } = await supabase
         .from("analises")
         .select("id, empresa_nome, cnpj, status")
@@ -240,29 +287,29 @@ function MesaAnaliseConteudo() {
     try {
       setLoadingAnalise(true);
       setIdSelecionado(id);
-      // ✅ Atualizado para a tabela "analises"
       const { data, error } = await supabase.from("analises").select("*").eq("id", id).single();
       if (error) throw error;
       if (data) {
         const dc = data.dados_consolidados || {};
-        
-        // 🔒 CAMADA DE TRADUÇÃO DE SEGURANÇA MESA V8
         const listaSocios = dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || []);
         const listaEndividamento = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
         const listaRestritivos = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
+        const razao_social = data.empresa_nome || dc.razao_social || "";
+        const cnpj = data.cnpj || dc.cnpj || "";
+        const empresas_principais = dc.empresas_principais?.length ? dc.empresas_principais : [{ razao_social, cnpj }];
         
         setAnalise({ 
           ...DADOS_MODELO, 
           ...dc,  
+          empresas_principais,
           socios: listaSocios,
           endividamento_detalhado: listaEndividamento,
           restritivos: listaRestritivos,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
           id: data.id, 
-          cnpj: data.cnpj, 
-          // ✅ Harmonizando o nome da tabela com o estado da tela
-          razao_social: data.empresa_nome || dc.razao_social || "", 
+          cnpj: cnpj, 
+          razao_social: razao_social, 
           status: data.status 
         });
       }
@@ -283,10 +330,9 @@ function MesaAnaliseConteudo() {
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       
-      // ✅ Atualiza a tabela nova, e garante que a coluna "empresa_nome" se mantenha sincronizada
       const { error } = await supabase.from("analises").update({ 
         dados_consolidados: dadosParaCompactar,
-        empresa_nome: analise.razao_social // Sincroniza caso tenham editado o input principal
+        empresa_nome: analise.razao_social
       }).eq("id", analise.id);
       
       if (error) throw error;
@@ -313,7 +359,6 @@ function MesaAnaliseConteudo() {
       await persistirNoBanco(false); 
       
       const novoStatus = analise.recomendacao_analista.toLowerCase() === "aprovado" ? "aprovado" : "reprovado";
-      // ✅ Atualizando a tabela "analises"
       const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
       
@@ -336,7 +381,6 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
-      // ✅ Atualizando a tabela "analises"
       const { error } = await supabase.from("analises").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
@@ -351,7 +395,15 @@ function MesaAnaliseConteudo() {
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
     const novoArray = [...(analise[campo] as any[])];
     novoArray[index][subCampo] = valor;
-    setAnalise({ ...analise, [campo]: novoArray });
+    
+    // Sincroniza raízes se estiver editando a primeira Empresa Principal
+    if (campo === 'empresas_principais' && index === 0) {
+       if (subCampo === 'razao_social') setAnalise({ ...analise, [campo]: novoArray, razao_social: valor });
+       else if (subCampo === 'cnpj') setAnalise({ ...analise, [campo]: novoArray, cnpj: valor });
+       else setAnalise({ ...analise, [campo]: novoArray });
+    } else {
+       setAnalise({ ...analise, [campo]: novoArray });
+    }
   };
   const addArray = (campo: keyof AnaliseData, obj: any) => setAnalise({ ...analise, [campo]: [...(analise[campo] as any[]), obj] });
   const rmArray = (campo: keyof AnaliseData, index: number) => setAnalise({ ...analise, [campo]: (analise[campo] as any[]).filter((_, i) => i !== index) });
@@ -362,22 +414,36 @@ function MesaAnaliseConteudo() {
   const handleFat = (ano: string, mes: string, val: string) => {
     const fatAtual = { ...analise.dados_faturamento };
     if (!fatAtual[ano]) fatAtual[ano] = {};
-    fatAtual[ano][mes] = Number(val || 0);
+    fatAtual[ano][mes] = val; // Agora guarda como string se preferível ou repassa Number. O mathInput retorna string com o calc resolvido.
     setAnalise({ ...analise, dados_faturamento: fatAtual });
   };
 
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
-  const mesesPreenchidos = (ano: string) => meses.filter(m => analise.dados_faturamento[ano]?.[m] > 0).length;
+  const mesesPreenchidos = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
   const calcMedia = (ano: string) => { const pre = mesesPreenchidos(ano); return pre === 0 ? 0 : calcTotAno(ano) / 12; }; 
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
+
+  // Faturamento e Potencial Ajustados
+  const faturamentoMedioReferencia = calcMedia("2026") > 0 ? calcMedia("2026") : calcMedia("2025") > 0 ? calcMedia("2025") : calcMedia("2024");
+  
+  // Extrai apenas os números para ver quantos dias. Ex: "60 dias" -> 60.
+  const prazoDias = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 30;
+  // Multiplicador de ciclo = prazo em dias dividido por 30 (Ex: 60 dias = 2 ciclos mensais de saldo)
+  const fatorCiclo = prazoDias / 30;
+  // Potencial = Faturamento Médio * % Vendido a Prazo * Fator de Ciclo
+  const faturamentoAPrazo = faturamentoMedioReferencia * (Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100);
+  const potencialRealCalculado = faturamentoAPrazo * fatorCiclo;
+
+  // Comparativo Período Fechado
+  const mesesComFat26 = meses.filter(m => Number(analise.dados_faturamento["2026"]?.[m] || 0) > 0);
+  const somaParcial26 = mesesComFat26.reduce((acc, m) => acc + Number(analise.dados_faturamento["2026"]?.[m] || 0), 0);
+  const somaParcial25 = mesesComFat26.reduce((acc, m) => acc + Number(analise.dados_faturamento["2025"]?.[m] || 0), 0);
+  const varParcial = somaParcial25 > 0 ? ((somaParcial26 - somaParcial25) / somaParcial25) * 100 : 0;
 
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
   const totRestritivos = analise.restritivos.reduce((acc, r) => acc + Number(r.valor), 0);
-
-  const faturamentoMedioReferencia = calcMedia("2025") > 0 ? calcMedia("2025") : calcMedia("2024");
-  const potencialRealCalculado = faturamentoMedioReferencia * (Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100);
 
   const totEndivGeral = analise.endividamento_detalhado.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivCurtoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
@@ -426,7 +492,6 @@ function MesaAnaliseConteudo() {
                 }`}
               >
                 <div className="flex justify-between items-start gap-1">
-                  {/* ✅ Adaptado para renderizar empresa_nome na fila */}
                   <p className={`text-[10px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.empresa_nome}</p>
                   {item.status === "em_processamento_ia" && idSelecionado !== item.id && (
                     <span className="bg-purple-100 text-purple-700 font-black text-[8px] px-1 py-0.5 rounded animate-pulse uppercase shrink-0">ROBÔ</span>
@@ -463,6 +528,9 @@ function MesaAnaliseConteudo() {
               </div>
               
               <div className="flex items-center gap-1.5">
+                <button onClick={() => alert("Acionando extração em lote dos documentos mais recentes...")} className="bg-slate-800 border border-slate-900 hover:bg-slate-700 text-white font-bold px-3 py-1 text-[10px] shadow-sm cursor-pointer">
+                  🤖 Ler Novos Docs
+                </button>
                 <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className="bg-slate-200 border border-slate-400 hover:bg-slate-300 text-slate-800 font-bold px-3 py-1 text-[10px] shadow-sm cursor-pointer">
                   💾 Salvar
                 </button>
@@ -508,20 +576,39 @@ function MesaAnaliseConteudo() {
                       <span>🔮 O Motor Python V8 está lendo e estruturando os arquivos anexados a essa conta. Os dados abaixo vão atualizar dinamicamente!</span>
                     </div>
                   )}
+
+                  <div>
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
+                      <span>Empresas (Principal e Coobrigados Base)</span>
+                      <button onClick={() => addArray('empresas_principais', {razao_social:"", cnpj:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Linha Empresa</button>
+                    </div>
+                    <table className="w-full border-collapse border border-slate-400">
+                      <tbody>
+                        {analise.empresas_principais?.map((emp, i) => (
+                          <tr key={i}>
+                            <td className={`${thStyle} w-1/6 text-right`}>{i === 0 ? "Empresa Principal" : "Coobrigado"}</td>
+                            <td className={`${tdStyle} w-2/6`}><input value={emp.razao_social} onChange={(e)=>updateArray('empresas_principais', i, 'razao_social', e.target.value)} className={`${cellStyle} font-bold bg-slate-50`} /></td>
+                            <td className={`${thStyle} w-1/6 text-right`}>CNPJ</td>
+                            <td className={`${tdStyle} w-2/6 relative`}>
+                              <input value={emp.cnpj} onChange={(e)=>updateArray('empresas_principais', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono bg-slate-50`} />
+                              {i > 0 && <button onClick={()=>rmArray('empresas_principais', i)} className="absolute right-0 top-0 text-red-500 font-bold hover:bg-red-50 px-2 h-full border-l border-slate-300">X</button>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
                   <table className="w-full border-collapse border border-slate-400">
                     <tbody>
                       <tr>
-                        <td className={`${thStyle} w-1/6 text-right`}>Empresa Principal</td><td className={`${tdStyle} w-2/6`}><input value={analise.razao_social} readOnly className={`${cellStyle} font-bold bg-slate-50`} /></td>
-                        <td className={`${thStyle} w-1/6 text-right`}>CNPJ</td><td className={`${tdStyle} w-2/6`}><input value={analise.cnpj} readOnly className={`${cellStyle} font-mono bg-slate-50`} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Relacionamento</td>
-                        <td className={tdStyle}>
+                        <td className={`${thStyle} text-right w-1/6`}>Relacionamento</td>
+                        <td className={`${tdStyle} w-2/6`}>
                           <select value={analise.relacionamento} onChange={(e)=>setAnalise({...analise, relacionamento: e.target.value})} className={cellStyle}>
                             <option value="Prospect">Prospect</option><option value="Cliente">Cliente</option>
                           </select>
                         </td>
-                        <td className={`${thStyle} text-right`}>Data Análise</td><td className={tdStyle}><input type="date" value={analise.data_analise} onChange={(e)=>setAnalise({...analise, data_analise: e.target.value})} className={cellStyle} /></td>
+                        <td className={`${thStyle} text-right w-1/6`}>Data Análise</td><td className={`${tdStyle} w-2/6`}><input type="date" value={analise.data_analise} onChange={(e)=>setAnalise({...analise, data_analise: e.target.value})} className={cellStyle} /></td>
                       </tr>
                       <tr>
                         <td className={`${thStyle} text-right`}>Gerente Comercial</td><td className={tdStyle}><input value={analise.gerente} onChange={(e)=>setAnalise({...analise, gerente: e.target.value})} className={cellStyle} /></td>
@@ -630,17 +717,45 @@ function MesaAnaliseConteudo() {
                                   const cnpjLimpo = analise.cnpj.replace(/\D/g, '');
                                   window.open(`/dashboard/busca-grupo?analise_id=${analise.id}&cnpj=${cnpjLimpo}`, '_blank');
                                 }}
-                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 text-[10px] rounded transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 text-[10px] rounded shadow-sm flex items-center gap-1 cursor-pointer whitespace-nowrap"
                               >
                                 🕸️ Abrir Gerador de Teia
                               </button>
                               
+                              <input 
+                                type="file" 
+                                accept=".json" 
+                                ref={uploadJsonRef}
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = (evt) => {
+                                      try {
+                                          const json = JSON.parse(evt.target?.result as string);
+                                          setAnalise({ ...analise, organograma_json: json });
+                                          alert("✅ JSON de Organograma anexado com sucesso!");
+                                      } catch(err: any) {
+                                          alert("❌ Erro ao ler JSON: " + err.message);
+                                      }
+                                  };
+                                  reader.readAsText(file);
+                                }}
+                              />
+                              <button 
+                                onClick={() => uploadJsonRef.current?.click()} 
+                                className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 px-3 text-[10px] rounded border border-slate-400 shadow-sm whitespace-nowrap"
+                              >
+                                📎 Anexar JSON
+                              </button>
+                              
                               {analise.organograma_json && analise.organograma_json.nodes?.length > 0 ? (
-                                <span className="text-green-600 font-bold text-[10px] flex items-center gap-1">
-                                  ✅ Teia vinculada ao Dossiê! ({analise.organograma_json.nodes.length} nós)
+                                <span className="text-green-600 font-bold text-[10px] flex items-center gap-1 ml-2">
+                                  ✅ Teia vinculada! ({analise.organograma_json.nodes.length} nós)
                                 </span>
                               ) : (
-                                <span className="text-slate-400 text-[10px] italic">Sem teia mapeada</span>
+                                <span className="text-slate-400 text-[10px] italic ml-2">Sem teia mapeada</span>
                               )}
                             </div>
                           </td>
@@ -770,14 +885,32 @@ function MesaAnaliseConteudo() {
                             return (
                               <tr key={mes}>
                                 <td className={`${tdStyle} bg-slate-100 font-bold uppercase text-[10px] pl-2`}>{mes}</td>
-                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2026"]?.[mes] || ""} onChange={(e) => handleFat("2026", mes, e.target.value)} className={numStyle} /></td>
+                                <td className={tdStyle}>
+                                  <MathInput value={analise.dados_faturamento["2026"]?.[mes]} onChange={(val) => handleFat("2026", mes, val)} className={numStyle} />
+                                </td>
                                 <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-green-600' : d26 < 0 ? 'text-red-600' : 'text-slate-400'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
-                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2025"]?.[mes] || ""} onChange={(e) => handleFat("2025", mes, e.target.value)} className={numStyle} /></td>
+                                <td className={tdStyle}>
+                                  <MathInput value={analise.dados_faturamento["2025"]?.[mes]} onChange={(val) => handleFat("2025", mes, val)} className={numStyle} />
+                                </td>
                                 <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-green-600' : d25 < 0 ? 'text-red-600' : 'text-slate-400'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
-                                <td className={tdStyle}><input type="number" value={analise.dados_faturamento["2024"]?.[mes] || ""} onChange={(e) => handleFat("2024", mes, e.target.value)} className={numStyle} /></td>
+                                <td className={tdStyle}>
+                                  <MathInput value={analise.dados_faturamento["2024"]?.[mes]} onChange={(val) => handleFat("2024", mes, val)} className={numStyle} />
+                                </td>
                               </tr>
                             );
                           })}
+                          
+                          <tr className="bg-yellow-50 border-t-2 border-yellow-300 font-bold text-[10px]">
+                            <td className="p-1.5 border border-slate-400 text-slate-700" title="Compara apenas os meses preenchidos em 2026 com os mesmos meses de 2025">COMPARATIVO PERÍODO (2026)</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-yellow-800">{somaParcial26.toLocaleString("pt-BR")}</td>
+                            <td className={`border border-slate-400 text-center ${varParcial > 0 ? 'text-green-600' : varParcial < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {varParcial === 0 ? "-" : `${varParcial.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono">{somaParcial25.toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-400"></td>
+                            <td className="border border-slate-400 bg-slate-100"></td>
+                          </tr>
+
                           <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400">TOTAL ANO</td>
                             <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td><td className="border border-slate-400"></td>
@@ -833,9 +966,10 @@ function MesaAnaliseConteudo() {
                       </table>
                     </div>
                     <div className="bg-green-50 border border-green-300 p-6 flex flex-col justify-center items-center text-center rounded-sm">
-                      <span className="text-[11px] font-bold text-green-800 uppercase tracking-wider">Potencial Real Estimado (Vendas a Prazo)</span>
+                      <span className="text-[11px] font-bold text-green-800 uppercase tracking-wider">Potencial Real Estimado (Ciclos A Prazo)</span>
                       <span className="font-mono text-3xl font-black text-green-700 mt-2">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <p className="text-[9px] text-slate-500 mt-2 italic">Base: Faturamento Médio Mensal (R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:0})}) × {analise.dados_potencial.forma_recebimento_prazo}% a prazo</p>
+                      <p className="text-[9px] text-slate-500 mt-2 italic">Base (Média Vendas): R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:0})} × {analise.dados_potencial.forma_recebimento_prazo}% (A Prazo)</p>
+                      <p className="text-[9px] text-slate-500 mt-0.5 italic">Ciclos Acumulados no Prazo Médio: {(fatorCiclo).toFixed(2)}x ({prazoDias} dias / 30)</p>
                     </div>
                   </div>
                 </div>
