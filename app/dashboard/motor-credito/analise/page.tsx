@@ -445,7 +445,15 @@ function MesaAnaliseConteudo() {
   
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
   const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
-  const calcMediaGeralAno = (ano: string) => { const pre = mesesPreenchidosGeral(ano); return pre === 0 ? 0 : calcTotAno(ano) / 12; }; 
+  
+  // CORREÇÃO: A Média Geral Anual agora respeita os meses preenchidos do ano vigente (2026), e divide por 12 para anos fechados.
+  const calcMediaGeralAno = (ano: string) => { 
+      const pre = mesesPreenchidosGeral(ano); 
+      if (pre === 0) return 0;
+      const divisor = ano === "2026" ? pre : 12;
+      return calcTotAno(ano) / divisor; 
+  }; 
+  
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
