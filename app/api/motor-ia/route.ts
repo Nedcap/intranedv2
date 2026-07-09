@@ -13,8 +13,8 @@ export async function POST(request: Request) {
 
     console.log(`[VERCEL API] Encaminhando análise ${analise_id} para o Motor V8 no Render...`);
 
-    // 🔥 CHAMA O SEU BACKEND PYTHON DO RENDER QUE ESTÁ LIVE!
-    const urlRender = "https://motor-ia-mmlv.onrender.com/analisar"; 
+    // 🔥 AGORA SIM! Apontando para a rota exata do seu main.py (/api/motor-ia)
+    const urlRender = "https://motor-ia-mmlv.onrender.com/api/motor-ia"; 
 
     const respostaRender = await fetch(urlRender, {
       method: "POST",
