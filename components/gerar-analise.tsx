@@ -114,7 +114,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
       // ==========================================
-      // AJUSTE: FATURAMENTO MÉDIO (POR MESES PREENCHIDOS)
+      // FATURAMENTO MÉDIO (POR MESES PREENCHIDOS)
       // ==========================================
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
@@ -501,7 +501,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
           ` : ''}
 
-          <!-- AJUSTE: CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
+          <!-- CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
           <div class="grid-2">
               <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
                   <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
@@ -569,7 +569,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           }
 
           // ==========================================
-          // AJUSTE: ORGANOGRAMA (CÍRCULOS DE MESMO TAMANHO)
+          // FIX ORGANOGRAMA: APENAS WIDTH CONSTRAINT
           // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
@@ -585,15 +585,15 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           id: n.id, 
                           label: labelText,
                           shape: 'circle',
-                          widthConstraint: { minimum: 90, maximum: 90 }, // Trava a largura fixa em 90px
-                          heightConstraint: { minimum: 90, maximum: 90 }, // Trava a altura fixa em 90px
+                          // Deixando SÓ a largura fixada em 100px.
+                          // A biblioteca calcula a altura sozinha pra fechar um círculo e não "some".
+                          widthConstraint: { minimum: 100, maximum: 100 }, 
                           font: { color: '#ffffff', size: 10, face: 'Inter', multi: 'html', bold: true },
                           color: { 
                               background: bgColor, 
                               border: borderColor,
                               highlight: { background: bgColor, border: '#000000' }
                           },
-                          margin: 0,
                           borderWidth: 1.5,
                           shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 8, x: 0, y: 4 }
                       };
