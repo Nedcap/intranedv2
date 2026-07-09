@@ -143,7 +143,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         </tr>`;
       }).join("");
 
-      // Modificado para dividir APENAS pela quantidade de meses com movimento
       const med2024 = qtd2024 > 0 ? tot2024 / qtd2024 : 0;
       const med2025 = qtd2025 > 0 ? tot2025 / qtd2025 : 0;
       const med2026 = qtd2026 > 0 ? tot2026 / qtd2026 : 0;
@@ -569,7 +568,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           }
 
           // ==========================================
-          // FIX ORGANOGRAMA: APENAS WIDTH CONSTRAINT
+          // FIX ORGANOGRAMA: REMOVIDO WIDTH CONSTRAINT E AJUSTADO FÍSICA
           // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
@@ -577,18 +576,38 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               const container = document.getElementById('network-container');
               if (container) {
                   const nodes = new vis.DataSet(orgaJson.nodes.map(n => {
-                      const labelText = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
+                      let rawLabel = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
+                      
+                      // 1. Limpa possíveis lixos HTML que bugam o renderizador
+                      rawLabel = String(rawLabel).replace(/<[^>]*>?/gm, ''); 
+
+                      // 2. Quebra o texto matematicamente para forçar um formato quadrado
+                      // (Isso faz com que o shape 'circle' englobe o texto uniformemente)
+                      const words = rawLabel.split(' ');
+                      let lines = [];
+                      let currentLine = '';
+                      words.forEach(w => {
+                          if ((currentLine + w).length > 12) {
+                              if (currentLine.trim() !== '') lines.push(currentLine.trim());
+                              currentLine = w + ' ';
+                          } else {
+                              currentLine += w + ' ';
+                          }
+                      });
+                      if (currentLine.trim() !== '') lines.push(currentLine.trim());
+                      
+                      // Insere um "enter" limpo, sem conflitos com strings escapadas no React
+                      const finalLabel = lines.join(String.fromCharCode(10));
+
                       const bgColor = (n.style && n.style.backgroundColor) ? n.style.backgroundColor : '#2563eb';
                       const borderColor = (n.style && n.style.borderColor) ? n.style.borderColor : 'rgba(0,0,0,0.2)';
 
                       return {
                           id: n.id, 
-                          label: labelText,
+                          label: finalLabel,
                           shape: 'circle',
-                          // Deixando SÓ a largura fixada em 100px.
-                          // A biblioteca calcula a altura sozinha pra fechar um círculo e não "some".
-                          widthConstraint: { minimum: 100, maximum: 100 }, 
-                          font: { color: '#ffffff', size: 10, face: 'Inter', multi: 'html', bold: true },
+                          margin: 15, // Cria o respiro interno do círculo
+                          font: { color: '#ffffff', size: 11, face: 'Inter', bold: true },
                           color: { 
                               background: bgColor, 
                               border: borderColor,
@@ -619,8 +638,10 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   new vis.Network(container, { nodes, edges }, {
                       layout: { randomSeed: 2 },
                       physics: {
-                          forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.005, springLength: 200, springConstant: 0.05 },
-                          maxVelocity: 50, solver: 'forceAtlas2Based', timestep: 0.35, stabilization: { iterations: 150 }
+                          // Mudamos para repulsion para evitar o efeito "teia esgarçada" da imagem
+                          solver: 'repulsion',
+                          repulsion: { nodeDistance: 120, centralGravity: 0.1, springLength: 150 },
+                          maxVelocity: 50, timestep: 0.35, stabilization: { iterations: 150 }
                       },
                       interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true }
                   });
