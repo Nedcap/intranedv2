@@ -415,7 +415,7 @@ function MesaAnaliseConteudo() {
   };
 
   // =========================================================================
-  // FÓRMULAS DE FATURAMENTO E POTENCIAL
+  // FÓRMULAS DE FATURAMENTO E POTENCIAL YTD
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
@@ -429,7 +429,7 @@ function MesaAnaliseConteudo() {
   }
   
   const has26Data = lastFilledIndex26 >= 0;
-  const limitIndex = has26Data ? lastFilledIndex26 : 11; // Se não tem 26, usa o ano todo
+  const limitIndex = has26Data ? lastFilledIndex26 : 11; 
   const mesesYTD = meses.slice(0, limitIndex + 1);
   const labelMascaraYTD = has26Data ? `MÉDIA ATÉ ${meses[lastFilledIndex26].toUpperCase()}` : "MÉDIA YTD";
 
@@ -451,10 +451,10 @@ function MesaAnaliseConteudo() {
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
-  // Usa a média YTD do ano mais recente como Faturamento Base
+  // Usa a média YTD do ano mais recente preenchido como Faturamento Base Oficial
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
-  // === CÁLCULO EXATO DE POTENCIAL DE NEGÓCIOS V8 (Conforme Excel) ===
+  // === CÁLCULO EXATO DE POTENCIAL DE NEGÓCIOS V8 (Idêntico ao Excel) ===
   const prazoDiasDpls = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 0;
   const prazoDiasComissaria = parseInt(String(analise.dados_potencial.prazo_medio_comissaria).replace(/\D/g, "")) || 0;
   
@@ -462,11 +462,10 @@ function MesaAnaliseConteudo() {
   const percDpls = Number(analise.dados_potencial.composicao_dpls || 0) / 100;
   const percComissaria = Number(analise.dados_potencial.composicao_comissaria || 0) / 100;
 
-  // Fórmula Exata = ((Faturamento Base / 30 dias) * Prazo Médio) * Composição% * % A Prazo
+  // Fórmula Excel Exata: ((FatBase / 30) * Prazo) * Composição% * % A Prazo
   const potDpls = (faturamentoMedioReferencia / 30) * prazoDiasDpls * percDpls * percAPrazo;
   const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
   const potencialRealCalculado = potDpls + potComissaria;
-
 
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
@@ -1002,12 +1001,12 @@ function MesaAnaliseConteudo() {
                       </table>
                     </div>
                     <div className="bg-blue-50 border border-blue-300 p-6 flex flex-col justify-center items-center text-center rounded-sm">
-                      <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">Potencial Real Estimado (Vendas a Prazo)</span>
+                      <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">Potencial Real Estimado (Ciclo a Prazo)</span>
                       <span className="font-mono text-3xl font-black text-blue-700 mt-2">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       
                       <div className="text-[9px] text-slate-500 mt-4 space-y-1">
-                          <p><strong>Faturamento Base Ref:</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
-                          <p><strong>Cálculo:</strong> (Fat. Base ÷ 30 dias) × Prazo × Composição(%) × Receb. a Prazo(%)</p>
+                          <p><strong>Faturamento Base (Média Parcial/YTD):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
+                          <p><strong>Cálculo Realizado:</strong> ((Fat. Base ÷ 30) × Prazo) × Composição(%) × Receb. a Prazo(%)</p>
                       </div>
                     </div>
                   </div>
@@ -1045,7 +1044,7 @@ function MesaAnaliseConteudo() {
                         </tr>
                         <tr>
                           <td colSpan={7} className="p-2 text-center text-[10px] text-slate-500 bg-slate-100 font-sans border border-slate-400">
-                            Alavancagem Cedente / Faturamento Base: <strong className="text-slate-800 text-xs">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
+                            Alavancagem Cedente / Faturamento Base Oficial: <strong className="text-slate-800 text-xs">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
                           </td>
                         </tr>
                       </tbody>
