@@ -186,40 +186,50 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           
           <style>
-              :root { --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #64748b; --blue: #2563eb; --blue-dark: #1e3a8a; --border: #e2e8f0; --green: #16a34a; --red: #dc2626; --yellow: #ca8a04; }
+              /* FUNDO BRANCO E ESTILIZAÇÃO PREMIUM */
+              :root { --bg: #ffffff; --card: #ffffff; --text: #0f172a; --muted: #64748b; --blue: #2563eb; --blue-dark: #1e3a8a; --border: #e2e8f0; --green: #16a34a; --red: #dc2626; --yellow: #ca8a04; }
               body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; font-size: 13px; }
               .container { max-width: 1200px; margin: 0 auto; }
-              .header { background: linear-gradient(135deg, var(--blue-dark), var(--blue)); color: white; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 2rem; display: flex; flex-direction: column; gap: 1rem; align-items: flex-start; }
+              .header { background: linear-gradient(135deg, var(--blue-dark), var(--blue)); color: white; padding: 2.5rem; border-radius: 0.75rem; box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.2); margin-bottom: 2rem; display: flex; flex-direction: column; gap: 1rem; align-items: flex-start; }
               @media(min-width: 768px){ .header { flex-direction: row; justify-content: space-between; align-items: center; } }
-              .header h1 { margin: 0; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.5px; text-transform: uppercase;}
-              .header .meta { font-size: 0.85rem; opacity: 0.9; margin-top: 0.5rem; }
-              .header .badge-top { background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 2rem; font-weight: 600; font-size: 0.85rem; backdrop-filter: blur(4px); text-transform: uppercase;}
-              h2 { font-size: 1.15rem; font-weight: 700; color: var(--text); margin: 2rem 0 1rem 0; display: flex; align-items: center; gap: 0.5rem; text-transform: uppercase; }
-              h2::before { content: ""; display: inline-block; width: 4px; height: 1.15rem; background-color: var(--blue); border-radius: 2px; }
+              .header h1 { margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; text-transform: uppercase;}
+              .header .meta { font-size: 0.9rem; opacity: 0.9; margin-top: 0.5rem; font-weight: 500; }
+              .header .badge-top { background: rgba(255,255,255,0.25); padding: 0.5rem 1.25rem; border-radius: 2rem; font-weight: 700; font-size: 0.85rem; backdrop-filter: blur(4px); text-transform: uppercase; border: 1px solid rgba(255,255,255,0.3);}
+              
+              h2 { font-size: 1.2rem; font-weight: 800; color: var(--blue-dark); margin: 2.5rem 0 1.25rem 0; display: flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;}
+              h2::before { content: ""; display: inline-block; width: 6px; height: 1.2rem; background-color: var(--blue); border-radius: 4px; }
+              
               .grid-2, .grid-3, .grid-4 { display: grid; gap: 1.5rem; grid-template-columns: 1fr; }
               @media (min-width: 768px) { .grid-2 { grid-template-columns: repeat(2, 1fr); } .grid-3 { grid-template-columns: repeat(3, 1fr); } .grid-4 { grid-template-columns: repeat(4, 1fr); } }
-              .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1.25rem; box-shadow: 0 1px 3px 0 rgba(0,0,0,0.05); }
-              .metric { margin-bottom: 1rem; }
-              .metric-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; margin-bottom: 0.25rem; }
-              .metric-value { font-size: 1.25rem; font-weight: 700; color: var(--text); }
-              .table-wrap { overflow-x: auto; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; box-shadow: 0 1px 3px 0 rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
+              
+              .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+              .metric-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+              .metric-value { font-size: 1.5rem; font-weight: 800; color: var(--text); }
+              
+              .table-wrap { overflow-x: auto; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
               table { width: 100%; border-collapse: collapse; text-align: left; }
-              th, td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-              th { background: #f8fafc; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; }
+              th, td { padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border); }
+              th { background: #f8fafc; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; }
               tr:hover { background: #f1f5f9; }
               .text-right { text-align: right; }
               .text-center { text-align: center; }
-              .delta-pos { color: var(--green); font-weight: 600; }
-              .delta-neg { color: var(--red); font-weight: 600; }
-              .row-total td { background: var(--bg); font-weight: 700; font-size: 0.85rem; border-top: 2px solid var(--border); }
+              .delta-pos { color: var(--green); font-weight: 700; }
+              .delta-neg { color: var(--red); font-weight: 700; }
+              .row-total td { background: #f8fafc; font-weight: 800; font-size: 0.9rem; border-top: 2px solid var(--border); }
+              
               .chart-container { position: relative; height: 280px; width: 100%; }
-              .parecer-wrapper { background: white; border-radius: 0.5rem; border: 1px solid #e2e8f0; box-shadow: 0 4px 15px rgba(0,0,0,0.05); overflow: hidden; position: relative; margin-bottom: 2rem;}
-              .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--blue); }
-              .parecer-header { background: #f8fafc; padding: 1rem 1.5rem; font-weight: 800; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size:0.9rem;}
-              .parecer-body { padding: 1.5rem; font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap; text-align: justify;}
-              .parecer-footer { background: #f8fafc; padding: 0.75rem 1.5rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 11px; }
-              .btn-maps { background: var(--blue); color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-block; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid rgba(0,0,0,0.1); }
-              @media print { .print-break { page-break-before: always; } }
+              
+              .parecer-wrapper { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); overflow: hidden; position: relative; margin-bottom: 2rem;}
+              .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--blue); }
+              .parecer-header { background: #f8fafc; padding: 1.25rem 2rem; font-weight: 800; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size:1rem;}
+              .parecer-body { padding: 2rem; font-size: 1rem; line-height: 1.7; color: #334155; white-space: pre-wrap; text-align: justify;}
+              .parecer-footer { background: #f8fafc; padding: 1rem 2rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.85rem; font-weight: 600; text-align: right;}
+              
+              .btn-maps { background: var(--blue); color: white; padding: 10px 18px; border-radius: 0.5rem; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-block; transition: 0.2s; box-shadow: 0 4px 6px rgba(37,99,235,0.2); border: 1px solid rgba(0,0,0,0.1); }
+              .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(37,99,235,0.3); }
+              
+              .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #f8fafc; border: 1px dashed #cbd5e1; }
+              @media print { .print-break { page-break-before: always; } body { background: white; } .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } .header { padding: 1rem; color: black; background: white; border: 2px solid black; } .header .meta, .header .badge-top { color: black; } }
           </style>
       </head>
       <body>
@@ -236,11 +246,11 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <div class="grid-3" style="margin-bottom: 1.5rem;">
               <div class="card" style="grid-column: span 1; background:#f8fafc; display:flex; flex-direction:column; justify-content:center; align-items:center; border: 2px dashed var(--blue);">
                   <div class="metric-label" style="color:var(--blue-dark);">Rating Sugerido</div>
-                  <div class="metric-value" style="color: var(--yellow); text-align:center;">${analise.rating || '-'}</div>
+                  <div class="metric-value" style="color: var(--yellow); text-align:center; font-size: 1.8rem;">${analise.rating || '-'}</div>
               </div>
               <div class="card" style="grid-column: span 2;">
                   <div class="metric-label" style="margin-bottom: 0.5rem;">Resumo Executivo (Visita Comercial)</div>
-                  <div style="font-size: 0.85rem; color: var(--muted); line-height: 1.5; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo cadastrado.'}</div>
+                  <div style="font-size: 0.9rem; color: #475569; line-height: 1.6; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo cadastrado.'}</div>
               </div>
           </div>
 
@@ -253,7 +263,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       ${totalLimites > 0 ? `
                       <tr class="row-total">
                           <td>LIMITE TOTAL SOLICITADO</td>
-                          <td class="text-right" style="color:var(--blue-dark);">${formatarMoeda(totalLimites)}</td>
+                          <td class="text-right" style="color:var(--blue-dark); font-size: 1rem;">${formatarMoeda(totalLimites)}</td>
                           <td colspan="4"></td>
                       </tr>` : ''}
                   </tbody>
@@ -271,64 +281,68 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
 
           <div class="grid-2">
-              <div class="card" style="margin-bottom:0; padding:1rem;">
+              <div class="card" style="margin-bottom:0;">
                   <div class="metric-label">Localização & Ramo de Atividade</div>
-                  <div style="font-weight: 600; font-size: 0.85rem;">${analise.localizacao || '-'}<br><span style="font-weight:normal; color:var(--muted);">${analise.ramo || '-'}</span></div>
-                  <div style="font-size:11px; color:var(--muted); margin-top:10px;">Site: ${analise.site || 'Não Informado'} | Balanço Auditado: ${analise.balanco_auditado || 'Não'}</div>
+                  <div style="font-weight: 700; font-size: 0.95rem; color: var(--text);">${analise.localizacao || '-'}<br><span style="font-weight:500; font-size:0.85rem; color:var(--muted);">${analise.ramo || '-'}</span></div>
+                  <div style="font-size:0.8rem; color:var(--muted); margin-top:1rem; padding-top:1rem; border-top: 1px solid #f1f5f9;">
+                      Site: <strong style="color:var(--blue);">${analise.site || 'Não Informado'}</strong> <br> Balanço Auditado: <strong>${analise.balanco_auditado || 'Não'}</strong>
+                  </div>
               </div>
-              <div class="card" style="margin-bottom:0; padding:1rem;">
+              <div class="card" style="margin-bottom:0;">
                   <div class="metric-label">Quadro Societário & Assinaturas</div>
-                  <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                  <table style="width:100%; font-size: 0.85rem; border-collapse: collapse;">
                       ${socioRows}
                   </table>
-                  <div style="font-size:11px; color:var(--muted); margin-top:10px;">Regra de Assinatura: <strong>${analise.regra_assinatura || '-'}</strong> | Aval: <strong>${analise.aval_societario || '-'}</strong></div>
+                  <div style="font-size:0.8rem; color:var(--muted); margin-top:1rem; padding-top:1rem; border-top: 1px solid #f1f5f9;">
+                      Regra de Assinatura: <strong>${analise.regra_assinatura || '-'}</strong> <br> Aval Societário: <strong>${analise.aval_societario || '-'}</strong>
+                  </div>
               </div>
           </div>
 
           <!-- LOCALIZAÇÃO / MAPS -->
           <div class="grid-2" style="margin-top: 1.5rem;">
-              <div class="card" style="padding:0; overflow:hidden; position:relative;">
-                  <div style="position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.9); padding:4px 8px; border-radius:4px; font-size:0.7rem; font-weight:bold; z-index:10; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">Visão de Satélite</div>
+              <div class="card" style="padding:0; overflow:hidden; position:relative; border: 1px solid #cbd5e1;">
+                  <div style="position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.95); padding:6px 12px; border-radius:6px; font-size:0.75rem; font-weight:800; z-index:10; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: var(--blue-dark); text-transform: uppercase;">Satélite</div>
                   <iframe width="100%" height="300" frameborder="0" style="border:0" src="https://maps.google.com/maps?q=${enderecoQuery}&t=k&z=18&output=embed" allowfullscreen></iframe>
               </div>
               
-              <div class="card" style="padding: 2rem; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#f8fafc; text-align: center;">
-                  <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📍</div>
-                  <div style="font-weight: 800; color: var(--blue-dark); margin-bottom: 0.5rem; font-size: 1.1rem;">Endereço Mapeado</div>
-                  <div style="font-size: 0.85rem; color: var(--text); font-weight: 500; margin-bottom: 1.5rem; max-width: 90%; line-height: 1.5;">${localizacaoReal}</div>
+              <div class="card" style="padding: 2rem; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#f8fafc; text-align: center; border: 1px solid #cbd5e1;">
+                  <div style="font-size: 3rem; margin-bottom: 0.5rem;">📍</div>
+                  <div style="font-weight: 800; color: var(--blue-dark); margin-bottom: 0.5rem; font-size: 1.2rem;">Endereço Mapeado</div>
+                  <div style="font-size: 0.9rem; color: var(--text); font-weight: 500; margin-bottom: 2rem; max-width: 90%; line-height: 1.5;">${localizacaoReal}</div>
                   
-                  <div style="display: flex; gap: 0.75rem; width: 100%; justify-content: center; flex-wrap: wrap;">
-                      <a href="https://www.google.com/maps/search/?api=1&query=${enderecoQuery}" target="_blank" class="btn-maps" style="background: var(--blue);">🗺️ Abrir Mapa Externo</a>
-                      <a href="https://www.google.com/maps?q=${enderecoQuery}&layer=c" target="_blank" class="btn-maps" style="background: #16a34a;">🚶‍♂️ Street View interativo</a>
+                  <div style="display: flex; gap: 1rem; width: 100%; justify-content: center; flex-wrap: wrap;">
+                      <a href="https://www.google.com/maps/search/?api=1&query=${enderecoQuery}" target="_blank" class="btn-maps">🗺️ Ver no Mapa Externo</a>
+                      <a href="https://www.google.com/maps?q=${enderecoQuery}&layer=c" target="_blank" class="btn-maps" style="background: #16a34a;">🚶‍♂️ Street View Interativo</a>
                   </div>
               </div>
           </div>
 
           <!-- ORGANOGRAMA INTERATIVO (VIS.JS) -->
-          <h2 style="margin-top: 3rem;">3. Organograma / Teia Societária</h2>
-          <div style="margin-bottom: 2rem;">
+          <h2 style="margin-top: 3.5rem;">3. Organograma / Teia Societária</h2>
+          <div style="margin-bottom: 2.5rem;">
               ${analise.organograma_json && analise.organograma_json.nodes && analise.organograma_json.nodes.length > 0 ? `
               <div class="card" style="padding:1rem;">
-                  <div id="network-container" style="width: 100%; height: 500px; border: 1px solid var(--border); border-radius: 0.5rem; background: #fafafa;"></div>
+                  <div id="network-container" class="org-container"></div>
               </div>
               ` : analise.anexos?.organograma_url ? `
-              <div class="card" style="padding: 1rem; display:flex; justify-content:center;">
-                  <img src="${analise.anexos.organograma_url}" style="max-width: 100%; max-height: 500px; object-fit: contain; border-radius: 0.5rem;">
+              <div class="card" style="padding: 1.5rem; display:flex; justify-content:center; background: #f8fafc;">
+                  <img src="${analise.anexos.organograma_url}" style="max-width: 100%; max-height: 600px; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
               </div>
               ` : `
-              <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted); font-weight:600;">[NENHUM ORGANOGRAMA VINCULADO]</div>
+              <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted); font-weight:700; background: #f8fafc; border: 1px dashed #cbd5e1;">[NENHUM ORGANOGRAMA VINCULADO]</div>
               `}
           </div>
 
           ${totalPatrimonio > 0 ? `
-          <h3 style="color: var(--muted); text-transform: uppercase; font-size: 0.85rem; margin-top: 1.5rem;">Patrimônio Garantidores (Bens IRPF)</h3>
+          <h3 style="color: var(--blue-dark); text-transform: uppercase; font-size: 0.9rem; font-weight: 800; margin-top: 2rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;">Patrimônio Declarado (Bens IRPF)</h3>
           <div class="table-wrap">
               <table>
                   <tbody>
                       ${patrimonioRows}
                       <tr class="row-total">
                           <td>TOTAL PATRIMÔNIO AVALIADO</td>
-                          <td class="text-right" style="color:var(--green);">${formatarMoeda(totalPatrimonio)}</td>
+                          <td class="text-right" style="color:var(--green); font-size: 1rem;">${formatarMoeda(totalPatrimonio)}</td>
                       </tr>
                   </tbody>
               </table>
@@ -338,7 +352,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <div class="print-break"></div>
 
           <h2>4. Faturamento Consolidado</h2>
-          <div class="card" style="margin-bottom: 1.5rem; padding: 1rem;">
+          <div class="card" style="margin-bottom: 1.5rem; padding: 1.5rem;">
               <div class="metric-label" style="margin-bottom: 1rem;">Evolução de Faturamento Anual (YoY)</div>
               <div class="chart-container"><canvas id="fatChart"></canvas></div>
           </div>
@@ -365,7 +379,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           <td class="text-center">--</td>
                           <td class="text-center">${formatarMoeda(tot2024)}</td>
                       </tr>
-                      <tr class="row-total" style="background:#f1f5f9;">
+                      <tr class="row-total" style="background:#f8fafc; border-top: 1px solid var(--border);">
                           <td>MÉDIA MENSAL</td>
                           <td class="text-center">${formatarMoeda(med2026)}</td>
                           <td class="text-center">--</td>
@@ -381,13 +395,13 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <div class="grid-2">
               <div class="card" style="margin-bottom:0;">
                   <div class="metric-label">Parâmetros de Rotação de Recebíveis</div>
-                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Ticket Médio Operado: <strong>${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong></div>
-                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Prazo de Vendas (Duplicatas): <strong>${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></div>
-                  <div style="font-size:0.85rem;">Divisão de Recebimento: <strong>${analise.dados_potencial?.forma_recebimento_prazo || 0}% a Prazo</strong></div>
+                  <div style="font-size:0.9rem; margin-bottom:0.75rem;">Ticket Médio Operado: <strong style="color:var(--text);">${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong></div>
+                  <div style="font-size:0.9rem; margin-bottom:0.75rem;">Prazo de Vendas (Duplicatas): <strong style="color:var(--text);">${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></div>
+                  <div style="font-size:0.9rem;">Divisão de Recebimento: <strong style="color:var(--blue);">${analise.dados_potencial?.forma_recebimento_prazo || 0}% a Prazo</strong></div>
               </div>
-              <div class="card" style="margin-bottom:0; background:#f0fdf4; border-color:#86efac; display:flex; flex-direction:column; justify-content:center;">
-                  <div class="metric-label" style="color:#166534;">Potencial Real Estimado (Ciclo)</div>
-                  <div class="metric-value" style="color:#15803d; font-size:2rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
+              <div class="card" style="margin-bottom:0; background:#f0fdf4; border: 1px solid #86efac; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                  <div class="metric-label" style="color:#166534;">Potencial Real Estimado (Giro de Ciclo)</div>
+                  <div class="metric-value" style="color:#15803d; font-size:2.2rem; margin-top:0.5rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
               </div>
           </div>
 
@@ -401,16 +415,16 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       <tbody>
                           <tr><td>Volume Curto Prazo</td><td class="text-right font-bold">${formatarMoeda(curtoPrazo)}</td></tr>
                           <tr><td>Volume Longo Prazo</td><td class="text-right font-bold">${formatarMoeda(longoPrazo)}</td></tr>
-                          <tr><td>Volume Total Mapeado</td><td class="text-right font-bold" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>
-                          <tr><td colspan="2" class="text-center" style="font-size:0.75rem; padding: 1.5rem; color:var(--muted);">
+                          <tr><td>Volume Total Mapeado</td><td class="text-right font-bold" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>
+                          <tr><td colspan="2" class="text-center" style="font-size:0.8rem; padding: 1.5rem; background:#f8fafc;">
                               Indicador de Alavancagem:<br>
-                              <strong style="color:var(--text); font-size: 1.1rem;">${alavancagem} x Fat. Médio</strong>
+                              <strong style="color:var(--text); font-size: 1.25rem;">${alavancagem} x Fat. Médio</strong>
                           </td></tr>
                       </tbody>
                   </table>
               </div>
               
-              <div class="card" style="grid-column: span 2; padding: 1rem; margin-bottom:0;">
+              <div class="card" style="grid-column: span 2; padding: 1.5rem; margin-bottom:0;">
                   <div class="metric-label" style="margin-bottom: 1rem;">Distribuição das Dívidas por Credor</div>
                   <div class="chart-container" style="height: 180px;"><canvas id="endivChart"></canvas></div>
               </div>
@@ -421,7 +435,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   <thead><tr><th>Credor / Instituição Financeira</th><th>Modalidade Contratada</th><th class="text-right">Saldo Devedor Atual</th></tr></thead>
                   <tbody>
                       ${bancoRows}
-                      ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR SCRUTADO</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
+                      ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR SCRUTADO</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
                   </tbody>
               </table>
           </div>
@@ -443,29 +457,29 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   <thead><tr><th>Envolvido (Empresa/Sócio)</th><th>Tipo de Ocorrência</th><th class="text-center">Qtd</th><th class="text-right">Montante</th></tr></thead>
                   <tbody>
                       ${restritivosRows}
-                      <tr class="row-total"><td colspan="3">EXPOSIÇÃO FINANCEIRA RESTRITIVA</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalRestritivos)}</td></tr>
+                      <tr class="row-total"><td colspan="3">EXPOSIÇÃO FINANCEIRA RESTRITIVA</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalRestritivos)}</td></tr>
                   </tbody>
               </table>
           </div>
-          ` : `<div class="card" style="text-align:center; color:var(--green); font-weight:bold; margin-bottom: 1.5rem;">Nenhum apontamento mapeado.</div>`}
+          ` : `<div class="card" style="text-align:center; color:var(--green); font-weight:800; font-size:1rem; margin-bottom: 1.5rem; background:#f0fdf4; border-color:#86efac;">Nenhum apontamento restritivo financeiro mapeado (R$ 0,00).</div>`}
 
           <div class="grid-2">
-              <div class="card" style="padding:1.25rem;">
-                  <div style="font-weight:800; font-size:0.8rem; color:var(--red); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #fca5a5; padding-bottom: 5px;">⚠️ Litígios e Processos Ativos</div>
-                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
+              <div class="card" style="padding:1.5rem; border-left: 4px solid #fca5a5;">
+                  <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
+                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
               </div>
-              <div class="card" style="padding:1.25rem;">
-                  <div style="font-weight:800; font-size:0.8rem; color:var(--blue-dark); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px;">🔍 Análise de Mídia e Compliance</div>
-                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.noticias_midia || 'Nada consta em pesquisas de desabonadores digitais.'}</div>
+              <div class="card" style="padding:1.5rem; border-left: 4px solid #93c5fd;">
+                  <div style="font-weight:800; font-size:0.85rem; color:var(--blue-dark); margin-bottom:1rem; text-transform:uppercase;">🔍 Análise de Mídia e Compliance</div>
+                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.noticias_midia || 'Nada consta em pesquisas de desabonadores digitais.'}</div>
               </div>
           </div>
 
           <div class="print-break"></div>
 
-          <div class="parecer-wrapper" style="margin-top: 2rem;">
+          <div class="parecer-wrapper" style="margin-top: 3rem;">
               <div class="parecer-header">Parecer Técnico / Deliberação da Mesa de Risco</div>
-              <div class="parecer-body"><b>RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</b>\n\n${analise.parecer_analista || 'Sem parecer conclusivo preenchido.'}</div>
-              <div class="parecer-footer">Emitido por: <strong>${analise.analista || 'Analista de Crédito'}</strong></div>
+              <div class="parecer-body"><span style="color: var(--blue-dark); font-weight: 800; font-size: 1.1rem; display:block; margin-bottom: 1rem;">RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</span>${analise.parecer_analista || 'Sem parecer conclusivo preenchido.'}</div>
+              <div class="parecer-footer">Documento Oficial Emitido por: <strong style="color: var(--blue-dark);">${analise.analista || 'Analista de Crédito'}</strong></div>
           </div>
 
       </div>
@@ -509,34 +523,65 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               });
           }
 
-          // SCRIPT DO ORGANOGRAMA INTERATIVO (VIS.JS)
+          // ==========================================
+          // SCRIPT DO ORGANOGRAMA INTERATIVO (VIS.JS) - CORRIGIDO PARA FORMATO REACT FLOW
+          // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
+          
           if (orgaJson && orgaJson.nodes && orgaJson.edges) {
               const container = document.getElementById('network-container');
               if (container) {
-                  const nodes = new vis.DataSet(orgaJson.nodes.map(n => ({
-                      ...n, 
-                      shape: 'box',
-                      font: { color: '#ffffff', size: 14, face: 'Inter', bold: true },
-                      color: { background: (n.id && (n.id.includes('.') || n.id === 'root')) ? '#dc2626' : '#2563eb', border: '#1e3a8a' },
-                      margin: { top: 10, bottom: 10, left: 15, right: 15 },
-                      borderWidth: 2,
-                      shadow: true
-                  })));
-                  const edges = new vis.DataSet(orgaJson.edges.map(e => ({
-                      ...e, 
-                      color: { color: '#94a3b8' }, 
-                      arrows: 'to',
-                      font: { size: 10, color: '#64748b', face: 'Inter', background: 'white' }
-                  })));
+                  // Mapeamento preciso do React Flow (data.label) para o formato do Vis.js (label)
+                  const nodes = new vis.DataSet(orgaJson.nodes.map(n => {
+                      // Pega o label do data.label (padrão React Flow que você exporta)
+                      const labelText = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
+                      
+                      // Extrai a cor se existir no style, senão usa azul padrão
+                      const bgColor = (n.style && n.style.backgroundColor) ? n.style.backgroundColor : '#2563eb';
+                      const borderColor = (n.style && n.style.borderColor) ? n.style.borderColor : 'rgba(0,0,0,0.2)';
+
+                      return {
+                          id: n.id, 
+                          label: labelText,
+                          shape: 'box',
+                          font: { color: '#ffffff', size: 12, face: 'Inter', multi: 'html', bold: true },
+                          color: { 
+                              background: bgColor, 
+                              border: borderColor,
+                              highlight: { background: bgColor, border: '#000000' }
+                          },
+                          margin: { top: 12, bottom: 12, left: 15, right: 15 },
+                          borderWidth: 1.5,
+                          shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 8, x: 0, y: 4 }
+                      };
+                  }));
+
+                  // Converte source/target (React Flow) para from/to (Vis.js)
+                  const edges = new vis.DataSet(orgaJson.edges.map(e => {
+                      const edgeColor = (e.style && e.style.stroke) ? e.style.stroke : '#94a3b8';
+                      const isDashed = (e.style && e.style.strokeDasharray) ? true : false;
+                      
+                      return {
+                          id: e.id, 
+                          from: e.source || e.from, 
+                          to: e.target || e.to,
+                          label: e.label || '',
+                          color: { color: edgeColor, highlight: edgeColor }, 
+                          arrows: 'to',
+                          font: { size: 10, color: '#475569', face: 'Inter', background: '#ffffff', strokeWidth: 0 },
+                          dashes: isDashed,
+                          width: 2
+                      };
+                  }));
                   
+                  // Inicia o Gráfico com física ajustada
                   new vis.Network(container, { nodes, edges }, {
-                      layout: { improvedLayout: true },
+                      layout: { randomSeed: 2 },
                       physics: {
-                          forceAtlas2Based: { gravitationalConstant: -50, centralGravity: 0.01, springLength: 150, springConstant: 0.08 },
+                          forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.005, springLength: 200, springConstant: 0.05 },
                           maxVelocity: 50, solver: 'forceAtlas2Based', timestep: 0.35, stabilization: { iterations: 150 }
                       },
-                      interaction: { hover: true, tooltipDelay: 200 }
+                      interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true }
                   });
               }
           }
@@ -562,10 +607,10 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     <button
       onClick={gerarRelatorioHTML}
       disabled={gerando || !analise.id}
-      className="bg-green-600 hover:bg-green-700 border border-green-800 text-white font-bold px-3 py-1.5 text-[11px] uppercase cursor-pointer shadow-sm transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-      title={!analise.id ? "Selecione uma análise real para gerar o relatório" : ""}
+      className="bg-blue-600 hover:bg-blue-700 border border-blue-800 text-white font-bold px-4 py-2 text-[11px] uppercase cursor-pointer shadow-md transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+      title={!analise.id ? "Selecione uma análise real para gerar o relatório" : "Gerar Relatório Executivo HTML"}
     >
-      {gerando ? "⏳ GERANDO..." : "📊 RELATÓRIO HTML"}
+      {gerando ? "⏳ GERANDO..." : "📄 RELATÓRIO HTML PREMIUM"}
     </button>
   );
 }
