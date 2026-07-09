@@ -184,9 +184,6 @@ const DADOS_MODELO: AnaliseData = {
   organograma_json: null
 };
 
-// =========================================================================
-// COMPONENTE PRINCIPAL
-// =========================================================================
 export default function MesaAnalisePage() {
   return (
     <div className="font-sans antialiased text-slate-800">
@@ -223,8 +220,6 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
-      
-      // 📊 LAPIDAÇÃO DA FILA: Agora traz o que está na IA e o que está pronto para o humano revisar
       const { data, error } = await supabase
         .from("analises_credito")
         .select("id, razao_social, cnpj, status")
@@ -249,9 +244,19 @@ function MesaAnaliseConteudo() {
       if (data) {
         const dc = data.dados_consolidados || {};
         
+        // 🔒 CAMADA DE TRADUÇÃO DE SEGURANÇA MESA V8:
+        // Caso o banco possua as chaves antigas vindas do robô Python sem re-execução, 
+        // nós normalizamos os arrays para o frontend renderizar imediatamente na tela!
+        const listaSocios = dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || []);
+        const listaEndividamento = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
+        const listaRestritivos = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
+        
         setAnalise({ 
           ...DADOS_MODELO, 
-          ...dc, 
+          ...dc,  
+          socios: listaSocios,
+          endividamento_detalhado: listaEndividamento,
+          restritivos: listaRestritivos,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
           id: data.id, 
@@ -276,6 +281,7 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
+      
       const { error } = await supabase.from("analises_credito").update({ dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       if (mostrarAlerta) alert("✅ Matriz Excel salva com sucesso no banco de dados!");
@@ -300,7 +306,6 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
       
-      // Quando finaliza a mesa humana, muda o veredito para o comitê deliberar
       const novoStatus = analise.recomendacao_analista.toLowerCase() === "aprovado" ? "aprovado" : "reprovado";
       const { error } = await supabase.from("analises_credito").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
@@ -363,15 +368,9 @@ function MesaAnaliseConteudo() {
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
   const totRestritivos = analise.restritivos.reduce((acc, r) => acc + Number(r.valor), 0);
 
-  // =========================================================================
-  // ENGENHARIA DE CÁLCULO DE POTENCIAL AUTOMÁTICO (DINÂMICO)
-  // =========================================================================
   const faturamentoMedioReferencia = calcMedia("2025") > 0 ? calcMedia("2025") : calcMedia("2024");
   const potencialRealCalculado = faturamentoMedioReferencia * (Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100);
 
-  // =========================================================================
-  // COMPOSIÇÃO DO ENDIVIDAMENTO DINÂMICO
-  // =========================================================================
   const totEndivGeral = analise.endividamento_detalhado.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivCurtoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivLongoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
@@ -523,7 +522,7 @@ function MesaAnaliseConteudo() {
                         <td className={`${thStyle} text-right`}>RATING FINAL</td>
                         <td colSpan={3} className={tdStyle}>
                           <select value={analise.rating} onChange={(e)=>setAnalise({...analise, rating: e.target.value})} className={`${cellStyle} font-bold text-yellow-700 bg-yellow-50`}>
-                            <option value="A - Risco reduzido">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
+                            <option value="A - Risco reduced">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
                           </select>
                         </td>
                       </tr>
@@ -787,7 +786,6 @@ function MesaAnaliseConteudo() {
                     </div>
                   </div>
 
-                  {/* POTENCIAL DE NEGÓCIOS AUTOMÁTICO */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div>
                       <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Parâmetros de Recebimento e Prazos</div>
