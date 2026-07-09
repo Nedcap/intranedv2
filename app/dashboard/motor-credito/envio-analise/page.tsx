@@ -97,20 +97,14 @@ export default function MotorCreditoPage() {
     setStatusTexto("🤖 Registrando lote de entrada na mesa...");
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
-      
-      // Pega dados do usuário logado
-      const userStr = localStorage.getItem("intraned_user");
-      const user = userStr ? JSON.parse(userStr) : null;
-      const nomeDoAgente = user?.nome || "Comercial Ned";
 
-      // 1. Cria o registro inicial usando o status homologado ("em_revisao_humana")
+      // 1. Cria o registro inicial usando estritamente as colunas existentes no banco
       const { data: novaAnalise, error } = await supabase
         .from("analises_credito")
         .insert({
           cnpj: cnpjLimpo,
           razao_social: empresaSelecionada.razao_social.toUpperCase(),
-          status: "em_revisao_humana", // ✅ Evita a violação de CHECK CONSTRAINT
-          comercial_nome: nomeDoAgente,
+          status: "em_revisao_humana", // ✅ Status padrão homologado pela constraint do banco
           dados_documentos: urlsDocumentos,
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
@@ -138,7 +132,7 @@ export default function MotorCreditoPage() {
         throw error;
       }
 
-      // 2. Acorda o Motor V8 no Render enviando as URLs
+      // 2. Acorda o Motor V8 no Render enviando as URLs em segundo plano
       if (novaAnalise && urlsDocumentos.length > 0) {
         setStatusTexto("🔮 Robô V8 lendo e estruturando dados em background...");
         
@@ -284,7 +278,7 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* Chamada direta e limpa do callback sem a Arrow Function redundante */}
+                {/* Integração direta e limpa do componente de uploads */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
