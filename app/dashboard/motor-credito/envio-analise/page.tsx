@@ -15,10 +15,13 @@ interface Empresa {
 
 interface FilaItem {
   id: string;
-  razao_social: string;
+  empresa_nome: string;
   cnpj: string;
   status: string;
-  created_at: string;
+  criado_em: string; 
+  ia_inicio?: string; // ✅ Adicionado
+  ia_fim?: string;    // ✅ Adicionado
+  status_comite?: string;
 }
 
 export default function MotorCreditoPage() {
@@ -36,12 +39,12 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
-      // 📊 Busca os status permitidos pelo escopo comercial e mapeados no banco
+      // 📊 Busca na tabela 'analises' com as colunas corretas
       const { data, error } = await supabase
-        .from("analises_credito")
-        .select("id, razao_social, cnpj, status, created_at")
-        .in("status", ["aprovado", "reprovado", "aguardando_docs", "em_revisao_humana"])
-        .order("created_at", { ascending: false });
+        .from("analises")
+        .select("id, empresa_nome, cnpj, status, criado_em, atualizado_em, status_comite")
+        .in("status", ["aberta", "aprovado", "reprovado", "aguardando_docs", "em_revisao_humana"])
+        .order("criado_em", { ascending: false });
 
       if (error) throw error;
       if (data) setFilaReal(data as any);
@@ -98,13 +101,14 @@ export default function MotorCreditoPage() {
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
 
-      // 1. Cria o registro inicial usando estritamente as colunas existentes no banco
       const { data: novaAnalise, error } = await supabase
-        .from("analises_credito")
+        .from("analises") // ✅ Tabela correta
         .insert({
           cnpj: cnpjLimpo,
-          razao_social: empresaSelecionada.razao_social.toUpperCase(),
-          status: "em_revisao_humana", // ✅ Status padrão homologado pela constraint do banco
+          empresa_nome: empresaSelecionada.razao_social.toUpperCase(), // ✅ Coluna correta
+          caminho_local: "Upload via Motor V8 / R2", // ✅ Obrigatório no seu banco (NOT NULL)
+          status: "em_revisao_humana", 
+          status_comite: "pendente",
           dados_documentos: urlsDocumentos,
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
@@ -132,7 +136,6 @@ export default function MotorCreditoPage() {
         throw error;
       }
 
-      // 2. Acorda o Motor V8 no Render enviando as URLs em segundo plano
       if (novaAnalise && urlsDocumentos.length > 0) {
         setStatusTexto("🔮 Robô V8 lendo e estruturando dados em background...");
         
@@ -157,7 +160,7 @@ export default function MotorCreditoPage() {
       await carregarFilaComercial();
 
     } catch (err: any) {
-      console.error("Erro ao inserir na tabela analises_credito:", err);
+      console.error("Erro ao inserir na tabela analises:", err);
       alert("⚠️ Erro ao registrar na esteira: " + err.message);
     } finally {
       setLoading(false);
@@ -166,6 +169,7 @@ export default function MotorCreditoPage() {
   };
 
   const formatarCnpj = (cnpj: string) => {
+    if (!cnpj) return "";
     const limpo = cnpj.replace(/\D/g, "");
     if (limpo.length !== 14) return cnpj;
     return `${limpo.substring(0, 2)}.${limpo.substring(2, 5)}.${limpo.substring(5, 8)}/${limpo.substring(8, 12)}-${limpo.substring(12, 14)}`;
@@ -179,6 +183,15 @@ export default function MotorCreditoPage() {
     if (limpo.length > 8) masc = `${masc.substring(0, 10)}/${masc.substring(10)}`;
     if (limpo.length > 12) masc = `${masc.substring(0, 15)}-${masc.substring(15)}`;
     setCnpjBusca(masc);
+  };
+
+  const formatarDataHora = (isoString?: string) => {
+    if (!isoString) return "---";
+    const data = new Date(isoString);
+    return data.toLocaleString("pt-BR", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
   };
 
   return (
@@ -278,7 +291,6 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* Integração direta e limpa do componente de uploads */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -297,61 +309,100 @@ export default function MotorCreditoPage() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
-                  <th className="p-3.5">Razão Social da Empresa</th>
-                  <th className="p-3.5">CNPJ Oficial</th>
-                  <th className="p-3.5">Veredito / Status</th>
-                  <th className="p-3.5 text-center">Data de Entrada</th>
-                  <th className="p-3.5 text-center">Parecer</th>
+                  <th className="p-3.5">Empresa</th>
+                  <th className="p-3.5 text-center">Início IA</th>
+                  <th className="p-3.5 text-center">Fim IA</th>
+                  <th className="p-3.5 text-center">Decisão Crédito</th>
+                  <th className="p-3.5 text-center">Decisão Comitê</th>
+                  <th className="p-3.5 text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-xs">
                 {filaReal.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-400 font-bold bg-slate-50/50">
+                    <td colSpan={6} className="p-8 text-center text-slate-400 font-bold bg-slate-50/50">
                       Nenhum resultado processado pela mesa no momento.
                     </td>
                   </tr>
                 ) : (
-                  filaReal.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[350px]">{item.razao_social}</td>
-                      <td className="p-3.5 font-mono font-bold text-slate-600">{formatarCnpj(item.cnpj)}</td>
-                      <td className="p-3.5">
-                        {item.status === "aguardando_docs" ? (
-                          <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            📥 Devolvido - Falta Docs
-                          </span>
-                        ) : item.status === "em_revisao_humana" ? (
-                          <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
-                            🔮 IA Extraindo / Mesa
-                          </span>
-                        ) : item.status === "aprovado" ? (
-                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            ✅ Aprovado
-                          </span>
-                        ) : item.status === "reprovado" ? (
-                          <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            ❌ Reprovado
-                          </span>
-                        ) : (
-                          <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                            {item.status}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
-                        {new Date(item.created_at).toLocaleDateString("pt-BR")}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <button
-                          onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] flex items-center gap-1 mx-auto shadow-sm cursor-pointer transition-all"
-                        >
-                          👁️ Ver Detalhes
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filaReal.map((item) => {
+                    const statusComite = item.status_comite?.toLowerCase() || "pendente";
+                    
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3.5">
+                          {/* ✅ Adaptado para item.empresa_nome */}
+                          <p className="font-black text-slate-900 uppercase truncate max-w-[250px]">{item.empresa_nome}</p>
+                          <p className="font-mono font-bold text-slate-500 text-[10px] mt-0.5">{formatarCnpj(item.cnpj)}</p>
+                        </td>
+                        
+                        <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
+                          {/* ✅ Adaptado para item.criado_em */}
+                          {formatarDataHora(item.criado_em)}
+                        </td>
+                        
+                        <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
+                          {/* ✅ Adaptado para item.atualizado_em */}
+                          {item.atualizado_em 
+                            ? formatarDataHora(item.atualizado_em) 
+                            : <span className="text-indigo-400 italic">⏳ Processando...</span>}
+                        </td>
+                        
+                        <td className="p-3.5 text-center">
+                          {item.status === "aberta" ? (
+                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              📄 Aberta
+                            </span>
+                          ) : item.status === "aguardando_docs" ? (
+                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              📥 Devolvido
+                            </span>
+                          ) : item.status === "em_revisao_humana" ? (
+                            <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
+                              🔮 Mesa Risco
+                            </span>
+                          ) : item.status === "aprovado" ? (
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              ✅ Aprovado
+                            </span>
+                          ) : item.status === "reprovado" ? (
+                            <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              ❌ Reprovado
+                            </span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              {item.status}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="p-3.5 text-center">
+                          {statusComite === "aprovado" ? (
+                            <span className="bg-emerald-600 text-white px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider shadow-sm">
+                              🟢 Aprovado
+                            </span>
+                          ) : statusComite === "reprovado" ? (
+                            <span className="bg-red-600 text-white px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider shadow-sm">
+                              🔴 Reprovado
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                              🟡 Pendente
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
+                            className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] flex items-center gap-1 mx-auto shadow-sm cursor-pointer transition-all"
+                          >
+                            👁️ Ver Parecer
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

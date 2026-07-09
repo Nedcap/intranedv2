@@ -10,7 +10,7 @@ import GerarAnalise from "@/components/gerar-analise";
 // =========================================================================
 interface FilaItem {
   id: string;
-  razao_social: string;
+  empresa_nome: string; // ✅ Adaptado para a tabela nova
   cnpj: string;
   status: string;
 }
@@ -220,11 +220,12 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
+      // ✅ Atualizado para a tabela "analises" e usando "empresa_nome" e "criado_em"
       const { data, error } = await supabase
-        .from("analises_credito")
-        .select("id, razao_social, cnpj, status")
+        .from("analises")
+        .select("id, empresa_nome, cnpj, status")
         .in("status", ["em_processamento_ia", "em_revisao_humana"])
-        .order("created_at", { ascending: false });
+        .order("criado_em", { ascending: false });
 
       if (error) throw error;
       if (data) setFila(data as any);
@@ -239,14 +240,13 @@ function MesaAnaliseConteudo() {
     try {
       setLoadingAnalise(true);
       setIdSelecionado(id);
-      const { data, error } = await supabase.from("analises_credito").select("*").eq("id", id).single();
+      // ✅ Atualizado para a tabela "analises"
+      const { data, error } = await supabase.from("analises").select("*").eq("id", id).single();
       if (error) throw error;
       if (data) {
         const dc = data.dados_consolidados || {};
         
-        // 🔒 CAMADA DE TRADUÇÃO DE SEGURANÇA MESA V8:
-        // Caso o banco possua as chaves antigas vindas do robô Python sem re-execução, 
-        // nós normalizamos os arrays para o frontend renderizar imediatamente na tela!
+        // 🔒 CAMADA DE TRADUÇÃO DE SEGURANÇA MESA V8
         const listaSocios = dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || []);
         const listaEndividamento = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
         const listaRestritivos = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
@@ -261,7 +261,8 @@ function MesaAnaliseConteudo() {
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
           id: data.id, 
           cnpj: data.cnpj, 
-          razao_social: data.razao_social, 
+          // ✅ Harmonizando o nome da tabela com o estado da tela
+          razao_social: data.empresa_nome || dc.razao_social || "", 
           status: data.status 
         });
       }
@@ -282,7 +283,12 @@ function MesaAnaliseConteudo() {
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       
-      const { error } = await supabase.from("analises_credito").update({ dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
+      // ✅ Atualiza a tabela nova, e garante que a coluna "empresa_nome" se mantenha sincronizada
+      const { error } = await supabase.from("analises").update({ 
+        dados_consolidados: dadosParaCompactar,
+        empresa_nome: analise.razao_social // Sincroniza caso tenham editado o input principal
+      }).eq("id", analise.id);
+      
       if (error) throw error;
       if (mostrarAlerta) alert("✅ Matriz Excel salva com sucesso no banco de dados!");
       return true;
@@ -307,7 +313,8 @@ function MesaAnaliseConteudo() {
       await persistirNoBanco(false); 
       
       const novoStatus = analise.recomendacao_analista.toLowerCase() === "aprovado" ? "aprovado" : "reprovado";
-      const { error } = await supabase.from("analises_credito").update({ status: novoStatus }).eq("id", analise.id);
+      // ✅ Atualizando a tabela "analises"
+      const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
       
       alert(`🚀 Análise finalizada com sucesso! Novo status do dossiê: [${novoStatus.toUpperCase()}]`);
@@ -329,7 +336,8 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
-      const { error } = await supabase.from("analises_credito").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
+      // ✅ Atualizando a tabela "analises"
+      const { error } = await supabase.from("analises").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
@@ -418,7 +426,8 @@ function MesaAnaliseConteudo() {
                 }`}
               >
                 <div className="flex justify-between items-start gap-1">
-                  <p className={`text-[10px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.razao_social}</p>
+                  {/* ✅ Adaptado para renderizar empresa_nome na fila */}
+                  <p className={`text-[10px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.empresa_nome}</p>
                   {item.status === "em_processamento_ia" && idSelecionado !== item.id && (
                     <span className="bg-purple-100 text-purple-700 font-black text-[8px] px-1 py-0.5 rounded animate-pulse uppercase shrink-0">ROBÔ</span>
                   )}
