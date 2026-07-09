@@ -9,11 +9,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor || 0);
   };
 
-  const calcDelta = (at: number, ant: number) => {
-    if (!ant || ant === 0) return "-";
-    return (((at - ant) / ant) * 100).toFixed(1) + "%";
-  };
-
   const gerarRelatorioHTML = () => {
     setGerando(true);
 
@@ -93,11 +88,12 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         }).join("")
         : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhum detalhamento bancário mapeado.</td></tr>`;
 
+      // RESTRITIVOS
       let totalRestritivos = 0, qtdRestritivos = 0;
       const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
         ? analise.restritivos.map((r: any) => {
             totalRestritivos += Number(r.valor) || 0;
-            qtdRestritivos += Number(r.qtd) || 0;
+            qtdRestritivos += Number(r.qtd) || 1;
             return `
             <tr>
                 <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
@@ -120,7 +116,15 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </tr>`).join("")
         : `<tr><td colspan="7" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
 
-      // Faturamento Mensal (YTD Lógico)
+      // Parceiros Comerciais (Clientes, Fornecedores, Concorrentes) caso existam no objeto
+      const clientesRows = analise.clientes && analise.clientes.length > 0 
+        ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+      const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 
+        ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
+      const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 
+        ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+
+      // Faturamento Mensal
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
       let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
@@ -180,7 +184,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Dossiê Executivo - ${analise.razao_social}</title>
           
-          <!-- Bibliotecas Embutidas p/ HTML Local -->
           <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
           <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
           <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -229,6 +232,11 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(37,99,235,0.3); }
               
               .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #f8fafc; border: 1px dashed #cbd5e1; }
+              
+              /* LISTAS SIMPLES */
+              ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
+              ul.simple-list li { margin-bottom: 0.25rem; }
+
               @media print { .print-break { page-break-before: always; } body { background: white; } .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } .header { padding: 1rem; color: black; background: white; border: 2px solid black; } .header .meta, .header .badge-top { color: black; } }
           </style>
       </head>
@@ -238,7 +246,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <div class="header">
               <div>
                   <h1>${analise.razao_social}</h1>
-                  <div class="meta">CNPJ: ${analise.cnpj} | Data Emissão: ${dataAtual} | Analista: ${analise.analista || '-'} | Gerente: ${analise.gerente || '-'}</div>
+                  <div class="meta">CNPJ: ${analise.cnpj || '-'} | Data Emissão: ${dataAtual} | Analista: ${analise.analista || '-'} | Gerente: ${analise.gerente || '-'}</div>
               </div>
               <div class="badge-top">SUGESTÃO: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
           </div>
@@ -318,7 +326,25 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
-          <!-- ORGANOGRAMA INTERATIVO (VIS.JS) -->
+          <!-- PARCEIROS COMERCIAIS (OPCIONAL) -->
+          ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
+          <div class="grid-3" style="margin-top: 1.5rem;">
+              <div class="card">
+                  <div class="metric-label">Principais Clientes</div>
+                  <ul class="simple-list">${clientesRows}</ul>
+              </div>
+              <div class="card">
+                  <div class="metric-label">Principais Fornecedores</div>
+                  <ul class="simple-list">${fornecedoresRows}</ul>
+              </div>
+              <div class="card">
+                  <div class="metric-label">Principais Concorrentes</div>
+                  <ul class="simple-list">${concorrentesRows}</ul>
+              </div>
+          </div>
+          ` : ''}
+
+          <!-- ORGANOGRAMA INTERATIVO (VIS.JS) - EM CIRCULOS -->
           <h2 style="margin-top: 3.5rem;">3. Organograma / Teia Societária</h2>
           <div style="margin-bottom: 2.5rem;">
               ${analise.organograma_json && analise.organograma_json.nodes && analise.organograma_json.nodes.length > 0 ? `
@@ -451,17 +477,29 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
 
           <h2>8. Apontamentos Restritivos e Análise Jurídica</h2>
-          ${totalRestritivos > 0 ? `
+          
+          <!-- CARDS CONSOLIDADOS DE RESTRITIVOS -->
+          <div class="grid-2" style="margin-bottom: 1.5rem;">
+              <div class="card" style="display:flex; flex-direction:column; justify-content:center; align-items:center; border: 1px solid ${totalRestritivos > 0 ? '#fca5a5' : '#86efac'}; background: ${totalRestritivos > 0 ? '#fef2f2' : '#f0fdf4'};">
+                  <div class="metric-label" style="color: ${totalRestritivos > 0 ? '#991b1b' : '#166534'};">Volume Financeiro Restritivo</div>
+                  <div class="metric-value" style="color: ${totalRestritivos > 0 ? '#b91c1c' : '#15803d'}; font-size:2.2rem; margin-top:0.5rem;">${formatarMoeda(totalRestritivos)}</div>
+              </div>
+              <div class="card" style="display:flex; flex-direction:column; justify-content:center; align-items:center; border: 1px solid ${qtdRestritivos > 0 ? '#fde047' : '#86efac'}; background: ${qtdRestritivos > 0 ? '#fefce8' : '#f0fdf4'};">
+                  <div class="metric-label" style="color: ${qtdRestritivos > 0 ? '#854d0e' : '#166534'};">Quantidade de Ocorrências</div>
+                  <div class="metric-value" style="color: ${qtdRestritivos > 0 ? '#a16207' : '#15803d'}; font-size:2.2rem; margin-top:0.5rem;">${qtdRestritivos}</div>
+              </div>
+          </div>
+
+          ${totalRestritivos > 0 || qtdRestritivos > 0 ? `
           <div class="table-wrap">
               <table>
                   <thead><tr><th>Envolvido (Empresa/Sócio)</th><th>Tipo de Ocorrência</th><th class="text-center">Qtd</th><th class="text-right">Montante</th></tr></thead>
                   <tbody>
                       ${restritivosRows}
-                      <tr class="row-total"><td colspan="3">EXPOSIÇÃO FINANCEIRA RESTRITIVA</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalRestritivos)}</td></tr>
                   </tbody>
               </table>
           </div>
-          ` : `<div class="card" style="text-align:center; color:var(--green); font-weight:800; font-size:1rem; margin-bottom: 1.5rem; background:#f0fdf4; border-color:#86efac;">Nenhum apontamento restritivo financeiro mapeado (R$ 0,00).</div>`}
+          ` : ''}
 
           <div class="grid-2">
               <div class="card" style="padding:1.5rem; border-left: 4px solid #fca5a5;">
@@ -524,39 +562,35 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           }
 
           // ==========================================
-          // SCRIPT DO ORGANOGRAMA INTERATIVO (VIS.JS) - CORRIGIDO PARA FORMATO REACT FLOW
+          // SCRIPT DO ORGANOGRAMA INTERATIVO (VIS.JS) 
+          // ATUALIZADO: SHAPE ALTERADA PARA CIRCLES
           // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
           if (orgaJson && orgaJson.nodes && orgaJson.edges) {
               const container = document.getElementById('network-container');
               if (container) {
-                  // Mapeamento preciso do React Flow (data.label) para o formato do Vis.js (label)
                   const nodes = new vis.DataSet(orgaJson.nodes.map(n => {
-                      // Pega o label do data.label (padrão React Flow que você exporta)
                       const labelText = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
-                      
-                      // Extrai a cor se existir no style, senão usa azul padrão
                       const bgColor = (n.style && n.style.backgroundColor) ? n.style.backgroundColor : '#2563eb';
                       const borderColor = (n.style && n.style.borderColor) ? n.style.borderColor : 'rgba(0,0,0,0.2)';
 
                       return {
                           id: n.id, 
                           label: labelText,
-                          shape: 'box',
-                          font: { color: '#ffffff', size: 12, face: 'Inter', multi: 'html', bold: true },
+                          shape: 'circle', // <--- Alterado para círculo
+                          font: { color: '#ffffff', size: 11, face: 'Inter', multi: 'html', bold: true },
                           color: { 
                               background: bgColor, 
                               border: borderColor,
                               highlight: { background: bgColor, border: '#000000' }
                           },
-                          margin: { top: 12, bottom: 12, left: 15, right: 15 },
+                          margin: 15, // <--- Ajuste de margem interna do círculo
                           borderWidth: 1.5,
                           shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 8, x: 0, y: 4 }
                       };
                   }));
 
-                  // Converte source/target (React Flow) para from/to (Vis.js)
                   const edges = new vis.DataSet(orgaJson.edges.map(e => {
                       const edgeColor = (e.style && e.style.stroke) ? e.style.stroke : '#94a3b8';
                       const isDashed = (e.style && e.style.strokeDasharray) ? true : false;
@@ -574,7 +608,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       };
                   }));
                   
-                  // Inicia o Gráfico com física ajustada
                   new vis.Network(container, { nodes, edges }, {
                       layout: { randomSeed: 2 },
                       physics: {
