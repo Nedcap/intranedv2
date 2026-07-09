@@ -35,7 +35,7 @@ interface SocioItem {
   nome: string;
   perc: number;
   funcao: string;
-  figura_contrato: string;
+  figure_contrato: string;
 }
 
 interface PatrimonioItem {
@@ -167,7 +167,7 @@ const DADOS_MODELO: AnaliseData = {
   propostas: [{ modalidade: "Desconto", limite: 0, prazo: "", tranche: 0, taxa: "", garantia: "" }],
   empresas_grupo: [],
   
-  socios: [{ nome: "", perc: 100, funcao: "Sócio", figura_contrato: "Sim" }],
+  socios: [{ nome: "", perc: 100, funcao: "Sócio", figure_contrato: "Sim" }],
   regra_assinatura: "( ) em conjunto (x) isolada", aval_societario: "", patrimonios: [],
   
   dados_faturamento: { "2024": {}, "2025": {}, "2026": {} }, 
@@ -223,10 +223,21 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
-      const { data, error } = await supabase.from("analises_credito").select("id, razao_social, cnpj, status").eq("status", "em_revisao_humana").order("created_at", { ascending: false });
+      
+      // 📊 LAPIDAÇÃO DA FILA: Agora traz o que está na IA e o que está pronto para o humano revisar
+      const { data, error } = await supabase
+        .from("analises_credito")
+        .select("id, razao_social, cnpj, status")
+        .in("status", ["em_processamento_ia", "em_revisao_humana"])
+        .order("created_at", { ascending: false });
+
       if (error) throw error;
       if (data) setFila(data as any);
-    } catch (err) { console.error(err); } finally { if (comSpinner) setLoadingFila(false); }
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      if (comSpinner) setLoadingFila(false); 
+    }
   };
 
   const selecionarEmpresaDaEsteira = async (id: string) => {
@@ -237,11 +248,23 @@ function MesaAnaliseConteudo() {
       if (error) throw error;
       if (data) {
         const dc = data.dados_consolidados || {};
-        if (data.status === "robo_processando") await supabase.from("analises_credito").update({ status: "em_revisao_humana" }).eq("id", id);
         
-        setAnalise({ ...DADOS_MODELO, ...dc, anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, id: data.id, cnpj: data.cnpj, razao_social: data.razao_social, status: "em_revisao_humana" });
+        setAnalise({ 
+          ...DADOS_MODELO, 
+          ...dc, 
+          anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
+          dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
+          id: data.id, 
+          cnpj: data.cnpj, 
+          razao_social: data.razao_social, 
+          status: data.status 
+        });
       }
-    } catch (err) { console.error(err); } finally { setLoadingAnalise(false); }
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setLoadingAnalise(false); 
+    }
   };
 
   const persistirNoBanco = async (mostrarAlerta = true) => {
@@ -252,13 +275,16 @@ function MesaAnaliseConteudo() {
     try {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
-      // Garante a gravação do potencial calculado antes de persistir
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       const { error } = await supabase.from("analises_credito").update({ dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       if (mostrarAlerta) alert("✅ Matriz Excel salva com sucesso no banco de dados!");
       return true;
-    } catch (err: any) { alert("❌ Erro ao salvar dados: " + err.message); return false; } finally { setProcessandoDecisao(false); }
+    } catch (err: any) { 
+      alert("❌ Erro ao salvar dados: " + err.message); return false; 
+    } finally { 
+      setProcessandoDecisao(false); 
+    }
   };
 
   const encaminharParaComite = async () => {
@@ -273,11 +299,21 @@ function MesaAnaliseConteudo() {
     try {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
-      const { error } = await supabase.from("analises_credito").update({ status: "concluido" }).eq("id", analise.id);
+      
+      // Quando finaliza a mesa humana, muda o veredito para o comitê deliberar
+      const novoStatus = analise.recomendacao_analista.toLowerCase() === "aprovado" ? "aprovado" : "reprovado";
+      const { error } = await supabase.from("analises_credito").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
-      alert(`🚀 Análise enviada com sucesso! Ela saiu da sua fila e o Motor Python já pode gerar o Relatório HTML.`);
-      setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
-    } catch (err: any) { alert("Erro ao processar: " + err.message); } finally { setProcessandoDecisao(false); }
+      
+      alert(`🚀 Análise finalizada com sucesso! Novo status do dossiê: [${novoStatus.toUpperCase()}]`);
+      setIdSelecionado(null); 
+      setAnalise(DADOS_MODELO); 
+      await buscarFilaSupabase(true);
+    } catch (err: any) { 
+      alert("Erro ao processar: " + err.message); 
+    } finally { 
+      setProcessandoDecisao(false); 
+    }
   };
 
   const devolverParaComercialPendente = async () => {
@@ -288,11 +324,15 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
-      const { error } = await supabase.from("analises_credito").update({ status: "devolvido", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
+      const { error } = await supabase.from("analises_credito").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
-    } catch (err: any) { alert("❌ Falha na devolução."); } finally { setProcessandoDecisao(false); }
+    } catch (err: any) { 
+      alert("❌ Falha na devolução."); 
+    } finally { 
+      setProcessandoDecisao(false); 
+    }
   };
 
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
@@ -367,8 +407,23 @@ function MesaAnaliseConteudo() {
             <div className="text-center py-4 text-slate-500 text-[10px]">Sincronizando...</div>
           ) : (
             fila.map((item) => (
-              <div key={item.id} onClick={() => selecionarEmpresaDaEsteira(item.id)} className={`p-2 border cursor-pointer border-b-slate-200 ${idSelecionado === item.id ? "bg-blue-600 border-blue-700 text-white" : "bg-white hover:bg-slate-100"}`}>
-                <p className={`text-[10px] font-bold truncate ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.razao_social}</p>
+              <div 
+                key={item.id} 
+                onClick={() => selecionarEmpresaDaEsteira(item.id)} 
+                className={`p-2 border cursor-pointer border-b-slate-200 ${
+                  idSelecionado === item.id 
+                    ? "bg-blue-600 border-blue-700 text-white" 
+                    : item.status === "em_processamento_ia" 
+                    ? "bg-purple-50/70 border-purple-200 hover:bg-purple-100" 
+                    : "bg-white hover:bg-slate-100"
+                }`}
+              >
+                <div className="flex justify-between items-start gap-1">
+                  <p className={`text-[10px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.razao_social}</p>
+                  {item.status === "em_processamento_ia" && idSelecionado !== item.id && (
+                    <span className="bg-purple-100 text-purple-700 font-black text-[8px] px-1 py-0.5 rounded animate-pulse uppercase shrink-0">ROBÔ</span>
+                  )}
+                </div>
                 <p className={`text-[9px] font-mono mt-0.5 ${idSelecionado === item.id ? "text-blue-200" : "text-slate-500"}`}>{item.cnpj}</p>
               </div>
             ))
@@ -388,7 +443,11 @@ function MesaAnaliseConteudo() {
             {/* TOOLBAR */}
             <div className="p-2 border-b border-slate-400 bg-[#f1f5f9] flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-2">
-                <div className="bg-green-700 text-white px-2 py-1 text-[10px] font-bold rounded-sm">AUTO-SAVE</div>
+                {analise.status === "em_processamento_ia" ? (
+                  <div className="bg-purple-600 text-white px-2 py-1 text-[10px] font-bold rounded-sm animate-pulse">IA PROCESSANDO</div>
+                ) : (
+                  <div className="bg-green-700 text-white px-2 py-1 text-[10px] font-bold rounded-sm">AUTO-SAVE</div>
+                )}
                 <div className="flex flex-col">
                   <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-800 text-sm bg-transparent outline-none border-b border-transparent focus:border-blue-400 w-96 uppercase" />
                   <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-[10px] text-slate-500 bg-transparent outline-none w-96" />
@@ -401,7 +460,7 @@ function MesaAnaliseConteudo() {
                 </button>
                 {idSelecionado && (
                   <>
-                    <button onClick={encaminharParaComite} disabled={processandoDecisao} className="bg-blue-600 border border-blue-800 hover:bg-blue-700 text-white font-bold px-3 py-1 text-[10px] cursor-pointer shadow-sm">
+                    <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className="bg-blue-600 border border-blue-800 hover:bg-blue-700 text-white font-bold px-3 py-1 text-[10px] cursor-pointer shadow-sm disabled:opacity-40">
                       ▶ Enviar Parecer
                     </button>
                     <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-red-100 border border-red-300 text-red-800 hover:bg-red-200 font-bold px-3 py-1 text-[10px] cursor-pointer shadow-sm">
@@ -433,11 +492,14 @@ function MesaAnaliseConteudo() {
             {/* CONTEÚDO DA PLANILHA */}
             <div className="flex-1 overflow-y-auto p-4 bg-white relative">
               
-              {/* ========================================================= */}
               {/* ABA 1: CAPA E PROPOSTA */}
-              {/* ========================================================= */}
               {abaAtiva === "capa" && (
                 <div className="max-w-6xl space-y-6">
+                  {analise.status === "em_processamento_ia" && (
+                    <div className="p-3 border border-purple-200 bg-purple-50 text-purple-900 font-bold text-xs rounded-sm flex items-center gap-2">
+                      <span>🔮 O Motor Python V8 está lendo e estruturando os arquivos anexados a essa conta. Os dados abaixo vão atualizar dinamicamente!</span>
+                    </div>
+                  )}
                   <table className="w-full border-collapse border border-slate-400">
                     <tbody>
                       <tr>
@@ -513,9 +575,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
-              {/* ABA 2: DADOS DA EMPRESA (CADASTRO) */}
-              {/* ========================================================= */}
+              {/* ABA 2: DADOS DA EMPRESA */}
               {abaAtiva === "cadastro" && (
                 <div className="max-w-6xl space-y-6">
                   <div>
@@ -527,7 +587,7 @@ function MesaAnaliseConteudo() {
                           <td className={`${thStyle} text-right w-1/6`}>Capital Social (R$)</td><td className={`${tdStyle} w-2/6`}><input type="number" value={analise.capital_social} onChange={(e)=>setAnalise({...analise, capital_social: Number(e.target.value)})} className={numStyle} /></td>
                         </tr>
                         <tr>
-                          <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} placeholder="Endereço obtido via Google API..." /></td>
+                          <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} placeholder="Endereço oficial corporativo..." /></td>
                           <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
                         </tr>
                         <tr>
@@ -552,7 +612,6 @@ function MesaAnaliseConteudo() {
                     <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Organograma, Fotos e Endereços Externos (URLs)</div>
                     <table className="w-full border-collapse border border-slate-400">
                       <tbody>
-                        {/* NOVO CAMPO DO GRAFO JSON INTEGRADO */}
                         <tr>
                           <td className={`${thStyle} w-1/4 text-right bg-purple-50 text-purple-900 border-purple-200`}>Organograma Interativo (Teia JSON)</td>
                           <td className={`${tdStyle} bg-purple-50/30`}>
@@ -588,9 +647,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
               {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
-              {/* ========================================================= */}
               {abaAtiva === "societario" && (
                 <div className="space-y-6">
                   <div>
@@ -619,7 +676,7 @@ function MesaAnaliseConteudo() {
                   <div>
                     <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
                       <span>Estrutura Societária</span>
-                      <button onClick={() => addArray('socios', {nome:"", perc:0, funcao:"Sócio", figura_contrato:"Sim"})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Sócio</button>
+                      <button onClick={() => addArray('socios', {nome:"", perc:0, funcao:"Sócio", figure_contrato:"Sim"})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Sócio</button>
                     </div>
                     <table className="w-full border-collapse border border-slate-400">
                       <thead>
@@ -632,7 +689,7 @@ function MesaAnaliseConteudo() {
                             <td className={tdStyle}><input type="number" value={s.perc} onChange={(e)=>updateArray('socios', i, 'perc', Number(e.target.value))} className={numStyle} /></td>
                             <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArray('socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
                             <td className={tdStyle}>
-                              <select value={s.figura_contrato} onChange={(e)=>updateArray('socios', i, 'figura_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                              <select value={s.figure_contrato} onChange={(e)=>updateArray('socios', i, 'figure_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
                             </td>
                             <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
                           </tr>
@@ -683,9 +740,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
               {/* ABA 4: FATURAMENTO E POTENCIAL */}
-              {/* ========================================================= */}
               {abaAtiva === "fat" && (
                 <div className="space-y-6">
                   <div>
@@ -779,12 +834,9 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
               {/* ABA 5: ENDIVIDAMENTO E REFERÊNCIAS */}
-              {/* ========================================================= */}
               {abaAtiva === "endividamento" && (
                 <div className="space-y-6">
-                  {/* QUADRO RESUMO (VIEW ESPELHO FILTRADA DO DETALHAMENTO) */}
                   <div>
                     <div className="bg-slate-800 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-900">Endividamento Bancos e Fundos (Visão Resumida Geral)</div>
                     <table className="w-full border-collapse border border-slate-400">
@@ -820,7 +872,6 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  {/* INSTITUIÇÕES DETALHADAS (LIMPAS CONFORME SOLICITADO) */}
                   <div>
                     <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
                       <span>Detalhamento Informado (Dívidas no Documento)</span>
@@ -865,7 +916,6 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  {/* REFERÊNCIAS COMPLETAS */}
                   <div>
                     <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
                       <span>Informações com Fundos de Investimentos / Referências (Com Risco, Liq e VOP)</span>
@@ -918,9 +968,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
               {/* ABA 6: RESTRITIVOS E JURÍDICO */}
-              {/* ========================================================= */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-6">
                   <div>
@@ -990,9 +1038,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ========================================================= */}
               {/* ABA 7: PARECER FINAL */}
-              {/* ========================================================= */}
               {abaAtiva === "parecer" && (
                 <div className="space-y-6 max-w-5xl">
                   <div className="bg-white border-2 border-slate-400 p-3">

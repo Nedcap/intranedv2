@@ -89,19 +89,20 @@ export default function MotorCreditoPage() {
     }
   };
 
-  const registrarAnaliseNoSupabase = async () => {
+  const registrarAnaliseNoSupabase = async (urlsDocumentos?: string[]) => {
     if (!empresaSelecionada) return;
 
     setLoading(true);
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
       
-      const { error } = await supabase
+      // 1. Cria o registro inicial no Supabase com o status focado no Robô
+      const { data: novaAnalise, error } = await supabase
         .from("analises_credito")
         .insert({
           cnpj: cnpjLimpo,
           razao_social: empresaSelecionada.razao_social.toUpperCase(),
-          status: "em_revisao_humana", // Entra direto para a mesa de análise
+          status: "em_processamento_ia", // 🤖 O status avisa que o robô de IA assumiu
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
             cidade: empresaSelecionada.cidadeExtenso || "Curitiba",
@@ -109,15 +110,17 @@ export default function MotorCreditoPage() {
             dados_gerais: { fundacao: "", ramo: "", site: "", relacionamento: "Prospect", gerente: "" },
             proposta: { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
             dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
-            dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
+            dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vending_prazo_perc: 100 },
             dados_endividamento: [],
             dados_restritivos: [],
             dados_estrutura_societaria: [],
             dados_juridico: { processos_tramitacao: "", processos_arquivados: "" },
             parecer_comite: ""
           }, 
-          dados_documentos: [] 
-        });
+          dados_documentos: urlsDocumentos || [] 
+        })
+        .select("id") // Pede pro Supabase devolver o ID que ele acabou de gerar
+        .single();
 
       if (error) {
         if (error.code === "23505") {
@@ -126,7 +129,22 @@ export default function MotorCreditoPage() {
         throw error;
       }
 
-      alert("🚀 Empresa enviada com sucesso para a esteira do comitê!");
+      // 2. Se temos os documentos em mãos, acorda o Motor V8 no Render em segundo plano!
+      if (novaAnalise && urlsDocumentos && urlsDocumentos.length > 0) {
+        console.log(`[FRONTEND] Acionando Motor V8 para a análise: ${novaAnalise.id}`);
+        
+        // Chamada assíncrona para a API do Gateway do Next.js (Repassa pro Render)
+        fetch("/api/motor-ia", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analise_id: novaAnalise.id,
+            urls_documentos: urlsDocumentos
+          })
+        }).catch(err => console.error("Erro no disparo em background do Motor V8:", err));
+      }
+
+      alert("🚀 Empresa enviada! O Motor de IA assumiu a leitura inteligente dos documentos.");
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
@@ -246,13 +264,14 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
+                {/* O onSucesso agora entrega as urls dos documentos para disparar a IA */}
                 <UploadDocs empresa={empresaSelecionada} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
           )}
         </div>
 
-        {/* TABELA DE STATUS DO COMERCIAL (SÓ MOSTRA FINALIZADOS OU PENDENTES) */}
+        {/* TABELA DE STATUS DO COMERCIAL */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <span className="font-black text-slate-700 uppercase tracking-widest text-[11px]">

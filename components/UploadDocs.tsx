@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
-import { supabase } from "@/lib/supabase";
 
 interface UploadDocsProps {
   empresa: {
@@ -11,7 +10,8 @@ interface UploadDocsProps {
     cidadeExtenso?: string;
     capital_social?: number;
   };
-  onSucesso: () => void;
+  // Modificamos a propriedade para aceitar e passar o array de links adiante
+  onSucesso: (urlsDocumentos: string[]) => void;
 }
 
 interface ArquivoFila {
@@ -45,53 +45,16 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     if (arquivos.length === 0) return;
     setUploading(true);
 
-    const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
     const urlsDocumentos: string[] = [];
-    let analiseId = "";
+    // Geramos um identificador temporário de lote para organizar os uploads no R2
+    const loteId = `lote-${Date.now()}`;
 
-    // URL base pública do seu Cloudflare R2 (Configure no seu .env)
+    // URL base pública do seu Cloudflare R2
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
     try {
       // ====================================================================
-      // PULO DO GATO 1: CRIA A ANÁLISE NO SUPABASE PRIMEIRO PARA OBTER O ID
-      // ====================================================================
-      const { data: novaAnalise, error: insertError } = await supabase
-        .from("analises_credito")
-        .insert({
-          cnpj: cnpjLimpo,
-          razao_social: empresa.razao_social.toUpperCase(),
-          status: "robo_processando", // Entra bloqueado para o robô trabalhar
-          dados_consolidados: {
-            uf: empresa.uf || "PR",
-            cidade: empresa.cidadeExtenso || "Curitiba",
-            capital_social: empresa.capital_social || 0,
-            dados_gerais: { fundacao: "", ramo: "", site: "", relacionamento: "Prospect", gerente: "" },
-            proposta: { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
-            dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
-            dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vendas_prazo_perc: 100 },
-            dados_endividamento: [],
-            dados_restritivos: [],
-            dados_estrutura_societaria: [],
-            dados_juridico: { processos_tramitacao: "", processos_arquivados: "" },
-            parecer_comite: ""
-          }, 
-          dados_documentos: [] 
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        if (insertError.code === "23505") {
-          throw new Error("Este CNPJ já possui uma análise cadastrada ou ativa na esteira!");
-        }
-        throw insertError;
-      }
-
-      analiseId = novaAnalise.id;
-
-      // ====================================================================
-      // PULO DO GATO 2: FAZ O UPLOAD DE CADA ARQUIVO VINCULADO AO ID REAL
+      // 🚀 LOOP DE UPLOAD: FAZ O ENCONTRO DOS ARQUIVOS COM O BUCKET R2
       // ====================================================================
       for (let i = 0; i < arquivos.length; i++) {
         const item = arquivos[i];
@@ -102,7 +65,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         try {
           const formData = new FormData();
           formData.append("file", item.file);
-          formData.append("analiseId", analiseId); // Injeta o ID gerado pelo Supabase
+          formData.append("analiseId", loteId); // Identificador temporário para a pasta física
 
           const res = await fetch("/api/upload", {
             method: "POST",
@@ -115,8 +78,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             throw new Error(data.error || `Erro HTTP ${res.status}`);
           }
 
-          // Monta o link final acessível que a IA vai ler
-          const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${analiseId}/${item.file.name}`;
+          // Monta o link público final do arquivo no Cloudflare R2
+          const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${loteId}/${item.file.name}`;
           urlsDocumentos.push(urlFinalDoArquivo);
 
           setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Salvo na esteira R2!" } : a));
@@ -128,56 +91,26 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         }
       }
 
-      // Atualiza a lista de documentos anexados no registro do Supabase
-      await supabase
-        .from("analises_credito")
-        .update({ dados_documentos: urlsDocumentos })
-        .eq("id", analiseId);
-
       // ====================================================================
-      // PULO DO GATO 3: CHAMA O MOTOR DE INTELIGÊNCIA ARTIFICIAL
+      // 🏁 ENTREGA FINAL: Devolve as URLs prontas para a tela mãe processar
       // ====================================================================
-      setArquivos(prev => prev.map(a => ({ ...a, mensagem: "🤖 Robô V8 lendo e estruturando dados..." })));
+      setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
       
-      const resIA = await fetch("/api/motor-ia", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          analise_id: analiseId,
-          urls_documentos: urlsDocumentos
-        }),
-      });
-
-      const dataIA = await resIA.json();
-
-      if (!resIA.ok) {
-        throw new Error(dataIA.error || "Ocorreu um erro no processamento da IA.");
-      }
-
-      // Tudo concluído com sucesso, avança a tela mãe
       setTimeout(() => {
-        onSucesso();
+        onSucesso(urlsDocumentos); // Aciona a gravação unificada e chama a IA lá na página principal
         setArquivos([]);
-      }, 1500);
+      }, 1000);
 
     } catch (err: any) {
-      console.error("❌ [ERRO_ESTEIRA_V8]:", err);
-      alert("⚠️ Erro no fluxo automático da esteira:\n" + err.message);
-      
-      // Fallback de segurança: Se deu erro pós-criação da análise, volta ela para revisão humana
-      if (analiseId) {
-        await supabase
-          .from("analises_credito")
-          .update({ status: "em_revisao_humana" })
-          .eq("id", analiseId);
-      }
+      console.error("❌ [ERRO_ESTEIRA_UPLOAD]:", err);
+      alert("⚠️ Erro no envio dos arquivos:\n" + err.message);
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="space-y-4 font-sans">
+    <div className="space-y-4 font-sans text-slate-700">
       <div>
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
           Anexar Documentação em Lote (Selecione um ou vários PDFs: Balanços, FAT, IRPF)
@@ -192,7 +125,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         />
       </div>
 
-      {/* GRADE VISUAL DO EXCEL INTERNO DE ARQUIVOS */}
+      {/* GRADE VISUAL DOS ARQUIVOS */}
       {arquivos.length > 0 && (
         <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
           <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider">
@@ -235,7 +168,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         disabled={uploading || arquivos.length === 0}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "Processando Lote de IA..." : "🚀 Disparar Documentos para a Mesa V8"}
+        {uploading ? "Enviando Lote para Armazenamento..." : "🚀 Disparar Documentos para a Mesa V8"}
       </button>
     </div>
   );

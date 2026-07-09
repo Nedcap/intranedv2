@@ -13,9 +13,10 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     setGerando(true);
 
     try {
-      // 1. Processamento Dinâmico de Tabelas
       const dataAtual = new Date().toLocaleDateString('pt-BR');
 
+      // 1. Processamento Dinâmico de Tabelas (Alinhado com a Estrutura do Banco)
+      
       // Propostas
       let totalLimites = 0;
       const propostasRows = analise.propostas && analise.propostas.length > 0 
@@ -23,12 +24,12 @@ export default function GerarAnalise({ analise }: { analise: any }) {
             totalLimites += Number(p.limite) || 0;
             return `
             <tr>
-                <td style="font-weight:600;">${p.modalidade}</td>
+                <td style="font-weight:600;">${p.modalidade || '-'}</td>
                 <td class="text-right font-bold" style="color:var(--blue);">${formatarMoeda(p.limite)}</td>
-                <td class="text-center">${p.prazo}</td>
+                <td class="text-center">${p.prazo || '-'}</td>
                 <td class="text-center">${formatarMoeda(p.tranche)}</td>
-                <td class="text-center font-bold">${p.taxa}</td>
-                <td>${p.garantia}</td>
+                <td class="text-center font-bold">${p.taxa || '-'}</td>
+                <td>${p.garantia || '-'}</td>
             </tr>
             `;
           }).join("")
@@ -38,25 +39,25 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const empresasRows = analise.empresas_grupo && analise.empresas_grupo.length > 0 
         ? analise.empresas_grupo.map((e: any) => `
           <tr>
-              <td style="font-weight:600; font-size:0.85rem;">${e.empresa}</td>
-              <td style="font-size:0.85rem;">${e.cnpj}</td>
-              <td style="font-size:0.85rem; text-align:center;">${e.fundacao}</td>
-              <td style="font-size:0.85rem; text-align:center;">${e.idade}</td>
+              <td style="font-weight:600; font-size:0.85rem;">${e.empresa || '-'}</td>
+              <td style="font-size:0.85rem;" class="font-mono">${e.cnpj || '-'}</td>
+              <td style="font-size:0.85rem; text-align:center;">${e.fundacao || '-'}</td>
+              <td style="font-size:0.85rem; text-align:center;">${e.idade || '-'}</td>
           </tr>
         `).join("") 
         : `<tr><td colspan="4" class="text-center" style="color:var(--muted);">Nenhuma empresa informada.</td></tr>`;
 
-      // Societário
+      // Societário (Mapeado exatamente para: nome, perc, funcao, figura_contrato)
       const socioRows = analise.socios && analise.socios.length > 0 
         ? analise.socios.map((s: any) => `
           <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 4px 0;"><strong>${s.nome}</strong></td>
-              <td style="padding: 4px 0; color: var(--muted); text-align:center;">${s.assinatura}</td>
-              <td style="padding: 4px 0; color: var(--muted);">${s.regra}</td>
-              <td style="padding: 4px 0; text-align: right; font-weight: 600;">${s.perc}%</td>
+              <td style="padding: 8px 10px;"><strong>${s.nome || '-'}</strong></td>
+              <td style="padding: 8px 10px; color: var(--muted); text-align:center;">${s.funcao || 'Sócio'}</td>
+              <td style="padding: 8px 10px; color: var(--muted); text-align:center;">Assina Contrato: ${s.figura_contrato || 'Sim'}</td>
+              <td style="padding: 8px 10px; text-align: right; font-weight: 600;" class="font-mono">${s.perc || 0}%</td>
           </tr>
         `).join("") 
-        : `<tr><td colspan="4" style="color:var(--muted); text-align:center;">Nenhum sócio informado.</td></tr>`;
+        : `<tr><td colspan="4" style="color:var(--muted); text-align:center; padding: 10px;">Nenhum sócio informado.</td></tr>`;
 
       // Patrimônio
       let totalPatrimonio = 0;
@@ -65,8 +66,8 @@ export default function GerarAnalise({ analise }: { analise: any }) {
             totalPatrimonio += Number(p.valor) || 0;
             return `
               <tr>
-                <td style="font-weight:600;">${p.descricao}</td>
-                <td class="text-right font-bold">${formatarMoeda(p.valor)}</td>
+                <td style="font-weight:600;">${p.descricao || '-'} <span style="font-weight:normal; color:var(--muted);">(${p.socio || 'Sócio'})</span></td>
+                <td class="text-right font-bold font-mono text-green-700">${formatarMoeda(p.valor)}</td>
               </tr>
             `;
           }).join("")
@@ -79,54 +80,54 @@ export default function GerarAnalise({ analise }: { analise: any }) {
             totalBancosDet += Number(b.saldo) || 0;
             return `
             <tr>
-                <td style="font-weight:600; font-size:0.85rem;">${b.instituicao}</td>
-                <td style="font-size:0.85rem;">${b.modalidade}</td>
-                <td class="text-right font-bold" style="font-size:0.85rem; color:var(--red);">${formatarMoeda(b.saldo)}</td>
+                <td style="font-weight:600; font-size:0.85rem;">${b.instituicao || '-'}</td>
+                <td style="font-size:0.85rem;">${b.modalidade || '-'} <span style="color:var(--muted); font-size:10px;">(${b.tipo} - ${b.prazo})</span></td>
+                <td class="text-right font-bold font-mono" style="font-size:0.85rem; color:var(--red);">${formatarMoeda(b.saldo)}</td>
             </tr>
             `;
         }).join("")
         : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhum detalhamento bancário mapeado.</td></tr>`;
 
-      // Restritivos
+      // Restritivos (Ajustado r.empresa -> r.empresa_socio)
       let totalRestritivos = 0;
       const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
         ? analise.restritivos.map((r: any) => {
             totalRestritivos += Number(r.valor) || 0;
             return `
             <tr>
-                <td style="font-weight:600;">${r.empresa}</td>
-                <td style="color:var(--yellow); font-weight:bold;">${r.restritivo}</td>
-                <td class="text-center">${r.qtd}</td>
-                <td class="text-right font-bold text-red-600">${formatarMoeda(r.valor)}</td>
+                <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
+                <td style="color:var(--yellow); font-weight:bold;">${r.restritivo || '-'}</td>
+                <td class="text-center font-mono">${r.qtd || 1}</td>
+                <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.valor)}</td>
             </tr>
             `;
         }).join("") 
         : ``;
 
-      // Referências
+      // Referências Fundos (Ajustado para o layout expandido de Liquidez)
       const refRows = analise.referencias && analise.referencias.length > 0
         ? analise.referencias.map((r: any) => `
           <tr>
-            <td style="font-weight:600;">${r.instituicao}</td>
-            <td class="text-center">${r.cliente_desde}</td>
-            <td class="text-center">${r.ultima_operacao}</td>
-            <td class="text-right font-bold text-blue-600">${formatarMoeda(r.limite_global)}</td>
-            <td class="text-right font-bold text-red-600">${formatarMoeda(r.risco_total)}</td>
-            <td class="text-center">${r.liquidez}</td>
-            <td class="text-right">${r.vop}</td>
+            <td style="font-weight:600;">${r.instituicao || '-'}</td>
+            <td class="text-center font-mono">${r.cliente_desde ? new Date(r.cliente_desde).toLocaleDateString('pt-BR') : '-'}</td>
+            <td class="text-center font-mono">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
+            <td class="text-right font-bold font-mono text-blue-600">${formatarMoeda(r.limite_global)}</td>
+            <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.risco_total)}</td>
+            <td class="text-center" style="font-size:11px;">Pontual: ${r.liquidez_pontual || '-'} | 5d: ${r.liquidez_5_dias || '-'}</td>
+            <td class="text-center font-mono">${r.concentracao || 0}%</td>
           </tr>
         `).join("")
         : `<tr><td colspan="7" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
 
-      // Faturamento Mensal (Meses curtos pra bater com a interface)
+      // Faturamento Mensal
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
       let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
 
       const fatRows = meses.map(mes => {
-        const val2024 = Number(analise.dados_faturamento["2024"]?.[mes]) || 0;
-        const val2025 = Number(analise.dados_faturamento["2025"]?.[mes]) || 0;
-        const val2026 = Number(analise.dados_faturamento["2026"]?.[mes]) || 0;
+        const val2024 = Number(analise.dados_faturamento?.["2024"]?.[mes]) || 0;
+        const val2025 = Number(analise.dados_faturamento?.["2025"]?.[mes]) || 0;
+        const val2026 = Number(analise.dados_faturamento?.["2026"]?.[mes]) || 0;
         
         tot2024 += val2024; if(val2024 > 0) qtd2024++;
         tot2025 += val2025; if(val2025 > 0) qtd2025++;
@@ -138,35 +139,31 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         return `
         <tr>
             <td style="font-weight: 600; text-transform: uppercase;">${mes}</td>
-            <td class="text-center">${formatarMoeda(val2026)}</td>
-            <td class="text-center ${delta2 > 0 ? 'delta-pos' : delta2 < 0 ? 'delta-neg' : ''}">${delta2 !== 0 ? delta2.toFixed(1) + '%' : '-'}</td>
-            <td class="text-center">${formatarMoeda(val2025)}</td>
-            <td class="text-center ${delta1 > 0 ? 'delta-pos' : delta1 < 0 ? 'delta-neg' : ''}">${delta1 !== 0 ? delta1.toFixed(1) + '%' : '-'}</td>
-            <td class="text-center">${formatarMoeda(val2024)}</td>
+            <td class="text-center font-mono">${formatarMoeda(val2026)}</td>
+            <td class="text-center font-mono ${delta2 > 0 ? 'delta-pos' : delta2 < 0 ? 'delta-neg' : ''}">${delta2 !== 0 ? delta2.toFixed(1) + '%' : '-'}</td>
+            <td class="text-center font-mono">${formatarMoeda(val2025)}</td>
+            <td class="text-center font-mono ${delta1 > 0 ? 'delta-pos' : delta1 < 0 ? 'delta-neg' : ''}">${delta1 !== 0 ? delta1.toFixed(1) + '%' : '-'}</td>
+            <td class="text-center font-mono">${formatarMoeda(val2024)}</td>
         </tr>`;
       }).join("");
 
-      // Médias
       const med2024 = qtd2024 > 0 ? tot2024 / 12 : 0;
       const med2025 = qtd2025 > 0 ? tot2025 / 12 : 0;
       const med2026 = qtd2026 > 0 ? tot2026 / 12 : 0;
 
-      // Resumo de Endividamento
-      const curtoPrazo = Number(analise.endividamento_resumo?.curto_prazo) || 0;
-      const longoPrazo = Number(analise.endividamento_resumo?.longo_prazo) || 0;
-      const totalGeralBancos = curtoPrazo + longoPrazo;
-      const alavancagem = med2025 > 0 ? (totalGeralBancos / med2025).toFixed(2) : "0.00";
+      // Alavancagem SCR Unificada com base no detalhamento do robô
+      const faturamentoReferencia = med2025 > 0 ? med2025 : med2024;
+      const alavancagem = faturamentoReferencia > 0 ? (totalBancosDet / faturamentoReferencia).toFixed(2) : "0.00";
 
-      // 2. Arrays para o Chart.js
-      const arrayFat2024 = JSON.stringify(meses.map(m => analise.dados_faturamento["2024"]?.[m] || 0));
-      const arrayFat2025 = JSON.stringify(meses.map(m => analise.dados_faturamento["2025"]?.[m] || 0));
-      const arrayFat2026 = JSON.stringify(meses.map(m => analise.dados_faturamento["2026"]?.[m] || 0));
+      // 2. Transmissão Segura de Arrays para o Chart.js
+      const arrayFat2024 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2024"]?.[m] || 0));
+      const arrayFat2025 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2025"]?.[m] || 0));
+      const arrayFat2026 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2026"]?.[m] || 0));
 
       const endividamentoValido = analise.endividamento_detalhado ? analise.endividamento_detalhado.filter((e:any) => e.saldo > 0) : [];
-      const arrayEndivLabels = JSON.stringify(endividamentoValido.map((e:any) => e.modalidade));
+      const arrayEndivLabels = JSON.stringify(endividamentoValido.map((e:any) => e.instituicao || e.modalidade));
       const arrayEndivData = JSON.stringify(endividamentoValido.map((e:any) => e.saldo));
 
-      // HTML do Organograma
       const organogramaHtml = analise.anexos?.organograma_url ? `
         <h3 style="color: var(--muted); text-transform: uppercase; font-size: 0.85rem; margin-top: 2rem;">Organograma Societário</h3>
         <div class="card" style="padding:1rem; text-align:center; overflow:hidden;">
@@ -174,7 +171,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         </div>
       ` : "";
 
-      // HTML da Fachada
       const fachadaHtml = analise.anexos?.fachada_url ? `
         <h3 style="color: var(--muted); text-transform: uppercase; font-size: 0.85rem; margin-top: 1.5rem;">Fachada / Instalações</h3>
         <div class="card" style="padding:1rem; text-align:center; overflow:hidden;">
@@ -182,14 +178,14 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         </div>
       ` : "";
 
-      // 3. O HTML MONSTRO COMPLETO
+      // 3. Montagem Estilizada do HTML Final
       const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Relatório Executivo - ${analise.razao_social}</title>
+          <title>Dossiê Executivo - ${analise.razao_social}</title>
           <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
           <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
@@ -224,6 +220,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--blue); }
               .parecer-header { background: #f8fafc; padding: 1rem 1.5rem; font-weight: 800; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size:0.9rem;}
               .parecer-body { padding: 1.5rem; font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap; text-align: justify;}
+              .parecer-footer { background: #f8fafc; padding: 0.75rem 1.5rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 11px; }
               @media print { .print-break { page-break-before: always; } }
           </style>
       </head>
@@ -233,19 +230,19 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <div class="header">
               <div>
                   <h1>${analise.razao_social}</h1>
-                  <div class="meta">CNPJ: ${analise.cnpj} | Data Análise: ${dataAtual} | Analista: ${analise.analista || '-'} | Gerente: ${analise.gerente || '-'}</div>
+                  <div class="meta">CNPJ: ${analise.cnpj} | Data Emissão: ${dataAtual} | Analista: ${analise.analista || '-'} | Gerente: ${analise.gerente || '-'}</div>
               </div>
-              <div class="badge-top">STATUS: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
+              <div class="badge-top">SUGESTÃO: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
           </div>
 
           <div class="grid-3" style="margin-bottom: 1.5rem;">
               <div class="card" style="grid-column: span 1; background:#f8fafc; display:flex; flex-direction:column; justify-content:center; align-items:center; border: 2px dashed var(--blue);">
-                  <div class="metric-label" style="color:var(--blue-dark);">Rating</div>
+                  <div class="metric-label" style="color:var(--blue-dark);">Rating Sugerido</div>
                   <div class="metric-value" style="color: var(--yellow); text-align:center;">${analise.rating || '-'}</div>
               </div>
               <div class="card" style="grid-column: span 2;">
-                  <div class="metric-label" style="margin-bottom: 0.5rem;">Resumo Executivo (Visita)</div>
-                  <div style="font-size: 0.85rem; color: var(--muted); line-height: 1.5; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo executivo preenchido.'}</div>
+                  <div class="metric-label" style="margin-bottom: 0.5rem;">Resumo Executivo (Visita Comercial)</div>
+                  <div style="font-size: 0.85rem; color: var(--muted); line-height: 1.5; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo cadastrado.'}</div>
               </div>
           </div>
 
@@ -257,7 +254,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       ${propostasRows}
                       ${totalLimites > 0 ? `
                       <tr class="row-total">
-                          <td>LIMITE TOTAL</td>
+                          <td>LIMITE TOTAL SOLICITADO</td>
                           <td class="text-right" style="color:var(--blue-dark);">${formatarMoeda(totalLimites)}</td>
                           <td colspan="4"></td>
                       </tr>` : ''}
@@ -277,19 +274,21 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <div class="grid-2">
               <div class="card" style="margin-bottom:0; padding:1rem;">
-                  <div class="metric-label">Localização & Ramo (Empresa Principal)</div>
+                  <div class="metric-label">Localização & Ramo de Atividade</div>
                   <div style="font-weight: 600; font-size: 0.85rem;">${analise.localizacao || '-'}<br><span style="font-weight:normal; color:var(--muted);">${analise.ramo || '-'}</span></div>
+                  <div style="font-size:11px; color:var(--muted); margin-top:10px;">Site: ${analise.site || 'Não Informado'} | Balanço Auditado: ${analise.balanco_auditado || 'Não'}</div>
               </div>
               <div class="card" style="margin-bottom:0; padding:1rem;">
-                  <div class="metric-label">Quadro Societário</div>
+                  <div class="metric-label">Quadro Societário & Assinaturas</div>
                   <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
                       ${socioRows}
                   </table>
+                  <div style="font-size:11px; color:var(--muted); margin-top:10px;">Regra de Assinatura: <strong>${analise.regra_assinatura || '-'}</strong></div>
               </div>
           </div>
 
           ${totalPatrimonio > 0 ? `
-          <h3 style="color: var(--muted); text-transform: uppercase; font-size: 0.85rem; margin-top: 1.5rem;">Patrimônio Informado (Bens)</h3>
+          <h3 style="color: var(--muted); text-transform: uppercase; font-size: 0.85rem; margin-top: 1.5rem;">Patrimônio Garantidores (Bens IRPF)</h3>
           <div class="table-wrap">
               <table>
                   <tbody>
@@ -310,7 +309,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <h2>Faturamento Consolidado</h2>
           <div class="card" style="margin-bottom: 1.5rem; padding: 1rem;">
-              <div class="metric-label" style="margin-bottom: 1rem;">Evolução de Faturamento (YoY)</div>
+              <div class="metric-label" style="margin-bottom: 1rem;">Evolução de Faturamento Anual (YoY)</div>
               <div class="chart-container"><canvas id="fatChart"></canvas></div>
           </div>
           
@@ -351,97 +350,91 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           <h2>Potencial de Negócios</h2>
           <div class="grid-2">
               <div class="card" style="margin-bottom:0;">
-                  <div class="metric-label">Parâmetros de Rotação</div>
-                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Ticket Médio: <strong>${formatarMoeda(analise.dados_potencial.ticket_medio)}</strong></div>
-                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Prazo Médio: <strong>${analise.dados_potencial.prazo_medio_vendas || '-'}</strong></div>
-                  <div style="font-size:0.85rem;">Composição: <strong>${analise.dados_potencial.composicao || '-'}</strong></div>
+                  <div class="metric-label">Parâmetros de Rotação de Recebíveis</div>
+                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Ticket Médio Operado: <strong>${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong></div>
+                  <div style="font-size:0.85rem; margin-bottom:0.5rem;">Prazo de Vendas (Duplicatas): <strong>${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></div>
+                  <div style="font-size:0.85rem;">Divisão de Recebimento: <strong>${analise.dados_potencial?.forma_recebimento_prazo || 0}% a Prazo</strong></div>
               </div>
               <div class="card" style="margin-bottom:0; background:#f0fdf4; border-color:#86efac; display:flex; flex-direction:column; justify-content:center;">
-                  <div class="metric-label" style="color:#166534;">Potencial Real Estimado</div>
-                  <div class="metric-value" style="color:#15803d; font-size:2rem;">${formatarMoeda(analise.dados_potencial.potencial_estimado)}</div>
+                  <div class="metric-label" style="color:#166534;">Potencial Real Estimado (Vol. Operável)</div>
+                  <div class="metric-value" style="color:#15803d; font-size:2rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
               </div>
           </div>
 
           <div class="print-break"></div>
 
-          <h2>Passivo Bancário / Endividamento</h2>
+          <h2>Passivo Bancário / Endividamento (SCR Bacen)</h2>
           <div class="grid-3">
               <div class="table-wrap" style="grid-column: span 1; display:flex; flex-direction:column; margin-bottom:0;">
                   <table style="flex-grow: 1;">
-                      <thead><tr><th colspan="2" class="text-center">Resumo Consolidado</th></tr></thead>
+                      <thead><tr><th colspan="2" class="text-center">Resumo de Linhas</th></tr></thead>
                       <tbody>
-                          <tr><td>Curto Prazo</td><td class="text-right font-bold">${formatarMoeda(curtoPrazo)}</td></tr>
-                          <tr><td>Longo Prazo</td><td class="text-right font-bold">${formatarMoeda(longoPrazo)}</td></tr>
-                          <tr class="row-total"><td>TOTAL GERAL</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalGeralBancos)}</td></tr>
-                          <tr><td colspan="2" class="text-center" style="font-size:0.75rem; padding: 1rem; color:var(--muted);">
-                              Alavancagem Atual:<br>
-                              <strong style="color:var(--text); font-size: 1rem;">${alavancagem} x Fat. Médio</strong>
+                          <tr><td>Volume Total Mapeado</td><td class="text-right font-bold" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>
+                          <tr><td colspan="2" class="text-center" style="font-size:0.75rem; padding: 1.5rem; color:var(--muted);">
+                              Indicador de Alavancagem:<br>
+                              <strong style="color:var(--text); font-size: 1.1rem;">${alavancagem} x Fat. Médio</strong>
                           </td></tr>
                       </tbody>
                   </table>
               </div>
               
               <div class="card" style="grid-column: span 2; padding: 1rem; margin-bottom:0;">
-                  <div class="metric-label" style="margin-bottom: 1rem;">Distribuição SCR (Detalhado)</div>
+                  <div class="metric-label" style="margin-bottom: 1rem;">Distribuição das Dívidas por Credor</div>
                   <div class="chart-container" style="height: 180px;"><canvas id="endivChart"></canvas></div>
               </div>
           </div>
           
           <div class="table-wrap" style="margin-top: 1.5rem;">
               <table>
-                  <thead><tr><th>Credor / Instituição</th><th>Modalidade</th><th class="text-right">Saldo Devedor</th></tr></thead>
+                  <thead><tr><th>Credor / Instituição Financeira</th><th>Modalidade Contratada</th><th class="text-right">Saldo Devedor Atual</th></tr></thead>
                   <tbody>
                       ${bancoRows}
-                      <tr class="row-total"><td colspan="2">TOTAL DETALHADO</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>
+                      <tr class="row-total"><td colspan="2">TOTAL SCR SCRUTADO</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>
                   </tbody>
               </table>
           </div>
 
-          <h2>Referências e Informações Bancárias</h2>
+          <h2>Referências e Birôs de Crédito</h2>
           <div class="table-wrap">
               <table>
-                  <thead><tr><th>Instituição / Fundo</th><th class="text-center">Cliente Desde</th><th class="text-center">Última Operação</th><th class="text-right">Limite Global</th><th class="text-right">Risco Total</th><th class="text-center">Comportamento</th><th class="text-right">RNX</th></tr></thead>
+                  <thead><tr><th>Fundo / Parceiro</th><th class="text-center">Parceria Desde</th><th class="text-center">Última Operação</th><th class="text-right">Limite Global</th><th class="text-right">Risco Alocado</th><th class="text-center">Histórico Pontualidade</th><th class="text-center">Concentração</th></tr></thead>
                   <tbody>
                       ${refRows}
                   </tbody>
               </table>
           </div>
 
-          <h2>Apontamentos Restritivos e Jurídico</h2>
+          <h2>Apontamentos Restritivos e Análise Jurídica</h2>
           
           ${totalRestritivos > 0 ? `
           <div class="table-wrap">
               <table>
-                  <thead><tr><th>Órgão / Origem</th><th>Restritivo</th><th class="text-center">Qtd</th><th class="text-right">Valor</th></tr></thead>
+                  <thead><tr><th>Envolvido (Empresa/Sócio)</th><th>Tipo de Ocorrência</th><th class="text-center">Qtd</th><th class="text-right">Montante</th></tr></thead>
                   <tbody>
                       ${restritivosRows}
-                      <tr class="row-total"><td colspan="3">TOTAL FINANCEIRO EXPOSTO</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalRestritivos)}</td></tr>
+                      <tr class="row-total"><td colspan="3">EXPOSIÇÃO FINANCEIRA RESTRITIVA</td><td class="text-right" style="color:var(--red);">${formatarMoeda(totalRestritivos)}</td></tr>
                   </tbody>
               </table>
           </div>
-          ` : `<div class="card" style="text-align:center; color:var(--green); font-weight:bold; margin-bottom: 1.5rem;">Nenhum apontamento restritivo financeiro localizado (R$ 0,00).</div>`}
+          ` : `<div class="card" style="text-align:center; color:var(--green); font-weight:bold; margin-bottom: 1.5rem;">Nada consta nos órgãos de proteção ao crédito (R$ 0,00).</div>`}
 
           <div class="grid-2">
               <div class="card" style="padding:1.25rem;">
-                  <div style="font-weight:800; font-size:0.8rem; color:var(--red); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #fca5a5; padding-bottom: 5px;">🔴 Processos em Tramitação</div>
-                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.juridico_tramitacao || 'Nenhum processo em tramitação relevante encontrado.'}</div>
+                  <div style="font-weight:800; font-size:0.8rem; color:var(--red); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #fca5a5; padding-bottom: 5px;">⚠️ Litígios e Processos Ativos</div>
+                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
               </div>
               <div class="card" style="padding:1.25rem;">
-                  <div style="font-weight:800; font-size:0.8rem; color:var(--green); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #86efac; padding-bottom: 5px;">🟢 Arquivados e Extintos</div>
-                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.juridico_arquivados || 'Nenhum processo arquivado encontrado.'}</div>
-              </div>
-              <div class="card" style="grid-column: span 2; padding:1.25rem;">
-                  <div style="font-weight:800; font-size:0.8rem; color:var(--blue-dark); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px;">📰 Pesquisa de Mídia e Notícias (Reputacional)</div>
-                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.noticias_midia || 'Nada consta na pesquisa de mídia.'}</div>
+                  <div style="font-weight:800; font-size:0.8rem; color:var(--blue-dark); margin-bottom:0.5rem; text-transform:uppercase; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px;">🔍 Análise de Mídia e Compliance Reputacional</div>
+                  <div style="font-size:0.8rem; color:#334155; white-space: pre-wrap;">${analise.noticias_midia || 'Nada consta em pesquisas de desabonadores digitais.'}</div>
               </div>
           </div>
 
           <div class="print-break"></div>
 
           <div class="parecer-wrapper" style="margin-top: 2rem;">
-              <div class="parecer-header">Parecer Final de Crédito</div>
-              <div class="parecer-body"><b>RECOMENDAÇÃO: ${analise.recomendacao_analista?.toUpperCase()}</b>\n\n${analise.parecer_analista}</div>
-              <div class="parecer-footer">Responsável pela Análise: <span style="color:var(--blue-dark);">${analise.analista || 'Analista'}</span></div>
+              <div class="parecer-header">Parecer Técnico / Deliberação da Mesa de Risco</div>
+              <div class="parecer-body"><b>RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</b>\n\n${analise.parecer_analista || 'Sem parecer conclusivo preenchido.'}</div>
+              <div class="parecer-footer">Emitido por: <strong>${analise.analista || 'Analista de Crédito'}</strong></div>
           </div>
 
       </div>
@@ -494,7 +487,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       window.open(url, "_blank");
 
     } catch (err) {
-      alert("Erro ao gerar o relatório.");
+      alert("Erro ao estruturar dados na impressão do relatório.");
       console.error(err);
     } finally {
       setGerando(false);
