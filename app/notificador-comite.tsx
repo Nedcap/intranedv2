@@ -65,10 +65,26 @@ export default function NotificadorComite() {
 
       const canalComiteGlobal = supabase
         .channel("comite-realtime-global")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "analises" }, (payload: any) => {
+        // ✅ MUDANÇA AQUI: Ouvindo UPDATE ao invés de INSERT
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "analises" }, (payload: any) => {
           // 🔐 Filtro de escopo comercial ativo
           if (isComercial && payload.new.comercial !== userNome) return;
-          adicionarNotificacao("📋 Nova Análise", `A empresa ${payload.new.empresa_nome} chegou no comitê.`, "analise");
+          
+          const statusNovo = payload.new?.status;
+          const statusAntigo = payload.old?.status;
+
+          // ✅ GATILHO CIRÚRGICO: Só avisa quando o Analista muda para aprovado/reprovado
+          if (
+            (statusNovo === "aprovado" || statusNovo === "reprovado") && 
+            statusNovo !== statusAntigo && 
+            statusAntigo !== undefined // Previne spam caso a Replica Identity não esteja ativada no banco
+          ) {
+            adicionarNotificacao(
+              "⚖️ Liberado para Votação", 
+              `A empresa ${payload.new.empresa_nome} foi enviada ao comitê com parecer: ${statusNovo.toUpperCase()}.`, 
+              "analise"
+            );
+          }
         })
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "votos" }, (payload: any) => {
           // 🔐 Filtro de escopo comercial ativo
