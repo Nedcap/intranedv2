@@ -284,8 +284,8 @@ export default function MotorCreditoPage() {
               </div>
 
               <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
-                {/* Repassa a tipagem unificada de array de links ao callback */}
-                <UploadDocs empresa={empresaSelecionada as any} onSucesso={(urls) => registrarAnaliseNoSupabase(urls)} />
+                {/* Chamada direta e limpa do callback sem a Arrow Function redundante */}
+                <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
           )}
