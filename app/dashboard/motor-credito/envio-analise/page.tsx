@@ -18,9 +18,9 @@ interface FilaItem {
   empresa_nome: string;
   cnpj: string;
   status: string;
-  criado_em: string; 
-  ia_inicio?: string; // ✅ Adicionado
-  ia_fim?: string;    // ✅ Adicionado
+  criado_em: string;
+  ia_inicio?: string;
+  ia_fim?: string;
   status_comite?: string;
 }
 
@@ -39,10 +39,10 @@ export default function MotorCreditoPage() {
 
   const carregarFilaComercial = async () => {
     try {
-      // 📊 Busca na tabela 'analises' com as colunas corretas
+      // 📊 Busca na tabela 'analises' incluindo as novas colunas de IA
       const { data, error } = await supabase
         .from("analises")
-        .select("id, empresa_nome, cnpj, status, criado_em, atualizado_em, status_comite")
+        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite")
         .in("status", ["aberta", "aprovado", "reprovado", "aguardando_docs", "em_revisao_humana"])
         .order("criado_em", { ascending: false });
 
@@ -102,13 +102,14 @@ export default function MotorCreditoPage() {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
 
       const { data: novaAnalise, error } = await supabase
-        .from("analises") // ✅ Tabela correta
+        .from("analises")
         .insert({
           cnpj: cnpjLimpo,
-          empresa_nome: empresaSelecionada.razao_social.toUpperCase(), // ✅ Coluna correta
-          caminho_local: "Upload via Motor V8 / R2", // ✅ Obrigatório no seu banco (NOT NULL)
+          empresa_nome: empresaSelecionada.razao_social.toUpperCase(),
+          caminho_local: "Upload via Motor V8 / R2",
           status: "em_revisao_humana", 
           status_comite: "pendente",
+          ia_inicio: new Date().toISOString(), // ✅ Registra o momento exato que a IA começa
           dados_documentos: urlsDocumentos,
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
@@ -331,21 +332,22 @@ export default function MotorCreditoPage() {
                     return (
                       <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3.5">
-                          {/* ✅ Adaptado para item.empresa_nome */}
                           <p className="font-black text-slate-900 uppercase truncate max-w-[250px]">{item.empresa_nome}</p>
                           <p className="font-mono font-bold text-slate-500 text-[10px] mt-0.5">{formatarCnpj(item.cnpj)}</p>
                         </td>
                         
                         <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
-                          {/* ✅ Adaptado para item.criado_em */}
-                          {formatarDataHora(item.criado_em)}
+                          {/* ✅ Exibe a data/hora do início da IA */}
+                          {item.ia_inicio ? formatarDataHora(item.ia_inicio) : "---"}
                         </td>
                         
                         <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
-                          {/* ✅ Adaptado para item.atualizado_em */}
-                          {item.atualizado_em 
-                            ? formatarDataHora(item.atualizado_em) 
-                            : <span className="text-indigo-400 italic">⏳ Processando...</span>}
+                          {/* ✅ Lógica precisa baseada no preenchimento do fim da IA */}
+                          {item.ia_fim 
+                            ? formatarDataHora(item.ia_fim) 
+                            : item.ia_inicio 
+                              ? <span className="text-indigo-400 italic">⏳ Processando...</span>
+                              : "---"}
                         </td>
                         
                         <td className="p-3.5 text-center">
