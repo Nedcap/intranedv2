@@ -10,7 +10,7 @@ interface UploadDocsProps {
     cidadeExtenso?: string;
     capital_social?: number;
   };
-  // Modificamos a propriedade para aceitar e passar o array de links adiante
+  // Propriedade mantida para repassar o lote de URLs para a função controladora da página mãe
   onSucesso: (urlsDocumentos: string[]) => void;
 }
 
@@ -41,12 +41,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setArquivos(prev => prev.filter(a => a.id !== id));
   };
 
-  const executarEsteiraUpload = async () => {
+  const ejecutarEsteiraUpload = async () => {
     if (arquivos.length === 0) return;
     setUploading(true);
 
     const urlsDocumentos: string[] = [];
-    // Geramos um identificador temporário de lote para organizar os uploads no R2
+    // Identificador de lote para organização das pastas no Cloudflare R2
     const loteId = `lote-${Date.now()}`;
 
     // URL base pública do seu Cloudflare R2
@@ -54,18 +54,18 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
     try {
       // ====================================================================
-      // 🚀 LOOP DE UPLOAD: FAZ O ENCONTRO DOS ARQUIVOS COM O BUCKET R2
+      // 🚀 LOOP DE UPLOAD: ENVIA OS ARQUIVOS DIRETAMENTE PARA O BACKEND API
       // ====================================================================
       for (let i = 0; i < arquivos.length; i++) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
 
-        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Enviando para o Cloudflare R2..." } : a));
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", message: "Enviando para o Cloudflare R2..." } : a));
 
         try {
           const formData = new FormData();
           formData.append("file", item.file);
-          formData.append("analiseId", loteId); // Identificador temporário para a pasta física
+          formData.append("analiseId", loteId);
 
           const res = await fetch("/api/upload", {
             method: "POST",
@@ -78,7 +78,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             throw new Error(data.error || `Erro HTTP ${res.status}`);
           }
 
-          // Monta o link público final do arquivo no Cloudflare R2
+          // Constrói o link público definitivo correspondente
           const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${loteId}/${item.file.name}`;
           urlsDocumentos.push(urlFinalDoArquivo);
 
@@ -92,12 +92,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       }
 
       // ====================================================================
-      // 🏁 ENTREGA FINAL: Devolve as URLs prontas para a tela mãe processar
+      // 🏁 ENTREGA FINAL: Aciona o callback da tela mãe com as URLs seguras
       // ====================================================================
       setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
       
       setTimeout(() => {
-        onSucesso(urlsDocumentos); // Aciona a gravação unificada e chama a IA lá na página principal
+        onSucesso(urlsDocumentos); 
         setArquivos([]);
       }, 1000);
 
