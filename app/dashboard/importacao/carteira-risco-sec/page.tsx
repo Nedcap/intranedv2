@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
 // ============================================================================
-// 🧽 UTILS DE LIMPEZA E TRATAMENTO DE FORMATOS
+// 🧽 UTILS DE LIMPEZA E TRATAMENTO DE FORMATOS (BLINDADO CONTRA ASPAS)
 // ============================================================================
 const strClean = (c: any) => {
   if (!c) return "";
@@ -18,10 +18,33 @@ const strClean = (c: any) => {
     .replace(/[^A-Z0-9]/g, ""); 
 };
 
+// ⚡ Parser inteligente de CSV que lida com aspas nativamente
+function parseCSVLine(line: string, delimiter: string = ';'): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes; 
+    } else if (char === delimiter && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
 function parseValorReal(valor: any): number {
   if (valor === null || valor === undefined || valor === "") return 0.0;
   if (typeof valor === "number") return valor;
-  let txt = String(valor).toUpperCase().replace(/[R$\s]/g, "").trim();
+  
+  // 🛡️ Remove aspas duplas, simples, R$ e espaços antes de fazer a conta
+  let txt = String(valor).toUpperCase().replace(/[R$\s"']/g, "").trim();
+  
   const isNeg = txt.startsWith("(") && txt.endsWith(")");
   if (isNeg) txt = txt.slice(1, -1);
   if (txt === "-" || txt === "NAN" || txt === "") return 0.0;
@@ -43,8 +66,12 @@ function parseInteiro(valor: any): number {
 }
 
 function converteDataParaISO(dataStr: string): string | null {
-  if (!dataStr || dataStr.trim() === "" || dataStr.trim() === "-") return null;
-  const partes = dataStr.trim().split("/");
+  if (!dataStr) return null;
+  // 🛡️ Arranca qualquer aspa residual antes de quebrar a data
+  const txt = dataStr.replace(/['"]/g, "").trim();
+  
+  if (txt === "" || txt === "-") return null;
+  const partes = txt.split("/");
   if (partes.length === 3) {
     return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
   }
@@ -52,9 +79,13 @@ function converteDataParaISO(dataStr: string): string | null {
 }
 
 function checarSeVencido(dataStr: string): string {
-  if (!dataStr || dataStr === "-") return "A Vencer";
+  if (!dataStr) return "A Vencer";
+  // 🛡️ Arranca aspas da data aqui também
+  const txt = dataStr.replace(/['"]/g, "").trim();
+  
+  if (txt === "" || txt === "-") return "A Vencer";
   try {
-    const partes = dataStr.split("/");
+    const partes = txt.split("/");
     if (partes.length !== 3) return "A Vencer";
     const dataTitulo = new Date(parseInt(partes[2]), parseInt(partes[1]) - 1, parseInt(partes[0]), 12, 0, 0);
     const hoje = new Date();
@@ -87,7 +118,6 @@ export default function CarteiraRiscoSecPage() {
   const carregarCedentes = async () => {
     try {
       setCarregandoBase(true);
-      // Lê apenas para usar de consulta (de-para)
       const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
       if (data) setCedentesSistema(data);
     } catch (err) {
@@ -112,35 +142,55 @@ export default function CarteiraRiscoSecPage() {
     try {
       const texto = await file.text();
       
-      let linhasRaw = texto.split(/\r?\n/).map(l => l.split(";"));
+      let linhasRaw = texto.split(/\r?\n/).filter(l => l.trim() !== "").map(l => parseCSVLine(l, ";"));
+      
       if (linhasRaw.length > 0 && linhasRaw[0].length <= 1) {
-        linhasRaw = texto.split(/\r?\n/).map(l => l.split(","));
+        linhasRaw = texto.split(/\r?\n/).filter(l => l.trim() !== "").map(l => parseCSVLine(l, ","));
       }
 
-      const headerIdx = linhasRaw.findIndex(row => 
-        row.some(cell => strClean(cell).includes("CEDENTE"))
-      );
+      const headerIdx = linhasRaw.findIndex(row => {
+        const colunasLimpas = row.map(strClean);
+        return colunasLimpas.some(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "NOME");
+      });
 
       if (headerIdx === -1) {
-        alert("❌ Layout inválido! Coluna 'CEDENTE' não encontrada no arquivo.");
+        alert("❌ Layout inválido! Coluna de 'Nome' ou 'Cedente' não encontrada no arquivo.");
         setProcessando(false);
         return;
       }
 
       const header = linhasRaw[headerIdx].map(strClean);
-      const idxCedente = header.findIndex(c => c.includes("CEDENTE"));
-      const idxSacado = header.findIndex(c => c.includes("SACADO"));
-      const idxNumTitulo = header.findIndex(c => c === "SNUM" || c === "SEQTIT" || c === "NOSSONUM");
-      const idxSituacao = header.findIndex(c => c.includes("SITUACAO"));
-      const idxVencimento = header.findIndex(c => c === "DTAVCTO" || c === "VENCIMENTO");
-      const idxValorFace = header.findIndex(c => c === "VALORFACE" || c === "VLRFACE");
-      const idxValorAberto = header.findIndex(c => c === "VALORABERTO" || c === "VLRABERTO");
-      const idxAtr = header.findIndex(c => c === "ATR" || c === "ATRASO");
-      const idxValorPago = header.findIndex(c => c.includes("PAGO"));
-      const idxDataLiq = header.findIndex(c => c === "DTALIQ" || c === "DATALIQUIDACAO");
-      const idxAgNeg = header.findIndex(c => c === "AGNEG" || c === "AGENEG" || c === "ASSESSOR");
-      const idxAditivo = header.findIndex(c => c.includes("ADITIVO"));
-      const idxDtaNeg = header.findIndex(c => c === "DTANEGOCIACAO" || c === "DATANEGOCIACAO");
+
+      const findCol = (possibilidades: string[], proibir: string[] = []) => {
+        return header.findIndex(c => 
+          possibilidades.some(p => c === p || c.includes(p)) && 
+          !proibir.some(proib => c.includes(proib))
+        );
+      };
+
+      let idxCedente = header.findIndex(c => c === "CEDENTE" || c === "NOMEDOCEDENTE" || c === "CLIENTE");
+      if (idxCedente === -1) idxCedente = findCol(["CEDENTE", "NOME"], ["DATA", "CNPJ", "CPF", "REG", "MOTIVO"]);
+
+      let idxSacado = header.findIndex(c => c === "SACADO" || c === "NOMEDOSACADO");
+      if (idxSacado === -1) idxSacado = findCol(["SACADO"], ["CNPJ", "CPF", "DATA"]);
+
+      const idxNumTitulo = findCol(["SNUM", "SEQTIT", "NOSSONUM", "NUMERODOTITULO"], ["QTD", "VALOR"]);
+      const idxSituacao = findCol(["SITUACAO", "STATUS"]);
+      const idxVencimento = findCol(["VENCIMENTO", "DTAVCTO", "VCTO"]);
+      const idxValorFace = findCol(["VALORFACE", "VLRFACE", "VALORDOTITULO"], ["ABERTO", "PAGO", "LIQUIDO"]);
+      const idxValorAberto = findCol(["VALORABERTO", "VLRABERTO", "SALDO", "EMABERTO"]);
+      const idxAtr = findCol(["ATR", "ATRASO", "DIAS"]);
+      const idxValorPago = findCol(["VALORPAGO", "VLRPAGO", "PAGO"]);
+      const idxDataLiq = findCol(["DATALIQUIDACAO", "DTALIQ", "LIQUIDACAO", "PAGAMENTO"]);
+      const idxAgNeg = findCol(["AGNEG", "AGENEG", "ASSESSOR", "GERENTE", "COMERCIAL"]);
+      const idxAditivo = findCol(["ADITIVO", "BORDERO"]);
+      const idxDtaNeg = findCol(["DATANEGOCIACAO", "DTANEG", "OPERACAO"]);
+
+      if (idxValorAberto === -1 && idxValorFace === -1) {
+        alert("⚠️ Arquivo Incompatível!\n\nNão encontrei colunas financeiras (Ex: Valor Aberto, Valor Face). Parece que você importou um 'Relatório de Cadastros' no lugar do relatório da Carteira.");
+        setProcessando(false);
+        return;
+      }
 
       const agrupamento: Record<string, any[]> = {};
 
@@ -148,7 +198,8 @@ export default function CarteiraRiscoSecPage() {
         const row = linhasRaw[i];
         if (!row || row.length <= idxCedente) continue;
 
-        const rawCedente = String(row[idxCedente] || "").trim();
+        // Tira as aspas dos nomes também por precaução
+        const rawCedente = String(row[idxCedente] || "").replace(/['"]/g, "").trim();
         if (!rawCedente || rawCedente.toUpperCase().includes("TOTAL") || rawCedente.toUpperCase() === "CEDENTE") continue;
 
         if (!agrupamento[rawCedente]) {
@@ -159,17 +210,17 @@ export default function CarteiraRiscoSecPage() {
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
         agrupamento[rawCedente].push({
-          sacado: idxSacado !== -1 ? String(row[idxSacado] || "").trim().toUpperCase() : "-",
-          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-",
-          situacao: idxSituacao !== -1 ? String(row[idxSituacao] || "").trim().toUpperCase() : "ABERTO",
+          sacado: idxSacado !== -1 ? String(row[idxSacado] || "").replace(/['"]/g, "").trim().toUpperCase() : "-",
+          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").replace(/['"]/g, "").trim() : "-",
+          situacao: idxSituacao !== -1 ? String(row[idxSituacao] || "").replace(/['"]/g, "").trim().toUpperCase() : "ABERTO",
           vencimento: converteDataParaISO(vencimentoRaw),
           valor_face: idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0,
           valor_aberto: idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0,
           dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0,
           valor_pago: idxValorPago !== -1 ? parseValorReal(row[idxValorPago]) : 0,
           data_liquidacao: idxDataLiq !== -1 ? converteDataParaISO(row[idxDataLiq]) : null,
-          gerente_comercial: idxAgNeg !== -1 ? String(row[idxAgNeg] || "").trim().toUpperCase() : null,
-          aditivo: idxAditivo !== -1 ? String(row[idxAditivo] || "").trim() : null,
+          gerente_comercial: idxAgNeg !== -1 ? String(row[idxAgNeg] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
+          aditivo: idxAditivo !== -1 ? String(row[idxAditivo] || "").replace(/['"]/g, "").trim() : null,
           data_negociacao: idxDtaNeg !== -1 ? converteDataParaISO(row[idxDtaNeg]) : null,
           status: statusVencimento
         });
@@ -196,7 +247,7 @@ export default function CarteiraRiscoSecPage() {
       }
 
       setLinhasConciliadas(resultadoConciliado);
-      setStatusMsg("✅ Dados minerados e estruturados de forma resiliente!");
+      setStatusMsg("✅ Dados da Carteira minerados com sucesso!");
     } catch (err: any) {
       alert("❌ Erro ao ler arquivo: " + err.message);
     } finally {
@@ -205,7 +256,7 @@ export default function CarteiraRiscoSecPage() {
   };
 
   // ============================================================================
-  // ⚡ FUNÇÃO DE AUTO-CADASTRO EM LOTE/TEMPO DE EXECUÇÃO
+  // ⚡ FUNÇÃO DE AUTO-CADASTRO INTELIGENTE (EVITA DUPLICIDADE DE CNPJ)
   // ============================================================================
   const handleAutoCadastrarCedente = async (nomePlanilha: string, index: number) => {
     const cnpjPrompt = prompt(`Insira o CNPJ (Apenas números - 14 dígitos) para a empresa:\n${nomePlanilha.toUpperCase()}`);
@@ -214,6 +265,21 @@ export default function CarteiraRiscoSecPage() {
     const cnpjLimpo = cnpjPrompt.replace(/\D/g, "");
     if (cnpjLimpo.length !== 14) {
       alert("❌ CNPJ inválido! Deve conter exatamente 14 dígitos.");
+      return;
+    }
+
+    // 🔍 Verifica se esse CNPJ já existe na base para não violar a chave única
+    const cedenteExistente = cedentesSistema.find(c => c.cnpj === cnpjLimpo);
+
+    if (cedenteExistente) {
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = cedenteExistente.cnpj;
+        copia[index].responsavelId = cedenteExistente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+      alert(`✅ Esse CNPJ já estava cadastrado no sistema sob o nome "${cedenteExistente.cedente}". O vínculo foi realizado!`);
       return;
     }
 
@@ -276,10 +342,8 @@ export default function CarteiraRiscoSecPage() {
     setStatusMsg("🚀 Sincronizando tabelão de carteira...");
 
     try {
-      // Pega todos os CNPJs importados para limpar apenas os dados deles
       const cnpjsParaLimpar = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
-      // Limpeza baseada rigorosamente no schema da carteira_sec
       const { error: errorClean } = await supabase
         .from("carteira_sec")
         .delete()
@@ -314,7 +378,6 @@ export default function CarteiraRiscoSecPage() {
         });
       }
 
-      // Insere apenas na carteira_sec em chunks
       if (payloadCarteira.length > 0) {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
@@ -355,7 +418,7 @@ export default function CarteiraRiscoSecPage() {
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
           <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
             <span className="text-3xl">📊</span>
-            <span className="font-bold text-slate-700">Carregar Relatório de Cobrança Consolidada Qprof (.CSV)</span>
+            <span className="font-bold text-slate-700">Carregar Relatório Analítico de Carteira/Cobrança Qprof (.CSV)</span>
             <span className="text-xs text-slate-400 font-mono">Processamento unificado de segurança com tolerância a BOM/Separadores.</span>
             <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={processando} />
           </label>
