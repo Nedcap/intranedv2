@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import Link from "next/link"; // Import do Link do Next.js para a navegação dos cards
 
 // ============================================================================
 // 🧽 UTILS CORRIGIDOS E SEGUROS
@@ -33,29 +34,6 @@ function formatarMesAno(str: string): string {
   return txt;
 }
 
-function parseDataSegura(dataStr: string) {
-  if (!dataStr) return null;
-  const apenasData = dataStr.trim().split("T")[0];
-  return new Date(`${apenasData}T12:00:00`);
-}
-
-function calcularDiasUteis(dInicio: Date, dFim: Date) {
-  let count = 0;
-  const atual = new Date(dInicio.getTime());
-  atual.setHours(12, 0, 0, 0);
-  const fim = new Date(dFim.getTime());
-  fim.setHours(12, 0, 0, 0);
-  if (fim < atual) return 0;
-  while (atual < fim) {
-    atual.setDate(atual.getDate() + 1);
-    const diaSemana = atual.getDay();
-    if (diaSemana !== 0 && diaSemana !== 6) {
-      count++;
-    }
-  }
-  return count;
-}
-
 function limparCnpjSimples(valor: any): string {
   if (!valor) return "";
   return String(valor).replace(/\D/g, "");
@@ -64,10 +42,9 @@ function limparCnpjSimples(valor: any): string {
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
 // ============================================================================
-// 📊 COMPONENTE PRINCIPAL
+// 📊 COMPONENTE PRINCIPAL (DASHBOARD BI)
 // ============================================================================
 export default function PowerBIPage() {
-  const [analises, setAnalises] = useState<any[]>([]);
   const [dashCarteira, setDashCarteira] = useState<any[]>([]);
   const [dashVop, setDashVop] = useState<any[]>([]);
   const [dashReceitas, setDashReceitas] = useState<any[]>([]);
@@ -106,21 +83,16 @@ export default function PowerBIPage() {
     try {
       setCarregando(true);
       
-      // 🎯 ADEUS LOCALSTORAGE MANUAIS E FILTROS INJETADOS! 
-      // O RLS nativo do Supabase V2 se encarrega de reter os dados com base na sessão ativa.
-      const [resAnalises, resVop, resCarteira, resExtrato] = await Promise.all([
-        supabase.from("analises").select("*"),
+      const [resVop, resCarteira, resExtrato] = await Promise.all([
         supabase.from("dash_vop").select("*"),
         supabase.from("dash_carteira").select("*"),
         supabase.from("extrato_financeiro").select("*")
       ]);
 
-      setAnalises(resAnalises.data || []);
       setDashVop(resVop.data || []);
       setDashCarteira(resCarteira.data || []);
       setDashReceitas(resExtrato.data || []);
 
-      // Mapeamento dinâmico de competências operacionais
       const mesesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => formatarMesAno(v.mes_ano)),
         ...(resExtrato.data || []).map(r => formatarMesAno(r.mes_ano))
@@ -134,7 +106,6 @@ export default function PowerBIPage() {
         setMesesSel(mesesUnicos);
       }
 
-      // Mapeamento de Cedentes unificados carregados na visão do usuário
       const cedentesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => v.cedente),
         ...(resCarteira.data || []).map(c => c.cedente),
@@ -160,16 +131,14 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS INTEGRAIS (PROVENIENTES DE CHAVES POR CNPJ)
+  // ⚡ CÁLCULOS MEMOIZADOS (Focados em VOP, Risco e Receitas)
   // ==========================================================================
   const kpis = useMemo(() => {
-    let aprovadosMes = 0, recusadosMes = 0, somaDias = 0, qtdSla = 0;
     let vopMensalSec = 0, vopMensalFidc = 0;
     let vopVidaTodaSec = 0, vopVidaTodaFidc = 0;
     let riscoSec = 0, riscoFidc = 0, vencidosSec = 0, vencidosFidc = 0;
     let totalDesagio = 0, totalTarifas = 0, totalJurosMultas = 0;
 
-    // Filtro global unificado por regras de interface
     const filtroAtivo = (emp: string, m_a: string, ced: string) => {
       const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
       const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
@@ -177,38 +146,7 @@ export default function PowerBIPage() {
       return bateEmpresa && bateMes && bateCedente;
     };
 
-    // 1. CÁLCULO DE SLA DA ESTEIRA (Mesa de Crédito)
-    analises.forEach(a => {
-      const dRecRaw = a.data_recebimento || a.criado_em || a.created_at; 
-      const dRec = parseDataSegura(dRecRaw);
-
-      if (dRec) {
-        const m_a = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
-        const bateMes = mesesSel.length === 0 || mesesSel.includes(m_a);
-        
-        // 🎯 O BATIMENTO AGORA BUSCA PELO CNPJ DA ANÁLISE!
-        // Cruzamos o CNPJ com os cedentes selecionados na lista para evitar falhas por nomes de texto digitados
-        const cnpjAnalise = limparCnpjSimples(a.cnpj);
-        const bateCedente = cedentesSel.length === 0 || dashCarteira.some(c => limparCnpjSimples(c.cnpj) === cnpjAnalise && cedentesSel.includes(c.cedente));
-
-        if (bateMes && bateCedente) {
-          const st = (a.status || "").toLowerCase();
-          
-          if (st.includes("aprov")) aprovadosMes++;
-          if (st.includes("reprov") || st.includes("recus")) recusadosMes++;
-          
-          const dFimRaw = a.data_finalizacao || a.atualizado_em || a.updated_at;
-          const dFim = parseDataSegura(dFimRaw);
-          
-          if (dFim && !st.includes("análise") && !st.includes("analise")) { 
-            somaDias += calcularDiasUteis(dRec, dFim); 
-            qtdSla++; 
-          }
-        }
-      }
-    });
-
-    // 2. VOP MENSAL E HISTÓRICO ACUMULADO
+    // 1. VOP MENSAL E HISTÓRICO ACUMULADO
     dashVop.forEach(v => {
       const isCedenteAtivo = cedentesSel.includes(v.cedente);
       if (isCedenteAtivo) {
@@ -222,7 +160,7 @@ export default function PowerBIPage() {
       }
     });
 
-    // 3. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO
+    // 2. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO
     dashCarteira.forEach(c => {
       if (cedentesSel.includes(c.cedente)) {
         if (empresasSel.includes("SEC")) { 
@@ -236,7 +174,7 @@ export default function PowerBIPage() {
       }
     });
 
-    // 4. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
+    // 3. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
     dashReceitas.forEach(r => {
       if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
         totalDesagio += parseValorReal(r.desagio);
@@ -245,17 +183,15 @@ export default function PowerBIPage() {
       }
     });
 
-    const prazoMedioDias = qtdSla > 0 ? (somaDias / qtdSla).toFixed(1) : "0.0";
     const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
     const receitaTotalAcumulada = totalDesagio + totalTarifas + totalJurosMultas;
 
     return {
-      aprovadosMes, recusadosMes, prazoMedioDias,
       vopMensalSec, vopMensalFidc, vopVidaTodaSec, vopVidaTodaFidc, vopVidaTodaConsolidadoGeral,
       riscoSec, riscoFidc, vencidosSec, vencidosFidc,
       totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada
     };
-  }, [analises, dashVop, dashCarteira, dashReceitas, empresasSel, mesesSel, cedentesSel]);
+  }, [dashVop, dashCarteira, dashReceitas, empresasSel, mesesSel, cedentesSel]);
 
   const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === listaMeses.length ? "Todos" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
 
@@ -285,7 +221,7 @@ export default function PowerBIPage() {
       </div>
 
       {/* MULTI-FILTROS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div ref={refEmp} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">Filtrar Origem (Empresa):</label>
           <button onClick={() => setOpenEmpresa(!openEmpresa)} className="w-full text-left p-2.5 border border-slate-300 rounded-lg bg-slate-50 hover:bg-slate-100 font-bold text-xs flex justify-between items-center outline-none transition-colors">
@@ -364,122 +300,137 @@ export default function PowerBIPage() {
         </div>
       </div>
 
-      {/* METRICAS DE CADASTRO */}
+      {/* ==================================================================================== */}
+      {/* 🚀 CARDS CLICÁVEIS: VALORES OPERADOS (MENSAL + HISTÓRICO MESCLADO) */}
+      {/* ==================================================================================== */}
       <div className="space-y-3">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Crédito e Cadastro</h3>
+        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Valores Operados (VOP)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Aprovados</span>
-            <div className="text-3xl font-black font-mono text-emerald-600 mt-2">{kpis.aprovadosMes}</div>
+          
+          {/* Card Consolidado Total (Informativo, sem Link) */}
+          <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl shadow-indigo-600/30 border border-indigo-500">
+             <svg className="absolute -bottom-4 -right-4 w-24 h-24 text-white opacity-10" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+             <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-100 block mb-2">Consolidado Geral (Vida Toda)</span>
+             <div className="text-3xl font-black truncate">{fM(kpis.vopVidaTodaConsolidadoGeral)}</div>
+             <span className="text-[10px] text-indigo-300 font-bold block mt-2 uppercase">SEC + FIDC</span>
           </div>
-          <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Recusados</span>
-            <div className="text-3xl font-black font-mono text-rose-600 mt-2">{kpis.recusadosMes}</div>
-          </div>
-          <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Prazo Médio SLA</span>
-            <div className="text-3xl font-black font-mono text-blue-600 mt-2">
-              {kpis.prazoMedioDias} <span className="text-sm font-bold text-slate-400 font-sans">{parseFloat(kpis.prazoMedioDias) === 1 ? "dia" : "dias"}</span>
+
+          {/* VOP SEC -> Link Operações SEC */}
+          <Link href="/dashboard/importacao/operacoes-sec" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/20 hover:shadow-md hover:-translate-y-0.5 block">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 group-hover:bg-indigo-600 transition-colors"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 block mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> VOP Securitizadora ({labelMesFiltro})</span>
+              <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity font-black text-lg">➔</span>
+            </span>
+            <div className="flex flex-col">
+               <span className="text-3xl font-black text-slate-800 truncate">{fM(kpis.vopMensalSec)}</span>
+               <span className="text-[11px] font-bold text-slate-400 mt-2 uppercase tracking-wider flex items-center gap-1">Histórico Geral: {fM(kpis.vopVidaTodaSec)}</span>
             </div>
-          </div>
+          </Link>
+
+          {/* VOP FIDC -> Link Operações FIDC */}
+          <Link href="/dashboard/importacao/operacoes-fidc" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-purple-300 hover:bg-purple-50/20 hover:shadow-md hover:-translate-y-0.5 block">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500 group-hover:bg-purple-600 transition-colors"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-purple-600 block mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-purple-500"></div> VOP FIDC ({labelMesFiltro})</span>
+              <span className="text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity font-black text-lg">➔</span>
+            </span>
+            <div className="flex flex-col">
+               <span className="text-3xl font-black text-slate-800 truncate">{fM(kpis.vopMensalFidc)}</span>
+               <span className="text-[11px] font-bold text-slate-400 mt-2 uppercase tracking-wider flex items-center gap-1">Histórico Geral: {fM(kpis.vopVidaTodaFidc)}</span>
+            </div>
+          </Link>
+
         </div>
       </div>
 
-      {/* VALORES OPERADOS */}
-      <div className="space-y-3">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Valores Operados Mensal</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="bg-white border-l-4 border-l-indigo-600 border border-slate-200 p-6 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">VOP Securitizadora ({labelMesFiltro})</span>
-            <div className="text-2xl font-black font-mono text-indigo-700 mt-2 truncate">{fM(kpis.vopMensalSec)}</div>
+      {/* ==================================================================================== */}
+      {/* 🚀 CARDS CLICÁVEIS: RISCO, EXPOSIÇÃO E VENCIDOS (MESCLADO) */}
+      {/* ==================================================================================== */}
+      <div className="space-y-3 pt-2">
+        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Carteira em Aberto (Risco e Inadimplência)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          
+          {/* Risco Total Consolidado (Informativo, sem Link) */}
+          <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-xl shadow-slate-900/20 border border-slate-600">
+             <span className="text-[11px] font-bold uppercase tracking-widest text-slate-300 block mb-2">Exposição Total Consolidada</span>
+             <div className="text-3xl font-black truncate">{fM(kpis.riscoSec + kpis.riscoFidc)}</div>
+             <span className="text-[10px] text-rose-400 font-bold block mt-2 uppercase flex items-center gap-1.5">
+               <div className="w-1.5 h-1.5 rounded-full bg-rose-400"></div> Total Vencido: {fM(kpis.vencidosSec + kpis.vencidosFidc)}
+             </span>
           </div>
-          <div className="bg-white border-l-4 border-l-indigo-600 border border-slate-200 p-6 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">VOP FIDC ({labelMesFiltro})</span>
-            <div className="text-2xl font-black font-mono text-indigo-700 mt-2 truncate">{fM(kpis.vopMensalFidc)}</div>
-          </div>
+
+          {/* RISCO SEC -> Link Carteira SEC */}
+          <Link href="/dashboard/importacao/carteira-risco-sec" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/20 hover:shadow-md hover:-translate-y-0.5 block">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 group-hover:bg-blue-600 transition-colors"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-blue-600 block mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Risco Securitizadora</span>
+              <span className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity font-black text-lg">➔</span>
+            </span>
+            <div className="flex flex-col">
+               <span className="text-3xl font-black text-slate-800 truncate">{fM(kpis.riscoSec)}</span>
+               <span className="text-[11px] font-bold text-rose-500 mt-2 uppercase tracking-wider flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div> Títulos Vencidos: {fM(kpis.vencidosSec)}</span>
+            </div>
+          </Link>
+
+          {/* RISCO FIDC -> Link Carteira FIDC */}
+          <Link href="/dashboard/importacao/carteira-risco-fidc" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/20 hover:shadow-md hover:-translate-y-0.5 block">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 group-hover:bg-indigo-600 transition-colors"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 block mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> Risco FIDC</span>
+              <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity font-black text-lg">➔</span>
+            </span>
+            <div className="flex flex-col">
+               <span className="text-3xl font-black text-slate-800 truncate">{fM(kpis.riscoFidc)}</span>
+               <span className="text-[11px] font-bold text-rose-500 mt-2 uppercase tracking-wider flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div> Títulos Vencidos: {fM(kpis.vencidosFidc)}</span>
+            </div>
+          </Link>
+
         </div>
       </div>
 
-      {/* RECEITAS */}
-      <div className="space-y-3">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Receitas Financeiras</h3>
+      {/* ==================================================================================== */}
+      {/* 🚀 RECEITAS FINANCEIRAS (Com atalhos de importação no Header) */}
+      {/* ==================================================================================== */}
+      <div className="space-y-3 pt-2">
+        <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+          <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px]">Receitas Financeiras</h3>
+          <div className="flex gap-2">
+            <Link href="/dashboard/importacao/receitas-sec" className="text-[9px] uppercase font-black bg-slate-100 hover:bg-emerald-50 text-slate-500 hover:text-emerald-700 hover:border-emerald-200 border border-transparent px-3 py-1.5 rounded transition-colors flex items-center gap-1 shadow-sm">Importar SEC ➔</Link>
+            <Link href="/dashboard/importacao/receitas-fidc" className="text-[9px] uppercase font-black bg-slate-100 hover:bg-emerald-50 text-slate-500 hover:text-emerald-700 hover:border-emerald-200 border border-transparent px-3 py-1.5 rounded transition-colors flex items-center gap-1 shadow-sm">Importar FIDC ➔</Link>
+          </div>
+        </div>
+        
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
-          <div className="bg-emerald-50/40 border border-emerald-100 p-5 rounded-xl shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Deságio Retido ({labelMesFiltro})</span>
-            <div className="text-lg font-black font-mono text-emerald-800 mt-2 truncate">{fM(kpis.totalDesagio)}</div>
+          <div className="relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:shadow-md">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-400"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Deságio Retido</span>
+            <span className="text-2xl font-black text-slate-800 truncate block">{fM(kpis.totalDesagio)}</span>
           </div>
-          <div className="bg-emerald-50/40 border border-emerald-100 p-5 rounded-xl shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Tarifas / Despesas ({labelMesFiltro})</span>
-            <div className="text-lg font-black font-mono text-emerald-800 mt-2 truncate">{fM(kpis.totalTarifas)}</div>
+          
+          <div className="relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:shadow-md">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-teal-400"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-teal-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-teal-500"></div> Tarifas / Despesas</span>
+            <span className="text-2xl font-black text-slate-800 truncate block">{fM(kpis.totalTarifas)}</span>
           </div>
-          <div className="bg-emerald-50/40 border border-emerald-100 p-5 rounded-xl shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Juros e Multa (Atraso)</span>
-            <div className="text-lg font-black font-mono text-emerald-800 mt-2 truncate">{fM(kpis.totalJurosMultas)}</div>
+          
+          <div className="relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:shadow-md">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-cyan-400"></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-cyan-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-cyan-500"></div> Juros e Multa</span>
+            <span className="text-2xl font-black text-slate-800 truncate block">{fM(kpis.totalJurosMultas)}</span>
           </div>
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">Receita Líquida (Total)</span>
-            <div className="text-xl font-black font-mono text-white mt-2 truncate">{fM(kpis.receitaTotalAcumulada)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* HISTORICO VIDA TODA */}
-      <div className="space-y-3">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Valores Operados Geral (Histórico)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">VOP Consolidado Geral</span>
-            <div className="text-xl font-black font-mono text-slate-700 mt-2 truncate">{fM(kpis.vopVidaTodaConsolidadoGeral)}</div>
-          </div>
-          <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">VOP Geral Securitizadora</span>
-            <div className="text-xl font-black font-mono text-slate-700 mt-2 truncate">{fM(kpis.vopVidaTodaSec)}</div>
-          </div>
-          <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">VOP Geral FIDC</span>
-            <div className="text-xl font-black font-mono text-slate-700 mt-2 truncate">{fM(kpis.vopVidaTodaFidc)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* RISCO ATUAL */}
-      <div className="space-y-3 pt-2">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Risco e Exposição (Foto Atual da Carteira)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="bg-white border-l-4 border-l-slate-800 border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco Total Consolidado</span>
-            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoSec + kpis.riscoFidc)}</div>
-          </div>
-          <div className="bg-white border-l-4 border-l-blue-600 border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco Securitizadora</span>
-            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoSec)}</div>
-          </div>
-          <div className="bg-white border-l-4 border-l-indigo-600 border border-slate-200 p-6 rounded-xl shadow-xs">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco FIDC</span>
-            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoFidc)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* VENCIDOS */}
-      <div className="space-y-3 pt-2">
-        <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Títulos Vencidos (Foto Atual)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="bg-rose-50/50 border border-rose-200 p-6 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 block">🚨 Vencidos Securitizadora</span>
-            <div className="text-2xl font-black font-mono text-rose-700 mt-2 truncate">{fM(kpis.vencidosSec)}</div>
-          </div>
-          <div className="bg-rose-50/50 border border-rose-200 p-6 rounded-xl shadow-xs flex flex-col justify-center">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 block">🚨 Vencidos FIDC</span>
-            <div className="text-2xl font-black font-mono text-rose-700 mt-2 truncate">{fM(kpis.vencidosFidc)}</div>
+          
+          <div className="relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-800 text-white shadow-xl shadow-emerald-900/20 border border-emerald-500">
+             <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-100 block mb-2">Receita Líquida (Total)</span>
+             <span className="text-3xl font-black text-white truncate block">{fM(kpis.receitaTotalAcumulada)}</span>
           </div>
         </div>
       </div>
 
       {/* SINCRO */}
-      <div className="flex justify-between items-center bg-slate-50 border border-slate-200 p-5 rounded-xl mt-8 shadow-xs">
+      <div className="flex justify-between items-center bg-white border border-slate-200 p-5 rounded-2xl mt-8 shadow-sm">
         <div className="flex items-center gap-4">
-          <span className="text-2xl bg-white p-2 rounded-lg border border-slate-200 shadow-xs">📊</span>
+          <span className="text-2xl bg-slate-50 p-2 rounded-lg border border-slate-200 shadow-xs">📊</span>
           <div className="flex flex-col">
             <span className="text-xs font-black uppercase tracking-wider text-slate-800">Painel Integrado Ned Capital</span>
             <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mt-1">Conexão Direta via Supabase V2</span>
@@ -488,7 +439,7 @@ export default function PowerBIPage() {
         <button 
           onClick={sincronizarSupabase} 
           disabled={sincronizando}
-          className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-lg transition-all cursor-pointer text-xs uppercase tracking-wider shadow-sm disabled:opacity-50 flex items-center gap-2"
+          className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-xl transition-all cursor-pointer text-xs uppercase tracking-wider shadow-md disabled:opacity-50 flex items-center gap-2"
         >
           {sincronizando ? "⏳ Puxando..." : "🔄 Atualizar Dados"}
         </button>
