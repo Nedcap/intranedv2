@@ -461,6 +461,22 @@ function MesaAnaliseConteudo() {
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
+  // 1. Cálculos de Variação do TOTAL ANO
+  const totAno26 = calcTotAno("2026");
+  const totAno25 = calcTotAno("2025");
+  const totAno24 = calcTotAno("2024");
+  
+  const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
+  const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
+
+  // 2. Cálculos de Variação da MÉDIA GERAL ANO
+  const medGeral26 = calcMediaGeralAno("2026");
+  const medGeral25 = calcMediaGeralAno("2025");
+  const medGeral24 = calcMediaGeralAno("2024");
+  
+  const varMed26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
+  const varMed25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
+
   // Usa a média YTD do ano mais recente preenchido como Faturamento Base Oficial
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
@@ -938,20 +954,28 @@ function MesaAnaliseConteudo() {
 
                           <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400 text-slate-800">TOTAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{totAno26.toLocaleString("pt-BR")}</td>
+                            <td className={`border border-slate-400 text-center ${varTot26_25 > 0 ? 'text-green-600' : varTot26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {(varTot26_25 === 0 && totAno26 === 0) ? "-" : `${varTot26_25.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{totAno25.toLocaleString("pt-BR")}</td>
+                            <td className={`border border-slate-400 text-center ${varTot25_24 > 0 ? 'text-green-600' : varTot25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {(varTot25_24 === 0 && totAno25 === 0) ? "-" : `${varTot25_24.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{totAno24.toLocaleString("pt-BR")}</td>
                           </tr>
                           
                           <tr className="bg-slate-200 border-t border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400 text-slate-800">MÉDIA GERAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{medGeral26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-400 text-center ${varMed26_25 > 0 ? 'text-green-600' : varMed26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {(varMed26_25 === 0 && medGeral26 === 0) ? "-" : `${varMed26_25.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{medGeral25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-400 text-center ${varMed25_24 > 0 ? 'text-green-600' : varMed25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {(varMed25_24 === 0 && medGeral25 === 0) ? "-" : `${varMed25_24.toFixed(1)}%`}
+                            </td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{medGeral24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
 
                           <tr className="bg-blue-50 border-t-2 border-blue-300 font-bold text-[10px]">
