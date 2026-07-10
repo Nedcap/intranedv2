@@ -348,18 +348,20 @@ function MesaAnaliseConteudo() {
       alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê.");
       return;
     }
-    const confirmacao = window.confirm(`Encaminhar para o Comitê de Crédito com parecer de: [${analise.recomendacao_analista.toUpperCase()}]?`);
+    const confirmacao = window.confirm(`Encaminhar para o Comitê de Crédito com a sugestão de: [${analise.recomendacao_analista.toUpperCase()}]?`);
     if (!confirmacao) return;
 
     try {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
       
-      const novoStatus = analise.recomendacao_analista.toLowerCase() === "aprovado" ? "aprovado" : "reprovado";
+      // O status real do banco vai sempre como "aberta" para cair na tela do comitê. 
+      // A recomendação vai no payload do persistirNoBanco, então os Diretores a verão, mas a empresa aguardará os votos em "aberta".
+      const novoStatus = "aberta"; 
       const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
       
-      alert(`🚀 Análise finalizada com sucesso! Novo status do dossiê: [${novoStatus.toUpperCase()}]`);
+      alert(`🚀 Análise finalizada com sucesso! A empresa foi enviada para votação na Mesa do Comitê.`);
       setIdSelecionado(null); 
       setAnalise(DADOS_MODELO); 
       await buscarFilaSupabase(true);
@@ -369,7 +371,7 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(false); 
     }
   };
-
+  
   const devolverParaComercialPendente = async () => {
     if (!idSelecionado || !analise.id) return;
     const justificativa = prompt("Motivo da devolução para o Comercial:");

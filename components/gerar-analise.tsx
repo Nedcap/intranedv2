@@ -414,7 +414,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           <td class="text-center">${formatarMoeda(med2024)}</td>
                       </tr>
                   </tbody>
-              </table>
+                  </table>
           </div>
 
           <h2>5. Potencial de Negócios</h2>
