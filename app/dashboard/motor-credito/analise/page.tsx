@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, Suspense, useRef } from "react";
@@ -154,6 +155,7 @@ interface AnaliseData {
   juridico_tramitacao: string;
   noticias_midia: string;
   parecer_analista: string;
+  parecer_comite?: string;
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
   recomendacao_analista?: string;
 
@@ -186,7 +188,7 @@ const DADOS_MODELO: AnaliseData = {
   restritivos_quadro: { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 },
   restritivos: [],
   
-  resumo_visita: "", juridico_tramitacao: "", noticias_midia: "", parecer_analista: "", recomendacao_analista: "",
+  resumo_visita: "", juridico_tramitacao: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
   organograma_json: null
 };
@@ -265,12 +267,24 @@ function MesaAnaliseConteudo() {
   const buscarFilaSupabase = async (comSpinner = false) => {
     try {
       if (comSpinner) setLoadingFila(true);
-      const { data, error } = await supabase
+
+      let query = supabase
         .from("analises")
         .select("id, empresa_nome, cnpj, status")
         .in("status", ["em_processamento_ia", "em_revisao_humana"])
         .order("criado_em", { ascending: false });
 
+      const userStr = localStorage.getItem("intraned_user");
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
+        
+        if (cargoUser === "comercial" && user.nome) {
+          query = query.ilike("comercial", `%${user.nome}%`);
+        }
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       if (data) setFila(data as any);
     } catch (err) { 
@@ -355,13 +369,12 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
       
-      // O status real do banco vai sempre como "aberta" para cair na tela do comitê. 
-      // A recomendação vai no payload do persistirNoBanco, então os Diretores a verão, mas a empresa aguardará os votos em "aberta".
-      const novoStatus = "aberta"; 
+      // Forçamos SEMPRE o status "aberta", a recomendação do analista viaja via json
+      const novoStatus = "aberta";
       const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
       
-      alert(`🚀 Análise finalizada com sucesso! A empresa foi enviada para votação na Mesa do Comitê.`);
+      alert(`🚀 Análise finalizada com sucesso! A empresa foi enviada para a Mesa de Comitê.`);
       setIdSelecionado(null); 
       setAnalise(DADOS_MODELO); 
       await buscarFilaSupabase(true);
@@ -371,7 +384,7 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(false); 
     }
   };
-  
+
   const devolverParaComercialPendente = async () => {
     if (!idSelecionado || !analise.id) return;
     const justificativa = prompt("Motivo da devolução para o Comercial:");
@@ -460,22 +473,6 @@ function MesaAnaliseConteudo() {
 
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
-
-  // 1. Cálculos de Variação do TOTAL ANO
-  const totAno26 = calcTotAno("2026");
-  const totAno25 = calcTotAno("2025");
-  const totAno24 = calcTotAno("2024");
-  
-  const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
-  const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
-
-  // 2. Cálculos de Variação da MÉDIA GERAL ANO
-  const medGeral26 = calcMediaGeralAno("2026");
-  const medGeral25 = calcMediaGeralAno("2025");
-  const medGeral24 = calcMediaGeralAno("2024");
-  
-  const varMed26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
-  const varMed25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
 
   // Usa a média YTD do ano mais recente preenchido como Faturamento Base Oficial
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
@@ -954,28 +951,20 @@ function MesaAnaliseConteudo() {
 
                           <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400 text-slate-800">TOTAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{totAno26.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-400 text-center ${varTot26_25 > 0 ? 'text-green-600' : varTot26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                              {(varTot26_25 === 0 && totAno26 === 0) ? "-" : `${varTot26_25.toFixed(1)}%`}
-                            </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{totAno25.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-400 text-center ${varTot25_24 > 0 ? 'text-green-600' : varTot25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                              {(varTot25_24 === 0 && totAno25 === 0) ? "-" : `${varTot25_24.toFixed(1)}%`}
-                            </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{totAno24.toLocaleString("pt-BR")}</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
                           </tr>
                           
                           <tr className="bg-slate-200 border-t border-slate-400 font-bold text-[10px]">
                             <td className="p-1.5 border border-slate-400 text-slate-800">MÉDIA GERAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{medGeral26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-400 text-center ${varMed26_25 > 0 ? 'text-green-600' : varMed26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                              {(varMed26_25 === 0 && medGeral26 === 0) ? "-" : `${varMed26_25.toFixed(1)}%`}
-                            </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{medGeral25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-400 text-center ${varMed25_24 > 0 ? 'text-green-600' : varMed25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                              {(varMed25_24 === 0 && medGeral25 === 0) ? "-" : `${varMed25_24.toFixed(1)}%`}
-                            </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{medGeral24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-400 bg-white"></td>
+                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
 
                           <tr className="bg-blue-50 border-t-2 border-blue-300 font-bold text-[10px]">
@@ -1204,7 +1193,7 @@ function MesaAnaliseConteudo() {
                   </div>
 
                   <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
+                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
                       <span>Apontamentos Restritivos Detalhados</span>
                       <button onClick={() => addArray('restritivos', {empresa_socio:"", restritivo:"", qtd:1, valor:0, data:"", observacao:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Apontamento</button>
                     </div>
@@ -1263,6 +1252,15 @@ function MesaAnaliseConteudo() {
                       placeholder="Conclusão final da mesa de análise..."
                     />
                   </div>
+
+                  {analise.parecer_comite && (
+                    <div className="bg-white border-2 border-blue-400 p-3 mt-4">
+                      <h3 className="text-[11px] font-bold text-blue-800 uppercase mb-2 border-b border-blue-200 pb-1">Votos e Deliberação do Comitê</h3>
+                      <div className="text-[12px] text-slate-700 bg-blue-50 p-2 whitespace-pre-wrap">
+                        {analise.parecer_comite}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-slate-100 border-2 border-slate-400 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div>
