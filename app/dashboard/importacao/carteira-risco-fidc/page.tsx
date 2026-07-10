@@ -74,21 +74,23 @@ export default function CarteiraRiscoFidcPage() {
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
 
-  useEffect(() => {
-    async function carregarCedentes() {
-      try {
-        setCarregandoBase(true);
-        const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
-        if (data) setCedentesSistema(data);
-      } catch (err) {
-        console.error("Erro ao carregar cedentes oficiais:", err);
-      } finally {
-        setCarregandoBase(false);
-      }
+  const carregarCedentes = async () => {
+    try {
+      setCarregandoBase(true);
+      const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
+      if (data) setCedentesSistema(data);
+    } catch (err) {
+      console.error("Erro ao carregar cedentes oficiais:", err);
+    } finally {
+      setCarregandoBase(false);
     }
-    carregarCedentes();
-  }, []);
+  };
 
+  useEffect(() => { carregarCedentes(); }, []);
+
+  // ============================================================================
+  // 🦾 PROCESSADOR EXCEL SÍNCRONO (CRUZAMENTO MDM VIA CNPJ)
+  // ============================================================================
   const processarArquivoExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -189,6 +191,47 @@ export default function CarteiraRiscoFidcPage() {
     }
   };
 
+  // ============================================================================
+  // ⚡ AUTO-CADASTRO RÁPIDO PARA EMPRESAS NOVAS NO FIDC
+  // ============================================================================
+  const handleAutoCadastrarCedente = async (nomePlanilha: string, cnpjPlanilha: string, index: number) => {
+    if (!cnpjPlanilha || cnpjPlanilha.length !== 14) {
+      alert("❌ CNPJ inválido ou ausente na linha do arquivo.");
+      return;
+    }
+
+    setProcessando(true);
+    try {
+      const { data: novoCedente, error } = await supabase
+        .from("cadastro_cedentes")
+        .insert({
+          id: crypto.randomUUID(),
+          cnpj: cnpjPlanilha,
+          cedente: nomePlanilha.toUpperCase().trim(),
+          atualizado_em: new Date().toISOString()
+        })
+        .select("id, cnpj, cedente, responsavel_id")
+        .single();
+
+      if (error) throw error;
+
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = novoCedente.cnpj;
+        copia[index].responsavelId = novoCedente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+
+      setCedentesSistema(prev => [...prev, novoCedente]);
+      alert(`⚡ ${nomePlanilha.toUpperCase()} cadastrada via MDM com sucesso!`);
+    } catch (err: any) {
+      alert("❌ Falha ao cadastrar: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
   const handleVincularManualmente = (index: number, cedenteSistemaId: string) => {
     const match = cedentesSistema.find(c => c.id === cedenteSistemaId);
     if (!match) return;
@@ -208,7 +251,7 @@ export default function CarteiraRiscoFidcPage() {
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
-      alert("⚠️ Resolva as pendências cadastrais antes de efetuar a consolidação do tabelão.");
+      alert("⚠️ Resolva ou cadastre as pendências cadastrais antes de efetuar a consolidação.");
       return;
     }
 
@@ -218,7 +261,6 @@ export default function CarteiraRiscoFidcPage() {
     try {
       const cnpjsImportados = linhasConciliadas.map(l => l.cnpjCadastrado);
 
-      // 🎯 PASSO 1: CORREÇÃO DO NOME DA COLUNA DE EXTINÇÃO RETROATIVA NA CARTEIRA DETALHADA
       const { error: cleanError } = await supabase
         .from("carteira_fidc")
         .delete()
@@ -256,7 +298,6 @@ export default function CarteiraRiscoFidcPage() {
           });
         });
 
-        // 🎯 FIX ATUALIZADO_EM: Sincronização direta com a chave única de limites
         payloadRisco.push({
           cnpj: linha.cnpjCadastrado,
           cedente: linha.cedentePlanilha,
@@ -295,7 +336,7 @@ export default function CarteiraRiscoFidcPage() {
         }
       }
 
-      alert(`🎉 Carga concluída!\n${payloadCarteira.length} títulos de recebíveis integrados ao tabelão analítico.`);
+      alert(`🎉 Carga concluída!\n${payloadCarteira.length} recebíveis integrados com sucesso.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -371,18 +412,27 @@ export default function CarteiraRiscoFidcPage() {
                             <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjPlanilha}</span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-2">
-                            <span className="text-rose-600 font-black text-[11px] leading-tight">{linha.status}</span>
-                            <select
-                              onChange={(e) => handleVincularManualmente(index, e.target.value)}
-                              className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[280px]"
-                              defaultValue=""
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex-1">
+                              <span className="text-rose-600 font-black text-[11px] block leading-tight mb-1">{linha.status}</span>
+                              <select
+                                onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                                className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[240px]"
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Vincular com Empresa...</option>
+                                {cedentesSistema.map(c => (
+                                  <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAutoCadastrarCedente(linha.cedentePlanilha, linha.cnpjPlanilha, index)}
+                              className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase rounded shadow-xs cursor-pointer h-8 self-end transition-colors"
                             >
-                              <option value="" disabled>Vincular com Empresa do Sistema...</option>
-                              {cedentesSistema.map(c => (
-                                <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
-                              ))}
-                            </select>
+                              ⚡ Auto-Cadastrar
+                            </button>
                           </div>
                         )}
                       </td>

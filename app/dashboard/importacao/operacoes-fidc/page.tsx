@@ -42,8 +42,8 @@ function formatarDataExcel(valorData: any): string | null {
 
 function extrairMesAno(dataIso: string | null): string {
   if (!dataIso) return "";
-  const partes = dataIso.split("-"); // AAAA-MM-DD
-  if (partes.length >= 2) return `${partes[1]}/${partes[0]}`; // MM/AAAA
+  const partes = dataIso.split("-"); 
+  if (partes.length >= 2) return `${partes[1]}/${partes[0]}`; 
   return "";
 }
 
@@ -67,20 +67,19 @@ export default function OperacoesFidcPage() {
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
 
-  useEffect(() => {
-    async function carregarCedentes() {
-      try {
-        setCarregandoBase(true);
-        const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
-        if (data) setCedentesSistema(data);
-      } catch (err) {
-        console.error("Erro ao carregar cedentes oficiais:", err);
-      } finally {
-        setCarregandoBase(false);
-      }
+  const carregarCedentes = async () => {
+    try {
+      setCarregandoBase(true);
+      const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
+      if (data) setCedentesSistema(data);
+    } catch (err) {
+      console.error("Erro ao carregar cedentes oficiais:", err);
+    } finally {
+      setCarregandoBase(false);
     }
-    carregarCedentes();
-  }, []);
+  };
+
+  useEffect(() => { carregarCedentes(); }, []);
 
   // ============================================================================
   // 🦾 PROCESSADOR EXCEL (VOP + RECEITA COMBINADOS)
@@ -175,6 +174,47 @@ export default function OperacoesFidcPage() {
     }
   };
 
+  // ============================================================================
+  // ⚡ CADASTRO AUTOMÁTICO VIA MESA DE CONCILIAÇÃO FIDC
+  // ============================================================================
+  const handleAutoCadastrarCedente = async (nomePlanilha: string, cnpjPlanilha: string, index: number) => {
+    if (!cnpjPlanilha || cnpjPlanilha.length !== 14) {
+      alert("❌ Não é possível auto-cadastrar sem um CNPJ válido de 14 dígitos.");
+      return;
+    }
+
+    setProcessando(true);
+    try {
+      const { data: novoCedente, error } = await supabase
+        .from("cadastro_cedentes")
+        .insert({
+          id: crypto.randomUUID(),
+          cnpj: cnpjPlanilha,
+          cedente: nomePlanilha.toUpperCase().trim(),
+          atualizado_em: new Date().toISOString()
+        })
+        .select("id, cnpj, cedente, responsavel_id")
+        .single();
+
+      if (error) throw error;
+
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = novoCedente.cnpj;
+        copia[index].responsavelId = novoCedente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+
+      setCedentesSistema(prev => [...prev, novoCedente]);
+      alert(`⚡ ${nomePlanilha.toUpperCase()} inserida com sucesso.`);
+    } catch (err: any) {
+      alert("❌ Falha ao cadastrar: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
   const handleVincularManualmente = (index: number, cedenteSistemaId: string) => {
     const match = cedentesSistema.find(c => c.id === cedenteSistemaId);
     if (!match) return;
@@ -194,7 +234,7 @@ export default function OperacoesFidcPage() {
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
-      alert("⚠️ Vincule todos os CNPJs antes de enviar pro banco de dados.");
+      alert("⚠️ Vincule ou Cadastre todos os CNPJs antes de enviar pro banco de dados.");
       return;
     }
 
@@ -231,7 +271,7 @@ export default function OperacoesFidcPage() {
             data_operacao: op.data_operacao,
             mes_ano: op.mes_ano,
             cnpj: linha.cnpjCadastrado,
-            cedente: linha.cedentePlanilha,
+            cedente: SelfCleanName(linha.cedentePlanilha),
             vop: op.vop,
             desagio: op.receita, 
             tarifas: 0,
@@ -243,8 +283,8 @@ export default function OperacoesFidcPage() {
           if (!vopAgregadoMap.has(keyVop)) {
             vopAgregadoMap.set(keyVop, {
               mes_ano: op.mes_ano,
-              cnpj: linha.cnpjCadastrado,
-              cedente: linha.cedentePlanilha,
+              cnpj: inline_cnpj(linha.cnpjCadastrado),
+              cedente: SelfCleanName(linha.cedentePlanilha),
               vop: 0,
               respId: linha.responsavelId
             });
@@ -280,7 +320,7 @@ export default function OperacoesFidcPage() {
             vop_sec: vSec,
             vop_consolidado: vSec + item.vop,
             responsavel_id: item.respId,
-            atualizado_em: new Date().toISOString() // 🎯 SYNC COM ATUALIZADO_EM DO BANCO
+            atualizado_em: new Date().toISOString()
           };
 
           const { error } = await supabase.from("dash_vop").upsert(payloadConsolidado, { onConflict: "mes_ano,cnpj" });
@@ -297,6 +337,9 @@ export default function OperacoesFidcPage() {
       setProcessando(false);
     }
   };
+
+  function inline_cnpj(v: any) { return String(v || "").replace(/\D/g, ""); }
+  function SelfCleanName(v: string) { return String(v || "").toUpperCase().trim(); }
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
@@ -326,7 +369,7 @@ export default function OperacoesFidcPage() {
             <span className="text-3xl">📥</span>
             <span className="font-bold text-slate-700">Carregar Relatório de Operações FIDC (.XLSX)</span>
             <span className="text-xs text-slate-400 font-mono">Processamento unificado de performance financeira com conciliação MDM.</span>
-            <input type="file" accept=".xlsx" onChange={processarArquivoExcel} className="hidden" disabled={carregandoBase || processando} />
+            <input type="file" accept=".xlsx" onChange={processarArquivoExcel} className="hidden" disabled={processando} />
           </label>
         </div>
       )}
@@ -369,18 +412,27 @@ export default function OperacoesFidcPage() {
                             <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjPlanilha}</span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-2">
-                            <span className="text-rose-600 font-black text-[11px] leading-tight">{linha.status}</span>
-                            <select
-                              onChange={(e) => handleVincularManualmente(index, e.target.value)}
-                              className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[280px]"
-                              defaultValue=""
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex-1">
+                              <span className="text-rose-600 font-black text-[11px] block leading-tight mb-1">{linha.status}</span>
+                              <select
+                                onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                                className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[200px]"
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Vincular com Empresa...</option>
+                                {cedentesSistema.map(c => (
+                                  <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAutoCadastrarCedente(linha.cedentePlanilha, linha.cnpjPlanilha, index)}
+                              className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase rounded shadow-xs cursor-pointer h-8 self-end transition-colors"
                             >
-                              <option value="" disabled>Vincular com Empresa do Sistema...</option>
-                              {cedentesSistema.map(c => (
-                                <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
-                              ))}
-                            </select>
+                              ⚡ Auto-Cadastrar
+                            </button>
                           </div>
                         )}
                       </td>

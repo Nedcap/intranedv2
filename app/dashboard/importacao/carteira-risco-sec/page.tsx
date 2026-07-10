@@ -65,7 +65,6 @@ function checarSeVencido(dataStr: string): string {
   }
 }
 
-// 🎯 SOLUÇÃO DO FORMATADOR EXPLICÍTO DISPONÍVEL NO ESCOPO GERAL
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
 
 interface LinhaConciliacao {
@@ -85,33 +84,46 @@ export default function CarteiraRiscoSecPage() {
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
 
-  useEffect(() => {
-    async function carregarCedentes() {
-      try {
-        setCarregandoBase(true);
-        const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
-        if (data) setCedentesSistema(data);
-      } catch (err) {
-        console.error("Erro ao carregar cedentes oficiais:", err);
-      } finally {
-        setCarregandoBase(false);
-      }
+  const carregarCedentes = async () => {
+    try {
+      setCarregandoBase(true);
+      const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
+      if (data) setCedentesSistema(data);
+    } catch (err) {
+      console.error("Erro ao carregar cedentes oficiais:", err);
+    } finally {
+      setCarregandoBase(false);
     }
-    carregarCedentes();
-  }, []);
+  };
 
+  useEffect(() => { carregarCedentes(); }, []);
+
+  // ============================================================================
+  // 🦾 LEITORA ROBUSTA COM AUTO-DETECÇÃO DE LAYOUT E CABEÇALHOS
+  // ============================================================================
   const processarArquivoCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setProcessando(true);
-    setStatusMsg("Mapeando colunas e minerando tabelão bruto do Qprof...");
+    setStatusMsg("Processando codificação e minerando cabeçalhos do Qprof...");
 
     try {
       const texto = await file.text();
-      const linhasRaw = texto.split(/\r?\n/).map(l => l.split(";"));
+      
+      // Quebra robusta aceitando múltiplos formatos de quebra de linha
+      let linhasRaw = texto.split(/\r?\n/).map(l => l.split(";"));
+      
+      // Se quebrou em uma coluna só, tenta o separador por vírgula como contingência
+      if (linhasRaw.length > 0 && linhasRaw[0].length <= 1) {
+        linhasRaw = texto.split(/\r?\n/).map(l => l.split(","));
+      }
 
-      const headerIdx = linhasRaw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
+      // Procura inteligente do cabeçalho removendo caracteres invisíveis e BOM do UTF-8
+      const headerIdx = linhasRaw.findIndex(row => 
+        row.some(cell => strClean(cell).includes("CEDENTE"))
+      );
+
       if (headerIdx === -1) {
         alert("❌ Layout inválido! Coluna 'CEDENTE' não encontrada no arquivo.");
         setProcessando(false);
@@ -119,19 +131,18 @@ export default function CarteiraRiscoSecPage() {
       }
 
       const header = linhasRaw[headerIdx].map(strClean);
-      
-      const idxCedente = header.indexOf("CEDENTE");
-      const idxSacado = header.indexOf("SACADO");
+      const idxCedente = header.findIndex(c => c.includes("CEDENTE"));
+      const idxSacado = header.findIndex(c => c.includes("SACADO"));
       const idxNumTitulo = header.findIndex(c => c === "SNUM" || c === "SEQTIT" || c === "NOSSONUM");
-      const idxSituacao = header.indexOf("SITUACAO");
+      const idxSituacao = header.findIndex(c => c.includes("SITUACAO"));
       const idxVencimento = header.findIndex(c => c === "DTAVCTO" || c === "VENCIMENTO");
       const idxValorFace = header.findIndex(c => c === "VALORFACE" || c === "VLRFACE");
       const idxValorAberto = header.findIndex(c => c === "VALORABERTO" || c === "VLRABERTO");
       const idxAtr = header.findIndex(c => c === "ATR" || c === "ATRASO");
-      const idxValorPago = header.indexOf("VLRPAGO");
+      const idxValorPago = header.findIndex(c => c.includes("PAGO"));
       const idxDataLiq = header.findIndex(c => c === "DTALIQ" || c === "DATALIQUIDACAO");
       const idxAgNeg = header.findIndex(c => c === "AGNEG" || c === "AGENEG" || c === "ASSESSOR");
-      const idxAditivo = header.indexOf("ADITIVO");
+      const idxAditivo = header.findIndex(c => c.includes("ADITIVO"));
       const idxDtaNeg = header.findIndex(c => c === "DTANEGOCIACAO" || c === "DATANEGOCIACAO");
 
       const agrupamento: Record<string, any[]> = {};
@@ -151,12 +162,12 @@ export default function CarteiraRiscoSecPage() {
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
         agrupamento[rawCedente].push({
-          sacado: String(row[idxSacado] || "").trim().toUpperCase(),
+          sacado: idxSacado !== -1 ? String(row[idxSacado] || "").trim().toUpperCase() : "-",
           numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-",
           situacao: idxSituacao !== -1 ? String(row[idxSituacao] || "").trim().toUpperCase() : "ABERTO",
           vencimento: converteDataParaISO(vencimentoRaw),
-          valor_face: parseValorReal(row[idxValorFace]),
-          valor_aberto: parseValorReal(row[idxValorAberto]),
+          valor_face: idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0,
+          valor_aberto: idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0,
           dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0,
           valor_pago: idxValorPago !== -1 ? parseValorReal(row[idxValorPago]) : 0,
           data_liquidacao: idxDataLiq !== -1 ? converteDataParaISO(row[idxDataLiq]) : null,
@@ -188,9 +199,54 @@ export default function CarteiraRiscoSecPage() {
       }
 
       setLinhasConciliadas(resultadoConciliado);
-      setStatusMsg("✅ Dados minerados e estruturados! Verifique a mesa operacional abaixo.");
+      setStatusMsg("✅ Dados minerados e estruturados de forma resiliente!");
     } catch (err: any) {
       alert("❌ Erro ao ler arquivo: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
+  // ============================================================================
+  // ⚡ FUNÇÃO DE AUTO-CADASTRO EM LOTE/TEMPO DE EXECUÇÃO
+  // ============================================================================
+  const handleAutoCadastrarCedente = async (nomePlanilha: string, index: number) => {
+    const cnpjPrompt = prompt(`Insira o CNPJ (Apenas números - 14 dígitos) para a empresa:\n${nomePlanilha.toUpperCase()}`);
+    if (!cnpjPrompt) return;
+    
+    const cnpjLimpo = cnpjPrompt.replace(/\D/g, "");
+    if (cnpjLimpo.length !== 14) {
+      alert("❌ CNPJ inválido! Deve conter exatamente 14 dígitos.");
+      return;
+    }
+
+    setProcessando(true);
+    try {
+      const { data: novoCedente, error } = await supabase
+        .from("cadastro_cedentes")
+        .insert({
+          id: crypto.randomUUID(),
+          cnpj: cnpjLimpo,
+          cedente: nomePlanilha.toUpperCase().trim(),
+          atualizado_em: new Date().toISOString()
+        })
+        .select("id, cnpj, cedente, responsavel_id")
+        .single();
+
+      if (error) throw error;
+
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = novoCedente.cnpj;
+        copia[index].responsavelId = novoCedente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+
+      setCedentesSistema(prev => [...prev, novoCedente]);
+      alert(`⚡ ${nomePlanilha.toUpperCase()} cadastrada com sucesso!`);
+    } catch (err: any) {
+      alert("❌ Falha ao cadastrar: " + err.message);
     } finally {
       setProcessando(false);
     }
@@ -215,12 +271,12 @@ export default function CarteiraRiscoSecPage() {
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
-      alert("⚠️ Vincule todos os cedentes antes de sincronizar o tabelão!");
+      alert("⚠️ Vincule ou Cadastre todos os cedentes antes de sincronizar o tabelão!");
       return;
     }
 
     setProcessando(true);
-    setStatusMsg("🚀 Limpando registros diários anteriores e processando tabelão...");
+    setStatusMsg("🚀 Sincronizando tabelões e atualizando limites...");
 
     try {
       const todosOsCedentesImportados = [...new Set(linhasConciliadas.map(l => l.cedentePlanilha.toUpperCase()))];
@@ -259,7 +315,6 @@ export default function CarteiraRiscoSecPage() {
           });
         });
 
-        // 🎯 FIX ATUALIZADO_EM: Alinhado e estruturado conforme o seu schema de tabelas
         payloadRisco.push({
           cnpj: linha.cnpjCadastrado,
           cedente: linha.cedentePlanilha.toUpperCase(),
@@ -288,11 +343,11 @@ export default function CarteiraRiscoSecPage() {
         }
       }
 
-      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos inseridos no tabelão geral com segurança.`);
+      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos adicionados e riscos recalculados.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
-      alert("❌ Falha crítica na gravação dos lotes: " + err.message);
+      alert("❌ Falha na gravação dos lotes: " + err.message);
     } finally {
       setProcessando(false);
     }
@@ -321,7 +376,7 @@ export default function CarteiraRiscoSecPage() {
           <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
             <span className="text-3xl">📊</span>
             <span className="font-bold text-slate-700">Carregar Relatório de Cobrança Consolidada Qprof (.CSV)</span>
-            <span className="text-xs text-slate-400 font-mono">Processamento de segurança ativado com limpeza retroativa e carga completa.</span>
+            <span className="text-xs text-slate-400 font-mono">Processamento unificado de segurança com tolerância a BOM/Separadores.</span>
             <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={processando} />
           </label>
         </div>
@@ -362,18 +417,27 @@ export default function CarteiraRiscoSecPage() {
                             <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjCadastrado}</span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-2">
-                            <span className="text-rose-600 font-black text-[11px] leading-tight">{linha.status}</span>
-                            <select
-                              onChange={(e) => handleVincularManualmente(index, e.target.value)}
-                              className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[280px]"
-                              defaultValue=""
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex-1">
+                              <span className="text-rose-600 font-black text-[11px] block leading-tight mb-1">{linha.status}</span>
+                              <select
+                                onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                                className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[240px]"
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Vincular com Cadastrado...</option>
+                                {cedentesSistema.map(c => (
+                                  <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAutoCadastrarCedente(linha.cedentePlanilha, index)}
+                              className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase rounded shadow-xs cursor-pointer h-8 self-end transition-colors"
                             >
-                              <option value="" disabled>Vincular com Empresa do Sistema...</option>
-                              {cedentesSistema.map(c => (
-                                <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
-                              ))}
-                            </select>
+                              ⚡ Auto-Cadastrar
+                            </button>
                           </div>
                         )}
                       </td>

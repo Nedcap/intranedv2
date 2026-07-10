@@ -219,7 +219,7 @@ export default function OperacoesSecPage() {
             desagio: op.receita, 
             tarifas: 0,
             juros: 0,
-            responsavel_id: linha.responsavelId
+            responsavel_id: inline_cnpj(linha.responsavelId) ? linha.responsavelId : null
           });
 
           const keyVop = `${op.mes_ano}_${linha.cnpjCadastrado}`;
