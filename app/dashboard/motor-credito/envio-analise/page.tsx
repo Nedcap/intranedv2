@@ -40,6 +40,7 @@ export default function MotorCreditoPage() {
   const carregarFilaComercial = async () => {
     try {
       // 📊 Busca na tabela 'analises' incluindo as novas colunas de IA
+      // Não precisamos colocar filtro de .eq() aqui, o RLS do Supabase vai fazer isso automaticamente!
       const { data, error } = await supabase
         .from("analises")
         .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite")
@@ -99,6 +100,13 @@ export default function MotorCreditoPage() {
     setLoading(true);
     setStatusTexto("🤖 Registrando lote de entrada na mesa...");
     try {
+      // 🎯 1. PEGA O USUÁRIO LOGADO ANTES DE SALVAR NO BANCO
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        throw new Error("Usuário não autenticado. Faça login novamente.");
+      }
+
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
 
       const { data: novaAnalise, error } = await supabase
@@ -109,7 +117,11 @@ export default function MotorCreditoPage() {
           caminho_local: "Upload via Motor V8 / R2",
           status: "em_revisao_humana", 
           status_comite: "pendente",
-          ia_inicio: new Date().toISOString(), // ✅ Registra o momento exato que a IA começa
+          ia_inicio: new Date().toISOString(),
+          
+          // 🎯 2. VINCULA A ANÁLISE AO USUÁRIO QUE A ENVIOU
+          responsavel_id: user.id,
+
           dados_documentos: urlsDocumentos,
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
@@ -337,12 +349,10 @@ export default function MotorCreditoPage() {
                         </td>
                         
                         <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
-                          {/* ✅ Exibe a data/hora do início da IA */}
                           {item.ia_inicio ? formatarDataHora(item.ia_inicio) : "---"}
                         </td>
                         
                         <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
-                          {/* ✅ Lógica precisa baseada no preenchimento do fim da IA */}
                           {item.ia_fim 
                             ? formatarDataHora(item.ia_fim) 
                             : item.ia_inicio 
