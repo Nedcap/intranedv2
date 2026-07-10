@@ -6,7 +6,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================================
-// 🧽 UTILS CORRIGIDOS
+// 🧽 UTILS CORRIGIDOS E SEGUROS
 // ============================================================================
 function parseValorReal(valor: any): number {
   if (valor === null || valor === undefined || valor === "") return 0;
@@ -19,10 +19,8 @@ function parseValorReal(valor: any): number {
 function formatarMesAno(str: string): string {
   if (!str) return "";
   const txt = String(str).trim();
-  // Se já está no formato correto MM/YYYY
   if (/^\d{2}\/\d{4}$/.test(txt)) return txt;
   
-  // Se vier no formato ISO YYYY-MM-DD
   if (txt.includes("-")) {
     const partes = txt.split("-");
     if (partes.length >= 2) return `${partes[1].padStart(2, "0")}/${partes[0]}`;
@@ -58,13 +56,9 @@ function calcularDiasUteis(dInicio: Date, dFim: Date) {
   return count;
 }
 
-// Limpador superficial para garantir comparação justa entre nomes de cedentes
-function limparNomeSimples(nome: string): string {
-  if (!nome) return "";
-  return String(nome)
-    .replace(/^\d+\s*-\s*/, "") // Remove códigos iniciais "12 - "
-    .trim()
-    .toUpperCase();
+function limparCnpjSimples(valor: any): string {
+  if (!valor) return "";
+  return String(valor).replace(/\D/g, "");
 }
 
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
@@ -112,51 +106,21 @@ export default function PowerBIPage() {
     try {
       setCarregando(true);
       
-      const userStr = localStorage.getItem("intraned_user");
-      let allowedCedentes: string[] = [];
-      let isComercial = false;
-      let userNome = "";
-
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        userNome = user.nome;
-        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-        if (cargoUser === "comercial") {
-          isComercial = true;
-          const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-          if (vinculos) allowedCedentes = vinculos.map((c: any) => c.cedente);
-        }
-      }
-
-      let queryAnalises = supabase.from("analises").select("*");
-      if (isComercial) { queryAnalises = queryAnalises.eq("comercial", userNome); }
-      const resAnalises = await queryAnalises;
-      setAnalises(resAnalises.data || []);
-
-      let qVop = supabase.from("dash_vop").select("*");
-      let qCarteira = supabase.from("dash_carteira").select("*");
-      let qExtrato = supabase.from("extrato_financeiro").select("*");
-
-      if (isComercial) {
-        if (allowedCedentes.length > 0) {
-          qVop = qVop.in("cedente", allowedCedentes);
-          qCarteira = qCarteira.in("cedente", allowedCedentes);
-          qExtrato = qExtrato.in("cedente", allowedCedentes);
-        } else {
-          qVop = qVop.in("cedente", ["__VAZIO__"]);
-          qCarteira = qCarteira.in("cedente", ["__VAZIO__"]);
-          qExtrato = qExtrato.in("cedente", ["__VAZIO__"]);
-        }
-      }
-
-      const [resVop, resCarteira, resExtrato] = await Promise.all([
-        qVop, qCarteira, qExtrato
+      // 🎯 ADEUS LOCALSTORAGE MANUAIS E FILTROS INJETADOS! 
+      // O RLS nativo do Supabase V2 se encarrega de reter os dados com base na sessão ativa.
+      const [resAnalises, resVop, resCarteira, resExtrato] = await Promise.all([
+        supabase.from("analises").select("*"),
+        supabase.from("dash_vop").select("*"),
+        supabase.from("dash_carteira").select("*"),
+        supabase.from("extrato_financeiro").select("*")
       ]);
 
+      setAnalises(resAnalises.data || []);
       setDashVop(resVop.data || []);
       setDashCarteira(resCarteira.data || []);
       setDashReceitas(resExtrato.data || []);
 
+      // Mapeamento dinâmico de competências operacionais
       const mesesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => formatarMesAno(v.mes_ano)),
         ...(resExtrato.data || []).map(r => formatarMesAno(r.mes_ano))
@@ -170,6 +134,7 @@ export default function PowerBIPage() {
         setMesesSel(mesesUnicos);
       }
 
+      // Mapeamento de Cedentes unificados carregados na visão do usuário
       const cedentesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => v.cedente),
         ...(resCarteira.data || []).map(c => c.cedente),
@@ -180,13 +145,13 @@ export default function PowerBIPage() {
       if (cedentesSel.length === 0) setCedentesSel(cedentesUnicos);
 
     } catch (err) {
-      console.error("Erro no processamento V2:", err);
+      console.error("Erro no processamento de BI V2:", err);
     } finally {
       setCarregando(false);
     }
   };
 
-  useEffect(() => { carregarDashboardFiel(); }, []);
+  useEffect(() => { if (carregando) carregarDashboardFiel(); }, []);
 
   const sincronizarSupabase = async () => {
     setSincronizando(true);
@@ -195,7 +160,7 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS (Seguros e de Alta Performance)
+  // ⚡ CÁLCULOS MEMOIZADOS INTEGRAIS (PROVENIENTES DE CHAVES POR CNPJ)
   // ==========================================================================
   const kpis = useMemo(() => {
     let aprovadosMes = 0, recusadosMes = 0, somaDias = 0, qtdSla = 0;
@@ -204,6 +169,7 @@ export default function PowerBIPage() {
     let riscoSec = 0, riscoFidc = 0, vencidosSec = 0, vencidosFidc = 0;
     let totalDesagio = 0, totalTarifas = 0, totalJurosMultas = 0;
 
+    // Filtro global unificado por regras de interface
     const filtroAtivo = (emp: string, m_a: string, ced: string) => {
       const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
       const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
@@ -211,18 +177,19 @@ export default function PowerBIPage() {
       return bateEmpresa && bateMes && bateCedente;
     };
 
-    // 1. SLA / Comitê (Normalizado para bater chaves com filtros)
+    // 1. CÁLCULO DE SLA DA ESTEIRA (Mesa de Crédito)
     analises.forEach(a => {
-      const dRecRaw = a.data_recebimento || a.created_at || a.criado_em; 
+      const dRecRaw = a.data_recebimento || a.criado_em || a.created_at; 
       const dRec = parseDataSegura(dRecRaw);
 
       if (dRec) {
         const m_a = `${String(dRec.getMonth() + 1).padStart(2, "0")}/${dRec.getFullYear()}`;
         const bateMes = mesesSel.length === 0 || mesesSel.includes(m_a);
         
-        const nomeCedente = limparNomeSimples(a.empresa_nome || a.cedente || "");
-        // Procura parcial ou exata baseada nos cedentes da lista de filtros
-        const bateCedente = cedentesSel.length === 0 || cedentesSel.some(c => limparNomeSimples(c) === nomeCedente);
+        // 🎯 O BATIMENTO AGORA BUSCA PELO CNPJ DA ANÁLISE!
+        // Cruzamos o CNPJ com os cedentes selecionados na lista para evitar falhas por nomes de texto digitados
+        const cnpjAnalise = limparCnpjSimples(a.cnpj);
+        const bateCedente = cedentesSel.length === 0 || dashCarteira.some(c => limparCnpjSimples(c.cnpj) === cnpjAnalise && cedentesSel.includes(c.cedente));
 
         if (bateMes && bateCedente) {
           const st = (a.status || "").toLowerCase();
@@ -241,7 +208,7 @@ export default function PowerBIPage() {
       }
     });
 
-    // 2. VOP Mensal e Histórico Geral
+    // 2. VOP MENSAL E HISTÓRICO ACUMULADO
     dashVop.forEach(v => {
       const isCedenteAtivo = cedentesSel.includes(v.cedente);
       if (isCedenteAtivo) {
@@ -255,7 +222,7 @@ export default function PowerBIPage() {
       }
     });
 
-    // 3. Carteira Atual
+    // 3. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO
     dashCarteira.forEach(c => {
       if (cedentesSel.includes(c.cedente)) {
         if (empresasSel.includes("SEC")) { 
@@ -269,7 +236,7 @@ export default function PowerBIPage() {
       }
     });
 
-    // 4. Receitas
+    // 4. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
     dashReceitas.forEach(r => {
       if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
         totalDesagio += parseValorReal(r.desagio);
@@ -285,7 +252,7 @@ export default function PowerBIPage() {
     return {
       aprovadosMes, recusadosMes, prazoMedioDias,
       vopMensalSec, vopMensalFidc, vopVidaTodaSec, vopVidaTodaFidc, vopVidaTodaConsolidadoGeral,
-      riscoSec, riesgoFidc: riscoFidc, vencidosSec, vencidosFidc,
+      riscoSec, riscoFidc, vencidosSec, vencidosFidc,
       totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada
     };
   }, [analises, dashVop, dashCarteira, dashReceitas, empresasSel, mesesSel, cedentesSel]);
@@ -312,7 +279,7 @@ export default function PowerBIPage() {
       
       <div className="border-b border-slate-200 pb-3 flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight uppercase">📊 Painel de Indicadores Estratégicos (BI)</h2>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">📊 Painel de Indicadores Estratégicos (BI)</h2>
           <span className="text-xs text-slate-500 font-medium">Consolidação em tempo real dos fluxos, receitas e riscos aprovados em comitê.</span>
         </div>
       </div>
@@ -481,7 +448,7 @@ export default function PowerBIPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-white border-l-4 border-l-slate-800 border border-slate-200 p-6 rounded-xl shadow-xs">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco Total Consolidado</span>
-            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoSec + kpis.riesgoFidc)}</div>
+            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoSec + kpis.riscoFidc)}</div>
           </div>
           <div className="bg-white border-l-4 border-l-blue-600 border border-slate-200 p-6 rounded-xl shadow-xs">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco Securitizadora</span>
@@ -489,7 +456,7 @@ export default function PowerBIPage() {
           </div>
           <div className="bg-white border-l-4 border-l-indigo-600 border border-slate-200 p-6 rounded-xl shadow-xs">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Risco FIDC</span>
-            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riesgoFidc)}</div>
+            <div className="text-2xl font-black font-mono text-slate-800 mt-2 truncate">{fM(kpis.riscoFidc)}</div>
           </div>
         </div>
       </div>
