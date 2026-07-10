@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import Link from "next/link"; // Import do Link do Next.js para a navegação dos cards
+import Link from "next/link";
 
 // ============================================================================
 // 🧽 UTILS CORRIGIDOS E SEGUROS
@@ -45,9 +45,10 @@ const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", curre
 // 📊 COMPONENTE PRINCIPAL (DASHBOARD BI)
 // ============================================================================
 export default function PowerBIPage() {
-  const [dashCarteira, setDashCarteira] = useState<any[]>([]);
   const [dashVop, setDashVop] = useState<any[]>([]);
   const [dashReceitas, setDashReceitas] = useState<any[]>([]);
+  const [carteiraSec, setCarteiraSec] = useState<any[]>([]);
+  const [carteiraFidc, setCarteiraFidc] = useState<any[]>([]);
   
   const [carregando, setCarregando] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
@@ -83,15 +84,17 @@ export default function PowerBIPage() {
     try {
       setCarregando(true);
       
-      const [resVop, resCarteira, resExtrato] = await Promise.all([
+      const [resVop, resExtrato, resCartSec, resCartFidc] = await Promise.all([
         supabase.from("dash_vop").select("*"),
-        supabase.from("dash_carteira").select("*"),
-        supabase.from("extrato_financeiro").select("*")
+        supabase.from("extrato_financeiro").select("*"),
+        supabase.from("carteira_sec").select("*"),
+        supabase.from("carteira_fidc").select("*")
       ]);
 
       setDashVop(resVop.data || []);
-      setDashCarteira(resCarteira.data || []);
       setDashReceitas(resExtrato.data || []);
+      setCarteiraSec(resCartSec.data || []);
+      setCarteiraFidc(resCartFidc.data || []);
 
       const mesesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => formatarMesAno(v.mes_ano)),
@@ -106,10 +109,12 @@ export default function PowerBIPage() {
         setMesesSel(mesesUnicos);
       }
 
+      // Mapeia cedentes de todas as origens
       const cedentesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => v.cedente),
-        ...(resCarteira.data || []).map(c => c.cedente),
-        ...(resExtrato.data || []).map(r => r.cedente)
+        ...(resExtrato.data || []).map(r => r.cedente),
+        ...(resCartSec.data || []).map(c => c.cedente),
+        ...(resCartFidc.data || []).map(c => c.cedente)
       ].filter(Boolean))).sort();
       
       setListaCedentes(cedentesUnicos);
@@ -131,7 +136,7 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS (Focados em VOP, Risco e Receitas)
+  // ⚡ CÁLCULOS MEMOIZADOS (Focados em VOP, Risco Analítico e Receitas)
   // ==========================================================================
   const kpis = useMemo(() => {
     let vopMensalSec = 0, vopMensalFidc = 0;
@@ -148,8 +153,7 @@ export default function PowerBIPage() {
 
     // 1. VOP MENSAL E HISTÓRICO ACUMULADO
     dashVop.forEach(v => {
-      const isCedenteAtivo = cedentesSel.includes(v.cedente);
-      if (isCedenteAtivo) {
+      if (cedentesSel.includes(v.cedente)) {
         vopVidaTodaSec += parseValorReal(v.vop_sec);
         vopVidaTodaFidc += parseValorReal(v.vop_fidc);
 
@@ -160,19 +164,32 @@ export default function PowerBIPage() {
       }
     });
 
-    // 2. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO
-    dashCarteira.forEach(c => {
-      if (cedentesSel.includes(c.cedente)) {
-        if (empresasSel.includes("SEC")) { 
-          riscoSec += parseValorReal(c.risco_sec); 
-          vencidosSec += parseValorReal(c.vencido_sec); 
+    // 2. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO (Direto do tabelão de recebíveis)
+    if (empresasSel.includes("SEC")) {
+      carteiraSec.forEach(c => {
+        if (cedentesSel.includes(c.cedente)) {
+          const vAberto = parseValorReal(c.valor_aberto);
+          riscoSec += vAberto;
+          // Regra de inadimplência SEC
+          if (c.status?.toLowerCase() === "vencido" || c.situacao?.toLowerCase() === "vencido" || Number(c.dias_atraso) > 0) {
+            vencidosSec += vAberto;
+          }
         }
-        if (empresasSel.includes("FIDC")) { 
-          riscoFidc += parseValorReal(c.risco_fidc); 
-          vencidosFidc += parseValorReal(c.vencido_fidc); 
+      });
+    }
+
+    if (empresasSel.includes("FIDC")) {
+      carteiraFidc.forEach(c => {
+        if (cedentesSel.includes(c.cedente)) {
+          const vAberto = parseValorReal(c.valor_aberto);
+          riscoFidc += vAberto;
+          // Regra de inadimplência FIDC
+          if (c.status?.toLowerCase() === "vencido" || c.situacao_recebivel?.toLowerCase() === "vencido") {
+            vencidosFidc += vAberto;
+          }
         }
-      }
-    });
+      });
+    }
 
     // 3. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
     dashReceitas.forEach(r => {
@@ -191,7 +208,7 @@ export default function PowerBIPage() {
       riscoSec, riscoFidc, vencidosSec, vencidosFidc,
       totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada
     };
-  }, [dashVop, dashCarteira, dashReceitas, empresasSel, mesesSel, cedentesSel]);
+  }, [dashVop, carteiraSec, carteiraFidc, dashReceitas, empresasSel, mesesSel, cedentesSel]);
 
   const labelMesFiltro = mesesSel.length === 0 ? "Geral" : mesesSel.length === listaMeses.length ? "Todos" : mesesSel.length === 1 ? mesesSel[0] : "Múltiplos";
 
@@ -307,7 +324,6 @@ export default function PowerBIPage() {
         <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Valores Operados (VOP)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
-          {/* Card Consolidado Total (Informativo, sem Link) */}
           <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl shadow-indigo-600/30 border border-indigo-500">
              <svg className="absolute -bottom-4 -right-4 w-24 h-24 text-white opacity-10" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
              <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-100 block mb-2">Consolidado Geral (Vida Toda)</span>
@@ -315,7 +331,6 @@ export default function PowerBIPage() {
              <span className="text-[10px] text-indigo-300 font-bold block mt-2 uppercase">SEC + FIDC</span>
           </div>
 
-          {/* VOP SEC -> Link Operações SEC */}
           <Link href="/dashboard/importacao/operacoes-sec" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/20 hover:shadow-md hover:-translate-y-0.5 block">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 group-hover:bg-indigo-600 transition-colors"></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 block mb-2 flex items-center justify-between">
@@ -328,7 +343,6 @@ export default function PowerBIPage() {
             </div>
           </Link>
 
-          {/* VOP FIDC -> Link Operações FIDC */}
           <Link href="/dashboard/importacao/operacoes-fidc" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-purple-300 hover:bg-purple-50/20 hover:shadow-md hover:-translate-y-0.5 block">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500 group-hover:bg-purple-600 transition-colors"></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-purple-600 block mb-2 flex items-center justify-between">
@@ -351,7 +365,6 @@ export default function PowerBIPage() {
         <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Carteira em Aberto (Risco e Inadimplência)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
-          {/* Risco Total Consolidado (Informativo, sem Link) */}
           <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-xl shadow-slate-900/20 border border-slate-600">
              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-300 block mb-2">Exposição Total Consolidada</span>
              <div className="text-3xl font-black truncate">{fM(kpis.riscoSec + kpis.riscoFidc)}</div>
@@ -360,7 +373,6 @@ export default function PowerBIPage() {
              </span>
           </div>
 
-          {/* RISCO SEC -> Link Carteira SEC */}
           <Link href="/dashboard/importacao/carteira-risco-sec" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/20 hover:shadow-md hover:-translate-y-0.5 block">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 group-hover:bg-blue-600 transition-colors"></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-blue-600 block mb-2 flex items-center justify-between">
@@ -373,7 +385,6 @@ export default function PowerBIPage() {
             </div>
           </Link>
 
-          {/* RISCO FIDC -> Link Carteira FIDC */}
           <Link href="/dashboard/importacao/carteira-risco-fidc" className="group relative overflow-hidden p-6 rounded-2xl text-left transition-all duration-300 border bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/20 hover:shadow-md hover:-translate-y-0.5 block">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 group-hover:bg-indigo-600 transition-colors"></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 block mb-2 flex items-center justify-between">
