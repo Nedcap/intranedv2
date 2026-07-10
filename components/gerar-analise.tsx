@@ -523,7 +523,23 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <div class="parecer-wrapper" style="margin-top: 3rem;">
               <div class="parecer-header">Parecer Técnico / Deliberação da Mesa de Risco</div>
-              <div class="parecer-body"><span style="color: var(--blue-dark); font-weight: 800; font-size: 1.1rem; display:block; margin-bottom: 1rem;">RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</span>${analise.parecer_analista || 'Sem parecer conclusivo preenchido.'}</div>
+              <div class="parecer-body">
+                  <span style="color: var(--blue-dark); font-weight: 800; font-size: 1.1rem; display:block; margin-bottom: 1rem;">
+                      RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}
+                  </span>
+                  
+                  <div style="margin-bottom: 1rem;">
+                      <strong style="color: var(--blue-dark); font-size: 0.85rem; text-transform: uppercase;">Parecer do Analista:</strong><br/>
+                      ${analise.parecer_analista || 'Sem parecer do analista preenchido.'}
+                  </div>
+
+                  ${analise.parecer_comite ? `
+                  <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
+                      <strong style="color: var(--blue-dark); font-size: 0.85rem; text-transform: uppercase;">Votos e Deliberação do Comitê:</strong><br/>
+                      ${analise.parecer_comite}
+                  </div>
+                  ` : ''}
+              </div>
               <div class="parecer-footer">Documento Oficial Emitido por: <strong style="color: var(--blue-dark);">${analise.analista || 'Analista de Crédito'}</strong></div>
           </div>
 
