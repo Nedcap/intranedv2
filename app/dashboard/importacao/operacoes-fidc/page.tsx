@@ -3,7 +3,6 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { limparNome } from "@/lib/normalizador";
 import * as XLSX from "xlsx";
 
 // ============================================================================
@@ -117,6 +116,7 @@ export default function OperacoesFidcPage() {
         const row = rawRows[i];
         if (!row || row.length === 0) continue;
 
+        // Pula se existir a coluna status e não for "FECHADA"
         if (idxStatus !== -1 && String(row[idxStatus]).trim().toUpperCase() !== "FECHADA") continue;
 
         const rawCnpj = limparCnpj(row[idxCnpjCedente]);
@@ -242,25 +242,30 @@ export default function OperacoesFidcPage() {
     setStatusMsg("🚀 Expurgando períodos retroativos e consolidando DRE do FIDC...");
 
     try {
+      // 1. Coleta os períodos (mês_ano) e CNPJs afetados para fazer a deleção segura (expurgo)
       const periodosAfetados = new Set<string>();
       linhasConciliadas.forEach(linha => {
+        if (!linha.cnpjCadastrado) return;
         linha.operacoes.forEach(op => {
-          if (op.mes_ano) periodosAfetados.add(`${op.mes_ano}|${linha.cnpjPlanilha}`);
+          if (op.mes_ano) periodosAfetados.add(`${op.mes_ano}|${linha.cnpjCadastrado}`);
         });
       });
 
+      // 2. Limpa os registros no banco apenas das empresas e meses que estão sendo importados
       for (const pa of periodosAfetados) {
         const [mes_ano, cnpj] = pa.split("|");
-        await supabase
+        const { error: deleteError } = await supabase
           .from("extrato_financeiro")
           .delete()
           .eq("empresa", "FIDC")
           .eq("mes_ano", mes_ano)
           .eq("cnpj", cnpj);
+        
+        if (deleteError) throw deleteError;
       }
 
+      // 3. Monta o payload aderente ao schema public.extrato_financeiro
       const payloadExtrato: any[] = [];
-      const vopAgregadoMap = new Map<string, { mes_ano: string, cnpj: string, cedente: string, vop: number, respId: string | null }>();
 
       linhasConciliadas.forEach(linha => {
         if (!linha.cnpjCadastrado) return;
@@ -271,28 +276,17 @@ export default function OperacoesFidcPage() {
             data_operacao: op.data_operacao,
             mes_ano: op.mes_ano,
             cnpj: linha.cnpjCadastrado,
-            cedente: SelfCleanName(linha.cedentePlanilha),
+            cedente: String(linha.cedentePlanilha || "").toUpperCase().trim(),
             vop: op.vop,
-            desagio: op.receita, 
+            desagio: op.receita, // Mapeando a receita unificada pro campo de deságio do schema
             tarifas: 0,
             juros: 0,
             responsavel_id: linha.responsavelId
           });
-
-          const keyVop = `${op.mes_ano}_${linha.cnpjCadastrado}`;
-          if (!vopAgregadoMap.has(keyVop)) {
-            vopAgregadoMap.set(keyVop, {
-              mes_ano: op.mes_ano,
-              cnpj: inline_cnpj(linha.cnpjCadastrado),
-              cedente: SelfCleanName(linha.cedentePlanilha),
-              vop: 0,
-              respId: linha.responsavelId
-            });
-          }
-          vopAgregadoMap.get(keyVop)!.vop += op.vop;
         });
       });
 
+      // 4. Inserção em chunks
       if (payloadExtrato.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadExtrato.length; i += chunk) {
@@ -301,34 +295,7 @@ export default function OperacoesFidcPage() {
         }
       }
 
-      if (vopAgregadoMap.size > 0) {
-        for (const [_, item] of vopAgregadoMap.entries()) {
-          const { data: existente } = await supabase
-            .from("dash_vop")
-            .select("vop_sec")
-            .eq("mes_ano", item.mes_ano)
-            .eq("cnpj", item.cnpj)
-            .maybeSingle();
-
-          const vSec = existente ? parseFloat(existente.vop_sec || 0) : 0;
-
-          const payloadConsolidado = {
-            mes_ano: item.mes_ano,
-            cnpj: item.cnpj,
-            cedente: item.cedente,
-            vop_fidc: item.vop,
-            vop_sec: vSec,
-            vop_consolidado: vSec + item.vop,
-            responsavel_id: item.respId,
-            atualizado_em: new Date().toISOString()
-          };
-
-          const { error } = await supabase.from("dash_vop").upsert(payloadConsolidado, { onConflict: "mes_ano,cnpj" });
-          if (error) throw error;
-        }
-      }
-
-      alert(`🎉 Carga concluída!\nDRE analítico de Finanças atualizado e gráficos de VOP recalculados.`);
+      alert(`🎉 Carga concluída com sucesso!\nDRE analítico de Finanças (Extrato Financeiro) atualizado.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -338,9 +305,6 @@ export default function OperacoesFidcPage() {
     }
   };
 
-  function inline_cnpj(v: any) { return String(v || "").replace(/\D/g, ""); }
-  function SelfCleanName(v: string) { return String(v || "").toUpperCase().trim(); }
-
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
       
@@ -348,7 +312,7 @@ export default function OperacoesFidcPage() {
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Fluxo Unificado FIDC: VOP e Receitas (Black101)</h2>
-          <span className="text-xs text-slate-500 font-medium">Extração síncrona do DRE em lote. O sistema calcula o Volume de Produção e a rentabilidade em uma única carga.</span>
+          <span className="text-xs text-slate-500 font-medium">Extração síncrona do DRE em lote. O sistema salva o Volume de Produção e a rentabilidade no Extrato Financeiro.</span>
         </div>
         
         <button
@@ -356,7 +320,7 @@ export default function OperacoesFidcPage() {
           disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
           className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
         >
-          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco Central"}
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco de Dados"}
         </button>
       </div>
 

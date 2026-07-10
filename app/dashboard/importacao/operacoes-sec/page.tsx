@@ -192,18 +192,21 @@ export default function OperacoesSecPage() {
         });
       });
 
+      // 1. Limpeza segura (expurgo) na tabela extrato_financeiro para a empresa SEC
       for (const pa of periodosAfetados) {
         const [mes_ano, cnpj] = pa.split("|");
-        await supabase
+        const { error: deleteError } = await supabase
           .from("extrato_financeiro")
           .delete()
           .eq("empresa", "SEC")
           .eq("mes_ano", mes_ano)
           .eq("cnpj", cnpj);
+        
+        if (deleteError) throw deleteError;
       }
 
+      // 2. Prepara o payload rigorosamente nos tipos do seu schema
       const payloadExtrato: any[] = [];
-      const vopAgregadoMap = new Map<string, { mes_ano: string, cnpj: string, cedente: string, vop: number, respId: string | null }>();
 
       linhasConciliadas.forEach(linha => {
         if (!linha.cnpjCadastrado) return;
@@ -214,28 +217,17 @@ export default function OperacoesSecPage() {
             data_operacao: op.data_operacao,
             mes_ano: op.mes_ano,
             cnpj: inline_cnpj(linha.cnpjCadastrado),
-            cedente: linha.cedentePlanilha,
+            cedente: String(linha.cedentePlanilha || "").toUpperCase().trim(),
             vop: op.vop,
-            desagio: op.receita, 
+            desagio: op.receita, // Usando desagio pra guardar receita
             tarifas: 0,
             juros: 0,
-            responsavel_id: inline_cnpj(linha.responsavelId) ? linha.responsavelId : null
+            responsavel_id: linha.responsavelId || null // Consertado: passa o UUID limpo direto!
           });
-
-          const keyVop = `${op.mes_ano}_${linha.cnpjCadastrado}`;
-          if (!vopAgregadoMap.has(keyVop)) {
-            vopAgregadoMap.set(keyVop, {
-              mes_ano: op.mes_ano,
-              cnpj: linha.cnpjCadastrado,
-              cedente: linha.cedentePlanilha,
-              vop: 0,
-              respId: linha.responsavelId
-            });
-          }
-          vopAgregadoMap.get(keyVop)!.vop += op.vop;
         });
       });
 
+      // 3. Inserção em massa por chunks
       if (payloadExtrato.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadExtrato.length; i += chunk) {
@@ -244,34 +236,7 @@ export default function OperacoesSecPage() {
         }
       }
 
-      if (vopAgregadoMap.size > 0) {
-        for (const [_, item] of vopAgregadoMap.entries()) {
-          const { data: existente } = await supabase
-            .from("dash_vop")
-            .select("vop_fidc")
-            .eq("mes_ano", item.mes_ano)
-            .eq("cnpj", item.cnpj)
-            .maybeSingle();
-
-          const vFidc = existente ? parseFloat(existente.vop_fidc || 0) : 0;
-
-          const payloadConsolidado = {
-            mes_ano: item.mes_ano,
-            cnpj: item.cnpj,
-            cedente: item.cedente,
-            vop_sec: item.vop,
-            vop_fidc: vFidc,
-            vop_consolidado: vFidc + item.vop,
-            responsavel_id: item.respId,
-            atualizado_em: new Date().toISOString()
-          };
-
-          const { error } = await supabase.from("dash_vop").upsert(payloadConsolidado, { onConflict: "mes_ano,cnpj" });
-          if (error) throw error;
-        }
-      }
-
-      alert(`🎉 Sincronização Concluída!\n${payloadExtrato.length} lançamentos adicionados no DRE. Gráficos de VOP atualizados.`);
+      alert(`🎉 Sincronização Concluída!\n${payloadExtrato.length} lançamentos da SEC adicionados no Extrato Financeiro.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -290,7 +255,7 @@ export default function OperacoesSecPage() {
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Fluxo Unificado SEC: VOP e Receitas (Qprof)</h2>
-          <span className="text-xs text-slate-500 font-medium">Extração analítica em tempo de execução de blocos do Qprof. Processa Volume Operado e Receitas de forma simultânea.</span>
+          <span className="text-xs text-slate-500 font-medium">Extração analítica em tempo de execução de blocos do Qprof para o Extrato Financeiro.</span>
         </div>
         
         <button

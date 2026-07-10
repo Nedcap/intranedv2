@@ -77,6 +77,7 @@ export default function CarteiraRiscoFidcPage() {
   const carregarCedentes = async () => {
     try {
       setCarregandoBase(true);
+      // Lê o cadastro base para usar como "De-Para" MDM
       const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
       if (data) setCedentesSistema(data);
     } catch (err) {
@@ -259,8 +260,9 @@ export default function CarteiraRiscoFidcPage() {
     setStatusMsg("🚀 Efetuando limpeza de lotes e persistindo tabelão FIDC...");
 
     try {
-      const cnpjsImportados = linhasConciliadas.map(l => l.cnpjCadastrado);
+      const cnpjsImportados = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
+      // 1. Limpeza segura na carteira_fidc apenas dos CNPJs que estão sendo importados
       const { error: cleanError } = await supabase
         .from("carteira_fidc")
         .delete()
@@ -269,17 +271,17 @@ export default function CarteiraRiscoFidcPage() {
       if (cleanError) throw cleanError;
 
       const payloadCarteira: any[] = [];
-      const payloadRisco: any[] = [];
 
       for (const linha of linhasConciliadas) {
         if (!linha.cnpjCadastrado) continue;
 
+        // 2. Monta o Payload exato pro schema da carteira_fidc
         linha.titulos.forEach(t => {
           payloadCarteira.push({
             cnpj_cedente: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha,
             sacado: t.sacado,
-            numero_titulo: t.numero_recebivel,
+            numero_titulo: t.numero_recebivel, // Mapeando num título = num recebível conforme planilhas de fidc
             numero_recebivel: t.numero_recebivel,
             tipo_recebivel: t.tipo_recebivel,
             situacao_recebivel: t.situacao_recebivel,
@@ -298,45 +300,29 @@ export default function CarteiraRiscoFidcPage() {
           });
         });
 
-        payloadRisco.push({
-          cnpj: linha.cnpjCadastrado,
-          cedente: linha.cedentePlanilha,
-          risco_fidc: linha.totalAberto,
-          vencido_fidc: broadband(linha.totalVencido),
-          responsavel_id: linha.responsavelId,
-          atualizado_em: new Date().toISOString()
-        });
+        // 3. Atualiza os limites de risco do FIDC de forma segura no cadastro_cedentes
+        await supabase
+          .from("cadastro_cedentes")
+          .update({
+            risco_fidc: linha.totalAberto,
+            vencido_fidc: isNaN(linha.totalVencido) ? 0 : linha.totalVencido,
+            atualizado_em: new Date().toISOString()
+          })
+          .eq("cnpj", linha.cnpjCadastrado);
       }
 
+      // 4. Inserção em Lote (Chunks) dos Títulos na carteira_fidc
       if (payloadCarteira.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
-          const { error } = await supabase.from("carteira_fidc").insert(payloadCarteira.slice(i, i + chunk));
+          const { error } = await supabase
+            .from("carteira_fidc")
+            .insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }
       }
 
-      if (payloadRisco.length > 0) {
-        for (const riscoItem of payloadRisco) {
-          const { data: existente } = await supabase.from("dash_carteira").select("risco_sec, vencido_sec").eq("cnpj", riscoItem.cnpj).maybeSingle();
-          
-          const rSec = existente ? parseFloat(existente.risco_sec || 0) : 0;
-          const vSec = existente ? parseFloat(existente.vencido_sec || 0) : 0;
-
-          const completo = {
-            ...riscoItem,
-            risco_sec: rSec,
-            vencido_sec: vSec,
-            risco_consolidado: rSec + riscoItem.risco_fidc,
-            vencido_consolidado: vSec + riscoItem.risco_fidc
-          };
-
-          const { error } = await supabase.from("dash_carteira").upsert(completo, { onConflict: "cnpj" });
-          if (error) throw error;
-        }
-      }
-
-      alert(`🎉 Carga concluída!\n${payloadCarteira.length} recebíveis integrados com sucesso.`);
+      alert(`🎉 Carga concluída!\n${payloadCarteira.length} recebíveis integrados na carteira FIDC e riscos atualizados.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -346,21 +332,19 @@ export default function CarteiraRiscoFidcPage() {
     }
   };
 
-  function broadband(val: number) { return isNaN(val) ? 0 : val; }
-
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira e Risco FIDC (Black101)</h2>
-          <span className="text-xs text-slate-500 font-medium">Alimentação em lote analítico do fluxo FIDC e sincronização síncrona do dashboard de alçadas.</span>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira FIDC (Black101)</h2>
+          <span className="text-xs text-slate-500 font-medium">Alimentação em lote analítico do fluxo FIDC e sincronização de alçadas.</span>
         </div>
         <button
           onClick={transferirDadosProSupabase}
           disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
           className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
         >
-          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco Central"}
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco de Dados"}
         </button>
       </div>
 

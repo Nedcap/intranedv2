@@ -87,6 +87,7 @@ export default function CarteiraRiscoSecPage() {
   const carregarCedentes = async () => {
     try {
       setCarregandoBase(true);
+      // Lê apenas para usar de consulta (de-para)
       const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
       if (data) setCedentesSistema(data);
     } catch (err) {
@@ -111,15 +112,11 @@ export default function CarteiraRiscoSecPage() {
     try {
       const texto = await file.text();
       
-      // Quebra robusta aceitando múltiplos formatos de quebra de linha
       let linhasRaw = texto.split(/\r?\n/).map(l => l.split(";"));
-      
-      // Se quebrou em uma coluna só, tenta o separador por vírgula como contingência
       if (linhasRaw.length > 0 && linhasRaw[0].length <= 1) {
         linhasRaw = texto.split(/\r?\n/).map(l => l.split(","));
       }
 
-      // Procura inteligente do cabeçalho removendo caracteres invisíveis e BOM do UTF-8
       const headerIdx = linhasRaw.findIndex(row => 
         row.some(cell => strClean(cell).includes("CEDENTE"))
       );
@@ -271,25 +268,26 @@ export default function CarteiraRiscoSecPage() {
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
-      alert("⚠️ Vincule ou Cadastre todos os cedentes antes de sincronizar o tabelão!");
+      alert("⚠️ Vincule ou Cadastre todos os cedentes antes de sincronizar a carteira!");
       return;
     }
 
     setProcessando(true);
-    setStatusMsg("🚀 Sincronizando tabelões e atualizando limites...");
+    setStatusMsg("🚀 Sincronizando tabelão de carteira...");
 
     try {
-      const todosOsCedentesImportados = [...new Set(linhasConciliadas.map(l => l.cedentePlanilha.toUpperCase()))];
+      // Pega todos os CNPJs importados para limpar apenas os dados deles
+      const cnpjsParaLimpar = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
+      // Limpeza baseada rigorosamente no schema da carteira_sec
       const { error: errorClean } = await supabase
         .from("carteira_sec")
         .delete()
-        .in("cedente", todosOsCedentesImportados);
+        .in("cnpj_cedente", cnpjsParaLimpar);
 
       if (errorClean) throw errorClean;
 
       const payloadCarteira: any[] = [];
-      const payloadRisco: any[] = [];
 
       for (const linha of linhasConciliadas) {
         if (!linha.cnpjCadastrado) continue;
@@ -314,19 +312,9 @@ export default function CarteiraRiscoSecPage() {
             responsavel_id: linha.responsavelId
           });
         });
-
-        payloadRisco.push({
-          cnpj: linha.cnpjCadastrado,
-          cedente: linha.cedentePlanilha.toUpperCase(),
-          risco_sec: linha.totalAberto,
-          vencido_sec: linha.totalVencido,
-          risco_consolidado: linha.totalAberto,
-          vencido_consolidado: linha.totalVencido,
-          responsavel_id: linha.responsavelId,
-          atualizado_em: new Date().toISOString()
-        });
       }
 
+      // Insere apenas na carteira_sec em chunks
       if (payloadCarteira.length > 0) {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
@@ -335,15 +323,7 @@ export default function CarteiraRiscoSecPage() {
         }
       }
 
-      if (payloadRisco.length > 0) {
-        const chunk = 400;
-        for (let i = 0; i < payloadRisco.length; i += chunk) {
-          const { error } = await supabase.from("dash_carteira").upsert(payloadRisco.slice(i, i + chunk), { onConflict: "cnpj" });
-          if (error) throw error;
-        }
-      }
-
-      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos adicionados e riscos recalculados.`);
+      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos adicionados à carteira SEC.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -357,15 +337,15 @@ export default function CarteiraRiscoSecPage() {
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira e Risco SEC (Qprof)</h2>
-          <span className="text-xs text-slate-500 font-medium">Alimentação síncrona do tabelão analítico de títulos e consolidação automática de limites.</span>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira SEC (Qprof)</h2>
+          <span className="text-xs text-slate-500 font-medium">Alimentação síncrona do tabelão analítico de títulos (carteira_sec).</span>
         </div>
         <button
           onClick={transferirDadosProSupabase}
           disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
           className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
         >
-          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco Central"}
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco de Dados"}
         </button>
       </div>
 
