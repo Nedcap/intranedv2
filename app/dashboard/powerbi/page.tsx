@@ -34,11 +34,6 @@ function formatarMesAno(str: string): string {
   return txt;
 }
 
-function limparCnpjSimples(valor: any): string {
-  if (!valor) return "";
-  return String(valor).replace(/\D/g, "");
-}
-
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
 // ============================================================================
@@ -109,7 +104,6 @@ export default function PowerBIPage() {
         setMesesSel(mesesUnicos);
       }
 
-      // Mapeia cedentes de todas as origens
       const cedentesUnicos = Array.from(new Set([
         ...(resVop.data || []).map(v => v.cedente),
         ...(resExtrato.data || []).map(r => r.cedente),
@@ -136,13 +130,39 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS (Focados em VOP, Risco Analítico e Receitas)
+  // ⚡ CÁLCULOS MEMOIZADOS BLINDADOS (Lógica Real de Vencimento por Data)
   // ==========================================================================
   const kpis = useMemo(() => {
     let vopMensalSec = 0, vopMensalFidc = 0;
     let vopVidaTodaSec = 0, vopVidaTodaFidc = 0;
     let riscoSec = 0, riscoFidc = 0, vencidosSec = 0, vencidosFidc = 0;
     let totalDesagio = 0, totalTarifas = 0, totalJurosMultas = 0;
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    // 🔥 NOVA FUNÇÃO: Avalia exclusivamente pela data para evitar falhas com strings tipo "A Vencer" ou "Cobrança"
+    const checarSeVencidoReal = (dataIso: string | null, stringFallback: string, diasAtraso: number = 0) => {
+      // 1. Regra de Ouro: Se existir data no banco, avaliamos matematicamente
+      if (dataIso) {
+        const partes = String(dataIso).split("T")[0].split("-");
+        if (partes.length === 3) {
+          const vcto = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+          vcto.setHours(0, 0, 0, 0);
+          return vcto.getTime() < hoje.getTime(); // Só é vencido se a data for estritamente menor que hoje
+        }
+      }
+      
+      // 2. Se a data vier nula, usamos o fallback de atrasos ou a string exata
+      if (diasAtraso > 0) return true;
+      
+      const st = stringFallback.toLowerCase().trim();
+      if (st === "vencido" || (st.includes("vencido") && !st.includes("a vencer"))) {
+        return true;
+      }
+      
+      return false;
+    };
 
     const filtroAtivo = (emp: string, m_a: string, ced: string) => {
       const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
@@ -170,8 +190,9 @@ export default function PowerBIPage() {
         if (cedentesSel.includes(c.cedente)) {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoSec += vAberto;
-          // Regra de inadimplência SEC
-          if (c.status?.toLowerCase() === "vencido" || c.situacao?.toLowerCase() === "vencido" || Number(c.dias_atraso) > 0) {
+          
+          const fallBackStr = `${c.status || ""} ${c.situacao || ""}`;
+          if (checarSeVencidoReal(c.vencimento, fallBackStr, Number(c.dias_atraso))) {
             vencidosSec += vAberto;
           }
         }
@@ -183,8 +204,9 @@ export default function PowerBIPage() {
         if (cedentesSel.includes(c.cedente)) {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoFidc += vAberto;
-          // Regra de inadimplência FIDC
-          if (c.status?.toLowerCase() === "vencido" || c.situacao_recebivel?.toLowerCase() === "vencido") {
+          
+          const fallBackStr = `${c.status || ""} ${c.situacao_recebivel || ""}`;
+          if (checarSeVencidoReal(c.vencimento, fallBackStr, 0)) {
             vencidosFidc += vAberto;
           }
         }
