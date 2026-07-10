@@ -1,0 +1,409 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
+import { limparNome } from "@/lib/normalizador";
+
+// ============================================================================
+// 🧽 UTILS DE LIMPEZA E TRATAMENTO DE FORMATOS
+// ============================================================================
+const strClean = (c: any) => {
+  if (!c) return "";
+  return String(c)
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, ""); 
+};
+
+function parseValorReal(valor: any): number {
+  if (valor === null || valor === undefined || valor === "") return 0.0;
+  if (typeof valor === "number") return valor;
+  let txt = String(valor).toUpperCase().replace(/[R$\s]/g, "").trim();
+  const isNeg = txt.startsWith("(") && txt.endsWith(")");
+  if (isNeg) txt = txt.slice(1, -1);
+  if (txt === "-" || txt === "NAN" || txt === "") return 0.0;
+  
+  if (txt.includes(",") && txt.includes(".")) {
+    if (txt.lastIndexOf(",") < txt.lastIndexOf(".")) txt = txt.replace(/,/g, "");
+    else txt = txt.replace(/\./g, "").replace(/,/g, ".");
+  } else if (txt.includes(",")) {
+    txt = txt.replace(/,/g, ".");
+  }
+  const num = parseFloat(txt);
+  return isNaN(num) ? 0.0 : (isNeg ? -num : num);
+}
+
+function parseInteiro(valor: any): number {
+  if (!valor) return 0;
+  const num = parseInt(String(valor).replace(/\D/g, ""));
+  return isNaN(num) ? 0 : num;
+}
+
+function converteDataParaISO(dataStr: string): string | null {
+  if (!dataStr || dataStr.trim() === "" || dataStr.trim() === "-") return null;
+  const partes = dataStr.trim().split("/");
+  if (partes.length === 3) {
+    return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function checarSeVencido(dataStr: string): string {
+  if (!dataStr || dataStr === "-") return "A Vencer";
+  try {
+    const partes = dataStr.split("/");
+    if (partes.length !== 3) return "A Vencer";
+    const dataTitulo = new Date(parseInt(partes[2]), parseInt(partes[1]) - 1, parseInt(partes[0]), 12, 0, 0);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    return dataTitulo.getTime() < hoje.getTime() ? "Vencido" : "A Vencer";
+  } catch {
+    return "A Vencer";
+  }
+}
+
+const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
+
+interface LinhaConciliacao {
+  cedentePlanilha: string;
+  cnpjCadastrado: string | null;
+  responsavelId: string | null;
+  status: "🟢 PRONTO" | "🔴 CEDENTE NÃO LOCALIZADO NO SISTEMA";
+  titulos: any[];
+  totalAberto: number;
+  totalVencido: number;
+}
+
+export default function CarteiraRiscoSecPage() {
+  const [cedentesSistema, setCedentesSistema] = useState<any[]>([]);
+  const [linhasConciliadas, setLinhasConciliadas] = useState<LinhaConciliacao[]>([]);
+  const [carregandoBase, setCarregandoBase] = useState(true);
+  const [processando, setProcessando] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+
+  useEffect(() => {
+    async function carregarCedentes() {
+      try {
+        setCarregandoBase(true);
+        const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
+        if (data) setCedentesSistema(data);
+      } catch (err) {
+        console.error("Erro ao carregar cedentes oficiais:", err);
+      } finally {
+        setCarregandoBase(false);
+      }
+    }
+    carregarCedentes();
+  }, []);
+
+  // ============================================================================
+  // 🦾 LEITORA DO TABELÃO COMPLETO (EXTRAÇÃO QUASE 100% DOS DADOS)
+  // ============================================================================
+  const processarArquivoCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setProcessando(true);
+    setStatusMsg("Mapeando colunas e minerando tabelão bruto do Qprof...");
+
+    try {
+      const texto = await file.text();
+      const linhasRaw = texto.split(/\r?\n/).map(l => l.split(";"));
+
+      const headerIdx = linhasRaw.findIndex(row => row.some(cell => strClean(cell) === "CEDENTE"));
+      if (headerIdx === -1) {
+        alert("❌ Layout inválido! Coluna 'CEDENTE' não encontrada no arquivo.");
+        setProcessando(false);
+        return;
+      }
+
+      const header = linhasRaw[headerIdx].map(strClean);
+      
+      // Indexação de colunas para mapeamento completo de dados
+      const idxCedente = header.indexOf("CEDENTE");
+      const idxSacado = header.indexOf("SACADO");
+      const idxNumTitulo = header.findIndex(c => c === "SNUM" || c === "SEQTIT" || c === "NOSSONUM");
+      const idxSituacao = header.indexOf("SITUACAO");
+      const idxVencimento = header.findIndex(c => c === "DTAVCTO" || c === "VENCIMENTO");
+      const idxValorFace = header.findIndex(c => c === "VLRFACE" || c === "VALORFACE");
+      const idxValorAberto = header.findIndex(c => c === "VLRABERTO" || c === "VALORABERTO");
+      const idxAtr = header.findIndex(c => c === "ATR" || c === "ATRASO");
+      const idxValorPago = header.indexOf("VLRPAGO");
+      const idxDataLiq = header.findIndex(c => c === "DTALIQ" || c === "DATALIQUIDACAO");
+      const idxAgNeg = header.findIndex(c => c === "AGNEG" || c === "AGENEG" || c === "ASSESSOR");
+      const idxAditivo = header.indexOf("ADITIVO");
+      const idxDtaNeg = header.findIndex(c => c === "DTANEGOCIACAO" || c === "DATANEGOCIACAO");
+
+      const agrupamento: Record<string, any[]> = {};
+
+      for (let i = headerIdx + 1; i < linhasRaw.length; i++) {
+        const row = linhasRaw[i];
+        if (!row || row.length <= idxCedente) continue;
+
+        const rawCedente = String(row[idxCedente] || "").trim();
+        if (!rawCedente || rawCedente.toUpperCase().includes("TOTAL") || rawCedente.toUpperCase() === "CEDENTE") continue;
+
+        if (!agrupamento[rawCedente]) {
+          agrupamento[rawCedente] = [];
+        }
+
+        const vencimentoRaw = String(row[idxVencimento] || "").trim();
+        const statusVencimento = checarSeVencido(vencimentoRaw);
+
+        // Monta o objeto completo com quase 100% das colunas operacionais da planilha
+        agrupamento[rawCedente].push({
+          sacado: String(row[idxSacado] || "").trim().toUpperCase(),
+          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-",
+          situacao: idxSituacao !== -1 ? String(row[idxSituacao] || "").trim().toUpperCase() : "ABERTO",
+          vencimento: converteDataParaISO(vencimentoRaw),
+          valor_face: parseValorReal(row[idxValorFace]),
+          valor_aberto: parseValorReal(row[idxValorAberto]),
+          dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0,
+          valor_pago: idxValorPago !== -1 ? parseValorReal(row[idxValorPago]) : 0,
+          data_liquidacao: idxDataLiq !== -1 ? converteDataParaISO(row[idxDataLiq]) : null,
+          gerente_comercial: idxAgNeg !== -1 ? String(row[idxAgNeg] || "").trim().toUpperCase() : null,
+          aditivo: idxAditivo !== -1 ? String(row[idxAditivo] || "").trim() : null,
+          data_negociacao: idxDtaNeg !== -1 ? converteDataParaISO(row[idxDtaNeg]) : null,
+          status: statusVencimento
+        });
+      }
+
+      const resultadoConciliado: LinhaConciliacao[] = [];
+
+      for (const [cedentePlanilha, titulosCedente] of Object.entries(agrupamento)) {
+        const nomePlanilhaLimpo = limparNome(cedentePlanilha);
+        const matchSistema = cedentesSistema.find(c => limparNome(c.cedente) === nomePlanilhaLimpo);
+
+        // Calcula os totais com base apenas em títulos que possuem saldo em aberto real
+        const totalAberto = titulosCedente.reduce((acc, t) => acc + t.valor_aberto, 0);
+        const totalVencido = titulosCedente.reduce((acc, t) => t.status === "Vencido" ? acc + t.valor_aberto : acc, 0);
+
+        resultadoConciliado.push({
+          cedentePlanilha,
+          cnpjCadastrado: matchSistema?.cnpj || null,
+          responsavelId: matchSistema?.responsavel_id || null,
+          status: matchSistema?.cnpj ? "🟢 PRONTO" : "🔴 CEDENTE NÃO LOCALIZADO NO SISTEMA",
+          titulos: titulosCedente,
+          totalAberto,
+          totalVencido
+        });
+      }
+
+      setLinhasConciliadas(resultadoConciliado);
+      setStatusMsg("✅ Dados minerados e estruturados! Verifique a mesa operacional abaixo.");
+    } catch (err: any) {
+      alert("❌ Erro ao ler arquivo: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
+  const handleVincularManualmente = (index: number, cedenteSistemaId: string) => {
+    const match = cedentesSistema.find(c => c.id === cedenteSistemaId);
+    if (!match) return;
+
+    setLinhasConciliadas(prev => {
+      const copia = [...prev];
+      copia[index].cnpjCadastrado = match.cnpj;
+      copia[index].responsavelId = match.responsavel_id;
+      copia[index].status = match.cnpj ? "🟢 PRONTO" : "🔴 CEDENTE NÃO LOCALIZADO NO SISTEMA";
+      return copia;
+    });
+  };
+
+  const totalPendentes = useMemo(() => {
+    return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
+  }, [linhasConciliadas]);
+
+  // ============================================================================
+  // ☁️ PROCESSAMENTO E ENVIO ANTI-DUPLICIDADE
+  // ============================================================================
+  const transferirDadosProSupabase = async () => {
+    if (totalPendentes > 0) {
+      alert("⚠️ Vincule todos os cedentes antes de sincronizar o tabelão!");
+      return;
+    }
+
+    setProcessando(true);
+    setStatusMsg("🚀 Limpando registros diários anteriores e processando tabelão...");
+
+    try {
+      const todosOsCedentesImportados = [...new Set(linhasConciliadas.map(l => l.cedentePlanilha.toUpperCase()))];
+
+      // 🎯 PASSO 1: SISTEMA DE LIMPEZA CIRÚRGICO
+      // Remove da carteira antiga apenas as empresas que constam no arquivo de hoje
+      const { error: errorClean } = await supabase
+        .from("carteira_sec")
+        .delete()
+        .in("cedente", todosOsCedentesImportados);
+
+      if (errorClean) throw errorClean;
+
+      const payloadCarteira: any[] = [];
+      const payloadRisco: any[] = [];
+
+      for (const linha of linhasConciliadas) {
+        if (!linha.cnpjCadastrado) continue;
+
+        // Monta o tabelão com carga total de dados para auditoria futura
+        linha.titulos.forEach(t => {
+          payloadCarteira.push({
+            cnpj_cedente: linha.cnpjCadastrado,
+            cedente: linha.cedentePlanilha.toUpperCase(),
+            sacado: t.sacado,
+            numero_titulo: t.numero_titulo,
+            situacao: t.situacao,
+            vencimento: t.vencimento,
+            valor_face: t.valor_face,
+            valor_aberto: t.valor_aberto,
+            dias_atraso: t.dias_atraso,
+            valor_pago: t.valor_pago,
+            data_liquidacao: t.data_liquidacao,
+            gerente_comercial: t.gerente_comercial,
+            aditivo: t.aditivo,
+            data_negociacao: t.data_negociacao,
+            status: t.status,
+            responsavel_id: linha.responsavelId
+          });
+        });
+
+        // Prepara dados do risco macro consolidado (Tabela com trava UNIQUE no CNPJ)
+        payloadRisco.push({
+          cnpj: linha.cnpjCadastrado,
+          cedente: linha.cedentePlanilha.toUpperCase(),
+          risco_sec: linha.totalAberto,
+          vencido_sec: linha.totalVencido,
+          risco_consolidado: linha.totalAberto,
+          vencido_consolidado: linha.totalVencido,
+          responsavel_id: linha.responsavelId,
+          atualizado_em: new Date().toISOString()
+        });
+      }
+
+      // Envio em chunks para evitar estouro de tamanho de requisição do gateway
+      if (payloadCarteira.length > 0) {
+        const chunk = 400; 
+        for (let i = 0; i < payloadCarteira.length; i += chunk) {
+          const { error } = await supabase.from("carteira_sec").insert(payloadCarteira.slice(i, i + chunk));
+          if (error) throw error;
+        }
+      }
+
+      if (payloadRisco.length > 0) {
+        const chunk = 400;
+        for (let i = 0; i < payloadRisco.length; i += chunk) {
+          const { error } = await supabase.from("dash_carteira").upsert(payloadRisco.slice(i, i + chunk), { onConflict: "cnpj" });
+          if (error) throw error;
+        }
+      }
+
+      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos inseridos no tabelão geral com segurança.`);
+      setLinhasConciliadas([]);
+      setStatusMsg("");
+    } catch (err: any) {
+      alert("❌ Falha crítica na gravação dos lotes: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
+      
+      {/* HEADER DA PÁGINA */}
+      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira e Risco SEC (Qprof)</h2>
+          <span className="text-xs text-slate-500 font-medium">Alimentação síncrona do tabelão analítico de títulos e consolidação automática de limites.</span>
+        </div>
+        
+        <button
+          onClick={transferirDadosProSupabase}
+          disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
+          className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
+        >
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco Central"}
+        </button>
+      </div>
+
+      {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
+
+      {/* DRAG AND DROP ZONE */}
+      {linhasConciliadas.length === 0 && (
+        <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
+          <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+            <span className="text-3xl">📊</span>
+            <span className="font-bold text-slate-700">Carregar Relatório de Cobrança Consolidada Qprof (.CSV)</span>
+            <span className="text-xs text-slate-400 font-mono">Processamento de segurança ativado com limpeza retroativa e carga completa.</span>
+            <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={carregandoBase || processando} />
+          </label>
+        </div>
+      )}
+
+      {/* MESA DE CONCILIAÇÃO SÍNCRONA */}
+      {linhasConciliadas.length > 0 && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center font-bold">
+            <span>Validação de Consistência cadastral (MDM)</span>
+            <span className={`px-3 py-1 rounded text-xs ${totalPendentes === 0 ? "bg-emerald-600" : "bg-rose-600 animate-pulse"}`}>
+              {totalPendentes === 0 ? "✓ Tabelão Consistente" : `⚠️ ${totalPendentes} amarração(ões) pendente(s)`}
+            </span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-[10px] tracking-wider h-11">
+                    <th className="p-4 w-72">Cedente na Planilha</th>
+                    <th className="p-4 text-center w-36">Total de Títulos</th>
+                    <th className="p-4 text-right w-40">Saldo em Aberto</th>
+                    <th className="p-4 text-right w-40">Total Vencido</th>
+                    <th className="p-4 w-64">Status / Resolução de Vínculo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {linhasConciliadas.map((linha, index) => (
+                    <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>
+                        {linha.cedentePlanilha}
+                      </td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.titulos.length}</td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalAberto)}</td>
+                      <td className="p-4 text-right font-mono font-bold text-rose-600">{fM(linha.totalVencido)}</td>
+                      <td className="p-4">
+                        {linha.status.startsWith("🟢") ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-emerald-700 font-black text-[11px]">{linha.status}</span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjCadastrado}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            <span className="text-rose-600 font-black text-[11px] leading-tight">{linha.status}</span>
+                            <select
+                              onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                              className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[280px]"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>Vincular com Empresa do Sistema...</option>
+                              {cedentesSistema.map(c => (
+                                <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
