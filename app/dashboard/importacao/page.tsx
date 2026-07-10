@@ -36,7 +36,8 @@ export default function ImportacaoHubPage() {
               <span className="text-[11px] font-bold text-slate-400 group-hover:text-blue-600 mt-4 flex items-center gap-1">Carteira + Risco SEC ➔</span>
             </Link>
 
-            <Link href="/dashboard/importacao/carteirafidc" className="group bg-white border border-slate-200 p-5 rounded-xl hover:border-blue-400 hover:shadow-md transition-all flex flex-col justify-between min-h-[140px]">
+            {/* ROTA CORRIGIDA AQUI: de /carteirafidc para /carteira-risco-fidc */}
+            <Link href="/dashboard/importacao/carteira-risco-fidc" className="group bg-white border border-slate-200 p-5 rounded-xl hover:border-blue-400 hover:shadow-md transition-all flex flex-col justify-between min-h-[140px]">
               <div>
                 <span className="text-xs font-black text-blue-700 uppercase block mb-1">FIDC</span>
                 <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200 font-mono">Black101 ➔ Lista de Recebíveis (.XLSX)</span>
