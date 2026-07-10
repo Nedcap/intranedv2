@@ -30,7 +30,7 @@ const STEPS_FIDC = [
 const VISUAL_STEPS_SEC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
   { key: "dt_documentos_sec", label: "Documentos" },
-  { key: "dt_geracao_contrato_sec", label: "Ger. Contrato" }, // Ajustado nome p/ alinhar c/ FIDC
+  { key: "dt_geracao_contrato_sec", label: "Ger. Contrato" },
   { key: "dt_assinatura_contrato_sec", label: "Assinatura" },
   { key: "na_1", label: "Envio Gestora", isNA: true },
   { key: "na_2", label: "Aprov. Gestora", isNA: true },
@@ -51,7 +51,6 @@ const VISUAL_STEPS_FIDC = [
   { key: "dt_apto_fidc", label: "Apto Operar" }
 ];
 
-// Utilitário para formatar datas na Tooltip
 const formatarDataBr = (dataString: string) => {
   if (!dataString) return "";
   const [ano, mes, dia] = dataString.split("-");
@@ -63,7 +62,9 @@ export default function CadastroPage() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
-  const [usuarioAtual, setUsuarioAtual] = useState<{ nome: string; perfil: string } | null>(null);
+  
+  // 🔥 ATUALIZADO: Agora guardamos o ID do Auth do usuário
+  const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string } | null>(null);
   
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
@@ -77,20 +78,25 @@ export default function CadastroPage() {
   const carregarCadastro = useCallback(async () => {
     try {
       setCarregando(true);
-      const userStr = localStorage.getItem("intraned_user");
-      let query = supabase.from("cadastro_cedentes").select("*");
-
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-        setUsuarioAtual({ nome: user.nome, perfil: cargoUser });
-
-        if (cargoUser === "comercial") {
-          query = query.eq("comercial", user.nome);
+      
+      // 🎯 1. PEGA O USUÁRIO DO AUTH (Adeus localStorage!)
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        // Busca o perfil do cara no banco para saber se ele é master, etc.
+        const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo').eq('id', user.id).single();
+        if (perfilData) {
+          setUsuarioAtual({ 
+            id: user.id, 
+            nome: perfilData.nome, 
+            perfil: (perfilData.cargo || "").toLowerCase() 
+          });
         }
       }
 
-      const { data } = await query;
+      // 🎯 2. PUXA OS DADOS COM SEGURANÇA (O RLS faz o filtro automático)
+      const { data } = await supabase.from("cadastro_cedentes").select("*");
+      
       if (data) {
         setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
       }
@@ -109,9 +115,10 @@ export default function CadastroPage() {
     try {
       setSincronizando(true);
       
+      // 🎯 ATUALIZADO: Trazendo o responsavel_id lá da tabela análises para manter a autoria
       const { data: analises, error: errAnalises } = await supabase
         .from("analises")
-        .select("empresa_nome, comercial, status, criado_em");
+        .select("empresa_nome, comercial, status, criado_em, responsavel_id");
       
       if (errAnalises) throw errAnalises;
       if (!analises) return;
@@ -135,7 +142,9 @@ export default function CadastroPage() {
              cedente: nomeLimpo,
              comercial: analise.comercial,
              dt_aprovacao_comite: dtComiteFormatada,
-             atualizado_em: new Date().toISOString()
+             atualizado_em: new Date().toISOString(),
+             // 👇 Herda o dono da análise (ou o usuário logado caso não exista)
+             responsavel_id: analise.responsavel_id || usuarioAtual?.id 
            });
            nomesNaEsteira.add(nomeLimpo);
         }
@@ -183,7 +192,7 @@ export default function CadastroPage() {
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
-      comercial: usuarioAtual?.perfil === "comercial" ? usuarioAtual.nome : "",
+      comercial: usuarioAtual?.perfil === "comercial" || usuarioAtual?.perfil === "sdr" ? usuarioAtual.nome : "",
       _isNovo: true, _isEditado: true
     };
     
@@ -234,6 +243,11 @@ export default function CadastroPage() {
           dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
           comercial: item.comercial, atualizado_em: new Date().toISOString()
         };
+
+        // 👇 GARANTE QUE O RESPONSÁVEL SEJA GRAVADO NAS NOVAS LINHAS
+        if (item._isNovo) {
+          payload.responsavel_id = usuarioAtual?.id;
+        }
 
         if (item.id) payload.id = item.id;
         const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
@@ -296,7 +310,7 @@ export default function CadastroPage() {
     return resultado;
   }, [cedentes, filtroStatus, sortConfig]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA COM FAKE STEPS (INATIVOS) ===============
+  // =============== COMPONENTE DE TIMELINE MODERNA =========================
   const renderTimelineUI = (visualSteps: any[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
     
@@ -309,10 +323,8 @@ export default function CadastroPage() {
 
     const passedEmptyDotClass = isFidc ? "border-purple-300 bg-purple-50" : "border-blue-300 bg-blue-50";
 
-    // Filtra apenas os steps válidos (não N/A) para calcular em que ponto da esteira estamos
     const validSteps = visualSteps.filter(s => !s.isNA);
 
-    // Encontra o index (dentro do array reduzido) da última etapa válida preenchida
     let lastFilledValidIndex = -1;
     for (let i = validSteps.length - 1; i >= 0; i--) {
       if (item[validSteps[i].key]) {
@@ -321,17 +333,15 @@ export default function CadastroPage() {
       }
     }
 
-    // A etapa atual é a próxima etapa válida disponível
     const currentValidStepIndex = lastFilledValidIndex === validSteps.length - 1 ? -1 : lastFilledValidIndex + 1;
     const currentValidStepKey = currentValidStepIndex !== -1 ? validSteps[currentValidStepIndex].key : null;
     
-    // Descobre o index no array COMPLETO (visual) onde a etapa piscante deve ficar
     const currentVisualIndex = currentValidStepKey ? visualSteps.findIndex(s => s.key === currentValidStepKey) : -1;
 
     return (
       <div className="flex w-full relative pt-2 pb-1">
         {visualSteps.map((step, idx) => {
-          const isNA = !!step.isNA; // Se for uma etapa fake (apenas para manter o alinhamento visual)
+          const isNA = !!step.isNA; 
           const isDone = !isNA && !!item[step.key];
           const isCurrent = !isNA && idx === currentVisualIndex;
           const isLast = idx === visualSteps.length - 1;
@@ -341,7 +351,6 @@ export default function CadastroPage() {
 
           let circleClasses = "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 border-2 ";
           if (isNA) {
-            // Estilo para etapas "Fantasma" -> Preenchidas, Apagadinhas e com X
             circleClasses += "bg-slate-200 border-slate-300 text-slate-400 opacity-60";
           } else if (isDone) {
             circleClasses += `${doneDotClass} text-white opacity-50`;
@@ -363,7 +372,6 @@ export default function CadastroPage() {
                 <div className={circleClasses}>
                   
                   {isNA ? (
-                    // Ícone de X para etapas Inativas (Fantasma)
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -615,7 +623,6 @@ export default function CadastroPage() {
                                     <span className="font-black text-blue-800 text-xs uppercase tracking-wider">🏦 Fluxo Securitizadora</span>
                                   </div>
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 ml-2">
-                                    {/* AQUI CONTINUAMOS RENDERIZANDO APENAS OS STEPS REAIS (5 STEPS) */}
                                     {STEPS_SEC.slice(1).map(step => (
                                       <div key={step.key} className="flex flex-col gap-1.5">
                                         <label className="text-[10px] text-blue-600/80 font-bold uppercase truncate" title={step.label}>{step.label}</label>
