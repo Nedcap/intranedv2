@@ -3,7 +3,6 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { limparNome } from "@/lib/normalizador";
 import * as XLSX from "xlsx";
 
 // ============================================================================
@@ -13,7 +12,7 @@ function parseValorReal(valor: any): number {
   if (valor === null || valor === undefined || valor === "") return 0.0;
   if (typeof valor === "number") return valor;
   const txt = String(valor).replace(/[R$\s]/g, "").trim();
-  const num = parseFloat(txt);
+  const num = parseFloat(txt.replace(",", ".")); // Garantia para decimais pt-BR se houver
   return isNaN(num) ? 0.0 : num;
 }
 
@@ -36,6 +35,7 @@ function formatarDataExcel(valorData: any): string | null {
     const partes = txt.split("-");
     if (partes.length === 3) {
       if (partes[0].length === 4) return `${partes[0]}-${partes[1].padStart(2, "0")}-${partes[2].padStart(2, "0")}`;
+      // Lida perfeitamente com a data 15-05-2026 do Excel fornecido
       return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
     }
   }
@@ -77,7 +77,6 @@ export default function CarteiraRiscoFidcPage() {
   const carregarCedentes = async () => {
     try {
       setCarregandoBase(true);
-      // Lê o cadastro base para usar como "De-Para" MDM
       const { data } = await supabase.from("cadastro_cedentes").select("id, cedente, cnpj, responsavel_id");
       if (data) setCedentesSistema(data);
     } catch (err) {
@@ -138,26 +137,28 @@ export default function CarteiraRiscoFidcPage() {
         if (!rawCnpj || valorAberto <= 0) continue;
 
         if (!agrupamento[rawCnpj]) {
-          agrupamento[rawCnpj] = { nome: String(row[idxCedente]).trim().toUpperCase(), titulos: [] };
+          // Fallback para evitar falha no constraint NOT NULL de cedente
+          agrupamento[rawCnpj] = { nome: String(row[idxCedente] || "NÃO INFORMADO").trim().toUpperCase(), titulos: [] };
         }
 
         const dataVctoIso = formatarDataExcel(row[idxVctoAtu]);
         const statusVencimento = checarSeVencidoISO(dataVctoIso);
 
         agrupamento[rawCnpj].titulos.push({
-          numero_recebivel: String(row[idxNumRecebivel] || ""),
-          tipo_recebivel: String(row[idxTipoRecebivel] || ""),
-          situacao_recebivel: String(row[idxSituacao] || "ABERTO").toUpperCase(),
-          numero_operacao: String(row[idxNumOp] || ""),
+          numero_recebivel: String(row[idxNumRecebivel] || "").substring(0, 100),
+          tipo_recebivel: String(row[idxTipoRecebivel] || "").substring(0, 100),
+          situacao_recebivel: String(row[idxSituacao] || "ABERTO").toUpperCase().substring(0, 100),
+          numero_operacao: String(row[idxNumOp] || "").substring(0, 100),
           taxa_operacao: parseValorReal(row[idxTaxa]),
-          sacado: String(row[idxSacado]).trim().toUpperCase(),
-          cnpj_sacado: limparCnpj(row[idxCnpjSacado]),
+          // Fallback para evitar falha no constraint NOT NULL de sacado do schema
+          sacado: String(row[idxSacado] || "NÃO INFORMADO").trim().toUpperCase().substring(0, 255),
+          cnpj_sacado: limparCnpj(row[idxCnpjSacado]).substring(0, 20),
           valor_face: parseValorReal(row[idxValorFace]),
           valor_aberto: valorAberto,
           valor_pago: parseValorReal(row[idxValorPago]),
           data_baixa: formatarDataExcel(row[idxDataBaixa]),
           vencimento: dataVctoIso,
-          assessoria: String(row[idxAgente] || "").trim().toUpperCase(),
+          assessoria: String(row[idxAgente] || "").trim().toUpperCase().substring(0, 100),
           desagio: parseValorReal(row[idxDesagio]),
           status: statusVencimento
         });
@@ -281,7 +282,7 @@ export default function CarteiraRiscoFidcPage() {
             cnpj_cedente: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha,
             sacado: t.sacado,
-            numero_titulo: t.numero_recebivel, // Mapeando num título = num recebível conforme planilhas de fidc
+            numero_titulo: t.numero_recebivel,
             numero_recebivel: t.numero_recebivel,
             tipo_recebivel: t.tipo_recebivel,
             situacao_recebivel: t.situacao_recebivel,
