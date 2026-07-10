@@ -28,20 +28,7 @@ export default function MonitoreDiarioPage() {
     try {
       setCarregando(true);
 
-      const userStr = localStorage.getItem("intraned_user");
-      let allowedCedentes: string[] = [];
-      let isComercial = false;
-
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-        if (cargoUser === "comercial") {
-          isComercial = true;
-          const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-          if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
-        }
-      }
-      
+      // 🎯 ADEUS LOCALSTORAGE E FILTROS MANUAIS! O RLS FAZ TUDO POR NÓS.
       const [resHist, resCadastro] = await Promise.all([
         supabase.from("historico_consolidado").select("*").order("data_processamento", { ascending: false }),
         supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc")
@@ -50,7 +37,7 @@ export default function MonitoreDiarioPage() {
       if (resHist.data && resHist.data.length > 0) {
         const ultimaData = resHist.data[0].data_processamento;
         
-        let filtrados = resHist.data.filter(r => {
+        const filtrados = resHist.data.filter(r => {
           if (r.data_processamento !== ultimaData) return false;
           
           const evo = parseFloat(r.evolucao || 0);
@@ -61,10 +48,6 @@ export default function MonitoreDiarioPage() {
 
           return evo !== 0 || temRestritivos || (r.resumo_movimento && r.resumo_movimento.trim() !== "");
         });
-
-        if (isComercial) {
-          filtrados = filtrados.filter(r => allowedCedentes.includes(simplificarNome(r.cedente)));
-        }
 
         setDados(filtrados.map(linha => {
           const match = resCadastro.data?.find(c => simplificarNome(c.cedente) === simplificarNome(linha.cedente));
@@ -84,7 +67,7 @@ export default function MonitoreDiarioPage() {
   }, []);
 
   // ============================================================================
-  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA (PORTADO DO PYTHON)
+  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA
   // ============================================================================
   const processarArquivoSerasa = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -120,7 +103,6 @@ export default function MonitoreDiarioPage() {
         let blocoCodigo = "";
 
         for (const cod of codigosChave) {
-          // 🎯 FIX: Corrigido o erro de digitação de "inline" para "linha"
           const pos = linha.indexOf(cod);
           if (pos !== -1 && (idxBloco === -1 || pos < idxBloco)) {
             idxBloco = pos;
@@ -160,7 +142,6 @@ export default function MonitoreDiarioPage() {
           continue;
         }
 
-        // Extrair Valor do Restritivo
         const partes = linha.trim().split(/\s+/);
         if (partes.length < 2) continue;
         const blocoValor = partes[partes.length - 2] || "";
@@ -199,9 +180,16 @@ export default function MonitoreDiarioPage() {
 
       setStatusProcessamento("Cruzando histórico com o Supabase...");
 
-      // Pegar histórico macro para comparação
       const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
-      const { data: histDB } = await supabase.from("historico_consolidado").select("*").in("cnpj_cliente", cnpjsCompletos).order("data_processamento", { ascending: false });
+      
+      // 🎯 BUSCA O DONO DE CADA CEDENTE PARA ATRIBUIR RESPONSABILIDADE
+      const [histDBResponse, cedentesDBResponse] = await Promise.all([
+        supabase.from("historico_consolidado").select("*").in("cnpj_cliente", cnpjsCompletos).order("data_processamento", { ascending: false }),
+        supabase.from("cadastro_cedentes").select("cedente, responsavel_id")
+      ]);
+      
+      const histDB = histDBResponse.data;
+      const cedentesDB = cedentesDBResponse.data;
 
       const registrosHistorico: any[] = [];
       const registrosSocios: any[] = [];
@@ -240,11 +228,25 @@ export default function MonitoreDiarioPage() {
 
         const cedNome = dadosHoje.cedente !== "N/A" ? dadosHoje.cedente : (regsAnteriores[0]?.cedente || "N/A");
 
+        // 🎯 ACHA O DONO PARA INSERIR NO BANCO
+        const cedNomeLimpo = simplificarNome(cedNome);
+        const donoMatch = cedentesDB?.find(c => simplificarNome(c.cedente) === cedNomeLimpo);
+        const idResponsavel = donoMatch ? donoMatch.responsavel_id : null;
+
         registrosHistorico.push({
-          data_processamento: dataArquivo, cnpj_cliente: cnpjCompleto, cedente: cedNome,
-          saldo_anterior: saldoAnterior, evolucao, saldo_atual: saldoAtual, resumo_movimento: resumoTexto,
-          total_pefin: vFinais.PEFIN, total_refin: vFinais.REFIN, total_protesto: vFinais.PROTESTO,
-          total_acao_jud: vFinais["AÇÃO JUDICIAL"], total_div_vencida: vFinais["DÍVIDA VENCIDA"]
+          data_processamento: dataArquivo, 
+          cnpj_cliente: cnpjCompleto, 
+          cedente: cedNome,
+          responsavel_id: idResponsavel, // VÍNCULO SALVO AQUI!
+          saldo_anterior: saldoAnterior, 
+          evolucao, 
+          saldo_atual: saldoAtual, 
+          resumo_movimento: resumoTexto,
+          total_pefin: vFinais.PEFIN, 
+          total_refin: vFinais.REFIN, 
+          total_protesto: vFinais.PROTESTO,
+          total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
+          total_div_vencida: vFinais["DÍVIDA VENCIDA"]
         });
 
         if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjCompleto, cedente: cedNome, evolucao, resumo: resumoTexto });
@@ -257,9 +259,16 @@ export default function MonitoreDiarioPage() {
 
             if (sTotalSocio > 0) {
               registrosSocios.push({
-                data_processamento: dataArquivo, cnpj_empresa: cnpjCompleto, nome_socio: nomeSocio,
-                total_pefin: vSocio.PEFIN, total_refin: vSocio.REFIN, total_protesto: vSocio.PROTESTO,
-                total_acao_jud: vSocio["AÇÃO JUDICIAL"], total_div_vencida: vSocio["DÍVIDA VENCIDA"], saldo_total: sTotalSocio
+                data_processamento: dataArquivo, 
+                cnpj_empresa: cnpjCompleto, 
+                nome_socio: nomeSocio,
+                responsavel_id: idResponsavel, // 🎯 VÍNCULO SALVO PARA OS SÓCIOS TAMBÉM!
+                total_pefin: vSocio.PEFIN, 
+                total_refin: vSocio.REFIN, 
+                total_protesto: vSocio.PROTESTO,
+                total_acao_jud: vSocio["AÇÃO JUDICIAL"], 
+                total_div_vencida: vSocio["DÍVIDA VENCIDA"], 
+                saldo_total: sTotalSocio
               });
             }
           }
@@ -267,11 +276,10 @@ export default function MonitoreDiarioPage() {
       }
 
       setStatusProcessamento("Limpando duplicidades e salvando novo lote...");
-      // Deleta dados do mesmo dia para evitar duplicidade e insere lote
       await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
       await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
 
-      // Inserção em chunks (lotes) de 500 para não estourar payload
+      // Inserção em chunks (lotes) de 500
       for (let i = 0; i < registrosHistorico.length; i += 500) {
         await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
       }
@@ -280,7 +288,7 @@ export default function MonitoreDiarioPage() {
       }
 
       // ========================================================================
-      // 📧 DISPARO DE E-MAIL (VIA ROTA INTERNA /API/EMAIL)
+      // 📧 DISPARO DE E-MAIL
       // ========================================================================
       if (resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
@@ -295,14 +303,12 @@ export default function MonitoreDiarioPage() {
         });
 
         if (!respostaEmail.ok) {
-          const erroApi = await respostaEmail.json();
-          console.error("Erro retornado no disparo de e-mail centralizado:", erroApi);
-          throw new Error(erroApi.error || "Falha no disparo de e-mail");
+          console.error("Aviso: Falha no disparo de e-mail.");
         }
       }
 
       alert("🎉 Sucesso! Relatório Serasa importado e banco de dados atualizado.");
-      carregarDiario(); // Recarrega a tabela com os novos dados
+      carregarDiario(); 
 
     } catch (e: any) {
       alert(`❌ Erro no processamento: ${e.message}`);

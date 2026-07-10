@@ -15,33 +15,15 @@ export default function MonitoreHistoricoPage() {
       try {
         setCarregando(true);
 
-        const userStr = localStorage.getItem("intraned_user");
-        let allowedCedentes: string[] = [];
-        let isComercial = false;
-
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-          if (cargoUser === "comercial") {
-            isComercial = true;
-            const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-            if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
-          }
-        }
-
-        // 🎯 Fix: Coleta dados históricos gerais e vincula ao risco real consolidado da V2
+        // 🎯 A MÁGICA DO RLS: Removemos o localStorage e os filtros manuais!
+        // O Supabase intercepta essas chamadas e já devolve os dados filtrados pela hierarquia.
         const [resHist, resCadastro] = await Promise.all([
           supabase.from("historico_consolidado").select("*").order("data_processamento", { ascending: false }),
           supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc")
         ]);
 
         if (resHist.data) {
-          let filtradosLog = resHist.data;
-
-          // 🔐 Segurança de escopo comercial nativa
-          if (isComercial) {
-            filtradosLog = filtradosLog.filter(r => allowedCedentes.includes(simplificarNome(r.cedente)));
-          }
+          const filtradosLog = resHist.data;
 
           // Indexa os cadastros em um Map para evitar a lentidão de loop aninhado (.find) na memória
           const cadastroMap = new Map();

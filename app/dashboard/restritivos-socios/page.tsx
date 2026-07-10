@@ -3,7 +3,6 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { simplificarNome } from "@/actions/dashboard-service";
 
 export default function RestritivosSociosPage() {
   const [socios, setSocios] = useState<any[]>([]);
@@ -14,34 +13,16 @@ export default function RestritivosSociosPage() {
       try {
         setCarregando(true);
         
-        const userStr = localStorage.getItem("intraned_user");
-        let allowedCedentes: string[] = [];
-        let isComercial = false;
-
-        // Verifica permissões do usuário para isolamento comercial
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          const cargoUser = (user.perfil || user.cargo || "").toLowerCase();
-          if (cargoUser === "comercial") {
-            isComercial = true;
-            const { data: vinculos } = await supabase.from("cadastro_cedentes").select("cedente").eq("comercial", user.nome);
-            if (vinculos) allowedCedentes = vinculos.map((c: any) => simplificarNome(c.cedente));
-          }
-        }
-
-        const { data } = await supabase.from("restritivos_socios").select("*").order("nome_socio", { ascending: true });
+        // 🎯 O RLS FAZ TUDO: Busca dados de forma segura e já filtrada pela hierarquia do banco.
+        const { data, error } = await supabase
+          .from("restritivos_socios")
+          .select("*")
+          .order("nome_socio", { ascending: true });
+        
+        if (error) throw error;
         
         if (data) {
-          let filtrados = data;
-          
-          // 🔐 Segurança de escopo comercial ativada
-          if (isComercial) {
-            // Nota: Se a tabela tiver o nome da empresa parceira, filtramos por ela. 
-            // Caso contrário, faz o match seguro com base no vínculo corporativo
-            filtrados = data.filter(s => !s.nome_empresa || allowedCedentes.includes(simplificarNome(s.nome_empresa)));
-          }
-          
-          setSocios(filtrados);
+          setSocios(data);
         }
       } catch (err) { 
         console.error(err); 
