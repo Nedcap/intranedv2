@@ -66,7 +66,6 @@ export default function CarteiraDinamicaPage() {
       setCarregando(true);
       setErro(null);
 
-      // 🚀 Chamada atômica paralela nas duas tabelas analíticas brutas
       const [resSec, resFidc] = await Promise.all([
         supabase.from("carteira_sec").select("*"),
         supabase.from("carteira_fidc").select("*")
@@ -79,7 +78,6 @@ export default function CarteiraDinamicaPage() {
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
 
-      // 🎯 Processa tabelão SEC
       resSec.data?.forEach(row => {
         if (!row.vencimento) return;
         const dtVenc = new Date(`${row.vencimento}T12:00:00`);
@@ -99,7 +97,6 @@ export default function CarteiraDinamicaPage() {
         });
       });
 
-      // 🎯 Processa tabelão FIDC
       resFidc.data?.forEach(row => {
         if (!row.vencimento) return;
         const dtVenc = new Date(`${row.vencimento}T12:00:00`);
@@ -129,7 +126,6 @@ export default function CarteiraDinamicaPage() {
 
   useEffect(() => { carregarDadosCarteira(); }, []);
 
-  // 🧮 CARDS DO TOPO: Previsão matemática de fluxo de caixa futuro
   const kpisGlobais = useMemo(() => {
     let totalVencido = 0;
     let totalProjetadoAVencer = 0;
@@ -145,7 +141,6 @@ export default function CarteiraDinamicaPage() {
     return { totalVencido, totalProjetadoAVencer };
   }, [titulosOriginais, diasProjecao]);
 
-  // 📊 MOTOR DE AGREGAÇÃO E CONCENTRAÇÃO DINÂMICA
   const carteiraAgregada = useMemo(() => {
     const agrupamento: Record<string, AgregacaoCedente> = {};
 
@@ -274,9 +269,7 @@ export default function CarteiraDinamicaPage() {
         </button>
       </div>
 
-      {/* INTERFACE DOS CARDZINHOS INTERATIVOS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card 1: Vencidos */}
         <div className="bg-white border-l-4 border-rose-600 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-center">
             <span className="text-slate-400 font-black uppercase tracking-wider text-[11px]">Total Carteira Vencida (Inadimplência Atual)</span>
@@ -286,7 +279,6 @@ export default function CarteiraDinamicaPage() {
           <span className="text-[10px] text-slate-400 font-medium mt-1">Soma do saldo em aberto real de todos os títulos em atraso da carteira filtrada.</span>
         </div>
 
-        {/* Card 2: Simulador de Liquidez Futura */}
         <div className="bg-white border-l-4 border-blue-600 border border-slate-200 p-5 rounded-xl shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-center">
             <span className="text-slate-400 font-black uppercase tracking-wider text-[11px] flex items-center gap-1.5">
@@ -306,7 +298,6 @@ export default function CarteiraDinamicaPage() {
         </div>
       </div>
 
-      {/* 📊 TABELA MASTER DINÂMICA */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1100px]">
@@ -324,161 +315,167 @@ export default function CarteiraDinamicaPage() {
               {carteiraAgregada.map((cedente) => {
                 const cedExpandido = !!cedentesExpandidos[cedente.nome];
                 return (
-                  <tr key={cedente.nome} style={{ display: "contents" }}>
-                    {/* NÍVEL 1: LINHA DO CEDENTE */}
-                    <tr className="bg-slate-50 font-bold text-slate-900 hover:bg-slate-100/80 border-l-4 border-l-slate-700 transition-colors h-11">
-                      <td className="p-2.5 text-center">
-                        <button onClick={() => toggleCedente(cedente.nome)} className="w-5 h-5 bg-slate-200 text-slate-800 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs">
-                          {cedExpandido ? "−" : "+"}
-                        </button>
-                      </td>
-                      <td className="p-2.5 text-[12px] tracking-tight font-black text-slate-900 uppercase truncate max-w-[360px]" title={cedente.nome}>{cedente.nome}</td>
-                      <td className="p-2.5 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.totalFace)}</td>
-                      <td className="p-2.5 text-right font-mono text-slate-900 font-black bg-slate-100/30">{formatarMoeda(cedente.totalAberto)}</td>
-                      <td className="p-2.5 text-right font-mono bg-rose-50/40 text-rose-700">{formatarMoeda(cedente.totalVencido)}</td>
-                      <td className="p-2.5 text-right font-mono bg-emerald-50/40 text-emerald-700">{formatarMoeda(cedente.totalAVencer)}</td>
-                    </tr>
-
-                    {/* NÍVEL 2 */}
-                    {cedExpandido && (
-                      <tr style={{ display: "contents" }}>
-                        {/* NED SECURITIZADORA */}
-                        {cedente.sec.titulos.length > 0 && (
-                          <tr style={{ display: "contents" }}>
-                            <tr className="bg-white text-slate-700 font-semibold hover:bg-slate-50 transition-colors h-10">
-                              <td className="p-2 text-center">
-                                <button onClick={() => toggleSub(`${cedente.nome}|||SEC`)} className="w-4 h-4 bg-blue-50 text-blue-800 rounded font-black flex items-center justify-center border border-blue-200 cursor-pointer text-[10px]">
-                                  {subExpandidos[`${cedente.nome}|||SEC`] ? "−" : "+"}
-                                </button>
-                              </td>
-                              <td className="p-2 pl-6 text-blue-800 font-black uppercase tracking-tight flex items-center gap-1 text-[11px]">🏦 Ned Securitizadora</td>
-                              <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.sec.valorFace)}</td>
-                              <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(cedente.sec.valorAberto)}</td>
-                              <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.sec.vencido)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.sec.aVencer)}</td>
-                            </tr>
-
-                            {/* NÍVEL 3: DETALHAMENTO DE TÍTULOS SEC */}
-                            {subExpandidos[`${cedente.nome}|||SEC`] && (
-                              <tr>
-                                <td colSpan={6} className="bg-slate-100/50 p-4">
-                                  <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
-                                    <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
-                                      <span className="font-bold text-slate-500 text-[10px] uppercase">Filtros Avançados:</span>
-                                      <input type="text" placeholder="Buscar Sacado..." value={filtroSacado} onChange={(e) => setFiltroSacado(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-medium w-48 bg-white outline-none" />
-                                      <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-bold bg-white outline-none cursor-pointer text-slate-700">
-                                        <option value="">Status (Todos)</option><option value="Vencido">Vencido</option><option value="A Vencer">A Vencer</option>
-                                      </select>
-                                      <span className="font-bold text-slate-500 text-[10px] uppercase ml-auto">Ordenar:</span>
-                                      <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none text-slate-700">
-                                        <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo em Aberto</option><option value="valorFace">Valor Face</option>
-                                      </select>
-                                      <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer text-slate-700">
-                                        {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
-                                      </button>
-                                    </div>
-
-                                    <table className="w-full text-[12px] text-left border-collapse">
-                                      <thead>
-                                        <tr className="bg-slate-100 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200 h-8">
-                                          <th className="p-2 pl-4">Sacado / Devedor</th>
-                                          <th className="p-2 text-center">Nº Título</th>
-                                          <th className="p-2 text-center">Vencimento</th>
-                                          <th className="p-2 text-right">Valor Face</th>
-                                          <th className="p-2 text-right">Saldo Aberto</th>
-                                          <th className="p-2 text-center">Envelhecimento</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100 font-medium">
-                                        {filtrarEOrdenarTitulos(cedente.sec.titulos).map((t, idx) => (
-                                          <tr key={idx} className="hover:bg-slate-50/80 h-9 text-slate-600">
-                                            <td className="p-2 pl-4 font-bold text-slate-800 max-w-[280px] truncate">{t.sacado}</td>
-                                            <td className="p-2 text-center text-slate-400 font-mono text-[11px]">{t.numeroTitulo}</td>
-                                            <td className="p-2 text-center font-bold text-slate-500">{t.vencimento}</td>
-                                            <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(t.valorFace)}</td>
-                                            <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(t.valorAberto)}</td>
-                                            <td className="p-2 text-center">
-                                              <span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status.toUpperCase()}</span>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </td>
-                              </td>
-                            </tr>
+                  <tr key={cedente.nome} className="hover:bg-slate-50/20">
+                    <td colSpan={6} className="p-0">
+                      <table className="w-full text-left border-collapse table-fixed">
+                        <tbody>
+                          {/* NÍVEL 1: LINHA DO CEDENTE */}
+                          <tr className="bg-slate-50 font-bold text-slate-900 hover:bg-slate-100/80 border-l-4 border-l-slate-700 transition-colors h-11">
+                            <td className="p-2.5 text-center w-14">
+                              <button onClick={() => toggleCedente(cedente.nome)} className="w-5 h-5 bg-slate-200 text-slate-800 rounded font-black flex items-center justify-center border border-slate-300 shadow-xs cursor-pointer text-xs">
+                                {cedExpandido ? "−" : "+"}
+                              </button>
+                            </td>
+                            <td className="p-2.5 text-[12px] tracking-tight font-black text-slate-900 uppercase truncate w-[380px]" title={cedente.nome}>{cedente.nome}</td>
+                            <td className="p-2.5 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.totalFace)}</td>
+                            <td className="p-2.5 text-right font-mono text-slate-900 font-black bg-slate-100/30">{formatarMoeda(cedente.totalAberto)}</td>
+                            <td className="p-2.5 text-right font-mono bg-rose-50/40 text-rose-700">{formatarMoeda(cedente.totalVencido)}</td>
+                            <td className="p-2.5 text-right font-mono bg-emerald-50/40 text-emerald-700">{formatarMoeda(cedente.totalAVencer)}</td>
                           </tr>
-                        )}
 
-                        {/* NED FIDC */}
-                        {cedente.fidc.titulos.length > 0 && (
-                          <tr style={{ display: "contents" }}>
-                            <tr className="bg-white text-slate-700 font-semibold hover:bg-slate-50 transition-colors h-10">
-                              <td className="p-2 text-center">
-                                <button onClick={() => toggleSub(`${cedente.nome}|||FIDC`)} className="w-4 h-4 bg-purple-50 text-purple-800 rounded font-black flex items-center justify-center border border-purple-200 cursor-pointer text-[10px]">
-                                  {subExpandidos[`${cedente.nome}|||FIDC`] ? "−" : "+"}
-                                </button>
-                              </td>
-                              <td className="p-2 pl-6 text-purple-800 font-black uppercase tracking-tight flex items-center gap-1 text-[11px]">🔮 Ned FIDC</td>
-                              <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.fidc.valorFace)}</td>
-                              <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(cedente.fidc.valorAberto)}</td>
-                              <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.fidc.vencido)}</td>
-                              <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.fidc.aVencer)}</td>
-                            </tr>
-
-                            {/* NÍVEL 3: DETALHAMENTO DE TÍTULOS FIDC */}
-                            {subExpandidos[`${cedente.nome}|||FIDC`] && (
-                              <tr>
-                                <td colSpan={6} className="bg-slate-100/50 p-4">
-                                  <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
-                                    <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
-                                      <span className="font-bold text-slate-500 text-[10px] uppercase">Filtros Avançados:</span>
-                                      <input type="text" placeholder="Buscar Sacado..." value={filtroSacado} onChange={(e) => setFiltroSacado(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-medium w-48 bg-white outline-none" />
-                                      <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-bold bg-white outline-none cursor-pointer text-slate-700">
-                                        <option value="">Status (Todos)</option><option value="Vencido">Vencido</option><option value="A Vencer">A Vencer</option>
-                                      </select>
-                                      <span className="font-bold text-slate-500 text-[10px] uppercase ml-auto">Ordenar:</span>
-                                      <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none text-slate-700">
-                                        <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo em Aberto</option><option value="valorFace">Valor Face</option>
-                                      </select>
-                                      <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer text-slate-700">
-                                        {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
+                          {/* NÍVEL 2 */}
+                          {cedExpandido && (
+                            <>
+                              {/* SECURITIZADORA */}
+                              {cedente.sec.titulos.length > 0 && (
+                                <>
+                                  <tr className="bg-white text-slate-700 font-semibold hover:bg-slate-50 transition-colors h-10">
+                                    <td className="p-2 text-center w-14">
+                                      <button onClick={() => toggleSub(`${cedente.nome}|||SEC`)} className="w-4 h-4 bg-blue-50 text-blue-800 rounded font-black flex items-center justify-center border border-blue-200 cursor-pointer text-[10px]">
+                                        {subExpandidos[`${cedente.nome}|||SEC`] ? "−" : "+"}
                                       </button>
-                                    </div>
+                                    </td>
+                                    <td className="p-2 pl-6 text-blue-800 font-black uppercase tracking-tight text-[11px]">重建 Ned Securitizadora</td>
+                                    <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.sec.valorFace)}</td>
+                                    <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(cedente.sec.valorAberto)}</td>
+                                    <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.sec.vencido)}</td>
+                                    <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.sec.aVencer)}</td>
+                                  </tr>
 
-                                    <table className="w-full text-[12px] text-left border-collapse">
-                                      <thead>
-                                        <tr className="bg-slate-100 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200 h-8">
-                                          <th className="p-2 pl-4">Sacado / Devedor</th>
-                                          <th className="p-2 text-center">Vencimento</th>
-                                          <th className="p-2 text-right">Valor Face</th>
-                                          <th className="p-2 text-right">Saldo Aberto</th>
-                                          <th className="p-2 text-center">Envelhecimento</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100 font-medium">
-                                        {filtrarEOrdenarTitulos(cedente.fidc.titulos).map((t, idx) => (
-                                          <tr key={idx} className="hover:bg-slate-50/80 h-9 text-slate-600">
-                                            <td className="p-2 pl-4 font-bold text-slate-800 max-w-[280px] truncate">{t.sacado}</td>
-                                            <td className="p-2 text-center font-bold text-slate-500">{t.vencimento}</td>
-                                            <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(t.valorFace)}</td>
-                                            <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(t.valorAberto)}</td>
-                                            <td className="p-2 text-center">
-                                              <span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status.toUpperCase()}</span>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </td>
-                              </td>
-                            </tr>
-                          </tr>
-                        )}
-                      </tr>
-                    )}
+                                  {/* TÍTULOS DETALHADOS SEC */}
+                                  {subExpandidos[`${cedente.nome}|||SEC`] && (
+                                    <tr>
+                                      <td colSpan={6} className="bg-slate-100/50 p-4">
+                                        <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
+                                          <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
+                                            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtros Avançados:</span>
+                                            <input type="text" placeholder="Buscar Sacado..." value={filtroSacado} onChange={(e) => setFiltroSacado(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-medium w-48 bg-white outline-none" />
+                                            <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-bold bg-white outline-none cursor-pointer text-slate-700">
+                                              <option value="">Status (Todos)</option><option value="Vencido">Vencido</option><option value="A Vencer">A Vencer</option>
+                                            </select>
+                                            <span className="font-bold text-slate-500 text-[10px] uppercase ml-auto">Ordenar:</span>
+                                            <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none text-slate-700">
+                                              <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo em Aberto</option><option value="valorFace">Valor Face</option>
+                                            </select>
+                                            <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer text-slate-700">
+                                              {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
+                                            </button>
+                                          </div>
+
+                                          <table className="w-full text-[12px] text-left border-collapse">
+                                            <thead>
+                                              <tr className="bg-slate-100 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200 h-8">
+                                                <th className="p-2 pl-4">Sacado / Devedor</th>
+                                                <th className="p-2 text-center">Nº Título</th>
+                                                <th className="p-2 text-center">Vencimento</th>
+                                                <th className="p-2 text-right">Valor Face</th>
+                                                <th className="p-2 text-right">Saldo Aberto</th>
+                                                <th className="p-2 text-center">Envelhecimento</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 font-medium">
+                                              {filtrarEOrdenarTitulos(cedente.sec.titulos).map((t, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50/80 h-9 text-slate-600">
+                                                  <td className="p-2 pl-4 font-bold text-slate-800 max-w-[280px] truncate">{t.sacado}</td>
+                                                  <td className="p-2 text-center text-slate-400 font-mono text-[11px]">{t.numeroTitulo}</td>
+                                                  <td className="p-2 text-center font-bold text-slate-500">{t.vencimento}</td>
+                                                  <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(t.valorFace)}</td>
+                                                  <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(t.valorAberto)}</td>
+                                                  <td className="p-2 text-center">
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status.toUpperCase()}</span>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              )}
+
+                              {/* FIDC */}
+                              {cedente.fidc.titulos.length > 0 && (
+                                <>
+                                  <tr className="bg-white text-slate-700 font-semibold hover:bg-slate-50 transition-colors h-10">
+                                    <td className="p-2 text-center w-14">
+                                      <button onClick={() => toggleSub(`${cedente.nome}|||FIDC`)} className="w-4 h-4 bg-purple-50 text-purple-800 rounded font-black flex items-center justify-center border border-purple-200 cursor-pointer text-[10px]">
+                                        {subExpandidos[`${cedente.nome}|||FIDC`] ? "−" : "+"}
+                                      </button>
+                                    </td>
+                                    <td className="p-2 pl-6 text-purple-800 font-black uppercase tracking-tight text-[11px]">🔮 Ned FIDC</td>
+                                    <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(cedente.fidc.valorFace)}</td>
+                                    <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(cedente.fidc.valorAberto)}</td>
+                                    <td className="p-2 text-right font-mono text-rose-600 bg-rose-50/10">{formatarMoeda(cedente.fidc.vencido)}</td>
+                                    <td className="p-2 text-right font-mono text-emerald-600 bg-emerald-50/10">{formatarMoeda(cedente.fidc.aVencer)}</td>
+                                  </tr>
+
+                                  {/* TÍTULOS DETALHADOS FIDC */}
+                                  {subExpandidos[`${cedente.nome}|||FIDC`] && (
+                                    <tr>
+                                      <td colSpan={6} className="bg-slate-100/50 p-4">
+                                        <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-3 shadow-xs">
+                                          <div className="flex flex-wrap gap-4 items-center bg-slate-50 p-2 rounded border border-slate-200">
+                                            <span className="font-bold text-slate-500 text-[10px] uppercase">Filtros Avançados:</span>
+                                            <input type="text" placeholder="Buscar Sacado..." value={filtroSacado} onChange={(e) => setFiltroSacado(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-medium w-48 bg-white outline-none" />
+                                            <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] font-bold bg-white outline-none cursor-pointer text-slate-700">
+                                              <option value="">Status (Todos)</option><option value="Vencido">Vencido</option><option value="A Vencer">A Vencer</option>
+                                            </select>
+                                            <span className="font-bold text-slate-500 text-[10px] uppercase ml-auto">Ordenar:</span>
+                                            <select value={ordenacaoColunaSub} onChange={(e) => setOrdenacaoColunaSub(e.target.value)} className="p-1.5 border border-slate-300 rounded text-[11px] bg-white font-medium outline-none text-slate-700">
+                                              <option value="vencimento">Vencimento</option><option value="valorAberto">Saldo em Aberto</option><option value="valorFace">Valor Face</option>
+                                            </select>
+                                            <button onClick={() => setOrdenacaoDirecaoSub(p => p === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded text-[10px] font-bold cursor-pointer text-slate-700">
+                                              {ordenacaoDirecaoSub === "asc" ? "🔼 Crescente" : "🔽 Decrescente"}
+                                            </button>
+                                          </div>
+
+                                          <table className="w-full text-[12px] text-left border-collapse">
+                                            <thead>
+                                              <tr className="bg-slate-100 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200 h-8">
+                                                <th className="p-2 pl-4">Sacado / Devedor</th>
+                                                <th className="p-2 text-center">Vencimento</th>
+                                                <th className="p-2 text-right">Valor Face</th>
+                                                <th className="p-2 text-right">Saldo Aberto</th>
+                                                <th className="p-2 text-center">Envelhecimento</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 font-medium">
+                                              {filtrarEOrdenarTitulos(cedente.fidc.titulos).map((t, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50/80 h-9 text-slate-600">
+                                                  <td className="p-2 pl-4 font-bold text-slate-800 max-w-[280px] truncate">{t.sacado}</td>
+                                                  <td className="p-2 text-center font-bold text-slate-500">{t.vencimento}</td>
+                                                  <td className="p-2 text-right font-mono text-slate-400 font-normal">{formatarMoeda(t.valorFace)}</td>
+                                                  <td className="p-2 text-right font-mono text-slate-900 font-bold">{formatarMoeda(t.valorAberto)}</td>
+                                                  <td className="p-2 text-center">
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.status === "Vencido" ? "bg-rose-100 text-rose-700 border border-rose-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>{t.status.toUpperCase()}</span>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          )}
+                        </tbody>
+                      </table>
+                    </td>
                   </tr>
                 );
               })}
