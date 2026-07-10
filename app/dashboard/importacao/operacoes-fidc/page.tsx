@@ -118,7 +118,6 @@ export default function OperacoesFidcPage() {
         const row = rawRows[i];
         if (!row || row.length === 0) continue;
 
-        // Trava de segurança operacional: Só importa o que de fato fechou na mesa
         if (idxStatus !== -1 && String(row[idxStatus]).trim().toUpperCase() !== "FECHADA") continue;
 
         const rawCnpj = limparCnpj(row[idxCnpjCedente]);
@@ -133,7 +132,6 @@ export default function OperacoesFidcPage() {
         const dataOpIso = formatarDataExcel(row[idxDataOp]);
         const mesAno = extrairMesAno(dataOpIso);
 
-        // Soma todas as frentes de tarifas e deságio para formar a receita real da operação
         const receitaTotalOp = 
           parseValorReal(row[idxDesagio]) +
           parseValorReal(row[idxDespOp]) +
@@ -148,7 +146,6 @@ export default function OperacoesFidcPage() {
         });
       }
 
-      // 🧠 CONCILIAÇÃO MDM SÍNCRONA VIA CNPJ
       const resultadoConciliado: LinhaConciliacao[] = [];
 
       for (const [cnpjPlanilha, meta] of Object.entries(agrupamento)) {
@@ -195,9 +192,6 @@ export default function OperacoesFidcPage() {
     return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
   }, [linhasConciliadas]);
 
-  // ============================================================================
-  // ☁️ COMIT DEFINITIVO DO DRE UNIFICADO PRO SUPABASE
-  // ============================================================================
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
       alert("⚠️ Vincule todos os CNPJs antes de enviar pro banco de dados.");
@@ -208,7 +202,6 @@ export default function OperacoesFidcPage() {
     setStatusMsg("🚀 Expurgando períodos retroativos e consolidando DRE do FIDC...");
 
     try {
-      // Coleta o mapeamento de competências (mes_ano) e cedentes contidos no arquivo
       const periodosAfetados = new Set<string>();
       linhasConciliadas.forEach(linha => {
         linha.operacoes.forEach(op => {
@@ -216,8 +209,6 @@ export default function OperacoesFidcPage() {
         });
       });
 
-      // 🎯 PASSO 1: SISTEMA DE LIMPEZA DIÁRIA CIRÚRGICA (EXTRATO)
-      // Evita duplicar o extrato financeiro limpando as competências daquele cedente específico
       for (const pa of periodosAfetados) {
         const [mes_ano, cnpj] = pa.split("|");
         await supabase
@@ -235,7 +226,6 @@ export default function OperacoesFidcPage() {
         if (!linha.cnpjCadastrado) return;
 
         linha.operacoes.forEach(op => {
-          // 1. Prepara linha detalhada para o extrato analítico
           payloadExtrato.push({
             empresa: "FIDC",
             data_operacao: op.data_operacao,
@@ -243,13 +233,12 @@ export default function OperacoesFidcPage() {
             cnpj: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha,
             vop: op.vop,
-            desagio: op.receita, // Consolida o deságio + tarifas totais na mesma coluna
+            desagio: op.receita, 
             tarifas: 0,
             juros: 0,
             responsavel_id: linha.responsavelId
           });
 
-          // 2. Agrega os volumes de VOP para alimentar a tabela dash_vop de forma incremental
           const keyVop = `${op.mes_ano}_${linha.cnpjCadastrado}`;
           if (!vopAgregadoMap.has(keyVop)) {
             vopAgregadoMap.set(keyVop, {
@@ -264,7 +253,6 @@ export default function OperacoesFidcPage() {
         });
       });
 
-      // Salva lote do extrato analítico
       if (payloadExtrato.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadExtrato.length; i += chunk) {
@@ -273,10 +261,8 @@ export default function OperacoesFidcPage() {
         }
       }
 
-      // 🎯 PASSO 2: ATUALIZAÇÃO INCREMENTAL DO DASH_VOP SEM APAGAR O FLUXO DA SECURITIZADORA
       if (vopAgregadoMap.size > 0) {
         for (const [_, item] of vopAgregadoMap.entries()) {
-          // Puxa o volume que a Securitizadora já realizou naquele mês para somar de forma simétrica
           const { data: existente } = await supabase
             .from("dash_vop")
             .select("vop_sec")
@@ -294,7 +280,7 @@ export default function OperacoesFidcPage() {
             vop_sec: vSec,
             vop_consolidado: vSec + item.vop,
             responsavel_id: item.respId,
-            atualizado_em: new Date().toISOString()
+            atualizado_em: new Date().toISOString() // 🎯 SYNC COM ATUALIZADO_EM DO BANCO
           };
 
           const { error } = await supabase.from("dash_vop").upsert(payloadConsolidado, { onConflict: "mes_ano,cnpj" });

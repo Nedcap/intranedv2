@@ -25,7 +25,6 @@ function limparCnpj(valor: any): string {
 function formatarDataExcel(valorData: any): string | null {
   if (!valorData) return null;
   
-  // Se for o número serial padrão do Excel
   const numVal = Number(valorData);
   if (!isNaN(numVal) && numVal > 30000 && numVal < 60000) {
     const data = new Date(Math.round((numVal - 25569) * 86400 * 1000));
@@ -90,9 +89,6 @@ export default function CarteiraRiscoFidcPage() {
     carregarCedentes();
   }, []);
 
-  // ============================================================================
-  // 🦾 PROCESSADOR EXCEL SÍNCRONO (CRUZAMENTO MDM VIA CNPJ)
-  // ============================================================================
   const processarArquivoExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -104,8 +100,6 @@ export default function CarteiraRiscoFidcPage() {
       const dataBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(dataBuffer, { type: "array" });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      
-      // Converte para JSON bruto em formato de Matriz (Array de Arrays)
       const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: "" });
 
       if (rawRows.length === 0) throw new Error("Planilha vazia.");
@@ -129,7 +123,6 @@ export default function CarteiraRiscoFidcPage() {
       const idxAgente = header.indexOf("AGENTE");
       const idxDesagio = header.indexOf("DESAGIO");
 
-      // Agrupador temporário: CNPJ_Cedente -> Lista de Títulos
       const agrupamento: Record<string, { nome: string, titulos: any[] }> = {};
 
       for (let i = 1; i < rawRows.length; i++) {
@@ -139,7 +132,7 @@ export default function CarteiraRiscoFidcPage() {
         const rawCnpj = limparCnpj(row[idxCnpjCedente]);
         const valorAberto = parseValorReal(row[idxValorAberto]);
 
-        if (!rawCnpj || valorAberto <= 0) continue; // Pula liquidados ou sem identificação
+        if (!rawCnpj || valorAberto <= 0) continue;
 
         if (!agrupamento[rawCnpj]) {
           agrupamento[rawCnpj] = { nome: String(row[idxCedente]).trim().toUpperCase(), titulos: [] };
@@ -167,11 +160,9 @@ export default function CarteiraRiscoFidcPage() {
         });
       }
 
-      // 🧠 CONCILIAÇÃO INTELIGENTE POR CNPJ DIRECT MATCH
       const resultadoConciliado: LinhaConciliacao[] = [];
 
       for (const [cnpjPlanilha, meta] of Object.entries(agrupamento)) {
-        // Busca direta e 100% segura usando o CNPJ limpo de 14 dígitos
         const matchSistema = cedentesSistema.find(c => limparCnpj(c.cnpj) === cnpjPlanilha);
 
         const totalAberto = meta.titulos.reduce((acc, t) => acc + t.valor_aberto, 0);
@@ -215,9 +206,6 @@ export default function CarteiraRiscoFidcPage() {
     return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
   }, [linhasConciliadas]);
 
-  // ============================================================================
-  // ☁️ SALVAMENTO COM EXPURGO RETROATIVO
-  // ============================================================================
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
       alert("⚠️ Resolva as pendências cadastrais antes de efetuar a consolidação do tabelão.");
@@ -228,13 +216,13 @@ export default function CarteiraRiscoFidcPage() {
     setStatusMsg("🚀 Efetuando limpeza de lotes e persistindo tabelão FIDC...");
 
     try {
-      const cnpjsImportados = linhasConciliadas.map(l => l.cnpjPlanilha);
+      const cnpjsImportados = linhasConciliadas.map(l => l.cnpjCadastrado);
 
-      // 🎯 PASSO 1: LIMPEZA ATÔMICA RETROATIVADOS POR CNPJ
+      // 🎯 PASSO 1: CORREÇÃO DO NOME DA COLUNA DE EXTINÇÃO RETROATIVA NA CARTEIRA DETALHADA
       const { error: cleanError } = await supabase
         .from("carteira_fidc")
         .delete()
-        .in("cnpj_cnpj_cedente", cnpjsImportados); // Limpa só as empresas que estão subindo hoje
+        .in("cnpj_cedente", cnpjsImportados); 
 
       if (cleanError) throw cleanError;
 
@@ -268,7 +256,7 @@ export default function CarteiraRiscoFidcPage() {
           });
         });
 
-        // Alimenta/Atualiza o Risco FIDC na tabela com trava UNIQUE(cnpj)
+        // 🎯 FIX ATUALIZADO_EM: Sincronização direta com a chave única de limites
         payloadRisco.push({
           cnpj: linha.cnpjCadastrado,
           cedente: linha.cedentePlanilha,
@@ -279,7 +267,6 @@ export default function CarteiraRiscoFidcPage() {
         });
       }
 
-      // Envia em blocos de 400 linhas
       if (payloadCarteira.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
@@ -288,12 +275,9 @@ export default function CarteiraRiscoFidcPage() {
         }
       }
 
-      // IMPORTANTE: Aqui fazemos um RPC ou atualização parcial para não zerar os campos da Securitizadora!
-      // Usamos uma transação em lote para o upsert respeitar as colunas da Securitizadora que já estão no banco
       if (payloadRisco.length > 0) {
         for (const riscoItem of payloadRisco) {
-          // Busca o que já existe para somar de forma simétrica
-          const { data: existente } = await supabase.from("dash_carteira").select("risco_sec, vencido_sec").eq("cnpj", riscoItem.cnpj).single();
+          const { data: existente } = await supabase.from("dash_carteira").select("risco_sec, vencido_sec").eq("cnpj", riscoItem.cnpj).maybeSingle();
           
           const rSec = existente ? parseFloat(existente.risco_sec || 0) : 0;
           const vSec = existente ? parseFloat(existente.vencido_sec || 0) : 0;
@@ -311,7 +295,7 @@ export default function CarteiraRiscoFidcPage() {
         }
       }
 
-      alert(`🎉 Carga concluída!\n${payloadCarteira.length} títulos de sócios e recebíveis integrados à base operacional.`);
+      alert(`🎉 Carga concluída!\n${payloadCarteira.length} títulos de recebíveis integrados ao tabelão analítico.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
@@ -321,19 +305,15 @@ export default function CarteiraRiscoFidcPage() {
     }
   };
 
-  // Pequena correção de escopo seguro para o parâmetro vencido do loop
   function broadband(val: number) { return isNaN(val) ? 0 : val; }
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
-      
-      {/* HEADER */}
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira e Risco FIDC (Black101)</h2>
           <span className="text-xs text-slate-500 font-medium">Alimentação em lote analítico do fluxo FIDC e sincronização síncrona do dashboard de alçadas.</span>
         </div>
-        
         <button
           onClick={transferirDadosProSupabase}
           disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
@@ -345,19 +325,17 @@ export default function CarteiraRiscoFidcPage() {
 
       {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
 
-      {/* DRAG ZONE */}
       {linhasConciliadas.length === 0 && (
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
           <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
             <span className="text-3xl">📋</span>
             <span className="font-bold text-slate-700">Carregar Relatório de Recebíveis FIDC (.XLSX)</span>
             <span className="text-xs text-slate-400 font-mono">Verificação via MDM por CNPJ ativo com expurgo retroativo ativado.</span>
-            <input type="file" accept=".xlsx" onChange={processarArquivoExcel} className="hidden" disabled={carregandoBase || processando} />
+            <input type="file" accept=".xlsx" onChange={processarArquivoExcel} className="hidden" disabled={processando} />
           </label>
         </div>
       )}
 
-      {/* RESULTADO DA CONCILIAÇÃO */}
       {linhasConciliadas.length > 0 && (
         <div className="space-y-4">
           <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center font-bold">
@@ -382,9 +360,7 @@ export default function CarteiraRiscoFidcPage() {
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {linhasConciliadas.map((linha, index) => (
                     <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
-                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>
-                        {linha.cedentePlanilha}
-                      </td>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>{linha.cedentePlanilha}</td>
                       <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.titulos.length}</td>
                       <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalAberto)}</td>
                       <td className="p-4 text-right font-mono font-bold text-rose-600">{fM(linha.totalVencido)}</td>

@@ -65,6 +65,7 @@ function checarSeVencido(dataStr: string): string {
   }
 }
 
+// 🎯 SOLUÇÃO DO FORMATADOR EXPLICÍTO DISPONÍVEL NO ESCOPO GERAL
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
 
 interface LinhaConciliacao {
@@ -99,9 +100,6 @@ export default function CarteiraRiscoSecPage() {
     carregarCedentes();
   }, []);
 
-  // ============================================================================
-  // 🦾 LEITORA DO TABELÃO COMPLETO (EXTRAÇÃO QUASE 100% DOS DADOS)
-  // ============================================================================
   const processarArquivoCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -122,14 +120,13 @@ export default function CarteiraRiscoSecPage() {
 
       const header = linhasRaw[headerIdx].map(strClean);
       
-      // Indexação de colunas para mapeamento completo de dados
       const idxCedente = header.indexOf("CEDENTE");
       const idxSacado = header.indexOf("SACADO");
       const idxNumTitulo = header.findIndex(c => c === "SNUM" || c === "SEQTIT" || c === "NOSSONUM");
       const idxSituacao = header.indexOf("SITUACAO");
       const idxVencimento = header.findIndex(c => c === "DTAVCTO" || c === "VENCIMENTO");
-      const idxValorFace = header.findIndex(c => c === "VLRFACE" || c === "VALORFACE");
-      const idxValorAberto = header.findIndex(c => c === "VLRABERTO" || c === "VALORABERTO");
+      const idxValorFace = header.findIndex(c => c === "VALORFACE" || c === "VLRFACE");
+      const idxValorAberto = header.findIndex(c => c === "VALORABERTO" || c === "VLRABERTO");
       const idxAtr = header.findIndex(c => c === "ATR" || c === "ATRASO");
       const idxValorPago = header.indexOf("VLRPAGO");
       const idxDataLiq = header.findIndex(c => c === "DTALIQ" || c === "DATALIQUIDACAO");
@@ -153,7 +150,6 @@ export default function CarteiraRiscoSecPage() {
         const vencimentoRaw = String(row[idxVencimento] || "").trim();
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
-        // Monta o objeto completo com quase 100% das colunas operacionais da planilha
         agrupamento[rawCedente].push({
           sacado: String(row[idxSacado] || "").trim().toUpperCase(),
           numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").trim() : "-",
@@ -177,7 +173,6 @@ export default function CarteiraRiscoSecPage() {
         const nomePlanilhaLimpo = limparNome(cedentePlanilha);
         const matchSistema = cedentesSistema.find(c => limparNome(c.cedente) === nomePlanilhaLimpo);
 
-        // Calcula os totais com base apenas em títulos que possuem saldo em aberto real
         const totalAberto = titulosCedente.reduce((acc, t) => acc + t.valor_aberto, 0);
         const totalVencido = titulosCedente.reduce((acc, t) => t.status === "Vencido" ? acc + t.valor_aberto : acc, 0);
 
@@ -218,9 +213,6 @@ export default function CarteiraRiscoSecPage() {
     return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
   }, [linhasConciliadas]);
 
-  // ============================================================================
-  // ☁️ PROCESSAMENTO E ENVIO ANTI-DUPLICIDADE
-  // ============================================================================
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
       alert("⚠️ Vincule todos os cedentes antes de sincronizar o tabelão!");
@@ -233,8 +225,6 @@ export default function CarteiraRiscoSecPage() {
     try {
       const todosOsCedentesImportados = [...new Set(linhasConciliadas.map(l => l.cedentePlanilha.toUpperCase()))];
 
-      // 🎯 PASSO 1: SISTEMA DE LIMPEZA CIRÚRGICO
-      // Remove da carteira antiga apenas as empresas que constam no arquivo de hoje
       const { error: errorClean } = await supabase
         .from("carteira_sec")
         .delete()
@@ -248,7 +238,6 @@ export default function CarteiraRiscoSecPage() {
       for (const linha of linhasConciliadas) {
         if (!linha.cnpjCadastrado) continue;
 
-        // Monta o tabelão com carga total de dados para auditoria futura
         linha.titulos.forEach(t => {
           payloadCarteira.push({
             cnpj_cedente: linha.cnpjCadastrado,
@@ -270,7 +259,7 @@ export default function CarteiraRiscoSecPage() {
           });
         });
 
-        // Prepara dados do risco macro consolidado (Tabela com trava UNIQUE no CNPJ)
+        // 🎯 FIX ATUALIZADO_EM: Alinhado e estruturado conforme o seu schema de tabelas
         payloadRisco.push({
           cnpj: linha.cnpjCadastrado,
           cedente: linha.cedentePlanilha.toUpperCase(),
@@ -283,7 +272,6 @@ export default function CarteiraRiscoSecPage() {
         });
       }
 
-      // Envio em chunks para evitar estouro de tamanho de requisição do gateway
       if (payloadCarteira.length > 0) {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
@@ -312,14 +300,11 @@ export default function CarteiraRiscoSecPage() {
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
-      
-      {/* HEADER DA PÁGINA */}
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira e Risco SEC (Qprof)</h2>
           <span className="text-xs text-slate-500 font-medium">Alimentação síncrona do tabelão analítico de títulos e consolidação automática de limites.</span>
         </div>
-        
         <button
           onClick={transferirDadosProSupabase}
           disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
@@ -331,19 +316,17 @@ export default function CarteiraRiscoSecPage() {
 
       {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
 
-      {/* DRAG AND DROP ZONE */}
       {linhasConciliadas.length === 0 && (
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
           <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
             <span className="text-3xl">📊</span>
             <span className="font-bold text-slate-700">Carregar Relatório de Cobrança Consolidada Qprof (.CSV)</span>
             <span className="text-xs text-slate-400 font-mono">Processamento de segurança ativado com limpeza retroativa e carga completa.</span>
-            <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={carregandoBase || processando} />
+            <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={processando} />
           </label>
         </div>
       )}
 
-      {/* MESA DE CONCILIAÇÃO SÍNCRONA */}
       {linhasConciliadas.length > 0 && (
         <div className="space-y-4">
           <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center font-bold">
@@ -368,9 +351,7 @@ export default function CarteiraRiscoSecPage() {
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {linhasConciliadas.map((linha, index) => (
                     <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
-                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>
-                        {linha.cedentePlanilha}
-                      </td>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>{linha.cedentePlanilha}</td>
                       <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.titulos.length}</td>
                       <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalAberto)}</td>
                       <td className="p-4 text-right font-mono font-bold text-rose-600">{fM(linha.totalVencido)}</td>

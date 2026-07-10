@@ -30,7 +30,6 @@ function parseValorReal(valor: any): number {
 function formatarDataQprof(valorRaw: any): string | null {
   if (!valorRaw) return null;
   const txt = String(valorRaw).trim();
-  // Se vier no formato datetime do pandas (Ex: 2024-10-30 00:00:00)
   if (txt.includes("-") && txt.length >= 10) {
     return txt.substring(0, 10);
   }
@@ -39,8 +38,8 @@ function formatarDataQprof(valorRaw: any): string | null {
 
 function extrairMesAnoDeISO(dataIso: string | null): string {
   if (!dataIso) return "";
-  const partes = dataIso.split("-"); // AAAA-MM-DD
-  if (partes.length >= 2) return `${partes[1]}/${partes[0]}`; // MM/AAAA
+  const partes = dataIso.split("-"); 
+  if (partes.length >= 2) return `${partes[1]}/${partes[0]}`; 
   return "";
 }
 
@@ -78,9 +77,6 @@ export default function OperacoesSecPage() {
     carregarCedentes();
   }, []);
 
-  // ============================================================================
-  // 🦾 MOTOR DE PARSE: EXTRAÇÃO DE DATA OPERACIONAL POR BLOCO DINÂMICO
-  // ============================================================================
   const processarArquivoExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -103,24 +99,18 @@ export default function OperacoesSecPage() {
 
         const primeiraCelula = String(row[0]).trim();
 
-        // 🧠 CAPTURA DE DATA DE BLOCO DINÂMICO (Linha isolada de data no Qprof)
         if (primeiraCelula.includes("-") && primeiraCelula.length >= 10 && row.filter(c => c !== "").length === 1) {
           dataBlocoAtiva = formatarDataQprof(primeiraCelula);
           continue;
         }
 
-        // Pula linhas de cabeçalho ou metadados soltos
         if (primeiraCelula === "Aditivo" || primeiraCelula === "TOTAL" || primeiraCelula === "" || primeiraCelula.includes("NED CAPITAL")) continue;
 
-        // Se chegamos aqui, é uma linha de operação válida!
-        // Colunas baseadas no layout Qprof indexado:
-        // row[0]=Aditivo, row[1]=Modalidade, row[3]=Esp, row[5]=Cliente(Cedente), row[9]=Qtd, row[10]=Face(Vop), row[12]=Diferencial(Deságio), row[13]=TaxaServiço, row[14]=Despesas
         if (dataBlocoAtiva && row.length > 10 && row[5]) {
           let rawCedente = String(row[5]).trim();
-          // Remove prefixos numéricos se existirem (Ex: "12 - STOCK TECH" ➔ "STOCK TECH")
           rawCedente = rawCedente.replace(/^\d+\s*-\s*/, "").trim().toUpperCase();
 
-          if (rawCedente.includes("TOTAL") || !row[0]) continue; // Ignora rodapés de blocos
+          if (rawCedente.includes("TOTAL") || !row[0]) continue; 
 
           if (!agrupamento[rawCedente]) {
             agrupamento[rawCedente] = [];
@@ -138,7 +128,6 @@ export default function OperacoesSecPage() {
         }
       }
 
-      // 🧠 CONCILIAÇÃO MDM SÍNCRONA
       const resultadoConciliado: LinhaConciliacao[] = [];
 
       for (const [cedentePlanilha, ops] of Object.entries(agrupamento)) {
@@ -185,9 +174,6 @@ export default function OperacoesSecPage() {
     return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
   }, [linhasConciliadas]);
 
-  // ============================================================================
-  // ☁️ TRANSACTIONAL COMMIT PRO SUPABASE V2
-  // ============================================================================
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
       alert("⚠️ Vincule todos os cedentes para garantir a integridade do tabelão financeiro.");
@@ -206,7 +192,6 @@ export default function OperacoesSecPage() {
         });
       });
 
-      // 🎯 PASSO 1: LIMPEZA RETROATIVADOS DA SECURITIZADORA
       for (const pa of periodosAfetados) {
         const [mes_ano, cnpj] = pa.split("|");
         await supabase
@@ -228,10 +213,10 @@ export default function OperacoesSecPage() {
             empresa: "SEC",
             data_operacao: op.data_operacao,
             mes_ano: op.mes_ano,
-            cnpj: linha.cnpjCadastrado,
+            cnpj: inline_cnpj(linha.cnpjCadastrado),
             cedente: linha.cedentePlanilha,
             vop: op.vop,
-            desagio: op.receita, // Consolida o bloco total de deságio e tarifas do Qprof aqui
+            desagio: op.receita, 
             tarifas: 0,
             juros: 0,
             responsavel_id: linha.responsavelId
@@ -251,7 +236,6 @@ export default function OperacoesSecPage() {
         });
       });
 
-      // Salva lote do extrato analítico Sec
       if (payloadExtrato.length > 0) {
         const chunk = 400;
         for (let i = 0; i < payloadExtrato.length; i += chunk) {
@@ -260,10 +244,8 @@ export default function OperacoesSecPage() {
         }
       }
 
-      // 🎯 PASSO 2: ATUALIZAÇÃO INCREMENTAL DO DASH_VOP SEM SUB-ESCREVER O FIDC
       if (vopAgregadoMap.size > 0) {
         for (const [_, item] of vopAgregadoMap.entries()) {
-          // Puxa o volume do FIDC do mesmo mês para somar de forma simétrica no consolidado
           const { data: existente } = await supabase
             .from("dash_vop")
             .select("vop_fidc")
@@ -299,6 +281,8 @@ export default function OperacoesSecPage() {
     }
   };
 
+  function inline_cnpj(v: any) { return String(v || "").replace(/\D/g, ""); }
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
       
@@ -327,7 +311,7 @@ export default function OperacoesSecPage() {
             <span className="text-3xl">📥</span>
             <span className="font-bold text-slate-700">Carregar Relatório de Negócios Realizados por Data (.XLS)</span>
             <span className="text-xs text-slate-400 font-mono">Leitura automatizada por blocos com conciliação cadastral MDM.</span>
-            <input type="file" accept=".xls" onChange={processarArquivoExcel} className="hidden" disabled={carregandoBase || processando} />
+            <input type="file" accept=".xls" onChange={processarArquivoExcel} className="hidden" disabled={processando} />
           </label>
         </div>
       )}
@@ -357,9 +341,7 @@ export default function OperacoesSecPage() {
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {linhasConciliadas.map((linha, index) => (
                     <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
-                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>
-                        {linha.cedentePlanilha}
-                      </td>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>{linha.cedentePlanilha}</td>
                       <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.operacoes.length}</td>
                       <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalVop)}</td>
                       <td className="p-4 text-right font-mono font-bold text-indigo-600">{fM(linha.totalReceita)}</td>
