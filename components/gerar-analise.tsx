@@ -251,7 +251,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   <h1>${analise.razao_social}</h1>
                   <div class="meta">CNPJ: ${analise.cnpj || '-'} | Data Emissão: ${dataAtual} | Analista: ${analise.analista || '-'} | Gerente: ${analise.gerente || '-'}</div>
               </div>
-              <div class="badge-top">SUGESTÃO: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
+              <div class="badge-top">RECOMENDAÇÃO DO ANALISTA: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
           </div>
 
           <div class="grid-3" style="margin-bottom: 1.5rem;">
