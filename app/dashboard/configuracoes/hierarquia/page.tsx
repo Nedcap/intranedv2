@@ -2,25 +2,9 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
+import { ReactFlow, Background, Controls } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-
-// 🚨 Importa os componentes do pacote de forma dinâmica e segura para evitar que o Next.js tente renderizar no Servidor (SSR)
-const ReactFlowWrapper = dynamic(
-  () => import("@xyflow/react").then((mod) => {
-    const { ReactFlow, Background, Controls } = mod;
-    return function FlowContainer({ nodes, edges, ...props }: any) {
-      return (
-        <ReactFlow nodes={nodes} edges={edges} {...props}>
-          <Background color="#cbd5e1" gap={16} size={1} />
-          <Controls className="bg-white border border-slate-200 rounded-lg shadow-sm p-1" />
-        </ReactFlow>
-      );
-    };
-  }),
-  { ssr: false, loading: () => <div className="p-8 text-slate-400">Carregando mapa interativo...</div> }
-);
 
 interface UsuarioSistema {
   id: string;
@@ -31,13 +15,20 @@ interface UsuarioSistema {
 }
 
 export default function GerenciarHierarquiaPage() {
+  const [mounted, setMounted] = useState(false);
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   
-  // Mapa id_usuario -> Array de lider_ids
+  // Mapa id_usuario (subordinado) -> Array de lider_ids
   const [hierarquiaLocal, setHierarquiaLocal] = useState<Record<string, string[]>>({});
   const [usuariosSelecionadosIds, setUsuariosSelecionadosId] = useState<string[]>([]);
+
+  // Evita erro de SSR (Hydration) com o ReactFlow
+  useEffect(() => {
+    setMounted(true);
+    carregarDadosHierarquia();
+  }, []);
 
   const carregarDadosHierarquia = async () => {
     try {
@@ -70,10 +61,6 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  useEffect(() => {
-    carregarDadosHierarquia();
-  }, []);
-
   const alternarSelecaoUsuario = (id: string) => {
     setUsuariosSelecionadosId(prev => 
       prev.includes(id) ? prev.filter(uid => uid !== id) : [...prev, id]
@@ -86,9 +73,9 @@ export default function GerenciarHierarquiaPage() {
     setHierarquiaLocal(prev => {
       const copia = { ...prev };
       usuariosSelecionadosIds.forEach(subId => {
-        if (subId === liderId) return;
+        if (subId === liderId) return; // Impede que o cara seja líder dele mesmo
         if (liderId === null) {
-          copia[subId] = []; // Reseta vínculos e joga pro topo
+          copia[subId] = []; // Solta pro topo
           return;
         }
         const lideresAtuais = copia[subId] || [];
@@ -112,7 +99,7 @@ export default function GerenciarHierarquiaPage() {
         const lideresLocais = hierarquiaLocal[usuario.id] || [];
         const novasPermissoes = { ...usuario.permissoes };
         novasPermissoes.lider_ids = lideresLocais;
-        if (novasPermissoes.lider_id) delete novasPermissoes.lider_id;
+        if (novasPermissoes.lider_id) delete novasPermissoes.lider_id; // Limpa o formato legado
 
         const { error } = await supabase
           .from("usuarios")
@@ -121,7 +108,7 @@ export default function GerenciarHierarquiaPage() {
 
         if (error) throw error;
       }
-      alert("🎉 Organograma em rede salvo com sucesso!");
+      alert("🎉 Organograma gravado e regras de visibilidade aplicadas!");
       await carregarDadosHierarquia();
     } catch (err: any) {
       alert(`❌ Erro ao salvar: ${err.message}`);
@@ -130,22 +117,30 @@ export default function GerenciarHierarquiaPage() {
     }
   };
 
-  // 🧮 ALGORITMO DE POSICIONAMENTO EM CAMADAS
+  // 🧮 ALGORITMO DE POSICIONAMENTO BLINDADO
   const { nodes, edges } = useMemo(() => {
     const nodesList: any[] = [];
     const edgesList: any[] = [];
 
     const niveis: Record<string, number> = {};
+    const visitando = new Set<string>();
+
     const calcularNivel = (id: string): number => {
       if (niveis[id] !== undefined) return niveis[id];
+      // 🛡️ Proteção contra LOOP INFINITO (A lidera B que lidera A)
+      if (visitando.has(id)) return 0; 
+      
+      visitando.add(id);
       const pais = hierarquiaLocal[id] || [];
       if (pais.length === 0) {
         niveis[id] = 0;
+        visitando.delete(id);
         return 0;
       }
       const niveisPais = pais.map(pId => calcularNivel(pId) + 1);
       const maxNivel = Math.max(...niveisPais);
       niveis[id] = maxNivel;
+      visitando.delete(id);
       return maxNivel;
     };
 
@@ -163,7 +158,6 @@ export default function GerenciarHierarquiaPage() {
       const indexNoNivel = usuariosPorNivel[nv].indexOf(u.id);
       const totalNoNivel = usuariosPorNivel[nv].length;
 
-      // Espaçamento horizontal e vertical ajustado para os blocos
       const posX = (indexNoNivel - (totalNoNivel - 1) / 2) * 280 + 350;
       const posY = nv * 180 + 40;
 
@@ -178,12 +172,12 @@ export default function GerenciarHierarquiaPage() {
               onClick={(e) => {
                 e.stopPropagation();
                 if (usuariosSelecionadosIds.length > 0) {
-                  vincularLoteAoLider(u.id);
+                  vincularLoteAoLider(u.id); // Se tem alguém selecionado na gaveta, vincula
                 } else {
-                  alternarSelecaoUsuario(u.id);
+                  alternarSelecaoUsuario(u.id); // Senão, seleciona ele mesmo
                 }
               }}
-              className={`flex flex-col w-[230px] bg-white border-2 p-3.5 rounded-2xl text-left shadow-xs transition-all ${
+              className={`flex flex-col w-[230px] bg-white border-2 p-3.5 rounded-2xl text-left shadow-xs transition-all cursor-pointer ${
                 selecionado ? "border-blue-600 ring-4 ring-blue-100 bg-blue-50/10" : "border-slate-200 hover:border-slate-400"
               }`}
             >
@@ -221,7 +215,7 @@ export default function GerenciarHierarquiaPage() {
           target: u.id,
           type: "smoothstep",
           animated: true,
-          style: { stroke: "#cbd5e1", strokeWidth: 2 },
+          style: { stroke: "#94a3b8", strokeWidth: 2 },
         });
       });
     });
@@ -230,6 +224,8 @@ export default function GerenciarHierarquiaPage() {
   }, [usuariosSistema, hierarquiaLocal, usuariosSelecionadosIds]);
 
   const usuariosLivresParaArraste = usuariosSistema.filter(u => (hierarquiaLocal[u.id] || []).length === 0);
+
+  if (!mounted) return <div className="p-8 text-center animate-pulse text-slate-400">Preparando tela interativa...</div>;
 
   return (
     <div className="p-6 space-y-6 font-sans bg-slate-50 min-h-screen text-[12px] flex flex-col h-screen overflow-hidden">
@@ -244,7 +240,7 @@ export default function GerenciarHierarquiaPage() {
           <button onClick={carregarDadosHierarquia} disabled={carregando || salvando} className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 font-bold uppercase text-[10px] rounded-lg tracking-wider transition-all">
             🔄 Descartar
           </button>
-          <button onClick={salvarEstruturaHierarquia} disabled={carregando || salvando} className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-md transition-all">
+          <button onClick={salvarEstruturaHierarquia} disabled={carregando || salvando} className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-[10px] rounded-lg tracking-wider shadow-md transition-all cursor-pointer">
             {salvando ? "⏳ Gravando..." : "📤 Salvar Organograma"}
           </button>
         </div>
@@ -256,8 +252,8 @@ export default function GerenciarHierarquiaPage() {
         {/* GAVETA ESQUERDA */}
         <div className="w-[260px] bg-slate-900 text-white p-4 rounded-2xl flex flex-col shadow-xl shrink-0 border border-slate-800">
           <div className="border-b border-slate-800 pb-2 mb-3">
-            <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block">👤 Colaboradores Livres ({usuariosLivresParaArraste.length})</span>
-            <span className="text-slate-500 text-[10px] block mt-0.5 leading-tight">Selecione e clique em um líder no canvas.</span>
+            <span className="font-black text-slate-400 text-[9px] uppercase tracking-widest block">👤 Tops de Linha / Soltos ({usuariosLivresParaArraste.length})</span>
+            <span className="text-slate-500 text-[10px] block mt-0.5 leading-tight">Selecione aqui e clique num líder ao lado para vincular.</span>
           </div>
           
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -273,7 +269,7 @@ export default function GerenciarHierarquiaPage() {
                       : "bg-slate-800 border-slate-700/60 text-slate-200 hover:border-slate-500"
                   }`}
                 >
-                  <span className="font-bold uppercase tracking-tight text-[11px] truncate">{user.nome}</span>
+                  <span className="font-bold uppercase tracking-tight text-[11px] truncate" title={user.nome}>{user.nome}</span>
                   <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 font-mono">
                     {user.cargo || "Comercial"}
                   </span>
@@ -285,10 +281,10 @@ export default function GerenciarHierarquiaPage() {
 
         {/* CANVAS PRINCIPAL */}
         <div 
-          className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-inner relative overflow-hidden flex flex-col h-full"
+          className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-inner relative overflow-hidden flex flex-col h-full cursor-grab active:cursor-grabbing"
           onClick={() => { if (usuariosSelecionadosIds.length > 0) vincularLoteAoLider(null); }}
         >
-          <ReactFlowWrapper
+          <ReactFlow
             nodes={nodes}
             edges={edges}
             fitView
@@ -296,7 +292,10 @@ export default function GerenciarHierarquiaPage() {
             nodesDraggable={true}
             minZoom={0.2}
             maxZoom={1.5}
-          />
+          >
+            <Background color="#cbd5e1" gap={16} size={1} />
+            <Controls className="bg-white border border-slate-200 rounded-lg shadow-sm p-1" />
+          </ReactFlow>
         </div>
 
       </div>
