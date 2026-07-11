@@ -86,6 +86,10 @@ export default function PowerBIPage() {
         supabase.from("carteira_fidc").select("*")
       ]);
 
+      // DEBUG INVISÍVEL (Verifique o F12 Console se o gráfico ficar zerado)
+      console.log("QTD SEC Recebida:", resCartSec.data?.length);
+      console.log("QTD FIDC Recebida:", resCartFidc.data?.length);
+
       setDashVop(resVop.data || []);
       setDashReceitas(resExtrato.data || []);
       setCarteiraSec(resCartSec.data || []);
@@ -130,7 +134,7 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS BLINDADOS (Lógica Real de Vencimento por Data)
+  // ⚡ CÁLCULOS MEMOIZADOS BLINDADOS
   // ==========================================================================
   const kpis = useMemo(() => {
     let vopMensalSec = 0, vopMensalFidc = 0;
@@ -141,26 +145,22 @@ export default function PowerBIPage() {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    // 🔥 NOVA FUNÇÃO: Avalia exclusivamente pela data para evitar falhas com strings tipo "A Vencer" ou "Cobrança"
-    const checarSeVencidoReal = (dataIso: string | null, stringFallback: string, diasAtraso: number = 0) => {
-      // 1. Regra de Ouro: Se existir data no banco, avaliamos matematicamente
+    const checarSeVencidoReal = (dataIso: string | null, stringFallback: string) => {
+      // 1. Prioriza Data (ignora timezone de forma segura cortando no 'T')
       if (dataIso) {
-        const partes = String(dataIso).split("T")[0].split("-");
+        const dataStr = String(dataIso).split("T")[0];
+        const partes = dataStr.split("-");
         if (partes.length === 3) {
-          const vcto = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
-          vcto.setHours(0, 0, 0, 0);
-          return vcto.getTime() < hoje.getTime(); // Só é vencido se a data for estritamente menor que hoje
+          const vcto = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]), 12, 0, 0);
+          return vcto.getTime() < hoje.getTime(); 
         }
       }
       
-      // 2. Se a data vier nula, usamos o fallback de atrasos ou a string exata
-      if (diasAtraso > 0) return true;
-      
+      // 2. Fallback pelas strings
       const st = stringFallback.toLowerCase().trim();
       if (st === "vencido" || (st.includes("vencido") && !st.includes("a vencer"))) {
         return true;
       }
-      
       return false;
     };
 
@@ -184,22 +184,22 @@ export default function PowerBIPage() {
       }
     });
 
-    // 2. FOTO DA CARTEIRA ATUAL DE EXPOSIÇÃO (Direto do tabelão de recebíveis)
+    // 2. CARTEIRA SEC
     if (empresasSel.includes("SEC")) {
       carteiraSec.forEach(c => {
         if (cedentesSel.includes(c.cedente)) {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoSec += vAberto;
           
-          // Correção do schema: 'situacao' virou 'situacao_recebivel' e 'dias_atraso' não existe mais
           const fallBackStr = `${c.status || ""} ${c.situacao_recebivel || ""}`;
-          if (checarSeVencidoReal(c.vencimento, fallBackStr, 0)) {
+          if (checarSeVencidoReal(c.vencimento, fallBackStr)) {
             vencidosSec += vAberto;
           }
         }
       });
     }
 
+    // 3. CARTEIRA FIDC
     if (empresasSel.includes("FIDC")) {
       carteiraFidc.forEach(c => {
         if (cedentesSel.includes(c.cedente)) {
@@ -207,14 +207,14 @@ export default function PowerBIPage() {
           riscoFidc += vAberto;
           
           const fallBackStr = `${c.status || ""} ${c.situacao_recebivel || ""}`;
-          if (checarSeVencidoReal(c.vencimento, fallBackStr, 0)) {
+          if (checarSeVencidoReal(c.vencimento, fallBackStr)) {
             vencidosFidc += vAberto;
           }
         }
       });
     }
 
-    // 3. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
+    // 4. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
     dashReceitas.forEach(r => {
       if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
         totalDesagio += parseValorReal(r.desagio);
@@ -223,13 +223,10 @@ export default function PowerBIPage() {
       }
     });
 
-    const vopVidaTodaConsolidadoGeral = vopVidaTodaSec + vopVidaTodaFidc;
-    const receitaTotalAcumulada = totalDesagio + totalTarifas + totalJurosMultas;
-
     return {
-      vopMensalSec, vopMensalFidc, vopVidaTodaSec, vopVidaTodaFidc, vopVidaTodaConsolidadoGeral,
+      vopMensalSec, vopMensalFidc, vopVidaTodaSec, vopVidaTodaFidc, vopVidaTodaConsolidadoGeral: vopVidaTodaSec + vopVidaTodaFidc,
       riscoSec, riscoFidc, vencidosSec, vencidosFidc,
-      totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada
+      totalDesagio, totalTarifas, totalJurosMultas, receitaTotalAcumulada: totalDesagio + totalTarifas + totalJurosMultas
     };
   }, [dashVop, carteiraSec, carteiraFidc, dashReceitas, empresasSel, mesesSel, cedentesSel]);
 
