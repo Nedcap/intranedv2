@@ -171,23 +171,23 @@ export default function CarteiraRiscoSecPage() {
       if (idxSacado === -1) idxSacado = findCol(["SACADO"], ["CNPJ", "CPF", "DATA"]);
 
       const idxNumTitulo = findCol(["SNUM", "SEQTIT", "NUMERODOTITULO"], ["QTD", "VALOR"]);
-      const idxNossoNumero = findCol(["NOSSONUM", "NOSSONUMERO"]); // NOVO MAPEAMENTO
+      const idxNossoNumero = findCol(["NOSSONUM", "NOSSONUMERO"]);
       
       const idxSituacao = findCol(["SITUACAO", "STATUS"]);
-      const idxSitRec = findCol(["SITREC", "SITUACAORECEBIVEL"]); // NOVO: Tentar achar situação secundária
+      const idxSitRec = findCol(["SITREC", "SITUACAORECEBIVEL"]);
       
       const idxVencimento = findCol(["VENCIMENTO", "DTAVCTO", "VCTO"], ["ORI"]);
-      const idxVctoOriginal = findCol(["VCTOORI", "VENCIMENTOORIGINAL", "DTAORI"]); // NOVO MAPEAMENTO
+      const idxVctoOriginal = findCol(["VCTOORI", "VENCIMENTOORIGINAL", "DTAORI"]);
       
       const idxValorFace = findCol(["VALORFACE", "VLRFACE", "VALORDOTITULO"], ["ABERTO", "PAGO", "LIQUIDO"]);
       const idxValorAberto = findCol(["VALORABERTO", "VLRABERTO", "SALDO", "EMABERTO"]);
       const idxAtr = findCol(["ATR", "ATRASO", "DIAS"]);
       const idxValorPago = findCol(["VALORPAGO", "VLRPAGO", "PAGO"]);
-      const idxDesagio = findCol(["VLRDESAGIO", "DESAGIO"]); // NOVO MAPEAMENTO
+      const idxDesagio = findCol(["VLRDESAGIO", "DESAGIO"]);
       
       const idxDataLiq = findCol(["DATALIQUIDACAO", "DTALIQ", "LIQUIDACAO", "PAGAMENTO"]);
       const idxAgNeg = findCol(["AGNEG", "AGENEG", "ASSESSOR", "GERENTE", "COMERCIAL"]);
-      const idxAditivo = findCol(["ADITIVO", "BORDERO", "OPERACAO"]); // Aditivo passa a ser operacao
+      const idxAditivo = findCol(["ADITIVO", "BORDERO", "OPERACAO"]);
       const idxDtaNeg = findCol(["DATANEGOCIACAO", "DTANEG"]);
 
       if (idxValorAberto === -1 && idxValorFace === -1) {
@@ -212,7 +212,6 @@ export default function CarteiraRiscoSecPage() {
         const vencimentoRaw = String(row[idxVencimento] || "").trim();
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
-        // AQUI: Montamos o objeto do título JÁ NO PADRÃO UNIFICADO DA TABELA
         agrupamento[rawCedente].push({
           // Identificação
           numero_operacao: idxAditivo !== -1 ? String(row[idxAditivo] || "").replace(/['"]/g, "").trim() : null,
@@ -220,7 +219,7 @@ export default function CarteiraRiscoSecPage() {
           nosso_numero: idxNossoNumero !== -1 ? String(row[idxNossoNumero] || "").replace(/['"]/g, "").trim() : null,
           
           sacado: idxSacado !== -1 ? String(row[idxSacado] || "").replace(/['"]/g, "").trim().toUpperCase() : "-",
-          cnpj_sacado: null, // CSV padrão geralmente não tem CNPJ Sacado, mantemos nulo
+          cnpj_sacado: null,
           
           // Valores
           valor_face: idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0,
@@ -230,7 +229,7 @@ export default function CarteiraRiscoSecPage() {
           
           // Datas
           data_negociacao: idxDtaNeg !== -1 ? converteDataParaISO(row[idxDtaNeg]) : null,
-          vencimento_original: idxVctoOriginal !== -1 ? converteDataParaISO(row[idxVctoOriginal]) : converteDataParaISO(vencimentoRaw), // Fallback
+          vencimento_original: idxVctoOriginal !== -1 ? converteDataParaISO(row[idxVctoOriginal]) : converteDataParaISO(vencimentoRaw),
           vencimento: converteDataParaISO(vencimentoRaw),
           data_baixa: idxDataLiq !== -1 ? converteDataParaISO(row[idxDataLiq]) : null,
           
@@ -238,7 +237,7 @@ export default function CarteiraRiscoSecPage() {
           status: idxSituacao !== -1 ? String(row[idxSituacao] || "").replace(/['"]/g, "").trim().toUpperCase() : "ABERTO",
           situacao_recebivel: idxSitRec !== -1 ? String(row[idxSitRec] || "").replace(/['"]/g, "").trim().toUpperCase() : "NORMAL",
           gerente_comercial: idxAgNeg !== -1 ? String(row[idxAgNeg] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
-          dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0, // Campo nativo da Sec, mantido
+          dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0,
           
           // Campo auxiliar para cálculo do painel
           _statusVencimento: statusVencimento 
@@ -274,10 +273,82 @@ export default function CarteiraRiscoSecPage() {
     }
   };
 
-  // ... [Ocultado os handlers de Auto Cadastrar e Vincular (mantidos idênticos do seu código original)] ...
-  const handleAutoCadastrarCedente = async (nomePlanilha: string, index: number) => { /* Original */ };
-  const handleVincularManualmente = (index: number, cedenteSistemaId: string) => { /* Original */ };
-  const totalPendentes = useMemo(() => linhasConciliadas.filter(l => l.status.startsWith("🔴")).length, [linhasConciliadas]);
+  // ============================================================================
+  // ⚡ FUNÇÃO DE AUTO-CADASTRO INTELIGENTE (EVITA DUPLICIDADE DE CNPJ)
+  // ============================================================================
+  const handleAutoCadastrarCedente = async (nomePlanilha: string, index: number) => {
+    const cnpjPrompt = prompt(`Insira o CNPJ (Apenas números - 14 dígitos) para a empresa:\n${nomePlanilha.toUpperCase()}`);
+    if (!cnpjPrompt) return;
+    
+    const cnpjLimpo = cnpjPrompt.replace(/\D/g, "");
+    if (cnpjLimpo.length !== 14) {
+      alert("❌ CNPJ inválido! Deve conter exatamente 14 dígitos.");
+      return;
+    }
+
+    // 🔍 Verifica se esse CNPJ já existe na base para não violar a chave única
+    const cedenteExistente = cedentesSistema.find(c => c.cnpj === cnpjLimpo);
+
+    if (cedenteExistente) {
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = cedenteExistente.cnpj;
+        copia[index].responsavelId = cedenteExistente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+      alert(`✅ Esse CNPJ já estava cadastrado no sistema sob o nome "${cedenteExistente.cedente}". O vínculo foi realizado!`);
+      return;
+    }
+
+    setProcessando(true);
+    try {
+      const { data: novoCedente, error } = await supabase
+        .from("cadastro_cedentes")
+        .insert({
+          id: crypto.randomUUID(),
+          cnpj: cnpjLimpo,
+          cedente: nomePlanilha.toUpperCase().trim(),
+          atualizado_em: new Date().toISOString()
+        })
+        .select("id, cnpj, cedente, responsavel_id")
+        .single();
+
+      if (error) throw error;
+
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = novoCedente.cnpj;
+        copia[index].responsavelId = novoCedente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+
+      setCedentesSistema(prev => [...prev, novoCedente]);
+      alert(`⚡ ${nomePlanilha.toUpperCase()} cadastrada com sucesso!`);
+    } catch (err: any) {
+      alert("❌ Falha ao cadastrar: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
+  const handleVincularManualmente = (index: number, cedenteSistemaId: string) => {
+    const match = cedentesSistema.find(c => c.id === cedenteSistemaId);
+    if (!match) return;
+
+    setLinhasConciliadas(prev => {
+      const copia = [...prev];
+      copia[index].cnpjCadastrado = match.cnpj;
+      copia[index].responsavelId = match.responsavel_id;
+      copia[index].status = match.cnpj ? "🟢 PRONTO" : "🔴 CEDENTE NÃO LOCALIZADO NO SISTEMA";
+      return copia;
+    });
+  };
+
+  const totalPendentes = useMemo(() => {
+    return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
+  }, [linhasConciliadas]);
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
@@ -291,8 +362,8 @@ export default function CarteiraRiscoSecPage() {
     try {
       const cnpjsParaLimpar = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
-      // 1. Limpeza segura na tabela destino 
-      // (Mudei aqui para o nome da tabela unificada, volte para carteira_sec se preferir não renomear)
+      // ATENÇÃO AQUI: Deixei carteira_unificada (conforme nosso SQL anterior). 
+      // Se você não mudou o nome da tabela no Supabase, volte para "carteira_sec".
       const { error: errorClean } = await supabase
         .from("carteira_unificada")
         .delete()
@@ -306,9 +377,8 @@ export default function CarteiraRiscoSecPage() {
         if (!linha.cnpjCadastrado) continue;
 
         linha.titulos.forEach(t => {
-          // 2. O Payload exato casando com a nova estrutura padronizada
           payloadCarteira.push({
-            sistema_origem: 'FIDC_CSV', // Para saber de onde veio
+            sistema_origem: 'FIDC_CSV',
             cnpj_cedente: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha.toUpperCase(),
             cnpj_sacado: t.cnpj_sacado,
@@ -332,7 +402,6 @@ export default function CarteiraRiscoSecPage() {
             situacao_recebivel: t.situacao_recebivel,
             gerente_comercial: t.gerente_comercial,
             
-            // Campo que o CSV tem e mantemos para histórico
             dias_atraso: t.dias_atraso,
             
             responsavel_id: linha.responsavelId
@@ -344,7 +413,7 @@ export default function CarteiraRiscoSecPage() {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
           const { error } = await supabase
-            .from("carteira_unificada") // Mudar se você não alterou o nome da tabela
+            .from("carteira_unificada") 
             .insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }
@@ -360,6 +429,102 @@ export default function CarteiraRiscoSecPage() {
     }
   };
 
-  // ... [Ocultado o return com JSX para não ficar gigantesco, use o seu original!] ...
-  return ( <div>{/* Seu JSX Original */}</div> );
+  return (
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
+      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira SEC (Qprof)</h2>
+          <span className="text-xs text-slate-500 font-medium">Alimentação síncrona do tabelão analítico de títulos (carteira_sec).</span>
+        </div>
+        <button
+          onClick={transferirDadosProSupabase}
+          disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
+          className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
+        >
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco de Dados"}
+        </button>
+      </div>
+
+      {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
+
+      {linhasConciliadas.length === 0 && (
+        <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
+          <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+            <span className="text-3xl">📊</span>
+            <span className="font-bold text-slate-700">Carregar Relatório Analítico de Carteira/Cobrança Qprof (.CSV)</span>
+            <span className="text-xs text-slate-400 font-mono">Processamento unificado de segurança com tolerância a BOM/Separadores.</span>
+            <input type="file" accept=".csv" onChange={processarArquivoCSV} className="hidden" disabled={processando} />
+          </label>
+        </div>
+      )}
+
+      {linhasConciliadas.length > 0 && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center font-bold">
+            <span>Validação de Consistência cadastral (MDM)</span>
+            <span className={`px-3 py-1 rounded text-xs ${totalPendentes === 0 ? "bg-emerald-600" : "bg-rose-600 animate-pulse"}`}>
+              {totalPendentes === 0 ? "✓ Tabelão Consistente" : `⚠️ ${totalPendentes} amarração(ões) pendente(s)`}
+            </span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-[10px] tracking-wider h-11">
+                    <th className="p-4 w-72">Cedente na Planilha</th>
+                    <th className="p-4 text-center w-36">Total de Títulos</th>
+                    <th className="p-4 text-right w-40">Saldo em Aberto</th>
+                    <th className="p-4 text-right w-40">Total Vencido</th>
+                    <th className="p-4 w-64">Status / Resolução de Vínculo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {linhasConciliadas.map((linha, index) => (
+                    <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>{linha.cedentePlanilha}</td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.titulos.length}</td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalAberto)}</td>
+                      <td className="p-4 text-right font-mono font-bold text-rose-600">{fM(linha.totalVencido)}</td>
+                      <td className="p-4">
+                        {linha.status.startsWith("🟢") ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-emerald-700 font-black text-[11px]">{linha.status}</span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjCadastrado}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex-1">
+                              <span className="text-rose-600 font-black text-[11px] block leading-tight mb-1">{linha.status}</span>
+                              <select
+                                onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                                className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[240px]"
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Vincular com Cadastrado...</option>
+                                {cedentesSistema.map(c => (
+                                  <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAutoCadastrarCedente(linha.cedentePlanilha, index)}
+                              className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase rounded shadow-xs cursor-pointer h-8 self-end transition-colors"
+                            >
+                              ⚡ Auto-Cadastrar
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

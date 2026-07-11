@@ -107,13 +107,12 @@ export default function CarteiraRiscoFidcPage() {
 
       const header = rawRows[0].map(c => String(c).trim().toUpperCase());
       
-      // Mapeamento Atualizado (Buscando o máximo de dados do Excel Securitizadora)
       const idxNumRecebivel = header.indexOf("NÚMERO DO RECEBÍVEL");
-      const idxNossoNumero = header.indexOf("NOSSONUMERO"); // NOVO
-      const idxSituacao = header.indexOf("SITUAÇÃO RECEBÍVEL"); // PADRONIZADO
-      const idxStatusBaixa = header.indexOf("STATUS DA BAIXA"); // NOVO
+      const idxNossoNumero = header.indexOf("NOSSONUMERO"); 
+      const idxSituacao = header.indexOf("SITUAÇÃO RECEBÍVEL"); 
+      const idxStatusBaixa = header.indexOf("STATUS DA BAIXA"); 
       const idxNumOp = header.indexOf("NÚMERO DA OPERAÇÃO");
-      const idxDataOp = header.indexOf("DATA DA OPERAÇÃO"); // NOVO
+      const idxDataOp = header.indexOf("DATA DA OPERAÇÃO"); 
       const idxCedente = header.indexOf("NOME DO CEDENTE");
       const idxCnpjCedente = header.indexOf("CNPJ/CPF DO CEDENTE");
       const idxSacado = header.indexOf("NOME DO SACADO");
@@ -123,7 +122,7 @@ export default function CarteiraRiscoFidcPage() {
       const idxValorPago = header.indexOf("VALOR PAGO");
       const idxDesagio = header.indexOf("DESAGIO");
       const idxDataBaixa = header.indexOf("DATA DA BAIXA");
-      const idxVctoOriginal = header.indexOf("DATA DE VENCIMENTO ORIGINAL"); // NOVO
+      const idxVctoOriginal = header.indexOf("DATA DE VENCIMENTO ORIGINAL"); 
       const idxVctoAtu = header.indexOf("DATA DE VENCIMENTO ATUALIZADA");
       const idxAgente = header.indexOf("AGENTE");
 
@@ -201,10 +200,63 @@ export default function CarteiraRiscoFidcPage() {
     }
   };
 
-  // ... [Ocultado os handlers de Auto Cadastrar e Vincular para não poluir, são iguais ao seu código original] ...
-  const handleAutoCadastrarCedente = async (nomePlanilha: string, cnpjPlanilha: string, index: number) => { /* Código original */ };
-  const handleVincularManualmente = (index: number, cedenteSistemaId: string) => { /* Código original */ };
-  const totalPendentes = useMemo(() => linhasConciliadas.filter(l => l.status.startsWith("🔴")).length, [linhasConciliadas]);
+  // ============================================================================
+  // ⚡ AUTO-CADASTRO RÁPIDO PARA EMPRESAS NOVAS NO FIDC
+  // ============================================================================
+  const handleAutoCadastrarCedente = async (nomePlanilha: string, cnpjPlanilha: string, index: number) => {
+    if (!cnpjPlanilha || cnpjPlanilha.length !== 14) {
+      alert("❌ CNPJ inválido ou ausente na linha do arquivo.");
+      return;
+    }
+
+    setProcessando(true);
+    try {
+      const { data: novoCedente, error } = await supabase
+        .from("cadastro_cedentes")
+        .insert({
+          id: crypto.randomUUID(),
+          cnpj: cnpjPlanilha,
+          cedente: nomePlanilha.toUpperCase().trim(),
+          atualizado_em: new Date().toISOString()
+        })
+        .select("id, cnpj, cedente, responsavel_id")
+        .single();
+
+      if (error) throw error;
+
+      setLinhasConciliadas(prev => {
+        const copia = [...prev];
+        copia[index].cnpjCadastrado = novoCedente.cnpj;
+        copia[index].responsavelId = novoCedente.responsavel_id;
+        copia[index].status = "🟢 PRONTO";
+        return copia;
+      });
+
+      setCedentesSistema(prev => [...prev, novoCedente]);
+      alert(`⚡ ${nomePlanilha.toUpperCase()} cadastrada via MDM com sucesso!`);
+    } catch (err: any) {
+      alert("❌ Falha ao cadastrar: " + err.message);
+    } finally {
+      setProcessando(false);
+    }
+  };
+
+  const handleVincularManualmente = (index: number, cedenteSistemaId: string) => {
+    const match = cedentesSistema.find(c => c.id === cedenteSistemaId);
+    if (!match) return;
+
+    setLinhasConciliadas(prev => {
+      const copia = [...prev];
+      copia[index].cnpjCadastrado = match.cnpj;
+      copia[index].responsavelId = match.responsavel_id;
+      copia[index].status = match.cnpj ? "🟢 PRONTO" : "🔴 CNPJ NÃO VINCULADO NO SISTEMA";
+      return copia;
+    });
+  };
+
+  const totalPendentes = useMemo(() => {
+    return linhasConciliadas.filter(l => l.status.startsWith("🔴")).length;
+  }, [linhasConciliadas]);
 
   const transferirDadosProSupabase = async () => {
     if (totalPendentes > 0) {
@@ -219,7 +271,7 @@ export default function CarteiraRiscoFidcPage() {
       const cnpjsImportados = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
       // 1. Limpeza segura na tabela destino 
-      // (Mudei aqui para o nome da tabela unificada, volte para carteira_fidc se preferir não renomear)
+      // Lembrete: Mude para carteira_fidc se não alterou no Supabase
       const { error: cleanError } = await supabase
         .from("carteira_unificada") 
         .delete()
@@ -235,7 +287,7 @@ export default function CarteiraRiscoFidcPage() {
         // 2. Monta o Payload exato pro novo Schema Unificado
         linha.titulos.forEach(t => {
           payloadCarteira.push({
-            sistema_origem: 'SEC_EXCEL', // Identificador opcional para saber de qual arquivo veio
+            sistema_origem: 'FIDC_EXCEL', 
             cnpj_cedente: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha,
             cnpj_sacado: t.cnpj_sacado,
@@ -263,8 +315,15 @@ export default function CarteiraRiscoFidcPage() {
           });
         });
 
-        // 3. Atualiza riscos...
-        // [Código original de atualização em cadastro_cedentes]
+        // 3. Atualiza os limites de risco do FIDC no cadastro de cedentes
+        await supabase
+          .from("cadastro_cedentes")
+          .update({
+            risco_fidc: linha.totalAberto,
+            vencido_fidc: isNaN(linha.totalVencido) ? 0 : linha.totalVencido,
+            atualizado_em: new Date().toISOString()
+          })
+          .eq("cnpj", linha.cnpjCadastrado);
       }
 
       // 4. Inserção em Lote (Chunks)
@@ -272,7 +331,7 @@ export default function CarteiraRiscoFidcPage() {
         const chunk = 400;
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
           const { error } = await supabase
-            .from("carteira_unificada") // Mudar se você não alterou o nome da tabela
+            .from("carteira_unificada") 
             .insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }
@@ -288,6 +347,102 @@ export default function CarteiraRiscoFidcPage() {
     }
   };
 
-  // ... [Ocultado o return com JSX para não ficar gigantesco, use o seu original!] ...
-  return ( <div>{/* Seu JSX Original */}</div> );
+  return (
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 p-6 font-sans text-[13px] text-slate-700">
+      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🏦 Carga Máxima: Carteira FIDC (Black101)</h2>
+          <span className="text-xs text-slate-500 font-medium">Alimentação em lote analítico do fluxo FIDC e sincronização de alçadas.</span>
+        </div>
+        <button
+          onClick={transferirDadosProSupabase}
+          disabled={processando || linhasConciliadas.length === 0 || totalPendentes > 0}
+          className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
+        >
+          {processando ? "⏳ Sincronizando..." : "☁️ Enviar para o Banco de Dados"}
+        </button>
+      </div>
+
+      {statusMsg && <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg font-bold text-center animate-pulse">{statusMsg}</div>}
+
+      {linhasConciliadas.length === 0 && (
+        <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center shadow-xs">
+          <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+            <span className="text-3xl">📋</span>
+            <span className="font-bold text-slate-700">Carregar Relatório de Recebíveis FIDC (.XLSX)</span>
+            <span className="text-xs text-slate-400 font-mono">Verificação via MDM por CNPJ ativo com expurgo retroativo ativado.</span>
+            <input type="file" accept=".xlsx" onChange={processarArquivoExcel} className="hidden" disabled={processando} />
+          </label>
+        </div>
+      )}
+
+      {linhasConciliadas.length > 0 && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center font-bold">
+            <span>Validação de Consistência cadastral por CNPJ (MDM)</span>
+            <span className={`px-3 py-1 rounded text-xs ${totalPendentes === 0 ? "bg-emerald-600" : "bg-rose-600 animate-pulse"}`}>
+              {totalPendentes === 0 ? "✓ Tabelão Consistente" : `⚠️ ${totalPendentes} amarração(ões) pendente(s)`}
+            </span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-[10px] tracking-wider h-11">
+                    <th className="p-4 w-72">Cedente na Planilha</th>
+                    <th className="p-4 text-center w-36">Total de Títulos</th>
+                    <th className="p-4 text-right w-40">Saldo em Aberto</th>
+                    <th className="p-4 text-right w-40">Total Vencido</th>
+                    <th className="p-4 w-64">Status / Resolução de Vínculo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {linhasConciliadas.map((linha, index) => (
+                    <tr key={index} className={`hover:bg-slate-50/50 transition-colors ${linha.status.startsWith("🔴") ? "bg-rose-50/20" : ""}`}>
+                      <td className="p-4 font-black text-slate-900 uppercase truncate max-w-[280px]" title={linha.cedentePlanilha}>{linha.cedentePlanilha}</td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-500">{linha.titulos.length}</td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900">{fM(linha.totalAberto)}</td>
+                      <td className="p-4 text-right font-mono font-bold text-rose-600">{fM(linha.totalVencido)}</td>
+                      <td className="p-4">
+                        {linha.status.startsWith("🟢") ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-emerald-700 font-black text-[11px]">{linha.status}</span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">CNPJ: {linha.cnpjPlanilha}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex-1">
+                              <span className="text-rose-600 font-black text-[11px] block leading-tight mb-1">{linha.status}</span>
+                              <select
+                                onChange={(e) => handleVincularManualmente(index, e.target.value)}
+                                className="p-1.5 border border-slate-300 rounded bg-white text-xs font-bold text-slate-700 outline-none w-full max-w-[240px]"
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Vincular com Empresa...</option>
+                                {cedentesSistema.map(c => (
+                                  <option key={c.id} value={c.id}>{c.cedente} ({c.cnpj || "Sem CNPJ"})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAutoCadastrarCedente(linha.cedentePlanilha, linha.cnpjPlanilha, index)}
+                              className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase rounded shadow-xs cursor-pointer h-8 self-end transition-colors"
+                            >
+                              ⚡ Auto-Cadastrar
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
