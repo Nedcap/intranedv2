@@ -413,7 +413,7 @@ export default function CarteiraRiscoSecPage() {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
           const { error } = await supabase
-            .from("carteira_unificada") 
+            .from("carteira_sec") 
             .insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }

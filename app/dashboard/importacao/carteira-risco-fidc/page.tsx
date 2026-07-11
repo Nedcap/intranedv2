@@ -331,7 +331,7 @@ export default function CarteiraRiscoFidcPage() {
         const chunk = 400;
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
           const { error } = await supabase
-            .from("carteira_unificada") 
+            .from("carteira_fidc") 
             .insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }
