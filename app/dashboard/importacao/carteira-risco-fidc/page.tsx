@@ -273,7 +273,7 @@ export default function CarteiraRiscoFidcPage() {
       // 1. Limpeza segura na tabela destino 
       // Lembrete: Mude para carteira_fidc se não alterou no Supabase
       const { error: cleanError } = await supabase
-        .from("carteira_unificada") 
+        .from("carteira_fidc") 
         .delete()
         .in("cnpj_cedente", cnpjsImportados); 
 

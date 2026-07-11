@@ -365,7 +365,7 @@ export default function CarteiraRiscoSecPage() {
       // ATENÇÃO AQUI: Deixei carteira_unificada (conforme nosso SQL anterior). 
       // Se você não mudou o nome da tabela no Supabase, volte para "carteira_sec".
       const { error: errorClean } = await supabase
-        .from("carteira_unificada")
+        .from("carteira_sec")
         .delete()
         .in("cnpj_cedente", cnpjsParaLimpar);
 
