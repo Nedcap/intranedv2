@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
 // ============================================================================
-// 🧽 UTILS DE LIMPEZA E TRATAMENTO DE FORMATOS
+// 🧽 UTILS DE LIMPEZA E TRATAMENTO DE FORMATOS (BLINDADO CONTRA ASPAS)
 // ============================================================================
 const strClean = (c: any) => {
   if (!c) return "";
@@ -18,6 +18,7 @@ const strClean = (c: any) => {
     .replace(/[^A-Z0-9]/g, ""); 
 };
 
+// ⚡ Parser inteligente de CSV que lida com aspas nativamente
 function parseCSVLine(line: string, delimiter: string = ';'): string[] {
   const result: string[] = [];
   let current = '';
@@ -41,6 +42,7 @@ function parseValorReal(valor: any): number {
   if (valor === null || valor === undefined || valor === "") return 0.0;
   if (typeof valor === "number") return valor;
   
+  // 🛡️ Remove aspas duplas, simples, R$ e espaços antes de fazer a conta
   let txt = String(valor).toUpperCase().replace(/[R$\s"']/g, "").trim();
   
   const isNeg = txt.startsWith("(") && txt.endsWith(")");
@@ -57,14 +59,9 @@ function parseValorReal(valor: any): number {
   return isNaN(num) ? 0.0 : (isNeg ? -num : num);
 }
 
-function parseInteiro(valor: any): number {
-  if (!valor) return 0;
-  const num = parseInt(String(valor).replace(/\D/g, ""));
-  return isNaN(num) ? 0 : num;
-}
-
 function converteDataParaISO(dataStr: string): string | null {
   if (!dataStr) return null;
+  // 🛡️ Arranca qualquer aspa residual antes de quebrar a data
   const txt = dataStr.replace(/['"]/g, "").trim();
   
   if (txt === "" || txt === "-") return null;
@@ -77,6 +74,7 @@ function converteDataParaISO(dataStr: string): string | null {
 
 function checarSeVencido(dataStr: string): string {
   if (!dataStr) return "A Vencer";
+  // 🛡️ Arranca aspas da data aqui também
   const txt = dataStr.replace(/['"]/g, "").trim();
   
   if (txt === "" || txt === "-") return "A Vencer";
@@ -94,12 +92,31 @@ function checarSeVencido(dataStr: string): string {
 
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
 
+interface TituloSchema {
+  sacado: string;
+  numero_titulo: string | null;
+  vencimento: string | null;
+  valor_face: number;
+  valor_aberto: number;
+  status: string;
+  numero_recebivel: string | null;
+  tipo_recebivel: string | null;
+  situacao_recebivel: string | null;
+  cnpj_sacado: string | null;
+  data_baixa: string | null;
+  valor_pago: number;
+  numero_operacao: string | null;
+  taxa_operacao: number;
+  desagio: number;
+  assessoria: string | null;
+}
+
 interface LinhaConciliacao {
   cedentePlanilha: string;
   cnpjCadastrado: string | null;
   responsavelId: string | null;
   status: "🟢 PRONTO" | "🔴 CEDENTE NÃO LOCALIZADO NO SISTEMA";
-  titulos: any[];
+  titulos: TituloSchema[];
   totalAberto: number;
   totalVencido: number;
 }
@@ -126,7 +143,7 @@ export default function CarteiraRiscoSecPage() {
   useEffect(() => { carregarCedentes(); }, []);
 
   // ============================================================================
-  // 🦾 LEITORA ROBUSTA COM AUTO-DETECÇÃO DE LAYOUT E CABEÇALHOS
+  // 🦾 LEITORA ROBUSTA COM AUTO-DETECÇÃO DE LAYOUT E CABEÇALHOS (ALINHADO AO SCHEMA)
   // ============================================================================
   const processarArquivoCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -170,33 +187,30 @@ export default function CarteiraRiscoSecPage() {
       let idxSacado = header.findIndex(c => c === "SACADO" || c === "NOMEDOSACADO");
       if (idxSacado === -1) idxSacado = findCol(["SACADO"], ["CNPJ", "CPF", "DATA"]);
 
-      const idxNumTitulo = findCol(["SNUM", "SEQTIT", "NUMERODOTITULO"], ["QTD", "VALOR"]);
-      const idxNossoNumero = findCol(["NOSSONUM", "NOSSONUMERO"]);
+      // MAPEAMENTOS ALINHADOS COM O SCHEMA DO BANCO
+      const idxNumTitulo = findCol(["SEQTIT", "NOSSONUM", "NUMERODOTITULO"], ["QTD", "VALOR"]);
+      const idxNumRecebivel = findCol(["SNUM", "NUMERODORECEBIVEL"]);
+      const idxTipoRecebivel = findCol(["ESPDOC", "TIPODORECEBIVEL"]);
+      const idxSituacaoRecebivel = findCol(["SITREC", "SITUACAO", "STATUS"]); 
+      const idxCnpjSacado = findCol(["COD1", "CNPJSACADO"]); 
+      const idxNumOperacao = findCol(["NOPDECREDESTRUT", "NUMERODAOPERACAO"]); 
       
-      const idxSituacao = findCol(["SITUACAO", "STATUS"]);
-      const idxSitRec = findCol(["SITREC", "SITUACAORECEBIVEL"]);
-      
-      const idxVencimento = findCol(["VENCIMENTO", "DTAVCTO", "VCTO"], ["ORI"]);
-      const idxVctoOriginal = findCol(["VCTOORI", "VENCIMENTOORIGINAL", "DTAORI"]);
-      
+      const idxVencimento = findCol(["VENCIMENTO", "DTAVCTO", "VCTO"]);
       const idxValorFace = findCol(["VALORFACE", "VLRFACE", "VALORDOTITULO"], ["ABERTO", "PAGO", "LIQUIDO"]);
       const idxValorAberto = findCol(["VALORABERTO", "VLRABERTO", "SALDO", "EMABERTO"]);
-      const idxAtr = findCol(["ATR", "ATRASO", "DIAS"]);
       const idxValorPago = findCol(["VALORPAGO", "VLRPAGO", "PAGO"]);
-      const idxDesagio = findCol(["VLRDESAGIO", "DESAGIO"]);
+      const idxDesagio = findCol(["VLRDESAGIO", "DESAGIO"]); 
       
-      const idxDataLiq = findCol(["DATALIQUIDACAO", "DTALIQ", "LIQUIDACAO", "PAGAMENTO"]);
-      const idxAgNeg = findCol(["AGNEG", "AGENEG", "ASSESSOR", "GERENTE", "COMERCIAL"]);
-      const idxAditivo = findCol(["ADITIVO", "BORDERO", "OPERACAO"]);
-      const idxDtaNeg = findCol(["DATANEGOCIACAO", "DTANEG"]);
+      const idxDataBaixa = findCol(["DATALIQUIDACAO", "DTALIQ", "LIQUIDACAO", "DATABAIXA"]);
+      const idxAssessoria = findCol(["AGNEG", "AGENEG", "ASSESSOR", "ASSESSORIA"]); 
 
       if (idxValorAberto === -1 && idxValorFace === -1) {
-        alert("⚠️ Arquivo Incompatível!\n\nNão encontrei colunas financeiras (Ex: Valor Aberto, Valor Face). Parece que você importou um 'Relatório de Cadastros' no lugar do relatório da Carteira.");
+        alert("⚠️ Arquivo Incompatível!\n\nNão encontrei colunas financeiras (Ex: Valor Aberto, Valor Face).");
         setProcessando(false);
         return;
       }
 
-      const agrupamento: Record<string, any[]> = {};
+      const agrupamento: Record<string, TituloSchema[]> = {};
 
       for (let i = headerIdx + 1; i < linhasRaw.length; i++) {
         const row = linhasRaw[i];
@@ -213,34 +227,22 @@ export default function CarteiraRiscoSecPage() {
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
         agrupamento[rawCedente].push({
-          // Identificação
-          numero_operacao: idxAditivo !== -1 ? String(row[idxAditivo] || "").replace(/['"]/g, "").trim() : null,
-          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").replace(/['"]/g, "").trim() : "-",
-          nosso_numero: idxNossoNumero !== -1 ? String(row[idxNossoNumero] || "").replace(/['"]/g, "").trim() : null,
-          
           sacado: idxSacado !== -1 ? String(row[idxSacado] || "").replace(/['"]/g, "").trim().toUpperCase() : "-",
-          cnpj_sacado: null,
-          
-          // Valores
+          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").replace(/['"]/g, "").trim() : null,
+          vencimento: converteDataParaISO(vencimentoRaw),
           valor_face: idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0,
           valor_aberto: idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0,
+          status: statusVencimento,
+          numero_recebivel: idxNumRecebivel !== -1 ? String(row[idxNumRecebivel] || "").replace(/['"]/g, "").trim() : null,
+          tipo_recebivel: idxTipoRecebivel !== -1 ? String(row[idxTipoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
+          situacao_recebivel: idxSituacaoRecebivel !== -1 ? String(row[idxSituacaoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
+          cnpj_sacado: idxCnpjSacado !== -1 ? String(row[idxCnpjSacado] || "").replace(/\D/g, "") : null,
+          data_baixa: idxDataBaixa !== -1 ? converteDataParaISO(row[idxDataBaixa]) : null,
           valor_pago: idxValorPago !== -1 ? parseValorReal(row[idxValorPago]) : 0,
+          numero_operacao: idxNumOperacao !== -1 ? String(row[idxNumOperacao] || "").replace(/['"]/g, "").trim() : null,
+          taxa_operacao: 0.00, // CSV Qprof não tem essa taxa explícita
           desagio: idxDesagio !== -1 ? parseValorReal(row[idxDesagio]) : 0,
-          
-          // Datas
-          data_negociacao: idxDtaNeg !== -1 ? converteDataParaISO(row[idxDtaNeg]) : null,
-          vencimento_original: idxVctoOriginal !== -1 ? converteDataParaISO(row[idxVctoOriginal]) : converteDataParaISO(vencimentoRaw),
-          vencimento: converteDataParaISO(vencimentoRaw),
-          data_baixa: idxDataLiq !== -1 ? converteDataParaISO(row[idxDataLiq]) : null,
-          
-          // Status e Controle
-          status: idxSituacao !== -1 ? String(row[idxSituacao] || "").replace(/['"]/g, "").trim().toUpperCase() : "ABERTO",
-          situacao_recebivel: idxSitRec !== -1 ? String(row[idxSitRec] || "").replace(/['"]/g, "").trim().toUpperCase() : "NORMAL",
-          gerente_comercial: idxAgNeg !== -1 ? String(row[idxAgNeg] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
-          dias_atraso: idxAtr !== -1 ? parseInteiro(row[idxAtr]) : 0,
-          
-          // Campo auxiliar para cálculo do painel
-          _statusVencimento: statusVencimento 
+          assessoria: idxAssessoria !== -1 ? String(row[idxAssessoria] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
         });
       }
 
@@ -251,7 +253,7 @@ export default function CarteiraRiscoSecPage() {
         const matchSistema = cedentesSistema.find(c => limparNome(c.cedente) === nomePlanilhaLimpo);
 
         const totalAberto = titulosCedente.reduce((acc, t) => acc + t.valor_aberto, 0);
-        const totalVencido = titulosCedente.reduce((acc, t) => t._statusVencimento === "Vencido" ? acc + t.valor_aberto : acc, 0);
+        const totalVencido = titulosCedente.reduce((acc, t) => t.status === "Vencido" ? acc + t.valor_aberto : acc, 0);
 
         resultadoConciliado.push({
           cedentePlanilha,
@@ -286,7 +288,6 @@ export default function CarteiraRiscoSecPage() {
       return;
     }
 
-    // 🔍 Verifica se esse CNPJ já existe na base para não violar a chave única
     const cedenteExistente = cedentesSistema.find(c => c.cnpj === cnpjLimpo);
 
     if (cedenteExistente) {
@@ -357,13 +358,11 @@ export default function CarteiraRiscoSecPage() {
     }
 
     setProcessando(true);
-    setStatusMsg("🚀 Sincronizando tabelão unificado de carteira...");
+    setStatusMsg("🚀 Sincronizando tabelão de carteira...");
 
     try {
       const cnpjsParaLimpar = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
 
-      // ATENÇÃO AQUI: Deixei carteira_unificada (conforme nosso SQL anterior). 
-      // Se você não mudou o nome da tabela no Supabase, volte para "carteira_sec".
       const { error: errorClean } = await supabase
         .from("carteira_sec")
         .delete()
@@ -377,34 +376,27 @@ export default function CarteiraRiscoSecPage() {
         if (!linha.cnpjCadastrado) continue;
 
         linha.titulos.forEach(t => {
+          // O payload agora atende PERFEITAMENTE ao schema universal "carteira_sec" e "carteira_fidc"
           payloadCarteira.push({
-            sistema_origem: 'FIDC_CSV',
             cnpj_cedente: linha.cnpjCadastrado,
             cedente: linha.cedentePlanilha.toUpperCase(),
-            cnpj_sacado: t.cnpj_sacado,
             sacado: t.sacado,
-            
-            numero_operacao: t.numero_operacao,
             numero_titulo: t.numero_titulo,
-            nosso_numero: t.nosso_numero,
-            
+            vencimento: t.vencimento,
             valor_face: t.valor_face,
             valor_aberto: t.valor_aberto,
-            valor_pago: t.valor_pago,
-            desagio: t.desagio,
-            
-            data_negociacao: t.data_negociacao,
-            vencimento_original: t.vencimento_original,
-            vencimento: t.vencimento,
-            data_baixa: t.data_baixa,
-            
             status: t.status,
+            responsavel_id: linha.responsavelId,
+            numero_recebivel: t.numero_recebivel,
+            tipo_recebivel: t.tipo_recebivel,
             situacao_recebivel: t.situacao_recebivel,
-            gerente_comercial: t.gerente_comercial,
-            
-            dias_atraso: t.dias_atraso,
-            
-            responsavel_id: linha.responsavelId
+            cnpj_sacado: t.cnpj_sacado,
+            data_baixa: t.data_baixa,
+            valor_pago: t.valor_pago,
+            numero_operacao: t.numero_operacao,
+            taxa_operacao: t.taxa_operacao,
+            desagio: t.desagio,
+            assessoria: t.assessoria
           });
         });
       }
@@ -412,14 +404,12 @@ export default function CarteiraRiscoSecPage() {
       if (payloadCarteira.length > 0) {
         const chunk = 400; 
         for (let i = 0; i < payloadCarteira.length; i += chunk) {
-          const { error } = await supabase
-            .from("carteira_sec") 
-            .insert(payloadCarteira.slice(i, i + chunk));
+          const { error } = await supabase.from("carteira_sec").insert(payloadCarteira.slice(i, i + chunk));
           if (error) throw error;
         }
       }
 
-      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos adicionados à carteira unificada.`);
+      alert(`🎉 Sucesso total!\n${payloadCarteira.length} títulos adicionados à carteira SEC.`);
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
