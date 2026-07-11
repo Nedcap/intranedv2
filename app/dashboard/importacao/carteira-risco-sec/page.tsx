@@ -227,22 +227,22 @@ export default function CarteiraRiscoSecPage() {
         const statusVencimento = checarSeVencido(vencimentoRaw);
 
         agrupamento[rawCedente].push({
-          sacado: idxSacado !== -1 ? String(row[idxSacado] || "").replace(/['"]/g, "").trim().toUpperCase() : "-",
-          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").replace(/['"]/g, "").trim() : null,
+          sacado: idxSacado !== -1 ? String(row[idxSacado] || "NÃO INFORMADO").replace(/['"]/g, "").trim().toUpperCase().substring(0, 255) : "NÃO INFORMADO",
+          numero_titulo: idxNumTitulo !== -1 ? String(row[idxNumTitulo] || "").replace(/['"]/g, "").trim().substring(0, 100) : null,
           vencimento: converteDataParaISO(vencimentoRaw),
           valor_face: idxValorFace !== -1 ? parseValorReal(row[idxValorFace]) : 0,
           valor_aberto: idxValorAberto !== -1 ? parseValorReal(row[idxValorAberto]) : 0,
           status: statusVencimento,
-          numero_recebivel: idxNumRecebivel !== -1 ? String(row[idxNumRecebivel] || "").replace(/['"]/g, "").trim() : null,
-          tipo_recebivel: idxTipoRecebivel !== -1 ? String(row[idxTipoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
-          situacao_recebivel: idxSituacaoRecebivel !== -1 ? String(row[idxSituacaoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
-          cnpj_sacado: idxCnpjSacado !== -1 ? String(row[idxCnpjSacado] || "").replace(/\D/g, "") : null,
+          numero_recebivel: idxNumRecebivel !== -1 ? String(row[idxNumRecebivel] || "").replace(/['"]/g, "").trim().substring(0, 100) : null,
+          tipo_recebivel: idxTipoRecebivel !== -1 ? String(row[idxTipoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase().substring(0, 100) : null,
+          situacao_recebivel: idxSituacaoRecebivel !== -1 ? String(row[idxSituacaoRecebivel] || "").replace(/['"]/g, "").trim().toUpperCase().substring(0, 100) : null,
+          cnpj_sacado: idxCnpjSacado !== -1 ? String(row[idxCnpjSacado] || "").replace(/\D/g, "").substring(0, 20) : null,
           data_baixa: idxDataBaixa !== -1 ? converteDataParaISO(row[idxDataBaixa]) : null,
           valor_pago: idxValorPago !== -1 ? parseValorReal(row[idxValorPago]) : 0,
-          numero_operacao: idxNumOperacao !== -1 ? String(row[idxNumOperacao] || "").replace(/['"]/g, "").trim() : null,
+          numero_operacao: idxNumOperacao !== -1 ? String(row[idxNumOperacao] || "").replace(/['"]/g, "").trim().substring(0, 100) : null,
           taxa_operacao: 0.00, // CSV Qprof não tem essa taxa explícita
           desagio: idxDesagio !== -1 ? parseValorReal(row[idxDesagio]) : 0,
-          assessoria: idxAssessoria !== -1 ? String(row[idxAssessoria] || "").replace(/['"]/g, "").trim().toUpperCase() : null,
+          assessoria: idxAssessoria !== -1 ? String(row[idxAssessoria] || "").replace(/['"]/g, "").trim().toUpperCase().substring(0, 100) : null,
         });
       }
 
@@ -358,34 +358,43 @@ export default function CarteiraRiscoSecPage() {
     }
 
     setProcessando(true);
-    setStatusMsg("🚀 Sincronizando tabelão de carteira...");
+    setStatusMsg("🚀 Limpando carteira antiga e preparando tabelão...");
 
     try {
+      // 1. LIMPEZA SEGURA E BLINDADA
       const cnpjsParaLimpar = [...new Set(linhasConciliadas.map(l => l.cnpjCadastrado).filter(Boolean))];
+      
+      // Quebra o array de CNPJs em pequenos blocos para o DELETE não tomar timeout no Postgres
+      const deleteChunkSize = 50;
+      for (let i = 0; i < cnpjsParaLimpar.length; i += deleteChunkSize) {
+        const chunkCnpj = cnpjsParaLimpar.slice(i, i + deleteChunkSize);
+        const { error: errorClean } = await supabase
+          .from("carteira_sec")
+          .delete()
+          .in("cnpj_cedente", chunkCnpj);
 
-      const { error: errorClean } = await supabase
-        .from("carteira_sec")
-        .delete()
-        .in("cnpj_cedente", cnpjsParaLimpar);
+        if (errorClean) throw new Error(`Falha no expurgo: ${errorClean.message}`);
+      }
 
-      if (errorClean) throw errorClean;
+      setStatusMsg("📦 Gravando novos títulos em lote...");
 
       const payloadCarteira: any[] = [];
 
+      // 2. MONTAGEM RIGOROSA DO PAYLOAD
       for (const linha of linhasConciliadas) {
         if (!linha.cnpjCadastrado) continue;
 
         linha.titulos.forEach(t => {
-          // O payload agora atende PERFEITAMENTE ao schema universal "carteira_sec" e "carteira_fidc"
+          // O payload atende PERFEITAMENTE ao schema universal "carteira_sec"
           payloadCarteira.push({
             cnpj_cedente: linha.cnpjCadastrado,
-            cedente: linha.cedentePlanilha.toUpperCase(),
-            sacado: t.sacado,
+            cedente: linha.cedentePlanilha.toUpperCase().substring(0, 255), // Garante o limite do VARCHAR(255)
+            sacado: t.sacado, 
             numero_titulo: t.numero_titulo,
             vencimento: t.vencimento,
             valor_face: t.valor_face,
             valor_aberto: t.valor_aberto,
-            status: t.status,
+            status: t.status ? t.status.substring(0, 50) : null,
             responsavel_id: linha.responsavelId,
             numero_recebivel: t.numero_recebivel,
             tipo_recebivel: t.tipo_recebivel,
@@ -399,13 +408,27 @@ export default function CarteiraRiscoSecPage() {
             assessoria: t.assessoria
           });
         });
+        
+        // 3. Atualiza os limites de risco na SEC no cadastro_cedentes (Igual fizemos pro FIDC!)
+        await supabase
+          .from("cadastro_cedentes")
+          .update({
+            risco_sec: linha.totalAberto,
+            vencido_sec: isNaN(linha.totalVencido) ? 0 : linha.totalVencido,
+            atualizado_em: new Date().toISOString()
+          })
+          .eq("cnpj", linha.cnpjCadastrado);
       }
 
+      // 4. INSERÇÃO EM LOTE SEGURO
       if (payloadCarteira.length > 0) {
-        const chunk = 400; 
-        for (let i = 0; i < payloadCarteira.length; i += chunk) {
-          const { error } = await supabase.from("carteira_sec").insert(payloadCarteira.slice(i, i + chunk));
-          if (error) throw error;
+        const insertChunkSize = 300; 
+        for (let i = 0; i < payloadCarteira.length; i += insertChunkSize) {
+          const { error: errorInsert } = await supabase
+            .from("carteira_sec")
+            .insert(payloadCarteira.slice(i, i + insertChunkSize));
+            
+          if (errorInsert) throw new Error(`Falha no insert: ${errorInsert.message}`);
         }
       }
 
@@ -413,6 +436,7 @@ export default function CarteiraRiscoSecPage() {
       setLinhasConciliadas([]);
       setStatusMsg("");
     } catch (err: any) {
+      console.error("ERRO SUPABASE:", err);
       alert("❌ Falha na gravação dos lotes: " + err.message);
     } finally {
       setProcessando(false);
