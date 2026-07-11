@@ -191,8 +191,9 @@ export default function PowerBIPage() {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoSec += vAberto;
           
-          const fallBackStr = `${c.status || ""} ${c.situacao || ""}`;
-          if (checarSeVencidoReal(c.vencimento, fallBackStr, Number(c.dias_atraso))) {
+          // Correção do schema: 'situacao' virou 'situacao_recebivel' e 'dias_atraso' não existe mais
+          const fallBackStr = `${c.status || ""} ${c.situacao_recebivel || ""}`;
+          if (checarSeVencidoReal(c.vencimento, fallBackStr, 0)) {
             vencidosSec += vAberto;
           }
         }
