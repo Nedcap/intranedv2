@@ -165,23 +165,35 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       // ==========================================
       const imagensMapeadas = new Set<string>();
 
+      // Helper para garantir que a URL seja string e limpa antes de salvar
+      const normalizarUrl = (u: any) => {
+        if (typeof u !== 'string') return null;
+        const limpa = u.trim();
+        if (limpa === '') return null;
+        // Se for um caminho relativo do Next.js, injeta a origem atual do sistema
+        if (limpa.startsWith('/')) {
+          return `${window.location.origin}${limpa}`;
+        }
+        return limpa;
+      };
+
       if (Array.isArray(analise.galeria_urls)) {
-        analise.galeria_urls.forEach((u: string) => u && imagensMapeadas.add(u));
+        analise.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
       }
       if (analise.anexos) {
         if (Array.isArray(analise.anexos.galeria_urls)) {
-          analise.anexos.galeria_urls.forEach((u: string) => u && imagensMapeadas.add(u));
+          analise.anexos.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
         }
-        if (typeof analise.anexos.fachada_url === 'string' && analise.anexos.fachada_url.trim() !== '') {
-          imagensMapeadas.add(analise.anexos.fachada_url);
-        }
-        if (typeof analise.anexos.fotos_visita_url === 'string' && analise.anexos.fotos_visita_url.trim() !== '') {
-          imagensMapeadas.add(analise.anexos.fotos_visita_url);
-        }
+        const fachada = normalizarUrl(analise.anexos.fachada_url);
+        if (fachada) imagensMapeadas.add(fachada);
+
+        const visita = normalizarUrl(analise.anexos.fotos_visita_url);
+        if (visita) imagensMapeadas.add(visita);
       }
       if (Array.isArray(analise.dados_documentos)) {
-        analise.dados_documentos.forEach((url: string) => {
-          if (typeof url === 'string' && url.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i)) {
+        analise.dados_documentos.forEach((u: string) => {
+          const url = normalizarUrl(u);
+          if (url && url.split('?')[0].match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
             imagensMapeadas.add(url);
           }
         });
@@ -189,7 +201,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
       const listaFotosValidas = Array.from(imagensMapeadas);
 
-      // 🔥 FIX EXIBIDOR: Resolvido escape de aspas e adicionado controle de largura CSS 100%
+      // 🔥 CORREÇÃO DA GALERIA: Trocado src='${url}' para src="${url}" para prevenir quebra por tokens com aspas simples
       const galeriaHTML = listaFotosValidas.length > 0 
         ? `
         <div class="print-break"></div>
@@ -197,11 +209,14 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 2.5rem; width: 100%;">
             ${listaFotosValidas.map(url => `
                 <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc; border: 1px solid var(--border); overflow: hidden;">
-                    <img src='${url}' style="width: 100%; min-width: 100%; max-width: 100%; height: 250px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.06);" alt="Foto R2">
+                    <img src="${url}" style="width: 100%; min-width: 100%; max-width: 100%; height: 250px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.06);" alt="Foto R2">
                 </div>
             `).join("")}
         </div>
         ` : '';
+
+      // Organograma URL Tratado
+      const organogramaUrlTratado = normalizarUrl(analise.anexos?.organograma_url);
 
       const htmlContent = `
       <!DOCTYPE html>
@@ -388,9 +403,9 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               <div class="card" style="padding:1rem;">
                   <div id="network-container" class="org-container"></div>
               </div>
-              ` : analise.anexos?.organograma_url ? `
+              ` : organogramaUrlTratado ? `
               <div class="card" style="padding: 1.5rem; display:flex; justify-content:center; background: #f8fafc;">
-                  <img src="${analise.anexos.organograma_url}" style="max-width: 100%; max-height: 600px; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                  <img src="${organogramaUrlTratado}" style="max-width: 100%; max-height: 600px; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
               </div>
               ` : `
               <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted); font-weight:700; background: #f8fafc; border: 1px dashed #cbd5e1;">[NENHUM ORGANOGRAMA VINCULADO]</div>
@@ -450,7 +465,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           <td class="text-center">--</td>
                           <td class="text-center">${formatarMoeda(med2025)}</td>
                           <td class="text-center">--</td>
-                          <td class="text-center">${formatarMoeda(med2024)}</td>
+                          <td class="text-center">${formatarMoeda(tot2024)}</td>
                       </tr>
                   </tbody>
               </table>
