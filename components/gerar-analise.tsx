@@ -79,8 +79,8 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                 <td style="font-size:0.85rem;">${b.modalidade || '-'} <span style="color:var(--muted); font-size:10px;">(${b.tipo} - ${b.prazo})</span></td>
                 <td class="text-right font-bold font-mono" style="font-size:0.85rem; color:var(--red);">${formatarMoeda(v)}</td>
             </tr>`;
-        }).join("")
-        : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhum detalhamento bancário mapeado.</td></tr>`;
+          }).join("")
+        : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhuma linha de endividamento localizada.</td></tr>`;
 
       let totalRestritivos = 0, qtdRestritivos = 0;
       const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
@@ -113,9 +113,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
       const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
-      // ==========================================
-      // FATURAMENTO MÉDIO
-      // ==========================================
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
       let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
@@ -164,48 +161,43 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
       // ==========================================
-      // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS (GALERIA INFINITA)
+      // 📸 VARREDURA DINÂMICA DE IMAGENS (DECLARAÇÃO FIXADA)
       // ==========================================
-      const imagensExtraidas = new Set<string>();
+      const imagensMapeadas = new Set<string>();
 
-      // 1. Procura se tem o array 'galeria_urls' direto no objeto analise
       if (Array.isArray(analise.galeria_urls)) {
-        analise.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+        analise.galeria_urls.forEach((u: string) => u && imagensMapeadas.add(u));
       }
-      
-      // 2. Procura na aba de anexos as fotos clássicas e array de galeria
       if (analise.anexos) {
         if (Array.isArray(analise.anexos.galeria_urls)) {
-          analise.anexos.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+          analise.anexos.galeria_urls.forEach((u: string) => u && imagensMapeadas.add(u));
         }
         if (typeof analise.anexos.fachada_url === 'string' && analise.anexos.fachada_url.trim() !== '') {
-          imagensExtraidas.add(analise.anexos.fachada_url);
+          imagensMapeadas.add(analise.anexos.fachada_url);
         }
         if (typeof analise.anexos.fotos_visita_url === 'string' && analise.anexos.fotos_visita_url.trim() !== '') {
-          imagensExtraidas.add(analise.anexos.fotos_visita_url);
+          imagensMapeadas.add(analise.anexos.fotos_visita_url);
         }
       }
-
-      // 3. Varredura no array bruto dados_documentos (se o V8 ou Comercial jogou tudo junto)
       if (Array.isArray(analise.dados_documentos)) {
         analise.dados_documentos.forEach((url: string) => {
           if (typeof url === 'string' && url.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i)) {
-            imagensExtraidas.add(url);
+            imagensMapeadas.add(url);
           }
         });
       }
 
-      const fotosUnicas = Array.from(imagensExtraidas);
+      const listaFotosValidas = Array.from(imagensMapeadas);
 
-      // Renderizador do HTML da Galeria
-      const galeriaHTML = fotosUnicas.length > 0 
+      // Monta a estrutura da galeria em grid bootstrap-like
+      const galeriaHTML = listaFotosValidas.length > 0 
         ? `
         <div class="print-break"></div>
-        <h2 style="margin-top: 3.5rem;">📸 Galeria de Fotos e Evidências (${fotosUnicas.length})</h2>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2.5rem;">
-            ${fotosUnicas.map(url => `
-                <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc;">
-                    <img src="${url}" style="width: 100%; height: 260px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" alt="Evidência Fotográfica">
+        <h2 style="margin-top: 3.5rem;">📸 Galeria de Evidências Fotográficas (${listaFotosValidas.length})</h2>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 2.5rem;">
+            ${listaFotosValidas.map(url => `
+                <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc; border: 1px solid var(--border);">
+                    <img src="${url}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.06);" alt="Foto R2">
                 </div>
             `).join("")}
         </div>
@@ -633,8 +625,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
           if (orgaJson && orgaJson.nodes && orgaJson.edges) {
-              
-              // 🔥 DEDUPLICAÇÃO DE NÓS (Prevenindo o crash da biblioteca)
               const uniqueNodesMap = new Map();
               orgaJson.nodes.forEach(n => {
                   if (!uniqueNodesMap.has(n.id)) {
@@ -643,7 +633,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               });
               const uniqueNodesArray = Array.from(uniqueNodesMap.values());
 
-              // 🔥 DEDUPLICAÇÃO DE ARESTAS
               const uniqueEdgesMap = new Map();
               orgaJson.edges.forEach(e => {
                   if (!uniqueEdgesMap.has(e.id)) {
