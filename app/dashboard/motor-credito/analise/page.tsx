@@ -1256,24 +1256,7 @@ function MesaAnaliseConteudo() {
               {/* ABA 7: PARECER FINAL */}
               {abaAtiva === "parecer" && (
                 <div className="space-y-6 max-w-5xl">
-                  
-                  {/* 🔥 AQUI ENTRA O CÉREBRO DO MAESTRO V8 */}
-                  {analise.parecer_executivo && (
-                     <div className="bg-indigo-50 border-2 border-indigo-400 p-4 relative shadow-sm">
-                        <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-bold px-2 py-1 uppercase rounded-bl-sm">
-                           IA MOTOR V8
-                        </div>
-                        <h3 className="text-[12px] font-bold text-indigo-900 uppercase mb-3 border-b border-indigo-200 pb-1 flex items-center gap-2">
-                           🧠 Dossiê Executivo (Súmula de Crédito)
-                        </h3>
-                        <textarea 
-                           value={analise.parecer_executivo} 
-                           onChange={(e) => setAnalise({...analise, parecer_executivo: e.target.value})}
-                           className="w-full h-80 bg-transparent text-[12px] text-indigo-900 outline-none resize-none font-sans leading-relaxed"
-                        />
-                     </div>
-                  )}
-
+                
                   <div className="bg-white border-2 border-slate-400 p-3">
                     <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer Técnico do Analista (Humano)</h3>
                     <textarea 

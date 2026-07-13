@@ -262,16 +262,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
-          ${analise.parecer_executivo ? `
-          <!-- 🔥 BLOCO INJETADO PELA IA MOTOR V8 -->
-          <div class="card" style="margin-bottom: 1.5rem; border-top: 4px solid var(--blue); background: #f4f7ff;">
-              <div style="font-weight: 800; font-size: 0.95rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
-                  <span>🧠</span> Súmula Executiva de Crédito (Parecer Motor IA V8)
-              </div>
-              <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.65; white-space: pre-wrap; text-align: justify;">${analise.parecer_executivo}</div>
-          </div>
-          ` : ''}
-
           <h2>1. Propostas e Condições Comerciais</h2>
           <div class="table-wrap">
               <table>
