@@ -26,11 +26,21 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
   const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
   
+  // 🔐 TRAVA DO LOTE: Ele guarda o nome da pasta aqui e não deixa mudar ao re-clicar!
+  const [loteId, setLoteId] = useState<string>("");
+  
   const docInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>, tipo: "documento" | "imagem") => {
     if (e.target.files) {
+      
+      // 🧠 Se for o primeiro arquivo que o usuário joga na tela, a gente fixa o lote de vez
+      if (!loteId) {
+        const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
+        setLoteId(`lote-${cnpjLimpo || "geral"}-${Date.now()}`);
+      }
+
       const novos: ArquivoFila[] = Array.from(e.target.files).map((f, i) => ({
         id: `${Date.now()}-${tipo}-${i}`,
         file: f,
@@ -47,16 +57,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setArquivos(prev => prev.filter(a => a.id !== id));
   };
 
-  const executarEsteiraUpload = async () => {
+  const ejecutarEsteiraUpload = async () => {
     if (arquivos.length === 0) return;
     setUploading(true);
 
     const urlsDocumentos: string[] = [];
     const urlsImagens: string[] = []; 
-    
-    // ✅ CORREÇÃO 1: loteId inteligente e controlado usando o CNPJ limpo para evitar pastas duplicadas no R2
-    const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
-    const loteId = `lote-${cnpjLimpo || "geral"}-${Date.now()}`;
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
     try {
@@ -71,6 +77,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           formData.append("file", item.file);
           
           const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
+          
+          // 🎯 Aqui ele usa o loteId fixo que está guardado lá no estado do componente!
           const pathDinamicoR2 = `${loteId}/${subpasta}`;
           formData.append("analiseId", pathDinamicoR2);
 
@@ -79,19 +87,17 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             body: formData,
           });
 
-          // ✅ CORREÇÃO 2: Intercepta o erro HTTP 413 (Payload Too Large) antes de tentar rodar o parser de JSON
           if (res.status === 413) {
-            throw new Error("Arquivo muito grande! O servidor rejeitou por passar do limite de tamanho.");
+            throw new Error("Arquivo muito grande! O servidor rejeitou por passar do limite.");
           }
 
-          // Lê primeiro como texto puro para evitar a quebra do 'Unexpected token R'
           const textoResposta = await res.text();
           let data: any = {};
           
           try {
             data = JSON.parse(textoResposta);
           } catch {
-            throw new Error(`Resposta inesperada do servidor (Código ${res.status}). Verifique as configurações de limite.`);
+            throw new Error(`Resposta inesperada do servidor (Código ${res.status}).`);
           }
 
           if (!res.ok || data.error) {
@@ -112,28 +118,32 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         } catch (err: any) {
           console.error(err);
           setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "erro", mensagem: err.message } : a));
-          
-          // ✅ CORREÇÃO 3: Usamos 'continue' em vez de travar o laço inteiro. 
-          // Se um arquivo der erro (ex: maior de 5MB), os outros arquivos da fila continuam subindo normalmente!
           continue; 
         }
       }
 
-      // Sincroniza e avança se pelo menos um arquivo do lote subiu com sucesso
       if (urlsDocumentos.length > 0 || urlsImagens.length > 0) {
-        setArquivos(prev => prev.map(a => a.status === "sucesso" ? a : { ...a, mensagem: "Arquivo retido devido a erros no lote." }));
+        setArquivos(prev => prev.map(a => a.status === "sucesso" ? a : { ...a, mensagem: "Retido devido a falhas." }));
         
         setTimeout(() => {
           onSucesso(urlsDocumentos, urlsImagens); 
-          // Limpa a fila mantendo na tela apenas os arquivos que falharam para o usuário ver
-          setArquivos(prev => prev.filter(a => a.status === "erro"));
+          
+          // 🧼 Se sobrou algum arquivo com erro na tela, mantém o MESMO loteId para quando ele tentar re-enviar.
+          // Se subiu tudo limpo, limpa o loteId para a próxima empresa.
+          const temErros = arquivos.some(a => a.status === "erro");
+          if (!temErros) {
+            setLoteId("");
+            setArquivos([]);
+          } else {
+            setArquivos(prev => prev.filter(a => a.status === "erro"));
+          }
         }, 1200);
       }
 
     } catch (err: any) {
       console.error("❌ [ERRO_ESTEIRA_UPLOAD]:", err);
       alert("⚠️ Erro crítico no envio dos arquivos:\n" + err.message);
-    } finally {
+    } file {
       setUploading(false);
     }
   };
