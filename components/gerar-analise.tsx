@@ -326,18 +326,18 @@ export default function GerarAnalise({ analise }: { analise: any }) {
           </div>
 
           ${(analise.anexos?.fachada_url || analise.anexos?.fotos_visita_url) ? `
-          <!-- 🔥 GALERIA DE FOTOS INJETADAS A PARTIR DA NOVA UPLOAD AREA -->
+          <!-- 🔥 GALERIA DE FOTOS SEM ONERROR PARA PERMITIR DEBUG -->
           <div class="grid-2" style="margin-top: 1.5rem;">
               ${analise.anexos?.fachada_url ? `
               <div class="card" style="padding:1rem; text-align:center;">
                   <div class="metric-label" style="margin-bottom: 0.75rem;">Foto da Fachada / Sede</div>
-                  <img src="${analise.anexos.fachada_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Fachada Empresa" onerror="this.style.display='none'">
+                  <img src="${analise.anexos.fachada_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Fachada Empresa">
               </div>
               ` : ''}
               ${analise.anexos?.fotos_visita_url ? `
               <div class="card" style="padding:1rem; text-align:center;">
                   <div class="metric-label" style="margin-bottom: 0.75rem;">Evidência de Visita / Produção</div>
-                  <img src="${analise.anexos.fotos_visita_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Visita Empresa" onerror="this.style.display='none'">
+                  <img src="${analise.anexos.fotos_visita_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Visita Empresa">
               </div>
               ` : ''}
           </div>
@@ -517,7 +517,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <!-- CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
           <div class="grid-2">
-              <!-- 🔥 AQUI ENTROU A NOVA VARIÁVEL DO KAPPI (DADOS JURÍDICOS) -->
               <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
                   <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
                   <div class="expandable-box">
@@ -599,22 +598,35 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               });
           }
 
-          // ==========================================
-          // FIX ORGANOGRAMA: REMOVIDO WIDTH CONSTRAINT E AJUSTADO FÍSICA
-          // ==========================================
           const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
           
           if (orgaJson && orgaJson.nodes && orgaJson.edges) {
+              
+              // 🔥 DEDUPLICAÇÃO DE NÓS (Prevenindo o crash da biblioteca)
+              const uniqueNodesMap = new Map();
+              orgaJson.nodes.forEach(n => {
+                  if (!uniqueNodesMap.has(n.id)) {
+                      uniqueNodesMap.set(n.id, n);
+                  }
+              });
+              const uniqueNodesArray = Array.from(uniqueNodesMap.values());
+
+              // 🔥 DEDUPLICAÇÃO DE ARESTAS
+              const uniqueEdgesMap = new Map();
+              orgaJson.edges.forEach(e => {
+                  if (!uniqueEdgesMap.has(e.id)) {
+                      uniqueEdgesMap.set(e.id, e);
+                  }
+              });
+              const uniqueEdgesArray = Array.from(uniqueEdgesMap.values());
+
               const container = document.getElementById('network-container');
               if (container) {
-                  const nodes = new vis.DataSet(orgaJson.nodes.map(n => {
+                  const nodes = new vis.DataSet(uniqueNodesArray.map(n => {
                       let rawLabel = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
                       
-                      // 1. Limpa possíveis lixos HTML que bugam o renderizador
                       rawLabel = String(rawLabel).replace(/<[^>]*>?/gm, ''); 
 
-                      // 2. Quebra o texto matematicamente para forçar um formato quadrado
-                      // (Isso faz com que o shape 'circle' englobe o texto uniformemente)
                       const words = rawLabel.split(' ');
                       let lines = [];
                       let currentLine = '';
@@ -628,7 +640,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       });
                       if (currentLine.trim() !== '') lines.push(currentLine.trim());
                       
-                      // Insere um "enter" limpo, sem conflitos com strings escapadas no React
                       const finalLabel = lines.join(String.fromCharCode(10));
 
                       const bgColor = (n.style && n.style.backgroundColor) ? n.style.backgroundColor : '#2563eb';
@@ -638,7 +649,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           id: n.id, 
                           label: finalLabel,
                           shape: 'circle',
-                          margin: 15, // Cria o respiro interno do círculo
+                          margin: 15, 
                           font: { color: '#ffffff', size: 11, face: 'Inter', bold: true },
                           color: { 
                               background: bgColor, 
@@ -650,7 +661,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       };
                   }));
 
-                  const edges = new vis.DataSet(orgaJson.edges.map(e => {
+                  const edges = new vis.DataSet(uniqueEdgesArray.map(e => {
                       const edgeColor = (e.style && e.style.stroke) ? e.style.stroke : '#94a3b8';
                       const isDashed = (e.style && e.style.strokeDasharray) ? true : false;
                       
@@ -670,7 +681,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   new vis.Network(container, { nodes, edges }, {
                       layout: { randomSeed: 2 },
                       physics: {
-                          // Mudamos para repulsion para evitar o efeito "teia esgarçada" da imagem
                           solver: 'repulsion',
                           repulsion: { nodeDistance: 120, centralGravity: 0.1, springLength: 150 },
                           maxVelocity: 50, timestep: 0.35, stabilization: { iterations: 150 }
