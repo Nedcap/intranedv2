@@ -52,7 +52,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setUploading(true);
 
     const urlsDocumentos: string[] = [];
-    const urlsImagens: string[] = []; // 🔥 CRIAMOS A LISTA DE IMAGENS
+    const urlsImagens: string[] = []; 
     const loteId = `lote-${Date.now()}`;
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
@@ -85,7 +85,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           const pathCodificado = data.path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
           const urlFinalDoArquivo = `${r2BaseUrl}/${pathCodificado}`;
           
-          // 🔥 SEPARAMOS QUEM É PDF E QUEM É IMAGEM
+          // 🔥 SEPARAMOS QUEM É PDF/PLANILHA E QUEM É IMAGEM
           if (item.tipo === "documento") {
              urlsDocumentos.push(urlFinalDoArquivo);
           } else if (item.tipo === "imagem") {
@@ -104,7 +104,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
       
       setTimeout(() => {
-        // 🔥 AGORA ENVIAMOS AS DUAS LISTAS PRA TELA PRINCIPAL!
         onSucesso(urlsDocumentos, urlsImagens); 
         setArquivos([]);
       }, 1000);
@@ -122,7 +121,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       <div className="flex flex-col md:flex-row gap-3">
         <input
           type="file"
-          accept="application/pdf"
+          // 🔥 AQUI ESTÁ A CORREÇÃO! Adicionamos suporte a Excel e CSV
+          accept="application/pdf, .xlsx, .xls, .csv" 
           multiple
           ref={docInputRef}
           onChange={(e) => handleFileChange(e, "documento")}
@@ -145,7 +145,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           disabled={uploading}
           className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
-          📄 Anexar Documentos (PDF)
+          {/* 🔥 Alterei o texto do botão pra ficar claro que aceita planilhas */}
+          📄 Anexar Documentos (PDF, Excel, CSV)
         </button>
         
         <button 
