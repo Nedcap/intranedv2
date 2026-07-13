@@ -57,7 +57,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setArquivos(prev => prev.filter(a => a.id !== id));
   };
 
-  const ejecutarEsteiraUpload = async () => {
+  const executarEsteiraUpload = async () => {
     if (arquivos.length === 0) return;
     setUploading(true);
 
@@ -143,7 +143,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     } catch (err: any) {
       console.error("❌ [ERRO_ESTEIRA_UPLOAD]:", err);
       alert("⚠️ Erro crítico no envio dos arquivos:\n" + err.message);
-    } file {
+    } finally { // ✅ CORRIGIDO: Modificado de 'file' para 'finally'
       setUploading(false);
     }
   };

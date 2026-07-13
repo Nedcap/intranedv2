@@ -1,17 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
-
-// ✅ CORREÇÃO 1: Adiciona as flags experimentais/oficiais de limite de tamanho de corpo de requisição do Next.js
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb', // Abre o cano para arquivos de até 50MB
-    },
-  },
-};
 
 const s3Client = new S3Client({
   region: "auto",
@@ -24,10 +16,13 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
-    // ✅ CORREÇÃO 2: Verificação de segurança preventiva para o tamanho do cabeçalho Content-Length
+    // 🛡️ VERIFICAÇÃO DE SEGURANÇA: Checa o tamanho da requisição direto no cabeçalho antes de processar
     const contentLength = request.headers.get("content-length");
     if (contentLength && parseInt(contentLength) > 52428800) { // 50MB em bytes
-      return NextResponse.json({ error: "Lote de arquivos excede o limite máximo de 50MB permitido." }, { status: 413 });
+      return NextResponse.json(
+        { error: "Lote de arquivos excede o limite máximo de 50MB permitido." }, 
+        { status: 413 }
+      );
     }
 
     const formData = await request.formData();
@@ -40,7 +35,7 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     
-    // 🔥 Mantendo seu padrão limpo e sem gambiarras
+    // 🎯 Mantendo seu padrão limpo de pastas estruturadas no R2
     const path = analiseId ? `clientes/${analiseId}/${file.name}` : `avulsos/${Date.now()}-${file.name}`;
 
     const command = new PutObjectCommand({
@@ -52,15 +47,18 @@ export async function POST(request: Request) {
 
     await s3Client.send(command);
 
-    // Retornamos o PATH exato gerado no R2
+    // Retorna o PATH exato gerado no R2 para o frontend
     return NextResponse.json({ success: true, path });
     
   } catch (error: any) {
     console.error("❌ [R2_SERVER_ERROR]:", error);
     
-    // ✅ CORREÇÃO 3: Captura amigável se o próprio parse do formData estourar limites internos do node
+    // Captura amigável caso o estouro de tamanho ocorra durante o parse do formData
     if (error.message?.includes("large") || error.code === "ERR_HTTP_INVALID_STATUS_CODE") {
-      return NextResponse.json({ error: "O arquivo enviado é grande demais para o manipulador da API." }, { status: 413 });
+      return NextResponse.json(
+        { error: "O arquivo enviado é grande demais para o manipulador da API." }, 
+        { status: 413 }
+      );
     }
     
     return NextResponse.json({ error: "Erro no servidor R2: " + error.message }, { status: 500 });
