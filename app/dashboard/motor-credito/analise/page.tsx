@@ -158,7 +158,7 @@ interface AnaliseData {
   recomendacao_analista?: string;
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
 
-  // 🔥 NOVOS CAMPOS DO MOTOR V8
+  // CAMPOS DO MOTOR V8
   dados_juridico: { relatorio_completo: string };
   parecer_executivo: string;
 
@@ -194,7 +194,6 @@ const DADOS_MODELO: AnaliseData = {
   resumo_visita: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
   
-  // 🔥 INICIALIZAÇÃO SEGURA PRO V8
   dados_juridico: { relatorio_completo: "" },
   parecer_executivo: "",
   
@@ -326,7 +325,7 @@ function MesaAnaliseConteudo() {
           restritivos: listaRestritivos,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
-          dados_juridico: { ...DADOS_MODELO.dados_juridico, ...(dc.dados_juridico || {}) }, // Blindagem extra
+          dados_juridico: { ...DADOS_MODELO.dados_juridico, ...(dc.dados_juridico || {}) }, 
           id: data.id, 
           cnpj: cnpj, 
           razao_social: razao_social, 
@@ -365,6 +364,7 @@ function MesaAnaliseConteudo() {
     }
   };
 
+  // 🔥 AQUI ESTÁ O NOVO ENCAMINHAR COM O MÓDULO DE APRENDIZADO
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
@@ -376,13 +376,55 @@ function MesaAnaliseConteudo() {
 
     try {
       setProcessandoDecisao(true);
+      
+      // 1. Salva a versão final da sua planilha no banco
       await persistirNoBanco(false); 
       
+      // 🔥 2. ROTINA DE APRENDIZADO DA IA (O X9 DA ESTEIRA)
+      try {
+        const { data: analiseDB } = await supabase
+          .from("analises")
+          .select("dados_ia_brutos")
+          .eq("id", analise.id)
+          .single();
+
+        if (analiseDB?.dados_ia_brutos) {
+            const iaOriginal = analiseDB.dados_ia_brutos;
+            
+            // Verifica Endividamento
+            if (JSON.stringify(iaOriginal.endividamento_detalhado) !== JSON.stringify(analise.endividamento_detalhado)) {
+                await supabase.from("memoria_credito").insert({
+                    analise_id: analise.id,
+                    cnpj: analise.cnpj,
+                    categoria: "endividamento",
+                    erro_ia: iaOriginal.endividamento_detalhado,
+                    correcao_humana: analise.endividamento_detalhado
+                });
+                console.log("🧠 Desvio de Endividamento mapeado para aprendizado.");
+            }
+
+            // Verifica Faturamento
+            if (JSON.stringify(iaOriginal.dados_faturamento) !== JSON.stringify(analise.dados_faturamento)) {
+                await supabase.from("memoria_credito").insert({
+                    analise_id: analise.id,
+                    cnpj: analise.cnpj,
+                    categoria: "faturamento",
+                    erro_ia: iaOriginal.dados_faturamento,
+                    correcao_humana: analise.dados_faturamento
+                });
+                console.log("🧠 Desvio de Faturamento mapeado para aprendizado.");
+            }
+        }
+      } catch (memError) {
+        console.error("Erro na rotina de memória da IA (não impede o envio):", memError);
+      }
+      
+      // 3. Finaliza a esteira e manda pro Comitê
       const novoStatus = "aberta";
       const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
       
-      alert(`🚀 Análise finalizada com sucesso! A empresa foi enviada para a Mesa de Comitê.`);
+      alert(`🚀 Análise finalizada com sucesso! Se houve correções, a IA foi notificada para aprender com o erro.`);
       setIdSelecionado(null); 
       setAnalise(DADOS_MODELO); 
       await buscarFilaSupabase(true);
@@ -1233,7 +1275,7 @@ function MesaAnaliseConteudo() {
 
                   <div className="grid grid-cols-1 gap-4">
                     <div>
-                      {/* 🔥 AQUI ENTRA O NOVO PARECER DO KAPPI */}
+                      {/* 🔥 PARECER DO KAPPI */}
                       <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800 flex gap-2 items-center">
                          <span>⚖️ Parecer Jurídico Consolidado (Kappi / Jusbrasil)</span>
                          {analise.status === "em_processamento_ia" && <span className="bg-purple-600 px-1 rounded animate-pulse">LENDO PROCESSOS...</span>}
