@@ -171,21 +171,20 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         if (limpa === '') return null;
 
         try {
-          // Usamos a API URL para isolar o caminho do arquivo sem query params
+          // Resolve URLs relativas injetando o origin se necessário
           const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
           const pathname = parsedUrl.pathname;
 
-          // 🔥 FILTRO CRÍTICO: Só aceita se for extensão de imagem. IGNORA os PDFs!
-          const ehImagem = /\.(jpeg|jpg|gif|png|webp)$/i.test(pathname);
+          // 🔥 CORREÇÃO DA REGEX: Removemos o engessamento do $ final para aceitar parênteses ou parâmetros residuais do R2
+          const ehImagem = /\.(jpeg|jpg|gif|png|webp)/i.test(pathname);
           
           if (ehImagem) {
-            // Retorna a URL envelopada em aspas duplas limpas na montagem posterior
             return limpa; 
           }
           return null;
         } catch (e) {
-          // Fallback caso a URL seja diferentona, mas estritamente terminada em imagem
-          if (/\.(jpeg|jpg|gif|png|webp)$/i.test(limpa.split('?')[0])) {
+          // Fallback mais permissivo caso o parser de URL falhe
+          if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) {
             return limpa;
           }
           return null;
