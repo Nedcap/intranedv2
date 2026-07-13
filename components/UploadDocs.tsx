@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, ChangeEvent, useRef } from "react";
@@ -10,7 +11,6 @@ interface UploadDocsProps {
     cidadeExtenso?: string;
     capital_social?: number;
   };
-  // 🔥 AGORA ELE DEVOLVE OS PDFs E AS IMAGENS SEPARADOS!
   onSucesso: (urlsDocumentos: string[], urlsImagens: string[]) => void;
 }
 
@@ -53,7 +53,10 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
     const urlsDocumentos: string[] = [];
     const urlsImagens: string[] = []; 
-    const loteId = `lote-${Date.now()}`;
+    
+    // ✅ CORREÇÃO 1: loteId inteligente e controlado usando o CNPJ limpo para evitar pastas duplicadas no R2
+    const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
+    const loteId = `lote-${cnpjLimpo || "geral"}-${Date.now()}`;
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
     try {
@@ -76,7 +79,20 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             body: formData,
           });
 
-          const data = await res.json();
+          // ✅ CORREÇÃO 2: Intercepta o erro HTTP 413 (Payload Too Large) antes de tentar rodar o parser de JSON
+          if (res.status === 413) {
+            throw new Error("Arquivo muito grande! O servidor rejeitou por passar do limite de tamanho.");
+          }
+
+          // Lê primeiro como texto puro para evitar a quebra do 'Unexpected token R'
+          const textoResposta = await res.text();
+          let data: any = {};
+          
+          try {
+            data = JSON.parse(textoResposta);
+          } catch {
+            throw new Error(`Resposta inesperada do servidor (Código ${res.status}). Verifique as configurações de limite.`);
+          }
 
           if (!res.ok || data.error) {
             throw new Error(data.error || `Erro HTTP ${res.status}`);
@@ -85,7 +101,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           const pathCodificado = data.path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
           const urlFinalDoArquivo = `${r2BaseUrl}/${pathCodificado}`;
           
-          // 🔥 SEPARAMOS QUEM É PDF/PLANILHA E QUEM É IMAGEM
           if (item.tipo === "documento") {
              urlsDocumentos.push(urlFinalDoArquivo);
           } else if (item.tipo === "imagem") {
@@ -97,20 +112,27 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         } catch (err: any) {
           console.error(err);
           setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "erro", mensagem: err.message } : a));
-          throw new Error(`Falha no upload do arquivo ${item.file.name}. Interrompendo esteira.`);
+          
+          // ✅ CORREÇÃO 3: Usamos 'continue' em vez de travar o laço inteiro. 
+          // Se um arquivo der erro (ex: maior de 5MB), os outros arquivos da fila continuam subindo normalmente!
+          continue; 
         }
       }
 
-      setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
-      
-      setTimeout(() => {
-        onSucesso(urlsDocumentos, urlsImagens); 
-        setArquivos([]);
-      }, 1000);
+      // Sincroniza e avança se pelo menos um arquivo do lote subiu com sucesso
+      if (urlsDocumentos.length > 0 || urlsImagens.length > 0) {
+        setArquivos(prev => prev.map(a => a.status === "sucesso" ? a : { ...a, mensagem: "Arquivo retido devido a erros no lote." }));
+        
+        setTimeout(() => {
+          onSucesso(urlsDocumentos, urlsImagens); 
+          // Limpa a fila mantendo na tela apenas os arquivos que falharam para o usuário ver
+          setArquivos(prev => prev.filter(a => a.status === "erro"));
+        }, 1200);
+      }
 
     } catch (err: any) {
       console.error("❌ [ERRO_ESTEIRA_UPLOAD]:", err);
-      alert("⚠️ Erro no envio dos arquivos:\n" + err.message);
+      alert("⚠️ Erro crítico no envio dos arquivos:\n" + err.message);
     } finally {
       setUploading(false);
     }
@@ -121,7 +143,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       <div className="flex flex-col md:flex-row gap-3">
         <input
           type="file"
-          // 🔥 AQUI ESTÁ A CORREÇÃO! Adicionamos suporte a Excel e CSV
           accept="application/pdf, .xlsx, .xls, .csv" 
           multiple
           ref={docInputRef}
@@ -145,7 +166,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           disabled={uploading}
           className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
-          {/* 🔥 Alterei o texto do botão pra ficar claro que aceita planilhas */}
           📄 Anexar Documentos (PDF, Excel, CSV)
         </button>
         
@@ -173,7 +193,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
                   <div className="truncate">
                     <p className="font-bold text-slate-800 truncate">{item.file.name}</p>
                     <p className={`text-[10px] font-medium font-mono ${
-                      item.status === "erro" ? "text-red-500" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
+                      item.status === "erro" ? "text-red-500 font-bold" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
                     }`}>{item.mensagem}</p>
                   </div>
                 </div>
