@@ -4,6 +4,407 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
+// ============================================================================
+// COMPILADOR EM TEMPO REAL PARA O NOVO MODELO BASEADO EM JSON (V8 MOTOR)
+// ============================================================================
+const formatarMoeda = (valor: number) => {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor || 0);
+};
+
+const compilarJsonParaHtml = (item: any) => {
+  if (!item) return "";
+  
+  const analise = item.dados_consolidados || {};
+  const dataAtual = new Date().toLocaleDateString('pt-BR');
+  const empresaNome = item.empresa_nome || analise.razao_social || 'EMPRESA NÃO INFORMADA';
+  const cnpjDoc = item.cnpj || analise.cnpj || '-';
+  const localizacaoReal = analise.localizacao?.trim() || "Brasil";
+  const enderecoQuery = encodeURIComponent(localizacaoReal);
+
+  let totalLimites = 0;
+  const propostasRows = analise.propostas && analise.propostas.length > 0 
+    ? analise.propostas.map((p: any) => {
+        totalLimites += Number(p.limite) || 0;
+        return `<tr>
+            <td style="font-weight:600;">${p.modalidade || '-'}</td>
+            <td class="text-right font-bold" style="color:var(--blue);">${formatarMoeda(p.limite)}</td>
+            <td class="text-center">${p.prazo || '-'}</td>
+            <td class="text-center">${p.tranche || '-'}</td>
+            <td class="text-center font-bold">${p.taxa || '-'}</td>
+            <td>${p.garantia || '-'}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6" class="text-center" style="color:var(--muted);">Nenhuma proposta informada.</td></tr>`;
+
+  const empresasRows = analise.empresas_grupo && analise.empresas_grupo.length > 0 
+    ? analise.empresas_grupo.map((e: any) => `<tr>
+          <td style="font-weight:600; font-size:0.85rem;">${e.empresa || '-'}</td>
+          <td style="font-size:0.85rem;" class="font-mono">${e.cnpj || '-'}</td>
+          <td style="font-size:0.85rem; text-align:center;">${e.fundacao || '-'}</td>
+          <td style="font-size:0.85rem; text-align:center;">${e.idade || '-'}</td>
+      </tr>`).join("") 
+    : `<tr><td colspan="4" class="text-center" style="color:var(--muted);">Nenhuma empresa informada.</td></tr>`;
+
+  const socioRows = analise.socios && analise.socios.length > 0 
+    ? analise.socios.map((s: any) => `<tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 8px 10px;"><strong>${s.nome || '-'}</strong></td>
+          <td style="padding: 8px 10px; color: var(--muted); text-align:center;">${s.funcao || 'Sócio'}</td>
+          <td style="padding: 8px 10px; color: var(--muted); text-align:center;">Assina Contrato: ${s.figure_contrato || 'Sim'}</td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 600;" class="font-mono">${s.perc || 0}%</td>
+      </tr>`).join("") 
+    : `<tr><td colspan="4" style="color:var(--muted); text-align:center; padding: 10px;">Nenhum sócio informado.</td></tr>`;
+
+  let totalPatrimonio = 0;
+  const patrimonioRows = analise.patrimonios && analise.patrimonios.length > 0 
+    ? analise.patrimonios.map((p: any) => {
+        totalPatrimonio += Number(p.valor) || 0;
+        return `<tr>
+            <td style="font-weight:600;">${p.descricao || '-'} <span style="font-weight:normal; color:var(--muted);">(${p.socio || 'Sócio'})</span></td>
+            <td class="text-right font-bold font-mono text-green-700">${formatarMoeda(p.valor)}</td>
+          </tr>`;
+      }).join("")
+    : ``;
+
+  let totalBancosDet = 0;
+  let curtoPrazo = 0, longoPrazo = 0;
+  const bancoRows = analise.endividamento_detalhado && analise.endividamento_detalhado.length > 0 
+    ? analise.endividamento_detalhado.map((b: any) => {
+        const v = Number(b.saldo) || 0;
+        totalBancosDet += v;
+        if (b.prazo === "Curto Prazo") curtoPrazo += v; else longoPrazo += v;
+        return `<tr>
+            <td style="font-weight:600; font-size:0.85rem;">${b.instituicao || '-'}</td>
+            <td style="font-size:0.85rem;">${b.modalidade || '-'} <span style="color:var(--muted); font-size:10px;">(${b.tipo} - ${b.prazo})</span></td>
+            <td class="text-right font-bold font-mono" style="font-size:0.85rem; color:var(--red);">${formatarMoeda(v)}</td>
+        </tr>`;
+    }).join("")
+    : `<tr><td colspan="3" class="text-center" style="color:var(--muted);">Nenhum detalhamento bancário mapeado.</td></tr>`;
+
+  let totalRestritivos = 0, qtdRestritivos = 0;
+  const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
+    ? analise.restritivos.map((r: any) => {
+        totalRestritivos += Number(r.valor) || 0;
+        qtdRestritivos += Number(r.qtd) || 1;
+        return `<tr>
+            <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
+            <td style="color:var(--yellow); font-weight:bold;">${r.restritivo || '-'}</td>
+            <td class="text-center font-mono">${r.qtd || 1}</td>
+            <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.valor)}</td>
+        </tr>`;
+    }).join("") : ``;
+
+  const refRows = analise.referencias && analise.referencias.length > 0
+    ? analise.referencias.map((r: any) => `<tr>
+        <td style="font-weight:600;">${r.instituicao || '-'}</td>
+        <td class="text-center font-mono">${r.cliente_desde ? new Date(r.cliente_desde).toLocaleDateString('pt-BR') : '-'}</td>
+        <td class="text-center font-mono">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
+        <td class="text-right font-bold font-mono text-blue-600">${formatarMoeda(r.limite_global)}</td>
+        <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.risco_total)}</td>
+        <td class="text-center" style="font-size:11px;">Pontual: ${r.liquidez_pontual || '-'} | 5d: ${r.liquidez_5_dias || '-'}</td>
+        <td class="text-center font-mono">${r.concentracao || 0}%</td>
+      </tr>`).join("")
+    : `<tr><td colspan="7" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
+
+  const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+  const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
+  const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+
+  const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  let tot2024 = 0, tot2025 = 0, tot2026 = 0;
+  let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
+
+  const fatRows = meses.map(mes => {
+    const val2024 = Number(analise.dados_faturamento?.["2024"]?.[mes]) || 0;
+    const val2025 = Number(analise.dados_faturamento?.["2025"]?.[mes]) || 0;
+    const val2026 = Number(analise.dados_faturamento?.["2026"]?.[mes]) || 0;
+    
+    tot2024 += val2024; if(val2024 > 0) qtd2024++;
+    tot2025 += val2025; if(val2025 > 0) qtd2025++;
+    tot2026 += val2026; if(val2026 > 0) qtd2026++;
+
+    const delta1 = val2024 > 0 ? ((val2025 - val2024) / val2024) * 100 : 0;
+    const delta2 = val2025 > 0 ? ((val2026 - val2025) / val2025) * 100 : 0;
+    
+    return `<tr>
+        <td style="font-weight: 600; text-transform: uppercase;">${mes}</td>
+        <td class="text-center font-mono">${formatarMoeda(val2026)}</td>
+        <td class="text-center font-mono ${delta2 > 0 ? 'delta-pos' : delta2 < 0 ? 'delta-neg' : ''}">${delta2 !== 0 ? delta2.toFixed(1) + '%' : '-'}</td>
+        <td class="text-center font-mono">${formatarMoeda(val2025)}</td>
+        <td class="text-center font-mono ${delta1 > 0 ? 'delta-pos' : delta1 < 0 ? 'delta-neg' : ''}">${delta1 !== 0 ? delta1.toFixed(1) + '%' : '-'}</td>
+        <td class="text-center font-mono">${formatarMoeda(val2024)}</td>
+    </tr>`;
+  }).join("");
+
+  const med2024 = qtd2024 > 0 ? tot2024 / qtd2024 : 0;
+  const med2025 = qtd2025 > 0 ? tot2025 / qtd2025 : 0;
+  const med2026 = qtd2026 > 0 ? tot2026 / qtd2026 : 0;
+
+  const faturamentoReferencia = med2026 > 0 ? med2026 : (med2025 > 0 ? med2025 : med2024);
+  const alavancagem = faturamentoReferencia > 0 ? (totalBancosDet / faturamentoReferencia).toFixed(2) : "0.00";
+
+  const arrayFat2024 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2024"]?.[m] || 0));
+  const arrayFat2025 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2025"]?.[m] || 0));
+  const arrayFat2026 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2026"]?.[m] || 0));
+
+  const endividamentoValido = analise.endividamento_detalhado ? analise.endividamento_detalhado.filter((e:any) => e.saldo > 0) : [];
+  const chartEndivData = endividamentoValido.reduce((acc: any, d: any) => {
+    const mod = d.modalidade || "Outros";
+    acc[mod] = (acc[mod] || 0) + Number(d.saldo || 0);
+    return acc;
+  }, {});
+  const arrayEndivLabels = JSON.stringify(Object.keys(chartEndivData || {}));
+  const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
+
+  // Varredura Inteligente de Mídias
+  const imagensExtraidas = new Set<string>();
+  const normalizarUrl = (u: any) => {
+    if (typeof u !== 'string') return null;
+    const limpa = u.trim();
+    if (limpa === '') return null;
+    try {
+      const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
+      if (/\.(jpeg|jpg|gif|png|webp)/i.test(parsedUrl.pathname)) return limpa;
+      return null;
+    } catch {
+      if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) return limpa;
+      return null;
+    }
+  };
+
+  if (Array.isArray(analise.galeria_urls)) {
+    analise.galeria_urls.forEach((url: string) => { const v = normalizarUrl(url); if(v) imagensExtraidas.add(v); });
+  }
+  if (analise.anexos) {
+    if (Array.isArray(analise.anexos.galeria_urls)) {
+      analise.anexos.galeria_urls.forEach((url: string) => { const v = normalizarUrl(url); if(v) imagensExtraidas.add(v); });
+    }
+    const f = normalizarUrl(analise.anexos.fachada_url); if (f) imagensExtraidas.add(f);
+    const vi = normalizarUrl(analise.anexos.fotos_visita_url); if (vi) imagensExtraidas.add(vi);
+  }
+  if (Array.isArray(item.dados_documentos)) {
+    item.dados_documentos.forEach((url: string) => { const v = normalizarUrl(url); if(v) imagensExtraidas.add(v); });
+  }
+
+  const fotosUnicas = Array.from(imagensExtraidas);
+  const galeriaHTML = fotosUnicas.length > 0 
+    ? `<div class="print-break"></div>
+    <h2 style="margin-top: 3.5rem;">📸 Galeria de Fotos e Evidências (${fotosUnicas.length})</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2.5rem;">
+        ${fotosUnicas.map(url => `
+            <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc;">
+                <img src="${url}" style="width: 100%; height: 260px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" alt="Evidência">
+            </div>
+        `).join("")}
+    </div>` : '';
+
+  const organogramaUrlTratado = normalizarUrl(analise.anexos?.organograma_url);
+
+  return `<!DOCTYPE html>
+  <html lang="pt-BR">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Dossiê Executivo - ${empresaNome}</title>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+      <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+      <style>
+          :root { --bg: #ffffff; --card: #ffffff; --text: #0f172a; --muted: #64748b; --blue: #2563eb; --blue-dark: #1e3a8a; --border: #e2e8f0; --green: #16a34a; --red: #dc2626; --yellow: #ca8a04; }
+          body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; font-size: 13px; }
+          .container { max-width: 1200px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, var(--blue-dark), var(--blue)); color: white; padding: 2.5rem; border-radius: 0.75rem; box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.2); margin-bottom: 2rem; display: flex; flex-direction: column; gap: 1rem; align-items: flex-start; }
+          @media(min-width: 768px){ .header { flex-direction: row; justify-content: space-between; align-items: center; } }
+          .header h1 { margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; text-transform: uppercase;}
+          .header .meta { font-size: 0.9rem; opacity: 0.9; margin-top: 0.5rem; font-weight: 500; }
+          .header .badge-top { background: rgba(255,255,255,0.25); padding: 0.5rem 1.25rem; border-radius: 2rem; font-weight: 700; font-size: 0.85rem; backdrop-filter: blur(4px); text-transform: uppercase; border: 1px solid rgba(255,255,255,0.3);}
+          h2 { font-size: 1.2rem; font-weight: 800; color: var(--blue-dark); margin: 2.5rem 0 1.25rem 0; display: flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;}
+          h2::before { content: ""; display: inline-block; width: 6px; height: 1.2rem; background-color: var(--blue); border-radius: 4px; }
+          .grid-2, .grid-3, .grid-4 { display: grid; gap: 1.5rem; grid-template-columns: 1fr; }
+          @media (min-width: 768px) { .grid-2 { grid-template-columns: repeat(2, 1fr); } .grid-3 { grid-template-columns: repeat(3, 1fr); } .grid-4 { grid-template-columns: repeat(4, 1fr); } }
+          .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .metric-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+          .metric-value { font-size: 1.5rem; font-weight: 800; color: var(--text); }
+          .table-wrap { overflow-x: auto; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
+          table { width: 100%; border-collapse: collapse; text-align: left; }
+          th, td { padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border); }
+          th { background: #f8fafc; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; }
+          tr:hover { background: #f1f5f9; }
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          .delta-pos { color: var(--green); font-weight: 700; }
+          .delta-neg { color: var(--red); font-weight: 700; }
+          .row-total td { background: #f8fafc; font-weight: 800; font-size: 0.9rem; border-top: 2px solid var(--border); }
+          .chart-container { position: relative; height: 280px; width: 100%; }
+          .parecer-wrapper { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); overflow: hidden; position: relative; margin-bottom: 2rem;}
+          .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--blue); }
+          .parecer-header { background: #f8fafc; padding: 1.25rem 2rem; font-weight: 800; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size:1rem;}
+          .parecer-body { padding: 2rem; font-size: 1rem; line-height: 1.7; color: #334155; white-space: pre-wrap; text-align: justify;}
+          .parecer-footer { background: #f8fafc; padding: 1rem 2rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.85rem; font-weight: 600; text-align: right;}
+          .btn-maps { background: var(--blue); color: white; padding: 10px 18px; border-radius: 0.5rem; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-block; transition: 0.2s; box-shadow: 0 4px 6px rgba(37,99,235,0.2); border: 1px solid rgba(0,0,0,0.1); }
+          .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(37,99,235,0.3); }
+          .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #f8fafc; border: 1px dashed #cbd5e1; }
+          ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
+          @media print { .print-break { page-break-before: always; } body { background: white; } .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } .header { padding: 1rem; color: black; background: white; border: 2px solid black; } }
+      </style>
+  </head>
+  <body>
+  <div class="container">
+      <div class="header">
+          <div>
+              <h1>${empresaNome}</h1>
+              <div class="meta">CNPJ: ${cnpjDoc} | Data Emissão: ${dataAtual} | Analista: ${analise.analista || item.comercial || '-'} | Gerente: ${analise.gerente || '-'}</div>
+          </div>
+          <div class="badge-top">RECOMENDAÇÃO DO ANALISTA: ${analise.recomendacao_analista || 'EM ANÁLISE'}</div>
+      </div>
+
+      <div class="grid-3" style="margin-bottom: 1.5rem;">
+          <div class="card" style="grid-column: span 1; background:#f8fafc; display:flex; flex-direction:column; justify-content:center; align-items:center; border: 2px dashed var(--blue);">
+              <div class="metric-label">Rating Sugerido</div>
+              <div class="metric-value" style="color: var(--yellow); font-size: 1.8rem;">${analise.rating || '-'}</div>
+          </div>
+          <div class="card" style="grid-column: span 2;">
+              <div class="metric-label">Resumo Executivo (Visita Comercial)</div>
+              <div style="font-size: 0.9rem; color: #475569; line-height: 1.6; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo cadastrado.'}</div>
+          </div>
+      </div>
+
+      ${analise.parecer_executivo ? `
+      <div class="card" style="margin-bottom: 1.5rem; border-top: 4px solid var(--blue); background: #f4f7ff;">
+          <div style="font-weight: 800; font-size: 0.95rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 0.75rem;">🧠 Súmula Executiva de Crédito (Parecer Motor IA V8)</div>
+          <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.65; white-space: pre-wrap;">${analise.parecer_executivo}</div>
+      </div>` : ''}
+
+      <h2>1. Propostas e Condições Comerciais</h2>
+      <div class="table-wrap">
+          <table>
+              <thead><tr><th>Modalidade</th><th class="text-right">Limite</th><th class="text-center">Prazo Médio</th><th class="text-center">Tranche</th><th class="text-center">Taxa</th><th>Garantia</th></tr></thead>
+              <tbody>
+                  ${propostasRows}
+                  ${totalLimites > 0 ? `<tr class="row-total"><td>LIMITE TOTAL SOLICITADO</td><td class="text-right">${formatarMoeda(totalLimites)}</td><td colspan="4"></td></tr>` : ''}
+              </tbody>
+          </table>
+      </div>
+
+      <h2>2. Background da Empresa & Societário</h2>
+      <div class="table-wrap">
+          <table>
+              <thead><tr><th>Empresa (Grupo Econômico)</th><th>CNPJ</th><th class="text-center">Fundação</th><th class="text-center">Idade</th></tr></thead>
+              <tbody>${empresasRows}</tbody>
+          </table>
+      </div>
+
+      <div class="grid-2">
+          <div class="card">
+              <div class="metric-label">Localização & Ramo de Atividade</div>
+              <div style="font-weight: 700;">${analise.localizacao || '-'}<br><span style="font-weight:500; color:var(--muted);">${analise.ramo || '-'}</span></div>
+          </div>
+          <div class="card">
+              <div class="metric-label">Quadro Societário & Assinaturas</div>
+              <table style="width:100%; font-size: 0.85rem;">${socioRows}</table>
+          </div>
+      </div>
+
+      <h2 style="margin-top: 3.5rem;">3. Organograma / Teia Societária</h2>
+      <div style="margin-bottom: 2.5rem;">
+          ${analise.organograma_json && analise.organograma_json.nodes ? `
+          <div class="card"><div id="network-container" class="org-container"></div></div>` : organogramaUrlTratado ? `
+          <div class="card" style="display:flex; justify-content:center;"><img src="${organogramaUrlTratado}" style="max-width: 100%; max-height: 600px; object-fit: contain;"></div>` : `
+          <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted);">[NENHUM ORGANOGRAMA VINCULADO]</div>`}
+      </div>
+
+      ${galeriaHTML}
+
+      <div class="print-break"></div>
+      <h2>4. Faturamento Consolidado</h2>
+      <div class="card" style="margin-bottom: 1.5rem;"><div class="chart-container"><canvas id="fatChart"></canvas></div></div>
+      <div class="table-wrap">
+          <table>
+              <thead><tr><th>Mês</th><th class="text-center">Realizado 2026</th><th class="text-center">Variação (%)</th><th class="text-center">Realizado 2025</th><th class="text-center">Variação (%)</th><th class="text-center">Realizado 2024</th></tr></thead>
+              <tbody>
+                  ${fatRows}
+                  <tr class="row-total"><td>TOTAL ANUAL</td><td class="text-center">${formatarMoeda(tot2026)}</td><td class="text-center">--</td><td class="text-center">${formatarMoeda(tot2025)}</td><td class="text-center">--</td><td class="text-center">${formatarMoeda(tot2024)}</td></tr>
+              </tbody>
+          </table>
+      </div>
+
+      <h2>5. Potencial de Negócios</h2>
+      <div class="grid-2">
+          <div class="card">
+              <div style="font-size:0.9rem;">Ticket Médio: <strong>${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong></div>
+              <div style="font-size:0.9rem;">Prazo de Vendas: <strong>${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></div>
+          </div>
+          <div class="card" style="background:#f0fdf4; border: 1px solid #86efac; text-align:center;">
+              <div class="metric-label" style="color:#166534;">Potencial Real Estimado</div>
+              <div class="metric-value" style="color:#15803d; font-size:2.2rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
+          </div>
+      </div>
+
+      <div class="print-break"></div>
+      <h2>6. Passivo Bancário / Endividamento (SCR Bacen)</h2>
+      <div class="grid-3">
+          <div class="table-wrap" style="grid-column: span 1;">
+              <table>
+                  <tr><td>Volume Total</td><td class="text-right font-bold" style="color:var(--red);">${formatarMoeda(totalBancosDet)}</td></tr>
+                  <tr><td colspan="2" class="text-center"><strong>${alavancagem} x Fat. Médio</strong></td></tr>
+              </table>
+          </div>
+          <div class="card" style="grid-column: span 2;"><div class="chart-container" style="height: 180px;"><canvas id="endivChart"></canvas></div></div>
+      </div>
+
+      <h2>7. Referências e Fundos de Investimentos</h2>
+      <div class="table-wrap"><table><tbody>${refRows}</tbody></table></div>
+
+      <h2>8. Apontamentos Restritivos e Análise Jurídica</h2>
+      <div class="grid-2">
+          <div class="card" style="border-left: 4px solid #fca5a5;"><div>⚠️ Litígios Ativos</div><p>${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento crítico.'}</p></div>
+          <div class="card" style="border-left: 4px solid #93c5fd;"><div>🔍 Compliance</div><p>${analise.noticias_midia || 'Nada consta em mídias sociais ou desabonadores.'}</p></div>
+      </div>
+
+      <div class="parecer-wrapper" style="margin-top: 3rem;">
+          <div class="parecer-header">Parecer Técnico / Deliberação da Mesa de Risco</div>
+          <div class="parecer-body">
+              <strong>RECOMENDAÇÃO TÉCNICA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</strong><br/><br/>
+              <p>Histórico e Parecer do Comitê:</p>
+              <div id="historico-comite-placeholder"></div>
+          </div>
+      </div>
+  </div>
+
+  <script>
+      const endivLabels = ${arrayEndivLabels}; const endivData = ${arrayEndivData};
+      const ctxFat = document.getElementById('fatChart').getContext('2d');
+      new Chart(ctxFat, {
+          type: 'bar',
+          data: {
+              labels: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
+              datasets: [
+                  { label: '2026', data: ${arrayFat2026}, backgroundColor: '#2563eb' },
+                  { label: '2025', data: ${arrayFat2025}, backgroundColor: '#60a5fa' },
+                  { label: '2024', data: ${arrayFat2024}, backgroundColor: '#cbd5e1' }
+              ]
+          },
+          options: { responsive: true, maintainAspectRatio: false }
+      });
+
+      if(endivLabels.length > 0 && endivData.length > 0) {
+          const ctxEndiv = document.getElementById('endivChart').getContext('2d');
+          new Chart(ctxEndiv, { type: 'pie', data: { labels: endivLabels, datasets: [{ data: endivData, backgroundColor: ['#2563eb', '#dc2626', '#16a34a', '#ca8a04'] }] }, options: { responsive: true, maintainAspectRatio: false } });
+      }
+
+      const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
+      if (orgaJson && orgaJson.nodes && orgaJson.edges) {
+          const container = document.getElementById('network-container');
+          if (container) {
+              const nodes = new vis.DataSet(orgaJson.nodes.map(n => ({ id: n.id, label: n.label || n.id, shape: 'circle', color: '#2563eb', font: { color: '#ffffff' } })));
+              const edges = new vis.DataSet(orgaJson.edges.map(e => ({ from: e.from || e.source, to: e.to || e.target, arrows: 'to', color: '#94a3b8' })));
+              new vis.Network(container, { nodes, edges }, { physics: { solver: 'repulsion' } });
+          }
+      }
+  </script>
+  </body>
+  </html>`;
+};
+
 function calcularDiasUteis(dInicio: Date, dFim: Date) {
   let count = 0;
   const atual = new Date(dInicio.getTime());
@@ -34,7 +435,6 @@ function simplificarNome(nome: string): string {
   return n.replace(/\s+/g, " ").trim();
 }
 
-// 🌲 Função de varredura profunda de equipe (Grafo/Multi-Líderes)
 const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
   if (visitados.has(liderId)) return [];
   visitados.add(liderId);
@@ -59,14 +459,12 @@ export default function FinalizadosPage() {
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null);
   
-  // 🎛️ CONTROLES DE FOCO EXECUTIVO
   const [modoFocoConsulta, setModoFocoComite] = useState(false);
   const [empresaFocoAtivo, setEmpresaFocoAtivo] = useState<any>(null);
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [htmlPreviewsInline, setHtmlPreviewsInline] = useState<Record<string, string>>({});
   
-  // 🎯 FIX DEFINITIVO: Declarando o estado que o pre-render do Next.js cobrou no build
   const [avisoCopia, setAvisoCopia] = useState(false);
 
   const [linhaEditando, setLinhaEditando] = useState<string | null>(null);
@@ -103,13 +501,23 @@ export default function FinalizadosPage() {
     }
   }, []);
 
-  const baixarHtmlInline = async (id: string, caminho: string) => {
-    const urlLimpa = caminho.trim();
+  // 🔥 VINCULAÇÃO INTELIGENTE DE PREVIEWS (SUPORTA HTML ANTIGO E MODELOS EM JSON)
+  const vincularPreVisualizacao = async (item: any) => {
+    // Se o item já tiver os dados consolidados do novo motor JSON, compila em tempo real
+    if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
+      const htmlCompilado = compilarJsonParaHtml(item);
+      setHtmlPreviewsInline(prev => ({ ...prev, [item.id]: htmlCompilado }));
+      return;
+    }
+
+    // Comportamento Legado: Busca arquivo físico .html se não houver o JSON estruturado
+    if (!item.caminho_local) return;
+    const urlLimpa = item.caminho_local.trim();
     if (urlLimpa.startsWith("http")) { 
       try {
         const res = await fetch(urlLimpa);
         const text = await res.text();
-        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+        setHtmlPreviewsInline(prev => ({ ...prev, [item.id]: text }));
       } catch { /* fallback */ }
       return;
     }
@@ -119,12 +527,11 @@ export default function FinalizadosPage() {
       const { data } = await supabase.storage.from("analises").download(nomeArquivo);
       if (data) {
         const text = await data.text();
-        setHtmlPreviewsInline(prev => ({ ...prev, [id]: text }));
+        setHtmlPreviewsInline(prev => ({ ...prev, [item.id]: text }));
       }
     } catch (err) { console.error(err); }
   };
 
-  // 🎯 FUNÇÃO AJUSTADA COM INTELIGÊNCIA DE REDE HIERÁRQUICA
   const carregarHistorico = async () => {
     try {
       setCarregando(true);
@@ -135,24 +542,15 @@ export default function FinalizadosPage() {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-        // 🛡️ Se NÃO FOR MASTER OU DIRETOR, aplica o filtro de hierarquia
         if (cargoUser !== "master" && cargoUser !== "diretor") {
-          
-          // Busca todos os usuários para ler a árvore de equipe
           const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
-          
           if (todosUsuarios) {
-            // Descobre todo mundo que está abaixo do usuário logado na árvore
             const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
-            
             const nomesPermitidos = todosUsuarios
               .filter(u => idsPermitidos.includes(u.id))
               .map(u => u.nome);
-
-            // Filtra a consulta puxando as análises de qualquer membro da equipe dele
             query = query.in("comercial", nomesPermitidos);
           } else {
-            // Fallback de segurança se falhar a busca da tabela de usuários
             query = query.eq("comercial", user.nome);
           }
         }
@@ -203,7 +601,7 @@ export default function FinalizadosPage() {
 
         historicoMapeado.forEach(item => {
           carregarVotosIniciais(item.empresa_nome);
-          if (item.caminho_local) baixarHtmlInline(item.id, item.caminho_local);
+          vintularPreVisualizacao(item);
         });
       }
     } catch (err) { 
@@ -256,6 +654,7 @@ export default function FinalizadosPage() {
     setChatMsgs([]);
   };
 
+  // 🔥 BANCO DE IMPRESSÃO INTEGRADO: SUPORTA ARQUIVOS .HTML E OBJETOS DO BANCO
   const baixarPdfAnalise = async (item: any) => {
     setGerandoPdfId(item.id);
     try {
@@ -277,7 +676,11 @@ export default function FinalizadosPage() {
       chatHtml += `</div>`;
 
       let analiseHtmlText = "";
-      if (item.caminho_local) {
+      if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
+        // Renderização instantânea do JSON V8
+        analiseHtmlText = compilarJsonParaHtml(item);
+      } else if (item.caminho_local) {
+        // Fallback Legado para arquivos HTML gravados
         const urlLimpa = item.caminho_local.trim();
         if (urlLimpa.startsWith("http")) {
           try {
@@ -294,21 +697,24 @@ export default function FinalizadosPage() {
 
       const parser = new DOMParser();
       const doc = parser.parseFromString(analiseHtmlText, "text/html");
-      const allElements = doc.body.querySelectorAll("*");
       
-      for (const el of Array.from(allElements)) {
-        if (el.textContent && el.textContent.trim().toLowerCase() === "histórico do comitê" && el.children.length === 0) {
-          let blockParent = el;
-          while (blockParent && !['DIV', 'SECTION', 'TD', 'LI'].includes(blockParent.tagName)) {
-             if(blockParent.parentElement) blockParent = blockParent.parentElement;
-             else break;
+      // Injeta os históricos na mesa do PDF compilado
+      const targetPlaceholder = doc.getElementById("historico-comite-placeholder");
+      if (targetPlaceholder) {
+        targetPlaceholder.innerHTML = chatHtml;
+      } else {
+        const allElements = doc.body.querySelectorAll("*");
+        for (const el of Array.from(allElements)) {
+          if (el.textContent && el.textContent.trim().toLowerCase() === "histórico do comitê" && el.children.length === 0) {
+            let blockParent = el;
+            while (blockParent && !['DIV', 'SECTION', 'TD', 'LI'].includes(blockParent.tagName)) {
+               if(blockParent.parentElement) blockParent = blockParent.parentElement;
+               else break;
+            }
+            if (blockParent) blockParent.insertAdjacentHTML('beforeend', chatHtml);
+            else el.insertAdjacentHTML('afterend', chatHtml);
+            break;
           }
-          if (blockParent) {
-            blockParent.insertAdjacentHTML('beforeend', chatHtml);
-          } else {
-            el.insertAdjacentHTML('afterend', chatHtml);
-          }
-          break;
         }
       }
 
@@ -390,8 +796,6 @@ export default function FinalizadosPage() {
 
     return (
       <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
-        
-        {/* Cabeçalho de Comando Superior */}
         <div className="bg-slate-950 text-white p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-4">
             <span className="text-xl">🗂</span>
@@ -422,10 +826,7 @@ export default function FinalizadosPage() {
           </div>
         </div>
 
-        {/* Corpo Split Layout */}
         <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
-          
-          {/* LADO ESQUERDO: RELATÓRIO COMPLETO */}
           <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
             <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800 flex flex-col">
               {htmlPreview ? (
@@ -433,16 +834,13 @@ export default function FinalizadosPage() {
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-400 italic text-xs gap-3 font-mono">
                   <span className="animate-spin text-2xl">⏳</span>
-                  Renderizando HTML nativo arquivado...
+                  Renderizando HTML estruturado...
                 </div>
               )}
             </div>
           </div>
 
-          {/* LADO DIREITO: HISTÓRICO DE PARECERES E ATAS CONGELADAS */}
           <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-900">
-            
-            {/* Bloco 1: Histórico de Votos Imutável */}
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left relative">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2 mb-2 flex items-center gap-2">
                 📋 Votos Registrados
@@ -471,7 +869,6 @@ export default function FinalizadosPage() {
               </div>
             </div>
 
-            {/* Bloco 2: Histórico de Conversas */}
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left relative">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2 mb-2 flex items-center gap-2">
                 💬 Atas e Alinhamentos Finais
@@ -503,16 +900,12 @@ export default function FinalizadosPage() {
     );
   }
 
-  // 🏛 ... INTERFACE 2: VISÃO PADRÃO (LISTAGEM DE HISTÓRICO)
   if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse text-xs uppercase tracking-widest">A varrer arquivo histórico do comitê...</div>;
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
-      
-      {/* Toast flutuante invisível mas mantido para evitar o aviso do React */}
       <div className="hidden">{avisoCopia && "Copiado!"}</div>
       
-      {/* HEADER DA PÁGINA */}
       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800 tracking-tight uppercase">📚 Arquivo do Comitê (Finalizados)</h2>
@@ -520,7 +913,6 @@ export default function FinalizadosPage() {
         </div>
       </div>
       
-      {/* SEÇÃO DE FILTROS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
         <div ref={refMes} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">Mês de Recebimento:</label>
@@ -574,7 +966,6 @@ export default function FinalizadosPage() {
         </div>
       </div>
 
-      {/* CARDS INDICADORES DE SLA */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         <div className="bg-slate-900 text-white p-6 rounded-xl text-center shadow-md flex flex-col justify-center transition-transform hover:-translate-y-1">
           <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider">Total de Análises</span>
@@ -596,7 +987,6 @@ export default function FinalizadosPage() {
         </div>
       </div>
 
-      {/* INPUT DE BUSCA TEXTUAL DIRETA */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-3 pt-4">
         <h2 className="text-xs font-black text-slate-500 tracking-wider uppercase">📋 Registros Filtrados da Carteira</h2>
         <div className="relative w-full md:w-80">
@@ -611,7 +1001,6 @@ export default function FinalizadosPage() {
         </div>
       </div>
 
-      {/* TABELA DE HISTÓRICO GERAL */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden mt-2">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-[13px] min-w-[1000px]">
@@ -645,7 +1034,6 @@ export default function FinalizadosPage() {
                         {item.empresa_nome}
                       </td>
                       
-                      {/* Datas */}
                       <td className="p-4 text-center text-slate-500">
                         {editando ? (
                           <input type="date" value={editDataRec} onChange={(e) => setEditDataRec(e.target.value)} className="w-full p-1.5 border border-slate-300 rounded text-[11px] outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
@@ -662,12 +1050,10 @@ export default function FinalizadosPage() {
                         )}
                       </td>
 
-                      {/* SLA */}
                       <td className="p-4 text-center font-black font-mono text-blue-700 bg-blue-50/20 border-l border-r border-blue-50">
                         {item._sla} d
                       </td>
                       
-                      {/* Resultado */}
                       <td className="p-4 text-center">
                         <span className={`inline-flex items-center px-2.5 py-1 text-[9px] font-black rounded border uppercase tracking-wider shadow-xs ${
                           eAprovado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
@@ -676,7 +1062,6 @@ export default function FinalizadosPage() {
                         </span>
                       </td>
                       
-                      {/* Ações */}
                       <td className="p-4 flex gap-2 justify-center">
                         {editando ? (
                           <>
