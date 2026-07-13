@@ -165,37 +165,62 @@ const montarHtmlDossie = (item: any) => {
   const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
   // ==========================================
-  // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS (GALERIA INFINITA)
+  // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS CORRIGIDA
   // ==========================================
   const imagensExtraidas = new Set<string>();
 
+  const normalizarUrl = (u: any) => {
+    if (typeof u !== 'string') return null;
+    const limpa = u.trim();
+    if (limpa === '') return null;
+
+    try {
+      const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
+      const pathname = parsedUrl.pathname;
+
+      // 🔥 CORREÇÃO CRÍTICA DA REGEX: Permissiva com parênteses e tokens (Sem o $ final)
+      const ehImagem = /\.(jpeg|jpg|gif|png|webp)/i.test(pathname);
+      
+      if (ehImagem) {
+        return limpa; 
+      }
+      return null;
+    } catch (e) {
+      if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) {
+        return limpa;
+      }
+      return null;
+    }
+  };
+
   if (Array.isArray(analise.galeria_urls)) {
-    analise.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+    analise.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
   }
   
   if (analise.anexos) {
     if (Array.isArray(analise.anexos.galeria_urls)) {
-      analise.anexos.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+      analise.anexos.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
     }
-    if (typeof analise.anexos.fachada_url === 'string' && analise.anexos.fachada_url.trim() !== '') {
-      imagensExtraidas.add(analise.anexos.fachada_url);
-    }
-    if (typeof analise.anexos.fotos_visita_url === 'string' && analise.anexos.fotos_visita_url.trim() !== '') {
-      imagensExtraidas.add(analise.anexos.fotos_visita_url);
-    }
+    const fachada = normalizarUrl(analise.anexos.fachada_url);
+    if (fachada) imagensExtraidas.add(fachada);
+
+    const visita = normalizarUrl(analise.anexos.fotos_visita_url);
+    if (visita) imagensExtraidas.add(visita);
   }
 
   // Verifica na raiz do item os dados_documentos
   if (Array.isArray(item.dados_documentos)) {
     item.dados_documentos.forEach((url: string) => {
-      if (typeof url === 'string' && url.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i)) {
-        imagensExtraidas.add(url);
+      const validUrl = normalizarUrl(url);
+      if (validUrl) {
+        imagensExtraidas.add(validUrl);
       }
     });
   }
 
   const fotosUnicas = Array.from(imagensExtraidas);
 
+  // 🔥 TAG HTML BLINDADA: Trocado aspas simples internas por aspas duplas direct no src
   const galeriaHTML = fotosUnicas.length > 0 
     ? `
     <div class="print-break"></div>
@@ -208,6 +233,9 @@ const montarHtmlDossie = (item: any) => {
         `).join("")}
     </div>
     ` : '';
+
+  // Organograma URL Tratado
+  const organogramaUrlTratado = normalizarUrl(analise.anexos?.organograma_url);
 
   return `
   <!DOCTYPE html>
@@ -389,7 +417,7 @@ const montarHtmlDossie = (item: any) => {
           </div>
           <div class="card">
               <div class="metric-label">Principais Fornecedores</div>
-              <ul class="simple-list">${fornecedoresRows}</ul>
+                  <ul class="simple-list">${fornecedoresRows}</ul>
           </div>
           <div class="card">
               <div class="metric-label">Principais Concorrentes</div>
@@ -404,9 +432,9 @@ const montarHtmlDossie = (item: any) => {
           <div class="card" style="padding:1rem;">
               <div id="network-container" class="org-container"></div>
           </div>
-          ` : analise.anexos?.organograma_url ? `
+          ` : organogramaUrlTratado ? `
           <div class="card" style="padding: 1.5rem; display:flex; justify-content:center; background: #f8fafc;">
-              <img src="${analise.anexos.organograma_url}" style="max-width: 100%; max-height: 600px; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+              <img src="${organogramaUrlTratado}" style="max-width: 100%; max-height: 600px; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
           </div>
           ` : `
           <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted); font-weight:700; background: #f8fafc; border: 1px dashed #cbd5e1;">[NENHUM ORGANOGRAMA VINCULADO]</div>
@@ -448,7 +476,7 @@ const montarHtmlDossie = (item: any) => {
                       <th class="text-center">Realizado 2025</th>
                       <th class="text-center">Variação (%)</th>
                       <th class="text-center">Realizado 2024</th>
-                      </tr>
+                  </tr>
               </thead>
               <tbody>
                   ${fatRows}
@@ -1071,7 +1099,6 @@ export default function ComitePage() {
   // 🔮 MODO COMITÊ TELA CHEIA ATIVO
   if (modoFocoComite && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
-    // Geração do dossiê HTML direto no client-side em tempo real
     const htmlInline = montarHtmlDossie(empresaFocoAtivo);
 
     return (
@@ -1098,7 +1125,6 @@ export default function ComitePage() {
         <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
           <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
             <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800 relative">
-              {/* O IFRAME RENDERIZA O HTML GERADO ON THE FLY DA FUNÇÃO AUXILIAR! */}
               <iframe 
                 srcDoc={htmlInline} 
                 className="w-full h-full border-0 bg-white" 
