@@ -92,8 +92,10 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             throw new Error(data.error || `Erro HTTP ${res.status}`);
           }
 
-          // Constrói o link público definitivo correspondente
-          const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${pathDinamicoR2}/${item.file.name}`;
+          // 🔥 A MÁGICA AQUI: Pegamos o caminho real devolvido pela API e encodamos pedaço por pedaço!
+          // Isso garante que espaços virem %20 e o Python não tome erro 404
+          const pathCodificado = data.path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
+          const urlFinalDoArquivo = `${r2BaseUrl}/${pathCodificado}`;
           
           // A gente só manda os PDFs para a esteira da IA V8 ler. 
           // As imagens vão ficar salvas no R2, mas não precisam ir pro motor de análise!

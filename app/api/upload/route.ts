@@ -1,7 +1,6 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 
-// 🔥 Garante que o Next.js não corte o upload de PDFs pesados por timeout
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +15,8 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
-    // Usamos formData para receber o arquivo bruto enviado pelo front
     const formData = await request.formData();
     const file = formData.get("file") as File;
-    
-    // Agora esse analiseId recebe a subpasta junto! Ex: "lote-12345/docs"
     const analiseId = formData.get("analiseId") as string;
 
     if (!file) {
@@ -29,14 +25,9 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     
-    // 🛡️ TRUQUE DE SEGURANÇA: Limpando espaços e caracteres bizarros do nome do arquivo
-    // Isso evita que a IA Python não consiga baixar o PDF por erro de URL inválida
-    const nomeSeguro = file.name.replace(/\s+/g, "%20");
+    // 🔥 VOLTAMOS AO NORMAL: Sem gambiarra de replace. 
+    const path = analiseId ? `clientes/${analiseId}/${file.name}` : `avulsos/${Date.now()}-${file.name}`;
 
-    // Monta o caminho final no R2
-    const path = analiseId ? `clientes/${analiseId}/${nomeSeguro}` : `avulsos/${Date.now()}-${nomeSeguro}`;
-
-    // O próprio servidor faz o upload, contornando o CORS do navegador totalmente
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME?.trim(),
       Key: path,
@@ -46,6 +37,7 @@ export async function POST(request: Request) {
 
     await s3Client.send(command);
 
+    // Retornamos o PATH exato gerado no R2
     return NextResponse.json({ success: true, path });
     
   } catch (error: any) {
