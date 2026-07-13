@@ -161,25 +161,43 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
       // ==========================================
-      // 📸 VARREDURA DINÂMICA DE IMAGENS CORRIGIDA
+      // 📸 VARREDURA DINÂMICA DE IMAGENS CORRIGIDA (Cloudflare R2 / Supabase)
       // ==========================================
       const imagensMapeadas = new Set<string>();
 
-      // Helper para garantir que a URL seja string e limpa antes de salvar
       const normalizarUrl = (u: any) => {
         if (typeof u !== 'string') return null;
         const limpa = u.trim();
         if (limpa === '') return null;
-        // Se for um caminho relativo do Next.js, injeta a origem atual do sistema
-        if (limpa.startsWith('/')) {
-          return `${window.location.origin}${limpa}`;
+
+        try {
+          // Usamos a API URL para isolar o caminho do arquivo sem query params
+          const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
+          const pathname = parsedUrl.pathname;
+
+          // 🔥 FILTRO CRÍTICO: Só aceita se for extensão de imagem. IGNORA os PDFs!
+          const ehImagem = /\.(jpeg|jpg|gif|png|webp)$/i.test(pathname);
+          
+          if (ehImagem) {
+            // Retorna a URL envelopada em aspas duplas limpas na montagem posterior
+            return limpa; 
+          }
+          return null;
+        } catch (e) {
+          // Fallback caso a URL seja diferentona, mas estritamente terminada em imagem
+          if (/\.(jpeg|jpg|gif|png|webp)$/i.test(limpa.split('?')[0])) {
+            return limpa;
+          }
+          return null;
         }
-        return limpa;
       };
 
+      // 1. Vasculha galeria_urls
       if (Array.isArray(analise.galeria_urls)) {
         analise.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
       }
+      
+      // 2. Vasculha anexos
       if (analise.anexos) {
         if (Array.isArray(analise.anexos.galeria_urls)) {
           analise.anexos.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
@@ -190,18 +208,18 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         const visita = normalizarUrl(analise.anexos.fotos_visita_url);
         if (visita) imagensMapeadas.add(visita);
       }
+      
+      // 3. Vasculha dados_documentos (Aqui filtramos os PDFs e pegamos só os JPEGs do WhatsApp)
       if (Array.isArray(analise.dados_documentos)) {
         analise.dados_documentos.forEach((u: string) => {
           const url = normalizarUrl(u);
-          if (url && url.split('?')[0].match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
-            imagensMapeadas.add(url);
-          }
+          if (url) imagensMapeadas.add(url);
         });
       }
 
       const listaFotosValidas = Array.from(imagensMapeadas);
 
-      // 🔥 CORREÇÃO DA GALERIA: Trocado src='${url}' para src="${url}" para prevenir quebra por tokens com aspas simples
+      // 🔥 EXIBIDOR ULTRA SEGURO: Usando aspas duplas escapadas \" para blindar os parênteses (1).jpeg
       const galeriaHTML = listaFotosValidas.length > 0 
         ? `
         <div class="print-break"></div>
