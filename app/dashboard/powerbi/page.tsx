@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { limparNome } from "@/lib/normalizador"; // 🧼 Usando o seu normalizador padrão
 import Link from "next/link";
 
 // ============================================================================
@@ -36,9 +37,6 @@ function formatarMesAno(str: string): string {
 
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
 
-// ============================================================================
-// 📊 COMPONENTE PRINCIPAL (DASHBOARD BI)
-// ============================================================================
 export default function PowerBIPage() {
   const [dashVop, setDashVop] = useState<any[]>([]);
   const [dashReceitas, setDashReceitas] = useState<any[]>([]);
@@ -54,7 +52,7 @@ export default function PowerBIPage() {
 
   const [empresasSel, setEmpresasSel] = useState<string[]>(["SEC", "FIDC"]);
   const [mesesSel, setMesesSel] = useState<string[]>([]);
-  const [cedentesSel, setCedentesSel] = useState<string[]>([]);
+  const [cedentesSel, setCedentesSel] = useState<string[]>([]); // Armazenará nomes normais para exibição
   const [termoBuscaCedente, setTermoBuscaCedente] = useState("");
 
   const [openEmpresa, setOpenEmpresa] = useState(false);
@@ -86,10 +84,6 @@ export default function PowerBIPage() {
         supabase.from("carteira_fidc").select("*")
       ]);
 
-      // DEBUG INVISÍVEL (Verifique o F12 Console se o gráfico ficar zerado)
-      console.log("QTD SEC Recebida:", resCartSec.data?.length);
-      console.log("QTD FIDC Recebida:", resCartFidc.data?.length);
-
       setDashVop(resVop.data || []);
       setDashReceitas(resExtrato.data || []);
       setCarteiraSec(resCartSec.data || []);
@@ -108,11 +102,12 @@ export default function PowerBIPage() {
         setMesesSel(mesesUnicos);
       }
 
+      // 🧼 Consolida a lista de cedentes removendo duplicidades invisíveis por espaços residuais
       const cedentesUnicos = Array.from(new Set([
-        ...(resVop.data || []).map(v => v.cedente),
-        ...(resExtrato.data || []).map(r => r.cedente),
-        ...(resCartSec.data || []).map(c => c.cedente),
-        ...(resCartFidc.data || []).map(c => c.cedente)
+        ...(resVop.data || []).map(v => String(v.cedente || "").trim()),
+        ...(resExtrato.data || []).map(r => String(r.cedente || "").trim()),
+        ...(resCartSec.data || []).map(c => String(c.cedente || "").trim()),
+        ...(resCartFidc.data || []).map(c => String(c.cedente || "").trim())
       ].filter(Boolean))).sort();
       
       setListaCedentes(cedentesUnicos);
@@ -134,7 +129,7 @@ export default function PowerBIPage() {
   };
 
   // ==========================================================================
-  // ⚡ CÁLCULOS MEMOIZADOS BLINDADOS
+  // ⚡ CÁLCULOS MEMOIZADOS BLINDADOS CONTRA STRINGS E ESPAÇOS DIVERGENTES
   // ==========================================================================
   const kpis = useMemo(() => {
     let vopMensalSec = 0, vopMensalFidc = 0;
@@ -145,8 +140,10 @@ export default function PowerBIPage() {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
+    // Map auxiliar de hashes limpos selecionados para agilizar o cruzamento de dados (MDM)
+    const cedentesSelecionadosHashed = new Set(cedentesSel.map(c => limparNome(c)));
+
     const checarSeVencidoReal = (dataIso: string | null, stringFallback: string) => {
-      // 1. Prioriza Data (ignora timezone de forma segura cortando no 'T')
       if (dataIso) {
         const dataStr = String(dataIso).split("T")[0];
         const partes = dataStr.split("-");
@@ -155,25 +152,20 @@ export default function PowerBIPage() {
           return vcto.getTime() < hoje.getTime(); 
         }
       }
-      
-      // 2. Fallback pelas strings
       const st = stringFallback.toLowerCase().trim();
-      if (st === "vencido" || (st.includes("vencido") && !st.includes("a vencer"))) {
-        return true;
-      }
-      return false;
+      return st === "vencido" || (st.includes("vencido") && !st.includes("a vencer"));
     };
 
     const filtroAtivo = (emp: string, m_a: string, ced: string) => {
       const bateEmpresa = empresasSel.includes((emp || "").toUpperCase());
       const bateMes = mesesSel.length === 0 || mesesSel.includes(formatarMesAno(m_a));
-      const bateCedente = cedentesSel.length === 0 || cedentesSel.includes(ced);
+      const bateCedente = cedentesSelecionadosHashed.has(limparNome(ced));
       return bateEmpresa && bateMes && bateCedente;
     };
 
-    // 1. VOP MENSAL E HISTÓRICO ACUMULADO
+    // 1. VALORES OPERADOS (VOP)
     dashVop.forEach(v => {
-      if (cedentesSel.includes(v.cedente)) {
+      if (cedentesSelecionadosHashed.has(limparNome(v.cedente))) {
         vopVidaTodaSec += parseValorReal(v.vop_sec);
         vopVidaTodaFidc += parseValorReal(v.vop_fidc);
 
@@ -184,10 +176,10 @@ export default function PowerBIPage() {
       }
     });
 
-    // 2. CARTEIRA SEC
+    // 2. EXPOSIÇÃO CARTEIRA SEC (Blindado com Normalizador)
     if (empresasSel.includes("SEC")) {
       carteiraSec.forEach(c => {
-        if (cedentesSel.includes(c.cedente)) {
+        if (cedentesSelecionadosHashed.has(limparNome(c.cedente))) {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoSec += vAberto;
           
@@ -199,10 +191,10 @@ export default function PowerBIPage() {
       });
     }
 
-    // 3. CARTEIRA FIDC
+    // 3. EXPOSIÇÃO CARTEIRA FIDC (Blindado com Normalizador)
     if (empresasSel.includes("FIDC")) {
       carteiraFidc.forEach(c => {
-        if (cedentesSel.includes(c.cedente)) {
+        if (cedentesSelecionadosHashed.has(limparNome(c.cedente))) {
           const vAberto = parseValorReal(c.valor_aberto);
           riscoFidc += vAberto;
           
@@ -214,7 +206,7 @@ export default function PowerBIPage() {
       });
     }
 
-    // 4. RECEITAS ANALÍTICAS DO EXTRATO DO DRE
+    // 4. RECEITAS FINANCEIRAS EXTRATO DRE
     dashReceitas.forEach(r => {
       if (filtroAtivo(r.empresa, r.mes_ano, r.cedente)) {
         totalDesagio += parseValorReal(r.desagio);
@@ -337,15 +329,12 @@ export default function PowerBIPage() {
         </div>
       </div>
 
-      {/* ==================================================================================== */}
-      {/* 🚀 CARDS CLICÁVEIS: VALORES OPERADOS (MENSAL + HISTÓRICO MESCLADO) */}
-      {/* ==================================================================================== */}
+      {/* VALORES OPERADOS */}
       <div className="space-y-3">
         <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Valores Operados (VOP)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
           <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl shadow-indigo-600/30 border border-indigo-500">
-             <svg className="absolute -bottom-4 -right-4 w-24 h-24 text-white opacity-10" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
              <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-100 block mb-2">Consolidado Geral (Vida Toda)</span>
              <div className="text-3xl font-black truncate">{fM(kpis.vopVidaTodaConsolidadoGeral)}</div>
              <span className="text-[10px] text-indigo-300 font-bold block mt-2 uppercase">SEC + FIDC</span>
@@ -378,9 +367,7 @@ export default function PowerBIPage() {
         </div>
       </div>
 
-      {/* ==================================================================================== */}
-      {/* 🚀 CARDS CLICÁVEIS: RISCO, EXPOSIÇÃO E VENCIDOS (MESCLADO) */}
-      {/* ==================================================================================== */}
+      {/* CARTEIRA EM ABERTO */}
       <div className="space-y-3 pt-2">
         <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-200 pb-1">Carteira em Aberto (Risco e Inadimplência)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -420,9 +407,7 @@ export default function PowerBIPage() {
         </div>
       </div>
 
-      {/* ==================================================================================== */}
-      {/* 🚀 RECEITAS FINANCEIRAS (Com atalhos de importação no Header) */}
-      {/* ==================================================================================== */}
+      {/* RECEITAS FINANCEIRAS */}
       <div className="space-y-3 pt-2">
         <div className="flex justify-between items-center border-b border-slate-200 pb-1">
           <h3 className="font-black text-slate-400 uppercase tracking-wider text-[10px]">Receitas Financeiras</h3>
