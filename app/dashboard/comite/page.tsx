@@ -164,6 +164,51 @@ const montarHtmlDossie = (item: any) => {
   const arrayEndivLabels = JSON.stringify(Object.keys(chartEndivData || {}));
   const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
+  // ==========================================
+  // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS (GALERIA INFINITA)
+  // ==========================================
+  const imagensExtraidas = new Set<string>();
+
+  if (Array.isArray(analise.galeria_urls)) {
+    analise.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+  }
+  
+  if (analise.anexos) {
+    if (Array.isArray(analise.anexos.galeria_urls)) {
+      analise.anexos.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+    }
+    if (typeof analise.anexos.fachada_url === 'string' && analise.anexos.fachada_url.trim() !== '') {
+      imagensExtraidas.add(analise.anexos.fachada_url);
+    }
+    if (typeof analise.anexos.fotos_visita_url === 'string' && analise.anexos.fotos_visita_url.trim() !== '') {
+      imagensExtraidas.add(analise.anexos.fotos_visita_url);
+    }
+  }
+
+  // Verifica na raiz do item os dados_documentos
+  if (Array.isArray(item.dados_documentos)) {
+    item.dados_documentos.forEach((url: string) => {
+      if (typeof url === 'string' && url.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i)) {
+        imagensExtraidas.add(url);
+      }
+    });
+  }
+
+  const fotosUnicas = Array.from(imagensExtraidas);
+
+  const galeriaHTML = fotosUnicas.length > 0 
+    ? `
+    <div class="print-break"></div>
+    <h2 style="margin-top: 3.5rem;">📸 Galeria de Fotos e Evidências (${fotosUnicas.length})</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2.5rem;">
+        ${fotosUnicas.map(url => `
+            <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc;">
+                <img src="${url}" style="width: 100%; height: 260px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" alt="Evidência Fotográfica">
+            </div>
+        `).join("")}
+    </div>
+    ` : '';
+
   return `
   <!DOCTYPE html>
   <html lang="pt-BR">
@@ -229,6 +274,16 @@ const montarHtmlDossie = (item: any) => {
           
           .hover-card:hover .expandable-box { max-height: 2000px; }
           .hover-card:hover .expandable-fade { opacity: 0; pointer-events: none; }
+
+          @media print { 
+              .print-break { page-break-before: always; } 
+              body { background: white; } 
+              .card, .table-wrap { box-shadow: none; border: 1px solid #cbd5e1; } 
+              .header { padding: 1rem; color: black; background: white; border: 2px solid black; } 
+              .header .meta, .header .badge-top { color: black; } 
+              .expandable-box { max-height: none !important; }
+              .expandable-fade { display: none !important; }
+          }
       </style>
   </head>
   <body>
@@ -358,6 +413,8 @@ const montarHtmlDossie = (item: any) => {
           `}
       </div>
 
+      ${galeriaHTML}
+
       ${totalPatrimonio > 0 ? `
       <h3 style="color: var(--blue-dark); text-transform: uppercase; font-size: 0.9rem; font-weight: 800; margin-top: 2rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;">Patrimônio Declarado (Bens IRPF)</h3>
       <div class="table-wrap">
@@ -372,6 +429,8 @@ const montarHtmlDossie = (item: any) => {
           </table>
       </div>
       ` : ''}
+
+      <div class="print-break"></div>
 
       <h2>4. Faturamento Consolidado</h2>
       <div class="card" style="margin-bottom: 1.5rem; padding: 1.5rem;">
@@ -426,6 +485,8 @@ const montarHtmlDossie = (item: any) => {
               <div class="metric-value" style="color:#15803d; font-size:2.2rem; margin-top:0.5rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
           </div>
       </div>
+
+      <div class="print-break"></div>
 
       <h2>6. Passivo Bancário / Endividamento (SCR Bacen)</h2>
       <div class="grid-3">
@@ -494,8 +555,8 @@ const montarHtmlDossie = (item: any) => {
       </div>
       ` : ''}
 
+      <!-- CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
       <div class="grid-2">
-          <!-- 🔥 AQUI ENTROU A NOVA VARIÁVEL DO KAPPI (DADOS JURÍDICOS) -->
           <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
               <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
               <div class="expandable-box">
@@ -512,6 +573,8 @@ const montarHtmlDossie = (item: any) => {
               </div>
           </div>
       </div>
+
+      <div class="print-break"></div>
 
       <div class="parecer-wrapper" style="margin-top: 3rem;">
           <div class="parecer-header">Parecer Técnico / Deliberação da Mesa de Risco</div>
@@ -578,9 +641,28 @@ const montarHtmlDossie = (item: any) => {
       const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
       
       if (orgaJson && orgaJson.nodes && orgaJson.edges) {
+          
+          // 🔥 DEDUPLICAÇÃO DE NÓS (Prevenindo o crash da biblioteca)
+          const uniqueNodesMap = new Map();
+          orgaJson.nodes.forEach(n => {
+              if (!uniqueNodesMap.has(n.id)) {
+                  uniqueNodesMap.set(n.id, n);
+              }
+          });
+          const uniqueNodesArray = Array.from(uniqueNodesMap.values());
+
+          // 🔥 DEDUPLICAÇÃO DE ARESTAS
+          const uniqueEdgesMap = new Map();
+          orgaJson.edges.forEach(e => {
+              if (!uniqueEdgesMap.has(e.id)) {
+                  uniqueEdgesMap.set(e.id, e);
+              }
+          });
+          const uniqueEdgesArray = Array.from(uniqueEdgesMap.values());
+
           const container = document.getElementById('network-container');
           if (container) {
-              const nodes = new vis.DataSet(orgaJson.nodes.map(n => {
+              const nodes = new vis.DataSet(uniqueNodesArray.map(n => {
                   let rawLabel = (n.data && n.data.label) ? n.data.label : (n.label || n.id || "Sem Nome");
                   
                   rawLabel = String(rawLabel).replace(/<[^>]*>?/gm, ''); 
@@ -619,7 +701,7 @@ const montarHtmlDossie = (item: any) => {
                   };
               }));
 
-              const edges = new vis.DataSet(orgaJson.edges.map(e => {
+              const edges = new vis.DataSet(uniqueEdgesArray.map(e => {
                   const edgeColor = (e.style && e.style.stroke) ? e.style.stroke : '#94a3b8';
                   const isDashed = (e.style && e.style.strokeDasharray) ? true : false;
                   
@@ -648,6 +730,7 @@ const montarHtmlDossie = (item: any) => {
           }
       }
   </script>
+
   </body>
   </html>
   `;

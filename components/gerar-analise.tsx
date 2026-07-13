@@ -163,6 +163,54 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivLabels = JSON.stringify(Object.keys(chartEndivData || {}));
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
+      // ==========================================
+      // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS (GALERIA INFINITA)
+      // ==========================================
+      const imagensExtraidas = new Set<string>();
+
+      // 1. Procura se tem o array 'galeria_urls' direto no objeto analise
+      if (Array.isArray(analise.galeria_urls)) {
+        analise.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+      }
+      
+      // 2. Procura na aba de anexos as fotos clássicas e array de galeria
+      if (analise.anexos) {
+        if (Array.isArray(analise.anexos.galeria_urls)) {
+          analise.anexos.galeria_urls.forEach((url: string) => imagensExtraidas.add(url));
+        }
+        if (typeof analise.anexos.fachada_url === 'string' && analise.anexos.fachada_url.trim() !== '') {
+          imagensExtraidas.add(analise.anexos.fachada_url);
+        }
+        if (typeof analise.anexos.fotos_visita_url === 'string' && analise.anexos.fotos_visita_url.trim() !== '') {
+          imagensExtraidas.add(analise.anexos.fotos_visita_url);
+        }
+      }
+
+      // 3. Varredura no array bruto dados_documentos (se o V8 ou Comercial jogou tudo junto)
+      if (Array.isArray(analise.dados_documentos)) {
+        analise.dados_documentos.forEach((url: string) => {
+          if (typeof url === 'string' && url.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i)) {
+            imagensExtraidas.add(url);
+          }
+        });
+      }
+
+      const fotosUnicas = Array.from(imagensExtraidas);
+
+      // Renderizador do HTML da Galeria
+      const galeriaHTML = fotosUnicas.length > 0 
+        ? `
+        <div class="print-break"></div>
+        <h2 style="margin-top: 3.5rem;">📸 Galeria de Fotos e Evidências (${fotosUnicas.length})</h2>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2.5rem;">
+            ${fotosUnicas.map(url => `
+                <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc;">
+                    <img src="${url}" style="width: 100%; height: 260px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" alt="Evidência Fotográfica">
+                </div>
+            `).join("")}
+        </div>
+        ` : '';
+
       const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
@@ -325,24 +373,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
-          ${(analise.anexos?.fachada_url || analise.anexos?.fotos_visita_url) ? `
-          <!-- 🔥 GALERIA DE FOTOS SEM ONERROR PARA PERMITIR DEBUG -->
-          <div class="grid-2" style="margin-top: 1.5rem;">
-              ${analise.anexos?.fachada_url ? `
-              <div class="card" style="padding:1rem; text-align:center;">
-                  <div class="metric-label" style="margin-bottom: 0.75rem;">Foto da Fachada / Sede</div>
-                  <img src="${analise.anexos.fachada_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Fachada Empresa">
-              </div>
-              ` : ''}
-              ${analise.anexos?.fotos_visita_url ? `
-              <div class="card" style="padding:1rem; text-align:center;">
-                  <div class="metric-label" style="margin-bottom: 0.75rem;">Evidência de Visita / Produção</div>
-                  <img src="${analise.anexos.fotos_visita_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Visita Empresa">
-              </div>
-              ` : ''}
-          </div>
-          ` : ''}
-
           ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
           <div class="grid-3" style="margin-top: 1.5rem;">
               <div class="card">
@@ -374,6 +404,8 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               <div class="card" style="display:flex; justify-content:center; align-items:center; height:150px; color:var(--muted); font-weight:700; background: #f8fafc; border: 1px dashed #cbd5e1;">[NENHUM ORGANOGRAMA VINCULADO]</div>
               `}
           </div>
+
+          ${galeriaHTML}
 
           ${totalPatrimonio > 0 ? `
           <h3 style="color: var(--blue-dark); text-transform: uppercase; font-size: 0.9rem; font-weight: 800; margin-top: 2rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;">Patrimônio Declarado (Bens IRPF)</h3>
