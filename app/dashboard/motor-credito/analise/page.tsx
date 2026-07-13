@@ -152,12 +152,15 @@ interface AnaliseData {
   
   // TEXTOS E LINKS
   resumo_visita: string;
-  juridico_tramitacao: string;
   noticias_midia: string;
   parecer_analista: string;
   parecer_comite?: string;
-  anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
   recomendacao_analista?: string;
+  anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
+
+  // 🔥 NOVOS CAMPOS DO MOTOR V8
+  dados_juridico: { relatorio_completo: string };
+  parecer_executivo: string;
 
   // GRAFO DE GRUPO ECONÔMICO (JSON DAS BOLINHAS DA TEIA)
   organograma_json?: { nodes: any[], edges: any[] } | null;
@@ -188,8 +191,13 @@ const DADOS_MODELO: AnaliseData = {
   restritivos_quadro: { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 },
   restritivos: [],
   
-  resumo_visita: "", juridico_tramitacao: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
+  resumo_visita: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
+  
+  // 🔥 INICIALIZAÇÃO SEGURA PRO V8
+  dados_juridico: { relatorio_completo: "" },
+  parecer_executivo: "",
+  
   organograma_json: null
 };
 
@@ -318,6 +326,7 @@ function MesaAnaliseConteudo() {
           restritivos: listaRestritivos,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
+          dados_juridico: { ...DADOS_MODELO.dados_juridico, ...(dc.dados_juridico || {}) }, // Blindagem extra
           id: data.id, 
           cnpj: cnpj, 
           razao_social: razao_social, 
@@ -369,7 +378,6 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
       
-      // Forçamos SEMPRE o status "aberta", a recomendação do analista viaja via json
       const novoStatus = "aberta";
       const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
       if (error) throw error;
@@ -418,6 +426,7 @@ function MesaAnaliseConteudo() {
   };
   const addArray = (campo: keyof AnaliseData, obj: any) => setAnalise({ ...analise, [campo]: [...(analise[campo] as any[]), obj] });
   const rmArray = (campo: keyof AnaliseData, index: number) => setAnalise({ ...analise, [campo]: (analise[campo] as any[]).filter((_, i) => i !== index) });
+  
   const updateNested = (campoPai: keyof AnaliseData, campoFilho: string, valor: any) => {
     setAnalise({ ...analise, [campoPai]: { ...(analise[campoPai] as any), [campoFilho]: valor } });
   };
@@ -434,7 +443,6 @@ function MesaAnaliseConteudo() {
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
-  // Descobre qual é o último mês preenchido do ano vigente (2026) para corte do YTD
   let lastFilledIndex26 = -1;
   for (let i = 11; i >= 0; i--) {
       if (Number(analise.dados_faturamento["2026"]?.[meses[i]] || 0) > 0) {
@@ -461,7 +469,6 @@ function MesaAnaliseConteudo() {
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
   const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
   
-  // CORREÇÃO: A Média Geral Anual agora respeita os meses preenchidos do ano vigente (2026), e divide por 12 para anos fechados.
   const calcMediaGeralAno = (ano: string) => { 
       const pre = mesesPreenchidosGeral(ano); 
       if (pre === 0) return 0;
@@ -474,10 +481,8 @@ function MesaAnaliseConteudo() {
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
-  // Usa a média YTD do ano mais recente preenchido como Faturamento Base Oficial
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
-  // === CÁLCULO EXATO DE POTENCIAL DE NEGÓCIOS V8 (Idêntico ao Excel) ===
   const prazoDiasDpls = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 0;
   const prazoDiasComissaria = parseInt(String(analise.dados_potencial.prazo_medio_comissaria).replace(/\D/g, "")) || 0;
   
@@ -485,7 +490,6 @@ function MesaAnaliseConteudo() {
   const percDpls = Number(analise.dados_potencial.composicao_dpls || 0) / 100;
   const percComissaria = Number(analise.dados_potencial.composicao_comissaria || 0) / 100;
 
-  // Fórmula Excel Exata: ((FatBase / 30) * Prazo) * Composição% * % A Prazo
   const potDpls = (faturamentoMedioReferencia / 30) * prazoDiasDpls * percDpls * percAPrazo;
   const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
   const potencialRealCalculado = potDpls + potComissaria;
@@ -1194,7 +1198,7 @@ function MesaAnaliseConteudo() {
 
                   <div>
                     <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
-                      <span>Apontamentos Restritivos Detalhados</span>
+                      <span>Apontamentos Restritivos Detalhados (Serasa/Boa Vista)</span>
                       <button onClick={() => addArray('restritivos', {empresa_socio:"", restritivo:"", qtd:1, valor:0, data:"", observacao:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Apontamento</button>
                     </div>
                     <table className="w-full border-collapse border border-slate-400">
@@ -1229,8 +1233,17 @@ function MesaAnaliseConteudo() {
 
                   <div className="grid grid-cols-1 gap-4">
                     <div>
-                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Pesquisa de Ações Tribunal / Jurídico</div>
-                      <textarea value={analise.juridico_tramitacao} onChange={(e)=>setAnalise({...analise, juridico_tramitacao: e.target.value})} className="w-full h-32 p-2 border border-slate-400 outline-none text-[11px] font-sans resize-none" />
+                      {/* 🔥 AQUI ENTRA O NOVO PARECER DO KAPPI */}
+                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800 flex gap-2 items-center">
+                         <span>⚖️ Parecer Jurídico Consolidado (Kappi / Jusbrasil)</span>
+                         {analise.status === "em_processamento_ia" && <span className="bg-purple-600 px-1 rounded animate-pulse">LENDO PROCESSOS...</span>}
+                      </div>
+                      <textarea 
+                         value={analise.dados_juridico?.relatorio_completo || ""} 
+                         onChange={(e)=>updateNested("dados_juridico", "relatorio_completo", e.target.value)} 
+                         className="w-full h-64 p-3 border border-slate-400 outline-none text-[11px] font-sans resize-none bg-slate-50 leading-relaxed" 
+                         placeholder="Aguardando dados da IA ou digite manualmente..."
+                      />
                     </div>
                     <div>
                       <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Pesquisas e Notícias de Mídia</div>
@@ -1243,13 +1256,31 @@ function MesaAnaliseConteudo() {
               {/* ABA 7: PARECER FINAL */}
               {abaAtiva === "parecer" && (
                 <div className="space-y-6 max-w-5xl">
+                  
+                  {/* 🔥 AQUI ENTRA O CÉREBRO DO MAESTRO V8 */}
+                  {analise.parecer_executivo && (
+                     <div className="bg-indigo-50 border-2 border-indigo-400 p-4 relative shadow-sm">
+                        <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-bold px-2 py-1 uppercase rounded-bl-sm">
+                           IA MOTOR V8
+                        </div>
+                        <h3 className="text-[12px] font-bold text-indigo-900 uppercase mb-3 border-b border-indigo-200 pb-1 flex items-center gap-2">
+                           🧠 Dossiê Executivo (Súmula de Crédito)
+                        </h3>
+                        <textarea 
+                           value={analise.parecer_executivo} 
+                           onChange={(e) => setAnalise({...analise, parecer_executivo: e.target.value})}
+                           className="w-full h-80 bg-transparent text-[12px] text-indigo-900 outline-none resize-none font-sans leading-relaxed"
+                        />
+                     </div>
+                  )}
+
                   <div className="bg-white border-2 border-slate-400 p-3">
-                    <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer Técnico do Analista</h3>
+                    <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer Técnico do Analista (Humano)</h3>
                     <textarea 
                       value={analise.parecer_analista} 
                       onChange={(e) => setAnalise({...analise, parecer_analista: e.target.value})}
-                      className="w-full p-2 border border-slate-300 h-96 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
-                      placeholder="Conclusão final da mesa de análise..."
+                      className="w-full p-3 border border-slate-300 h-64 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
+                      placeholder="Conclusão final da mesa de análise. Use a súmula da IA acima como base..."
                     />
                   </div>
 

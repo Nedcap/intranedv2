@@ -253,6 +253,16 @@ const montarHtmlDossie = (item: any) => {
           </div>
       </div>
 
+      ${analise.parecer_executivo ? `
+      <!-- 🔥 BLOCO INJETADO PELA IA MOTOR V8 -->
+      <div class="card" style="margin-bottom: 1.5rem; border-top: 4px solid var(--blue); background: #f4f7ff;">
+          <div style="font-weight: 800; font-size: 0.95rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+              <span>🧠</span> Súmula Executiva de Crédito (Parecer Motor IA V8)
+          </div>
+          <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.65; white-space: pre-wrap; text-align: justify;">${analise.parecer_executivo}</div>
+      </div>
+      ` : ''}
+
       <h2>1. Propostas e Condições Comerciais</h2>
       <div class="table-wrap">
           <table>
@@ -445,7 +455,7 @@ const montarHtmlDossie = (item: any) => {
               <thead><tr><th>Credor / Instituição Financeira</th><th>Modalidade Contratada</th><th class="text-right">Saldo Devedor Atual</th></tr></thead>
               <tbody>
                   ${bancoRows}
-                  ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR SCRUTADO</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
+                  ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR ESCRUTADO</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
               </tbody>
           </table>
       </div>
@@ -485,10 +495,11 @@ const montarHtmlDossie = (item: any) => {
       ` : ''}
 
       <div class="grid-2">
+          <!-- 🔥 AQUI ENTROU A NOVA VARIÁVEL DO KAPPI (DADOS JURÍDICOS) -->
           <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
               <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
               <div class="expandable-box">
-                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
+                  <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
                   <div class="expandable-fade"></div>
               </div>
           </div>
