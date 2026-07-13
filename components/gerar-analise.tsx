@@ -161,7 +161,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
       // ==========================================
-      // 📸 VARREDURA DINÂMICA DE IMAGENS (DECLARAÇÃO FIXADA)
+      // 📸 VARREDURA DINÂMICA DE IMAGENS CORRIGIDA
       // ==========================================
       const imagensMapeadas = new Set<string>();
 
@@ -189,15 +189,15 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
       const listaFotosValidas = Array.from(imagensMapeadas);
 
-      // Monta a estrutura da galeria em grid bootstrap-like
+      // 🔥 FIX EXIBIDOR: Resolvido escape de aspas e adicionado controle de largura CSS 100%
       const galeriaHTML = listaFotosValidas.length > 0 
         ? `
         <div class="print-break"></div>
         <h2 style="margin-top: 3.5rem;">📸 Galeria de Evidências Fotográficas (${listaFotosValidas.length})</h2>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 2.5rem;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 2.5rem; width: 100%;">
             ${listaFotosValidas.map(url => `
-                <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc; border: 1px solid var(--border);">
-                    <img src="${url}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.06);" alt="Foto R2">
+                <div class="card" style="padding: 0.5rem; display: flex; justify-content: center; align-items: center; background: #f8fafc; border: 1px solid var(--border); overflow: hidden;">
+                    <img src='${url}' style="width: 100%; min-width: 100%; max-width: 100%; height: 250px; object-fit: cover; border-radius: 0.5rem; box-shadow: 0 4px 8px rgba(0,0,0,0.06);" alt="Foto R2">
                 </div>
             `).join("")}
         </div>
