@@ -114,7 +114,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
       // ==========================================
-      // FATURAMENTO MÉDIO (POR MESES PREENCHIDOS)
+      // FATURAMENTO MÉDIO
       // ==========================================
       const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
       let tot2024 = 0, tot2025 = 0, tot2026 = 0;
@@ -220,9 +220,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #f8fafc; border: 1px dashed #cbd5e1; }
               ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
               
-              /* =========================================
-                 ANIMAÇÃO DOS CARDS JURÍDICOS (HOVER) 
-                 ========================================= */
               .hover-card { transition: box-shadow 0.3s; }
               .hover-card:hover { box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
               .expandable-box { position: relative; max-height: 90px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
@@ -264,6 +261,16 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   <div style="font-size: 0.9rem; color: #475569; line-height: 1.6; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Sem resumo cadastrado.'}</div>
               </div>
           </div>
+
+          ${analise.parecer_executivo ? `
+          <!-- 🔥 BLOCO INJETADO PELA IA MOTOR V8 -->
+          <div class="card" style="margin-bottom: 1.5rem; border-top: 4px solid var(--blue); background: #f4f7ff;">
+              <div style="font-weight: 800; font-size: 0.95rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+                  <span>🧠</span> Súmula Executiva de Crédito (Parecer Motor IA V8)
+              </div>
+              <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.65; white-space: pre-wrap; text-align: justify;">${analise.parecer_executivo}</div>
+          </div>
+          ` : ''}
 
           <h2>1. Propostas e Condições Comerciais</h2>
           <div class="table-wrap">
@@ -327,6 +334,24 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   </div>
               </div>
           </div>
+
+          ${(analise.anexos?.fachada_url || analise.anexos?.fotos_visita_url) ? `
+          <!-- 🔥 GALERIA DE FOTOS INJETADAS A PARTIR DA NOVA UPLOAD AREA -->
+          <div class="grid-2" style="margin-top: 1.5rem;">
+              ${analise.anexos?.fachada_url ? `
+              <div class="card" style="padding:1rem; text-align:center;">
+                  <div class="metric-label" style="margin-bottom: 0.75rem;">Foto da Fachada / Sede</div>
+                  <img src="${analise.anexos.fachada_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Fachada Empresa" onerror="this.style.display='none'">
+              </div>
+              ` : ''}
+              ${analise.anexos?.fotos_visita_url ? `
+              <div class="card" style="padding:1rem; text-align:center;">
+                  <div class="metric-label" style="margin-bottom: 0.75rem;">Evidência de Visita / Produção</div>
+                  <img src="${analise.anexos.fotos_visita_url}" style="max-width:100%; height:250px; object-fit:cover; border-radius:0.5rem; border:1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);" alt="Visita Empresa" onerror="this.style.display='none'">
+              </div>
+              ` : ''}
+          </div>
+          ` : ''}
 
           ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
           <div class="grid-3" style="margin-top: 1.5rem;">
@@ -414,7 +439,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                           <td class="text-center">${formatarMoeda(med2024)}</td>
                       </tr>
                   </tbody>
-                  </table>
+              </table>
           </div>
 
           <h2>5. Potencial de Negócios</h2>
@@ -461,7 +486,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   <thead><tr><th>Credor / Instituição Financeira</th><th>Modalidade Contratada</th><th class="text-right">Saldo Devedor Atual</th></tr></thead>
                   <tbody>
                       ${bancoRows}
-                      ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR SCRUTADO</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
+                      ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">TOTAL SCR ESCRUTADO</td><td class="text-right" style="color:var(--red); font-size:1rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
                   </tbody>
               </table>
           </div>
@@ -502,10 +527,11 @@ export default function GerarAnalise({ analise }: { analise: any }) {
 
           <!-- CARDS JURÍDICOS EXPANSÍVEIS (HOVER) -->
           <div class="grid-2">
+              <!-- 🔥 AQUI ENTROU A NOVA VARIÁVEL DO KAPPI (DADOS JURÍDICOS) -->
               <div class="card hover-card" style="padding:1.5rem; border-left: 4px solid #fca5a5; cursor: pointer;">
                   <div style="font-weight:800; font-size:0.85rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Litígios e Processos Ativos</div>
                   <div class="expandable-box">
-                      <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
+                      <div style="font-size:0.9rem; color:#334155; white-space: pre-wrap; line-height: 1.6;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado.'}</div>
                       <div class="expandable-fade"></div>
                   </div>
               </div>

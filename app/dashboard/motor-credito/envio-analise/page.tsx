@@ -303,7 +303,20 @@ export default function MotorCreditoPage() {
                 </button>
               </div>
 
-              <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner">
+              {/* 🔥 AQUI ENTROU A NOVA ÁREA DE ANEXOS */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner space-y-4">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-100 pb-3 gap-3">
+                  <span className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">
+                    📄 Painel de Documentação
+                  </span>
+                  <button 
+                    onClick={() => alert("Módulo de upload de imagens da empresa será ativado aqui!")}
+                    className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded text-[10px] uppercase tracking-wider hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                  >
+                    📸 Anexar Imagens da Empresa
+                  </button>
+                </div>
+                
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>

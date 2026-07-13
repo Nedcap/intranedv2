@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, ChangeEvent } from "react";
+import { useState, ChangeEvent, useRef } from "react";
 
 interface UploadDocsProps {
   empresa: {
@@ -17,6 +17,7 @@ interface UploadDocsProps {
 interface ArquivoFila {
   id: string;
   file: File;
+  tipo: "documento" | "imagem"; // 🔥 IDENTIFICADOR DE TIPO
   status: "pendente" | "enviando" | "sucesso" | "erro";
   mensagem: string;
 }
@@ -24,17 +25,24 @@ interface ArquivoFila {
 export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
   const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
+  
+  // Referências para os inputs invisíveis
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const imgInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>, tipo: "documento" | "imagem") => {
     if (e.target.files) {
       const novos: ArquivoFila[] = Array.from(e.target.files).map((f, i) => ({
-        id: `${Date.now()}-${i}`,
+        id: `${Date.now()}-${tipo}-${i}`,
         file: f,
+        tipo: tipo,
         status: "pendente",
         mensagem: "Pronto para processamento"
       }));
       setArquivos(prev => [...prev, ...novos]);
     }
+    // Reseta o input para permitir adicionar o mesmo arquivo de novo se o cara apagar
+    e.target.value = "";
   };
 
   const removerArquivoDaFila = (id: string) => {
@@ -46,7 +54,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setUploading(true);
 
     const urlsDocumentos: string[] = [];
-    // Identificador de lote para organização das pastas no Cloudflare R2
+    // Identificador de lote master
     const loteId = `lote-${Date.now()}`;
 
     // URL base pública do seu Cloudflare R2
@@ -60,13 +68,18 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
 
-        // ✅ CORRIGIDO: Alterado 'message' para 'mensagem' para sintonizar com a interface e evitar crash
         setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Enviando para o Cloudflare R2..." } : a));
 
         try {
           const formData = new FormData();
           formData.append("file", item.file);
-          formData.append("analiseId", loteId);
+          
+          // 🔥 O TRUQUE NINJA: A gente injeta a subpasta direto no ID do analise
+          // O Cloudflare R2 vai criar a pasta automaticamente!
+          const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
+          const pathDinamicoR2 = `${loteId}/${subpasta}`;
+          
+          formData.append("analiseId", pathDinamicoR2);
 
           const res = await fetch("/api/upload", {
             method: "POST",
@@ -80,10 +93,15 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           }
 
           // Constrói o link público definitivo correspondente
-          const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${loteId}/${item.file.name}`;
-          urlsDocumentos.push(urlFinalDoArquivo);
+          const urlFinalDoArquivo = `${r2BaseUrl}/clientes/${pathDinamicoR2}/${item.file.name}`;
+          
+          // A gente só manda os PDFs para a esteira da IA V8 ler. 
+          // As imagens vão ficar salvas no R2, mas não precisam ir pro motor de análise!
+          if (item.tipo === "documento") {
+             urlsDocumentos.push(urlFinalDoArquivo);
+          }
 
-          setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: "✅ Salvo na esteira R2!" } : a));
+          setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: `✅ Salvo na subpasta /${subpasta}!` } : a));
 
         } catch (err: any) {
           console.error(err);
@@ -93,11 +111,12 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       }
 
       // ====================================================================
-      // 🏁 ENTREGA FINAL: Aciona o callback da tela mãe com as URLs seguras
+      // 🏁 ENTREGA FINAL: Aciona o callback da tela mãe apenas com as URLs dos PDFs
       // ====================================================================
       setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
       
       setTimeout(() => {
+        // Manda pro Motor V8 (ele só precisa ler PDFs)
         onSucesso(urlsDocumentos); 
         setArquivos([]);
       }, 1000);
@@ -112,34 +131,67 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
   return (
     <div className="space-y-4 font-sans text-slate-700">
-      <div>
-        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
-          Anexar Documentação em Lote (Selecione um ou vários PDFs: Balanços, FAT, IRPF)
-        </label>
+      
+      {/* BOTÕES DE UPLOAD CUSTOMIZADOS */}
+      <div className="flex flex-col md:flex-row gap-3">
+        {/* INPUT ESCONDIDO DE DOCUMENTOS */}
         <input
           type="file"
           accept="application/pdf"
           multiple
-          onChange={handleFileChange}
+          ref={docInputRef}
+          onChange={(e) => handleFileChange(e, "documento")}
+          className="hidden"
           disabled={uploading}
-          className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-bold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer disabled:opacity-40"
         />
+        {/* INPUT ESCONDIDO DE IMAGENS */}
+        <input
+          type="file"
+          accept="image/png, image/jpeg, image/jpg, image/webp"
+          multiple
+          ref={imgInputRef}
+          onChange={(e) => handleFileChange(e, "imagem")}
+          className="hidden"
+          disabled={uploading}
+        />
+
+        <button 
+          type="button"
+          onClick={() => docInputRef.current?.click()}
+          disabled={uploading}
+          className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+        >
+          📄 Anexar Documentos (PDF)
+        </button>
+        
+        <button 
+          type="button"
+          onClick={() => imgInputRef.current?.click()}
+          disabled={uploading}
+          className="flex-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+        >
+          📸 Anexar Fotos da Empresa
+        </button>
       </div>
 
       {/* GRADE VISUAL DOS ARQUIVOS */}
       {arquivos.length > 0 && (
         <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-          <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider">
-            📋 Fila de Entrada de Arquivos para o Robô
+          <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider flex justify-between">
+            <span>📋 Fila de Entrada de Arquivos para o R2</span>
+            <span>{arquivos.length} arquivo(s)</span>
           </div>
           <div className="divide-y divide-slate-200">
             {arquivos.map((item) => (
               <div key={item.id} className="p-2.5 flex justify-between items-center text-xs">
-                <div className="truncate max-w-[400px]">
-                  <p className="font-bold text-slate-800 truncate">{item.file.name}</p>
-                  <p className={`text-[10px] font-medium font-mono ${
-                    item.status === "erro" ? "text-red-500" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
-                  }`}>{item.mensagem}</p>
+                <div className="flex items-center gap-2 truncate max-w-[400px]">
+                  <span className="text-[16px]">{item.tipo === "documento" ? "📄" : "🖼️"}</span>
+                  <div className="truncate">
+                    <p className="font-bold text-slate-800 truncate">{item.file.name}</p>
+                    <p className={`text-[10px] font-medium font-mono ${
+                      item.status === "erro" ? "text-red-500" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
+                    }`}>{item.mensagem}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
@@ -169,7 +221,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         disabled={uploading || arquivos.length === 0}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
       >
-        {uploading ? "Enviando Lote para Armazenamento..." : "🚀 Disparar Documentos para a Mesa V8"}
+        {uploading ? "Enviando Lote para Armazenamento..." : "🚀 Disparar Lote para a Nuvem e Mesa V8"}
       </button>
     </div>
   );
