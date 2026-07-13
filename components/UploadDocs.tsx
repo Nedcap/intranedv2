@@ -10,14 +10,14 @@ interface UploadDocsProps {
     cidadeExtenso?: string;
     capital_social?: number;
   };
-  // Propriedade mantida para repassar o lote de URLs para a função controladora da página mãe
-  onSucesso: (urlsDocumentos: string[]) => void;
+  // 🔥 AGORA ELE DEVOLVE OS PDFs E AS IMAGENS SEPARADOS!
+  onSucesso: (urlsDocumentos: string[], urlsImagens: string[]) => void;
 }
 
 interface ArquivoFila {
   id: string;
   file: File;
-  tipo: "documento" | "imagem"; // 🔥 IDENTIFICADOR DE TIPO
+  tipo: "documento" | "imagem";
   status: "pendente" | "enviando" | "sucesso" | "erro";
   mensagem: string;
 }
@@ -26,7 +26,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
   const [arquivos, setArquivos] = useState<ArquivoFila[]>([]);
   const [uploading, setUploading] = useState(false);
   
-  // Referências para os inputs invisíveis
   const docInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
 
@@ -41,7 +40,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       }));
       setArquivos(prev => [...prev, ...novos]);
     }
-    // Reseta o input para permitir adicionar o mesmo arquivo de novo se o cara apagar
     e.target.value = "";
   };
 
@@ -54,16 +52,11 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     setUploading(true);
 
     const urlsDocumentos: string[] = [];
-    // Identificador de lote master
+    const urlsImagens: string[] = []; // 🔥 CRIAMOS A LISTA DE IMAGENS
     const loteId = `lote-${Date.now()}`;
-
-    // URL base pública do seu Cloudflare R2
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
     try {
-      // ====================================================================
-      // 🚀 LOOP DE UPLOAD: ENVIA OS ARQUIVOS DIRETAMENTE PARA O BACKEND API
-      // ====================================================================
       for (let i = 0; i < arquivos.length; i++) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
@@ -74,11 +67,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           const formData = new FormData();
           formData.append("file", item.file);
           
-          // 🔥 O TRUQUE NINJA: A gente injeta a subpasta direto no ID do analise
-          // O Cloudflare R2 vai criar a pasta automaticamente!
           const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
           const pathDinamicoR2 = `${loteId}/${subpasta}`;
-          
           formData.append("analiseId", pathDinamicoR2);
 
           const res = await fetch("/api/upload", {
@@ -92,15 +82,14 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
             throw new Error(data.error || `Erro HTTP ${res.status}`);
           }
 
-          // 🔥 A MÁGICA AQUI: Pegamos o caminho real devolvido pela API e encodamos pedaço por pedaço!
-          // Isso garante que espaços virem %20 e o Python não tome erro 404
           const pathCodificado = data.path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
           const urlFinalDoArquivo = `${r2BaseUrl}/${pathCodificado}`;
           
-          // A gente só manda os PDFs para a esteira da IA V8 ler. 
-          // As imagens vão ficar salvas no R2, mas não precisam ir pro motor de análise!
+          // 🔥 SEPARAMOS QUEM É PDF E QUEM É IMAGEM
           if (item.tipo === "documento") {
              urlsDocumentos.push(urlFinalDoArquivo);
+          } else if (item.tipo === "imagem") {
+             urlsImagens.push(urlFinalDoArquivo);
           }
 
           setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "sucesso", mensagem: `✅ Salvo na subpasta /${subpasta}!` } : a));
@@ -112,14 +101,11 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         }
       }
 
-      // ====================================================================
-      // 🏁 ENTREGA FINAL: Aciona o callback da tela mãe apenas com as URLs dos PDFs
-      // ====================================================================
       setArquivos(prev => prev.map(a => ({ ...a, mensagem: "📌 Sincronizando com a esteira principal..." })));
       
       setTimeout(() => {
-        // Manda pro Motor V8 (ele só precisa ler PDFs)
-        onSucesso(urlsDocumentos); 
+        // 🔥 AGORA ENVIAMOS AS DUAS LISTAS PRA TELA PRINCIPAL!
+        onSucesso(urlsDocumentos, urlsImagens); 
         setArquivos([]);
       }, 1000);
 
@@ -133,10 +119,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
   return (
     <div className="space-y-4 font-sans text-slate-700">
-      
-      {/* BOTÕES DE UPLOAD CUSTOMIZADOS */}
       <div className="flex flex-col md:flex-row gap-3">
-        {/* INPUT ESCONDIDO DE DOCUMENTOS */}
         <input
           type="file"
           accept="application/pdf"
@@ -146,7 +129,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           className="hidden"
           disabled={uploading}
         />
-        {/* INPUT ESCONDIDO DE IMAGENS */}
         <input
           type="file"
           accept="image/png, image/jpeg, image/jpg, image/webp"
@@ -176,7 +158,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         </button>
       </div>
 
-      {/* GRADE VISUAL DOS ARQUIVOS */}
       {arquivos.length > 0 && (
         <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
           <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider flex justify-between">

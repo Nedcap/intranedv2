@@ -671,7 +671,7 @@ function MesaAnaliseConteudo() {
                         <td className={`${thStyle} text-right`}>RATING FINAL</td>
                         <td colSpan={3} className={tdStyle}>
                           <select value={analise.rating} onChange={(e)=>setAnalise({...analise, rating: e.target.value})} className={`${cellStyle} font-bold text-yellow-700 bg-yellow-50`}>
-                            <option value="A - Risco reduced">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
+                            <option value="A - Risco reduzido">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
                           </select>
                         </td>
                       </tr>

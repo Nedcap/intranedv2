@@ -94,7 +94,8 @@ export default function MotorCreditoPage() {
     }
   };
 
-  const registrarAnaliseNoSupabase = async (urlsDocumentos: string[]) => {
+  // 🔥 AQUI ESTÁ A CORREÇÃO: RECEBE urlsImagens COMO SEGUNDO PARÂMETRO
+  const registrarAnaliseNoSupabase = async (urlsDocumentos: string[], urlsImagens: string[] = []) => {
     if (!empresaSelecionada) return;
 
     setLoading(true);
@@ -135,7 +136,12 @@ export default function MotorCreditoPage() {
             endividamento_detalhado: [],
             restritivos: [],
             socios: [],
-            anexos: { organograma_url: "", fachada_url: "" },
+            // 🔥 O SEGREDO TÁ AQUI: Salvando as imagens direto na aba de anexos!
+            anexos: { 
+              organograma_url: "", 
+              fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
+              fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
+            },
             parecer_comite: ""
           }
         })
@@ -310,10 +316,9 @@ export default function MotorCreditoPage() {
                     📄 Painel de Documentação
                   </span>
                   <button 
-                    onClick={() => alert("Módulo de upload de imagens da empresa será ativado aqui!")}
-                    className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded text-[10px] uppercase tracking-wider hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                    onClick={() => alert("Módulo de upload de imagens ativado!")}
+                    className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded text-[10px] uppercase tracking-wider hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-1 cursor-not-allowed opacity-0 w-0 h-0 p-0 overflow-hidden"
                   >
-                    📸 Anexar Imagens da Empresa
                   </button>
                 </div>
                 
