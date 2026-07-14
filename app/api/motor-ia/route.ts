@@ -5,15 +5,16 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { analise_id, urls_documentos } = body;
+    
+    // 🔥 CORREÇÃO: Extraindo o modo_atualizacao do body
+    const { analise_id, urls_documentos, modo_atualizacao } = body;
 
     if (!analise_id || !urls_documentos || urls_documentos.length === 0) {
       return NextResponse.json({ error: "Faltam parâmetros" }, { status: 400 });
     }
 
-    console.log(`[VERCEL API] Encaminhando análise ${analise_id} para o Motor V8 no Render...`);
+    console.log(`[VERCEL API] Encaminhando análise ${analise_id} para o Motor V8 no Render... (Merge/Update: ${!!modo_atualizacao})`);
 
-    // 🔥 AGORA SIM! Apontando para a rota exata do seu main.py (/api/motor-ia)
     const urlRender = "https://motor-ia-mmlv.onrender.com/api/motor-ia"; 
 
     const respostaRender = await fetch(urlRender, {
@@ -23,7 +24,8 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         analise_id,
-        urls_documentos
+        urls_documentos,
+        modo_atualizacao: modo_atualizacao || false // 🔥 Repassando para o Python
       }),
     });
 

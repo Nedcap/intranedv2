@@ -262,6 +262,11 @@ function MesaAnaliseConteudo() {
   const [loadingAnalise, setLoadingAnalise] = useState(false);
   const [processandoDecisao, setProcessandoDecisao] = useState(false);
 
+  // 🔥 NOVOS ESTADOS PARA O MODAL DE UPLOAD (ATUALIZAÇÃO DE IA)
+  const [modalDocsAberto, setModalDocsAberto] = useState(false);
+  const [novosArquivos, setNovosArquivos] = useState<File[]>([]);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+
   useEffect(() => {
     buscarFilaSupabase(true);
     const intervalo = setInterval(() => { buscarFilaSupabase(false); }, 10000);
@@ -366,7 +371,7 @@ function MesaAnaliseConteudo() {
     }
   };
 
-  // 🔥 NOVO: LÓGICA DE VINCULAR COMERCIAL MANUALMENTE
+  // 🔥 LÓGICA DE VINCULAR COMERCIAL MANUALMENTE
   const vincularComercial = async () => {
     if (!idSelecionado || !analise.id) {
       alert("💡 Selecione uma análise real na esteira antes de vincular o Comercial.");
@@ -386,6 +391,70 @@ function MesaAnaliseConteudo() {
       alert("❌ Falha ao vincular o comercial: " + err.message);
     } finally {
       setProcessandoDecisao(false);
+    }
+  };
+
+  // 🔥 NOVA FUNÇÃO: UPLOAD DOS NOVOS ARQUIVOS E ACIONAMENTO DA IA (MERGE)
+  const processarNovosDocumentos = async () => {
+    if (!idSelecionado || novosArquivos.length === 0) return;
+
+    try {
+      setUploadingDocs(true);
+      
+      // 1. UPLOAD PARA O R2 (Ajuste o endpoint /api/upload conforme o do seu projeto)
+      const formData = new FormData();
+      novosArquivos.forEach(file => formData.append("files", file));
+      
+      const resUpload = await fetch("/api/upload", {
+        method: "POST",
+        body: formData
+      });
+      
+      if (!resUpload.ok) {
+        const dataUpload = await resUpload.json().catch(()=>({}));
+        throw new Error(dataUpload.error || "Erro ao fazer upload para o R2");
+      }
+      
+      const dataUpload = await resUpload.json();
+      // Verifique a chave de retorno do seu endpoint de upload (ex: dataUpload.urls ou dataUpload.fileUrls)
+      const urlsNovosDocs = dataUpload.urls || dataUpload.fileUrls || []; 
+      
+      if (!urlsNovosDocs || urlsNovosDocs.length === 0) {
+        throw new Error("Nenhuma URL retornada do upload.");
+      }
+
+      // 2. ATUALIZAR O BANCO (Adicionar os novos links no array do Supabase)
+      const { data: analiseDB } = await supabase.from("analises").select("dados_documentos").eq("id", idSelecionado).single();
+      const docsAtuais = analiseDB?.dados_documentos || [];
+      const docsAtualizados = [...docsAtuais, ...urlsNovosDocs];
+
+      await supabase.from("analises").update({ dados_documentos: docsAtualizados }).eq("id", idSelecionado);
+
+      // 3. ACIONAR O MOTOR IA PASSANDO A FLAG DE "MERGE/UPDATE"
+      const resIA = await fetch("/api/motor-ia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analise_id: idSelecionado,
+          urls_documentos: urlsNovosDocs, // Manda SÓ os novos arquivos para o Python processar
+          modo_atualizacao: true // 🔥 ESSA É A FLAG QUE O PYTHON VAI LER PRA NÃO MATAR OS DADOS
+        })
+      });
+
+      if (!resIA.ok) throw new Error("Falha ao acionar o Motor V8 no Render");
+
+      // Atualiza visualmente para "IA Processando"
+      setAnalise(prev => ({ ...prev, status: "em_processamento_ia" }));
+      await supabase.from("analises").update({ status: "em_processamento_ia" }).eq("id", idSelecionado);
+
+      alert("🤖 Documentos enviados com sucesso! A IA está processando e os dados serão mesclados em breve.");
+      setModalDocsAberto(false);
+      setNovosArquivos([]);
+      
+    } catch (err: any) {
+      alert("❌ Erro: " + err.message);
+    } finally {
+      setUploadingDocs(false);
     }
   };
 
@@ -549,11 +618,11 @@ function MesaAnaliseConteudo() {
   const thStyle = "p-2 bg-slate-100 border border-slate-200 font-semibold text-[10px] text-slate-600 uppercase tracking-wider text-center";
   const tdStyle = "border border-slate-200 p-0 bg-white hover:bg-slate-50 relative focus-within:bg-indigo-50/40 transition-colors h-8";
   const sectionHeaderStyle = "flex justify-between items-center bg-indigo-950 text-white text-[11px] font-semibold tracking-wide p-2.5 rounded-t-md shadow-sm border border-indigo-950";
-  const btnSecundario = "bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer";
+  const btnSecundario = "bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer disabled:opacity-50";
   const btnPrimario = "bg-indigo-600 border border-indigo-700 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer disabled:opacity-50";
 
   return (
-    <div className="flex flex-col xl:flex-row gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6">
+    <div className="flex flex-col xl:flex-row gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6 relative">
       
       {/* SIDEBAR REFINADA */}
       <div className="w-full xl:w-72 shrink-0 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] sticky top-6 z-20 overflow-hidden">
@@ -620,8 +689,14 @@ function MesaAnaliseConteudo() {
               </div>
               
               <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={() => alert("Acionando extração em lote dos documentos mais recentes...")} className={btnSecundario} title="Ler Novos Docs">
-                  🤖 Atualizar via Docs
+                {/* 🔥 BOTÃO DE NOVO LOTE (ACIONA O MODAL) */}
+                <button 
+                  onClick={() => setModalDocsAberto(true)} 
+                  disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} 
+                  className={btnSecundario} 
+                  title="Adicionar novos PDFs (Balanço, Endividamento) para mesclar com esta análise"
+                >
+                  🤖 Add e Ler Novos Docs
                 </button>
                 <button onClick={vincularComercial} disabled={!idSelecionado || processandoDecisao} className={btnSecundario}>
                   👤 Vincular Comercial
@@ -631,7 +706,7 @@ function MesaAnaliseConteudo() {
                 </button>
                 {idSelecionado && (
                   <>
-                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer">
+                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer disabled:opacity-50">
                       ✖ Devolver Req.
                     </button>
                     <GerarAnalise analise={analise} />
@@ -673,7 +748,7 @@ function MesaAnaliseConteudo() {
                   {analise.status === "em_processamento_ia" && (
                     <div className="p-4 border-l-4 border-purple-500 bg-purple-50 text-purple-900 font-semibold text-xs rounded-r-md shadow-sm flex items-center gap-3">
                       <span className="text-lg">🔮</span>
-                      <span>O Motor Python V8 está lendo e estruturando os arquivos anexados a essa conta. Os dados abaixo vão atualizar dinamicamente enquanto você acompanha!</span>
+                      <span>O Motor Python V8 está lendo e estruturando arquivos. Os dados abaixo vão atualizar dinamicamente enquanto você acompanha!</span>
                     </div>
                   )}
 
@@ -1361,6 +1436,73 @@ function MesaAnaliseConteudo() {
           </>
         )}
       </div>
+
+      {/* 🔥 MODAL DE UPLOAD DE NOVOS DOCUMENTOS (MERGE/ATUALIZAÇÃO IA) */}
+      {modalDocsAberto && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-indigo-900 text-white p-4 font-bold text-sm flex justify-between items-center shadow-md">
+              <span className="flex items-center gap-2">📄 Processar Novos Documentos (Merge IA)</span>
+              <button onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} className="text-indigo-200 hover:text-white transition-colors cursor-pointer text-xl">✕</button>
+            </div>
+            
+            <div className="p-6 space-y-5">
+              <p className="text-xs text-slate-600 leading-relaxed bg-indigo-50 border border-indigo-100 p-3 rounded">
+                Selecione os novos arquivos (PDFs de faturamento, balancetes atualizados, etc). 
+                A IA irá extrair os dados e <strong>mesclar</strong> com a análise atual sem apagar o que você já editou manualmente.
+              </p>
+              
+              <div className="border-2 border-dashed border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50/70 transition-colors bg-indigo-50/30 rounded-xl p-8 text-center relative cursor-pointer">
+                <input 
+                  type="file" 
+                  multiple 
+                  accept=".pdf,.png,.jpg,.jpeg" 
+                  onChange={(e) => setNovosArquivos(Array.from(e.target.files || []))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <div className="pointer-events-none flex flex-col items-center gap-2">
+                  <span className="text-3xl">📤</span>
+                  <span className="text-sm font-bold text-indigo-700">Clique ou arraste novos arquivos aqui</span>
+                  <span className="text-xs text-slate-500 font-medium">Aceita PDF, PNG, JPG</span>
+                </div>
+              </div>
+
+              {novosArquivos.length > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-wider">Arquivos Selecionados:</span>
+                  <ul className="text-[11px] text-slate-700 max-h-32 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300">
+                    {novosArquivos.map((file, i) => (
+                      <li key={i} className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded truncate shadow-sm">
+                        📎 {file.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-100 p-4 border-t border-slate-200 flex justify-end gap-3">
+              <button 
+                onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} 
+                className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={processarNovosDocumentos} 
+                disabled={uploadingDocs || novosArquivos.length === 0}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-bold rounded-md shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {uploadingDocs ? (
+                  <>
+                    <span className="animate-spin">⏳</span> Enviando R2...
+                  </>
+                ) : "🚀 Enviar para Leitura IA"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
