@@ -38,7 +38,9 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       // 🧠 Se for o primeiro arquivo que o usuário joga na tela, a gente fixa o lote de vez
       if (!loteId) {
         const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
-        setLoteId(`lote-${cnpjLimpo || "geral"}-${Date.now()}`);
+        // 🛡️ HASH DE SEGURANÇA: Garante unicidade absoluta da pasta no Cloudflare R2
+        const randomHash = Math.random().toString(36).substring(2, 8);
+        setLoteId(`lote-${cnpjLimpo || "geral"}-${Date.now()}-${randomHash}`);
       }
 
       const novos: ArquivoFila[] = Array.from(e.target.files).map((f, i) => ({
@@ -78,7 +80,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           
           const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
           
-          // 🎯 Aqui ele usa o loteId fixo que está guardado lá no estado do componente!
+          // 🎯 Aqui ele usa o loteId fixo e seguro que está guardado no estado
           const pathDinamicoR2 = `${loteId}/${subpasta}`;
           formData.append("analiseId", pathDinamicoR2);
 
@@ -128,7 +130,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         setTimeout(() => {
           onSucesso(urlsDocumentos, urlsImagens); 
           
-          // 🧼 Se sobrou algum arquivo com erro na tela, mantém o MESMO loteId para quando ele tentar re-enviar.
+          // 🧼 Se sobrou algum arquivo com erro na tela, mantém o MESMO loteId para quando tentar re-enviar.
           // Se subiu tudo limpo, limpa o loteId para a próxima empresa.
           const temErros = arquivos.some(a => a.status === "erro");
           if (!temErros) {
@@ -143,7 +145,7 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     } catch (err: any) {
       console.error("❌ [ERRO_ESTEIRA_UPLOAD]:", err);
       alert("⚠️ Erro crítico no envio dos arquivos:\n" + err.message);
-    } finally { // ✅ CORRIGIDO: Modificado de 'file' para 'finally'
+    } finally { 
       setUploading(false);
     }
   };

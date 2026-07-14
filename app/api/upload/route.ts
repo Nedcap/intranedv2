@@ -35,8 +35,13 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     
+    // 🧽 SANITIZAÇÃO: Remove espaços, acentos e caracteres estranhos do nome do arquivo
+    // Isso previne links quebrados no R2 e ataques de Directory Traversal (ex: ../../arquivo.pdf)
+    const nomeSeguro = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    
     // 🎯 Mantendo seu padrão limpo de pastas estruturadas no R2
-    const path = analiseId ? `clientes/${analiseId}/${file.name}` : `avulsos/${Date.now()}-${file.name}`;
+    // analiseId chega do front como: lote-cnpj-timestamp-hash/docs
+    const path = analiseId ? `clientes/${analiseId}/${nomeSeguro}` : `avulsos/${Date.now()}-${nomeSeguro}`;
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME?.trim(),
