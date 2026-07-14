@@ -9,7 +9,8 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor || 0);
   };
 
-  const gerarRelatorioHTML = () => {
+  // 🔥 Transformado em ASYNC para poder consultar a API do Cloudflare R2
+  const gerarRelatorioHTML = async () => {
     setGerando(true);
 
     try {
@@ -161,62 +162,61 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
       // ==========================================
-      // 📸 VARREDURA DINÂMICA DE IMAGENS CORRIGIDA (Cloudflare R2 / Supabase)
+      // 🕵️‍♂️ VASCULHADOR DE PASTA DIRETO DO R2
       // ==========================================
+      let prefixoPasta = `clientes/${analise.id}/`; // Padrão antigo
       const imagensMapeadas = new Set<string>();
 
+      // Descobre qual é a pasta exata olhando para os PDFs que sobreviveram no banco
+      if (analise.dados_documentos && analise.dados_documentos.length > 0) {
+        try {
+          const urlBase = new URL(analise.dados_documentos[0]);
+          const parts = urlBase.pathname.split('/'); 
+          const idxClientes = parts.indexOf('clientes');
+          if (idxClientes !== -1 && parts.length > idxClientes + 1) {
+            // Pega o nome correto da pasta, ex: "clientes/lote-1234-hash/"
+            prefixoPasta = `${parts[idxClientes]}/${parts[idxClientes + 1]}/`;
+          }
+        } catch(e) { console.error("Erro ao extrair prefixo da URL", e); }
+      }
+
+      // Chama a nova API para listar tudo que tem na pasta física
+      try {
+        const resR2 = await fetch('/api/listar-r2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefix: prefixoPasta })
+        });
+        
+        if (resR2.ok) {
+          const dataR2 = await resR2.json();
+          const regexImagem = /\.(jpeg|jpg|gif|png|webp)/i;
+          
+          if (dataR2.urls) {
+            dataR2.urls.forEach((url: string) => {
+              if (regexImagem.test(url)) imagensMapeadas.add(url);
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Aviso: Falha ao listar diretório do R2, usando fallback do banco", err);
+      }
+
+      // 🔄 Fallback de Segurança (Lê do banco caso a API do R2 falhe)
       const normalizarUrl = (u: any) => {
         if (typeof u !== 'string') return null;
-        const limpa = u.trim();
-        if (limpa === '') return null;
-
-        try {
-          const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
-          const pathname = parsedUrl.pathname;
-
-          const ehImagem = /\.(jpeg|jpg|gif|png|webp)/i.test(pathname);
-          if (ehImagem) return limpa; 
-          return null;
-        } catch (e) {
-          if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) return limpa;
-          return null;
-        }
+        if (/\.(jpeg|jpg|gif|png|webp)/i.test(u)) return u.trim();
+        return null;
       };
 
-      // 1. Vasculha galeria_urls solta (legado)
-      if (Array.isArray(analise.galeria_urls)) {
-        analise.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
-      }
-      
-      // 2. Vasculha anexos (AQUI ENTRA A NOSSA CHAVE NOVA)
-      if (analise.anexos) {
-        // 🔥 Lê a chave 'todas_as_imagens' que nós criamos no Envio Análise!
-        if (Array.isArray(analise.anexos.todas_as_imagens)) {
-          analise.anexos.todas_as_imagens.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
-        }
-        
-        // Mantém a leitura antiga por segurança
-        if (Array.isArray(analise.anexos.galeria_urls)) {
-          analise.anexos.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
-        }
-        const fachada = normalizarUrl(analise.anexos.fachada_url);
-        if (fachada) imagensMapeadas.add(fachada);
-
-        const visita = normalizarUrl(analise.anexos.fotos_visita_url);
-        if (visita) imagensMapeadas.add(visita);
-      }
-      
-      // 3. Vasculha dados_documentos (Como agora mandamos fotos pra IA ler, elas caem aqui também)
-      if (Array.isArray(analise.dados_documentos)) {
-        analise.dados_documentos.forEach((u: string) => {
-          const url = normalizarUrl(u);
-          if (url) imagensMapeadas.add(url); // O Set previne que a foto apareça duplicada se já foi pega no passo 2!
-        });
-      }
+      if (analise.anexos?.todas_as_imagens) analise.anexos.todas_as_imagens.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
+      if (analise.anexos?.fachada_url) { const f = normalizarUrl(analise.anexos.fachada_url); if(f) imagensMapeadas.add(f); }
+      if (analise.anexos?.fotos_visita_url) { const v = normalizarUrl(analise.anexos.fotos_visita_url); if(v) imagensMapeadas.add(v); }
+      if (analise.galeria_urls) analise.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
+      if (Array.isArray(analise.dados_documentos)) analise.dados_documentos.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
 
       const listaFotosValidas = Array.from(imagensMapeadas);
 
-      // 🔥 EXIBIDOR ULTRA SEGURO: Usando aspas duplas escapadas \" para blindar os parênteses (1).jpeg
       const galeriaHTML = listaFotosValidas.length > 0 
         ? `
         <div class="print-break"></div>

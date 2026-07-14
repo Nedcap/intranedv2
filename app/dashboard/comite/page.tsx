@@ -165,62 +165,32 @@ const montarHtmlDossie = (item: any) => {
   const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
 
   // ==========================================
-  // 📸 EXTRAÇÃO INTELIGENTE DE FOTOS CORRIGIDA
+  // 📸 GALERIA - LÊ A ARRAY 'todas_as_imagens_r2' que injetamos no fetch inicial
   // ==========================================
-  const imagensExtraidas = new Set<string>();
-
-  const normalizarUrl = (u: any) => {
-    if (typeof u !== 'string') return null;
-    const limpa = u.trim();
-    if (limpa === '') return null;
-
-    try {
-      const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
-      const pathname = parsedUrl.pathname;
-
-      // 🔥 CORREÇÃO CRÍTICA DA REGEX: Permissiva com parênteses e tokens (Sem o $ final)
-      const ehImagem = /\.(jpeg|jpg|gif|png|webp)/i.test(pathname);
-      
-      if (ehImagem) {
-        return limpa; 
-      }
-      return null;
-    } catch (e) {
-      if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) {
-        return limpa;
-      }
-      return null;
-    }
-  };
-
-  if (Array.isArray(analise.galeria_urls)) {
-    analise.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
-  }
+  // Pega direto da propriedade injetada no state, e caso não exista usa o fallback
+  let fotosUnicas: string[] = [];
   
-  if (analise.anexos) {
-    if (Array.isArray(analise.anexos.galeria_urls)) {
-      analise.anexos.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
+  if (item.todas_as_imagens_r2 && Array.isArray(item.todas_as_imagens_r2)) {
+    fotosUnicas = item.todas_as_imagens_r2;
+  } else {
+    // 🔄 Fallback caso o fetch do R2 não tenha retornado a tempo
+    const imagensExtraidas = new Set<string>();
+    const normalizarUrl = (u: any) => {
+      if (typeof u !== 'string') return null;
+      if (/\.(jpeg|jpg|gif|png|webp)/i.test(u)) return u.trim();
+      return null;
+    };
+    if (analise.anexos?.todas_as_imagens) analise.anexos.todas_as_imagens.forEach((u: string) => { const validUrl = normalizarUrl(u); if(validUrl) imagensExtraidas.add(validUrl); });
+    if (analise.galeria_urls) analise.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
+    if (analise.anexos) {
+      if (analise.anexos.galeria_urls) analise.anexos.galeria_urls.forEach((url: string) => { const validUrl = normalizarUrl(url); if(validUrl) imagensExtraidas.add(validUrl); });
+      const fachada = normalizarUrl(analise.anexos.fachada_url); if (fachada) imagensExtraidas.add(fachada);
+      const visita = normalizarUrl(analise.anexos.fotos_visita_url); if (visita) imagensExtraidas.add(visita);
     }
-    const fachada = normalizarUrl(analise.anexos.fachada_url);
-    if (fachada) imagensExtraidas.add(fachada);
-
-    const visita = normalizarUrl(analise.anexos.fotos_visita_url);
-    if (visita) imagensExtraidas.add(visita);
+    if (Array.isArray(item.dados_documentos)) item.dados_documentos.forEach((url: string) => { const validUrl = normalizarUrl(url); if (validUrl) imagensExtraidas.add(validUrl); });
+    fotosUnicas = Array.from(imagensExtraidas);
   }
 
-  // Verifica na raiz do item os dados_documentos
-  if (Array.isArray(item.dados_documentos)) {
-    item.dados_documentos.forEach((url: string) => {
-      const validUrl = normalizarUrl(url);
-      if (validUrl) {
-        imagensExtraidas.add(validUrl);
-      }
-    });
-  }
-
-  const fotosUnicas = Array.from(imagensExtraidas);
-
-  // 🔥 TAG HTML BLINDADA: Trocado aspas simples internas por aspas duplas direct no src
   const galeriaHTML = fotosUnicas.length > 0 
     ? `
     <div class="print-break"></div>
@@ -234,8 +204,8 @@ const montarHtmlDossie = (item: any) => {
     </div>
     ` : '';
 
-  // Organograma URL Tratado
-  const organogramaUrlTratado = normalizarUrl(analise.anexos?.organograma_url);
+  const normalizarOrganogramaUrl = (u: any) => { if (typeof u !== 'string') return null; if (/\.(jpeg|jpg|gif|png|webp)/i.test(u)) return u.trim(); return null; };
+  const organogramaUrlTratado = normalizarOrganogramaUrl(analise.anexos?.organograma_url);
 
   return `
   <!DOCTYPE html>
@@ -815,6 +785,41 @@ export default function ComitePage() {
     }
   }, []);
 
+  // 🔥 VASCULHADOR R2 PARA O COMITÊ (Roda transparente no fundo)
+  const vasculharImagensR2 = async (analiseItem: any) => {
+    let prefixoPasta = `clientes/${analiseItem.id}/`; 
+    
+    // Descobre o prefixo pela primeira URL de documento
+    if (analiseItem.dados_documentos && analiseItem.dados_documentos.length > 0) {
+      try {
+        const urlBase = new URL(analiseItem.dados_documentos[0]);
+        const parts = urlBase.pathname.split('/'); 
+        const idxClientes = parts.indexOf('clientes');
+        if (idxClientes !== -1 && parts.length > idxClientes + 1) {
+          prefixoPasta = `${parts[idxClientes]}/${parts[idxClientes + 1]}/`;
+        }
+      } catch(e) { /* ignora */ }
+    }
+
+    try {
+      const res = await fetch('/api/listar-r2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix: prefixoPasta })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const regexImagem = /\.(jpeg|jpg|gif|png|webp)/i;
+        if (data.urls) {
+          return data.urls.filter((url: string) => regexImagem.test(url));
+        }
+      }
+    } catch (e) {
+       console.error("Erro vasculhador R2", e);
+    }
+    return [];
+  };
+
   const carregarComite = async () => {
     try {
       setCarregando(true);
@@ -834,11 +839,18 @@ export default function ComitePage() {
         }
       }
       
-      // Carrega pauta ativa do comitê (Baseado na tabela "analises" -> status 'aberta')
+      // Carrega pauta ativa do comitê
       const { data: dataComite } = await queryComite.eq("status", "aberta").order("criado_em", { ascending: false });
       if (dataComite) {
-        setAnalises(dataComite);
-        for (const item of dataComite) {
+        
+        // 🚀 Injeta as fotos únicas de nuvem dentro do objeto ANTES de renderizar o comitê!
+        const analisesComImagensR2 = await Promise.all(dataComite.map(async (item) => {
+           const urlsR2 = await vasculharImagensR2(item);
+           return { ...item, todas_as_imagens_r2: urlsR2 };
+        }));
+
+        setAnalises(analisesComImagensR2);
+        for (const item of analisesComImagensR2) {
           await carregarVotosIniciais(item.empresa_nome);
         }
       }
@@ -1035,7 +1047,7 @@ export default function ComitePage() {
       setCarregando(true);
       const { error } = await supabase.from("analises").insert({
         empresa_nome: nomeNovaEmpresa.trim().toUpperCase(),
-        caminho_local: "INCLUSAO_MANUAL", // Requisito do novo schema NOT NULL
+        caminho_local: "INCLUSAO_MANUAL", 
         cnpj: "00000000000000",
         status: "aguardando_docs"
       });
