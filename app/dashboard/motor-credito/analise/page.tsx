@@ -401,26 +401,55 @@ function MesaAnaliseConteudo() {
     try {
       setUploadingDocs(true);
       
-      // 1. UPLOAD PARA O R2 (Ajuste o endpoint /api/upload conforme o do seu projeto)
-      const formData = new FormData();
-      novosArquivos.forEach(file => formData.append("files", file));
-      
-      const resUpload = await fetch("/api/upload", {
-        method: "POST",
-        body: formData
-      });
-      
-      if (!resUpload.ok) {
-        const dataUpload = await resUpload.json().catch(()=>({}));
-        throw new Error(dataUpload.error || "Erro ao fazer upload para o R2");
+      const urlsNovosDocs: string[] = [];
+      const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
+
+      // 1. UPLOAD DIRETO PARA O R2 USANDO PRESIGNED URL (Lote)
+      for (let i = 0; i < novosArquivos.length; i++) {
+        const file = novosArquivos[i];
+        
+        // Define o caminho no R2 (adiciona um timestamp para evitar sobreposição de nomes)
+        const pathDinamicoR2 = `analises/${idSelecionado}/adicionais/${Date.now()}`;
+
+        // ETAPA 1: Pede a URL de autorização pro backend
+        const resAuth = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            analiseId: pathDinamicoR2
+          }),
+        });
+
+        const dataAuth = await resAuth.json().catch(() => ({}));
+
+        if (!resAuth.ok || dataAuth.error) {
+          throw new Error(dataAuth.error || `Erro ao autorizar arquivo ${file.name}`);
+        }
+
+        const { url, path } = dataAuth;
+
+        // ETAPA 2: Upload DIRETO do navegador pro Cloudflare R2
+        const uploadRes = await fetch(url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": file.type || "application/octet-stream",
+          },
+          body: file,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
+        }
+
+        // Monta a URL pública do arquivo recém-subido
+        const pathCodificado = path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
+        urlsNovosDocs.push(`${r2BaseUrl}/${pathCodificado}`);
       }
       
-      const dataUpload = await resUpload.json();
-      // Verifique a chave de retorno do seu endpoint de upload (ex: dataUpload.urls ou dataUpload.fileUrls)
-      const urlsNovosDocs = dataUpload.urls || dataUpload.fileUrls || []; 
-      
-      if (!urlsNovosDocs || urlsNovosDocs.length === 0) {
-        throw new Error("Nenhuma URL retornada do upload.");
+      if (urlsNovosDocs.length === 0) {
+        throw new Error("Nenhuma URL foi gerada no upload.");
       }
 
       // 2. ATUALIZAR O BANCO (Adicionar os novos links no array do Supabase)
