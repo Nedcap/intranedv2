@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 60; 
@@ -16,56 +17,33 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
-    // 🛡️ VERIFICAÇÃO DE SEGURANÇA: Checa o tamanho da requisição direto no cabeçalho antes de processar
-    const contentLength = request.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > 52428800) { // 50MB em bytes
-      return NextResponse.json(
-        { error: "Lote de arquivos excede o limite máximo de 50MB permitido." }, 
-        { status: 413 }
-      );
+    // ⚠️ Agora recebemos um JSON leve apenas com os metadados, e não mais o FormData (o arquivo em si)
+    const { fileName, fileType, analiseId } = await request.json();
+
+    if (!fileName || !fileType) {
+      return NextResponse.json({ error: "Nome ou tipo do arquivo não fornecidos." }, { status: 400 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File;
-    const analiseId = formData.get("analiseId") as string;
-
-    if (!file) {
-      return NextResponse.json({ error: "Nenhum arquivo foi enviado." }, { status: 400 });
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    
-    // 🧽 SANITIZAÇÃO: Remove espaços, acentos e caracteres estranhos do nome do arquivo
-    // Isso previne links quebrados no R2 e ataques de Directory Traversal (ex: ../../arquivo.pdf)
-    const nomeSeguro = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    // 🧽 SANITIZAÇÃO: Mantive a sua lógica para remover espaços, acentos e caracteres estranhos
+    const nomeSeguro = fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
     
     // 🎯 Mantendo seu padrão limpo de pastas estruturadas no R2
-    // analiseId chega do front como: lote-cnpj-timestamp-hash/docs
     const path = analiseId ? `clientes/${analiseId}/${nomeSeguro}` : `avulsos/${Date.now()}-${nomeSeguro}`;
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME?.trim(),
       Key: path,
-      Body: buffer,
-      ContentType: file.type,
+      ContentType: fileType, // Essencial passar o ContentType aqui para o R2 salvar com a extensão correta
     });
 
-    await s3Client.send(command);
+    // 🔑 Gera a URL de permissão (Presigned URL) válida por 2 minutos
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 120 });
 
-    // Retorna o PATH exato gerado no R2 para o frontend
-    return NextResponse.json({ success: true, path });
+    // Retorna a URL de upload DIRETO e o PATH exato gerado para o frontend
+    return NextResponse.json({ success: true, url, path });
     
   } catch (error: any) {
     console.error("❌ [R2_SERVER_ERROR]:", error);
-    
-    // Captura amigável caso o estouro de tamanho ocorra durante o parse do formData
-    if (error.message?.includes("large") || error.code === "ERR_HTTP_INVALID_STATUS_CODE") {
-      return NextResponse.json(
-        { error: "O arquivo enviado é grande demais para o manipulador da API." }, 
-        { status: 413 }
-      );
-    }
-    
-    return NextResponse.json({ error: "Erro no servidor R2: " + error.message }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao gerar autorização do R2: " + error.message }, { status: 500 });
   }
 }

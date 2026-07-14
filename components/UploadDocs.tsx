@@ -72,41 +72,48 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
 
-        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Enviando para o Cloudflare R2..." } : a));
+        setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, status: "enviando", mensagem: "Solicitando autorização à Vercel..." } : a));
 
         try {
-          const formData = new FormData();
-          formData.append("file", item.file);
-          
           const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
-          
-          // 🎯 Aqui ele usa o loteId fixo e seguro que está guardado no estado
           const pathDinamicoR2 = `${loteId}/${subpasta}`;
-          formData.append("analiseId", pathDinamicoR2);
 
-          const res = await fetch("/api/upload", {
+          // ETAPA 1: Pede a URL de autorização pro backend (JSON leve, passa ileso pela Vercel)
+          const resAuth = await fetch("/api/upload", {
             method: "POST",
-            body: formData,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileName: item.file.name,
+              fileType: item.file.type || "application/octet-stream", // Fallback caso o navegador não identifique o tipo
+              analiseId: pathDinamicoR2
+            }),
           });
 
-          if (res.status === 413) {
-            throw new Error("Arquivo muito grande! O servidor rejeitou por passar do limite.");
+          const dataAuth = await resAuth.json().catch(() => ({}));
+
+          if (!resAuth.ok || dataAuth.error) {
+            throw new Error(dataAuth.error || `Erro HTTP ${resAuth.status} ao autorizar`);
           }
 
-          const textoResposta = await res.text();
-          let data: any = {};
-          
-          try {
-            data = JSON.parse(textoResposta);
-          } catch {
-            throw new Error(`Resposta inesperada do servidor (Código ${res.status}).`);
+          const { url, path } = dataAuth;
+
+          setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Fazendo upload direto para o R2..." } : a));
+
+          // ETAPA 2: Upload DIRETO do navegador pro Cloudflare R2 (Aceita até 5GB)
+          const uploadRes = await fetch(url, {
+            method: "PUT",
+            headers: {
+              "Content-Type": item.file.type || "application/octet-stream",
+            },
+            body: item.file,
+          });
+
+          if (!uploadRes.ok) {
+            throw new Error(`O Cloudflare R2 rejeitou o arquivo (Erro ${uploadRes.status}).`);
           }
 
-          if (!res.ok || data.error) {
-            throw new Error(data.error || `Erro HTTP ${res.status}`);
-          }
-
-          const pathCodificado = data.path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
+          // ETAPA 3: Monta a URL pública final
+          const pathCodificado = path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
           const urlFinalDoArquivo = `${r2BaseUrl}/${pathCodificado}`;
           
           if (item.tipo === "documento") {
