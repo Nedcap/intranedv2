@@ -1259,7 +1259,7 @@ function MesaAnaliseConteudo() {
                             <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-rose-600 bg-rose-50/10`} /></td>
                             <td className={tdStyle}>
                               <select value={div.tipo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'tipo', e.target.value)} className={cellStyle}>
-                                <option value="Banco">Banco Varejo/Atacado</option><option value="Fundo">Fundo Estruturado</option>
+                                <option value="Banco">Banco</option><option value="Fundo">FIDC/SEC</option>
                               </select>
                             </td>
                             <td className={tdStyle}>
