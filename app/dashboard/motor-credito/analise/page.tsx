@@ -67,6 +67,7 @@ interface ReferenciaItem {
   rnx: string;
   cliente_desde: string;
   ultima_operacao: string;
+  vop?: number; // NOVO CAMPO: Volume de Operação
   limite_global: number;
   risco_total: number;
   risco_1: number;
@@ -75,10 +76,10 @@ interface ReferenciaItem {
   risco_2: number;
   operacao_2: string;
   vcto_2: string;
-  liquidez_5_dias: string;
-  liquidez_pontual: string;
-  atraso_5_dias: string;
-  atraso_15_dias: string;
+  liquidez_5_dias: string | number; // Agora calculado
+  liquidez_pontual: string | number;
+  atraso_5_dias: string | number;
+  atraso_15_dias: string | number;
   recompra: string;
   concentracao: number;
 }
@@ -97,7 +98,7 @@ interface AnaliseData {
   cnpj: string; 
   razao_social: string; 
   status?: string;
-  comercial?: string; // NOVO: Mapeamento do Comercial
+  comercial?: string; 
 
   // CAPA
   empresas_principais: EmpresaPrincipal[];
@@ -262,7 +263,6 @@ function MesaAnaliseConteudo() {
   const [loadingAnalise, setLoadingAnalise] = useState(false);
   const [processandoDecisao, setProcessandoDecisao] = useState(false);
 
-  // 🔥 NOVOS ESTADOS PARA O MODAL DE UPLOAD (ATUALIZAÇÃO DE IA)
   const [modalDocsAberto, setModalDocsAberto] = useState(false);
   const [novosArquivos, setNovosArquivos] = useState<File[]>([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
@@ -336,7 +336,7 @@ function MesaAnaliseConteudo() {
           cnpj: cnpj, 
           razao_social: razao_social, 
           status: data.status,
-          comercial: data.comercial || "" // INJETANDO O COMERCIAL AQUI
+          comercial: data.comercial || ""
         });
       }
     } catch (err) { 
@@ -371,14 +371,13 @@ function MesaAnaliseConteudo() {
     }
   };
 
-  // 🔥 LÓGICA DE VINCULAR COMERCIAL MANUALMENTE
   const vincularComercial = async () => {
     if (!idSelecionado || !analise.id) {
       alert("💡 Selecione uma análise real na esteira antes de vincular o Comercial.");
       return;
     }
     const novoComercial = prompt("Digite o nome completo do Comercial para vincular a esta conta:", analise.comercial || "");
-    if (novoComercial === null) return; // Cancelou
+    if (novoComercial === null) return; 
     
     try {
       setProcessandoDecisao(true);
@@ -394,7 +393,6 @@ function MesaAnaliseConteudo() {
     }
   };
 
-  // 🔥 NOVA FUNÇÃO: UPLOAD DOS NOVOS ARQUIVOS E ACIONAMENTO DA IA (MERGE)
   const processarNovosDocumentos = async () => {
     if (!idSelecionado || novosArquivos.length === 0) return;
 
@@ -404,14 +402,10 @@ function MesaAnaliseConteudo() {
       const urlsNovosDocs: string[] = [];
       const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
-      // 1. UPLOAD DIRETO PARA O R2 USANDO PRESIGNED URL (Lote)
       for (let i = 0; i < novosArquivos.length; i++) {
         const file = novosArquivos[i];
-        
-        // Define o caminho no R2 (adiciona um timestamp para evitar sobreposição de nomes)
         const pathDinamicoR2 = `analises/${idSelecionado}/adicionais/${Date.now()}`;
 
-        // ETAPA 1: Pede a URL de autorização pro backend
         const resAuth = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -430,12 +424,9 @@ function MesaAnaliseConteudo() {
 
         const { url, path } = dataAuth;
 
-        // ETAPA 2: Upload DIRETO do navegador pro Cloudflare R2
         const uploadRes = await fetch(url, {
           method: "PUT",
-          headers: {
-            "Content-Type": file.type || "application/octet-stream",
-          },
+          headers: { "Content-Type": file.type || "application/octet-stream" },
           body: file,
         });
 
@@ -443,7 +434,6 @@ function MesaAnaliseConteudo() {
           throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
         }
 
-        // Monta a URL pública do arquivo recém-subido
         const pathCodificado = path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
         urlsNovosDocs.push(`${r2BaseUrl}/${pathCodificado}`);
       }
@@ -452,27 +442,24 @@ function MesaAnaliseConteudo() {
         throw new Error("Nenhuma URL foi gerada no upload.");
       }
 
-      // 2. ATUALIZAR O BANCO (Adicionar os novos links no array do Supabase)
       const { data: analiseDB } = await supabase.from("analises").select("dados_documentos").eq("id", idSelecionado).single();
       const docsAtuais = analiseDB?.dados_documentos || [];
       const docsAtualizados = [...docsAtuais, ...urlsNovosDocs];
 
       await supabase.from("analises").update({ dados_documentos: docsAtualizados }).eq("id", idSelecionado);
 
-      // 3. ACIONAR O MOTOR IA PASSANDO A FLAG DE "MERGE/UPDATE"
       const resIA = await fetch("/api/motor-ia", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           analise_id: idSelecionado,
-          urls_documentos: urlsNovosDocs, // Manda SÓ os novos arquivos para o Python processar
-          modo_atualizacao: true // 🔥 ESSA É A FLAG QUE O PYTHON VAI LER PRA NÃO MATAR OS DADOS
+          urls_documentos: urlsNovosDocs,
+          modo_atualizacao: true
         })
       });
 
       if (!resIA.ok) throw new Error("Falha ao acionar o Motor V8 no Render");
 
-      // Atualiza visualmente para "IA Processando"
       setAnalise(prev => ({ ...prev, status: "em_processamento_ia" }));
       await supabase.from("analises").update({ status: "em_processamento_ia" }).eq("id", idSelecionado);
 
@@ -487,7 +474,6 @@ function MesaAnaliseConteudo() {
     }
   };
 
-  // ENCAMINHAR COM MÓDULO DE APRENDIZADO
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
@@ -571,7 +557,7 @@ function MesaAnaliseConteudo() {
   };
 
   // =========================================================================
-  // FÓRMULAS DE FATURAMENTO E POTENCIAL YTD
+  // FÓRMULAS DE FATURAMENTO E POTENCIAL YTD E GERAL
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
@@ -608,6 +594,20 @@ function MesaAnaliseConteudo() {
 
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
+
+  // Calculando variações para o TOTAL ANO
+  const totAno26 = calcTotAno("2026");
+  const totAno25 = calcTotAno("2025");
+  const totAno24 = calcTotAno("2024");
+  const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
+  const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
+
+  // Calculando variações para a MÉDIA GERAL (Mês)
+  const medGeral26 = calcMediaGeralAno("2026");
+  const medGeral25 = calcMediaGeralAno("2025");
+  const medGeral24 = calcMediaGeralAno("2024");
+  const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
+  const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
 
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
@@ -718,7 +718,6 @@ function MesaAnaliseConteudo() {
               </div>
               
               <div className="flex items-center gap-2 flex-wrap">
-                {/* 🔥 BOTÃO DE NOVO LOTE (ACIONA O MODAL) */}
                 <button 
                   onClick={() => setModalDocsAberto(true)} 
                   disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} 
@@ -1110,20 +1109,28 @@ function MesaAnaliseConteudo() {
 
                           <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
                             <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-200 bg-white/50"></td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-200 bg-white/50"></td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR")}</td>
+                            <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
+                                {varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}
+                            </td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR")}</td>
+                            <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
+                                {varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}
+                            </td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR")}</td>
                           </tr>
                           
                           <tr className="bg-slate-200/50 border-t border-slate-300 font-bold text-[11px]">
                             <td className="p-2 border border-slate-200 text-slate-700 text-right">MÉDIA GERAL (Mês)</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-200 bg-white/50"></td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-200 bg-white/50"></td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-800">{medGeral26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-200 text-center font-mono ${varMedGeral26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varMedGeral26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
+                                {varMedGeral26_25 === 0 ? "-" : `${varMedGeral26_25.toFixed(1)}%`}
+                            </td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{medGeral25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-slate-200 text-center font-mono ${varMedGeral25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varMedGeral25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
+                                {varMedGeral25_24 === 0 ? "-" : `${varMedGeral25_24.toFixed(1)}%`}
+                            </td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{medGeral24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
 
                           <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
@@ -1282,27 +1289,38 @@ function MesaAnaliseConteudo() {
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>
                       <span>Market Check & Referências Comerciais Ativas</span>
-                      <button onClick={() => addArray('referencias', {instituicao:"", rnx:"", cliente_desde:"", ultima_operacao:"", limite_global:0, risco_total:0, risco_1:0, operacao_1:"", vcto_1:"", risco_2:0, operacao_2:"", vcto_2:"", liquidez_5_dias:"", liquidez_pontual:"", atraso_5_dias:"", atraso_15_dias:"", recompra:"", concentracao:0})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Cadastrar Referência</button>
+                      <button onClick={() => addArray('referencias', {instituicao:"", rnx:"", cliente_desde:"", ultima_operacao:"", vop:0, limite_global:0, risco_total:0, risco_1:0, operacao_1:"", vcto_1:"", risco_2:0, operacao_2:"", vcto_2:"", liquidez_5_dias:0, liquidez_pontual:0, atraso_5_dias:0, atraso_15_dias:0, recompra:"", concentracao:0})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Cadastrar Referência</button>
                     </div>
                     <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300">
                       <table className="w-full border-collapse min-w-[1500px]">
                         <thead>
                           <tr>
                             <th className={thStyle}>Agente Financeiro</th><th className={thStyle}>Rating/RNX</th><th className={`${thStyle} w-24`}>Início Relac.</th><th className={`${thStyle} w-24`}>Última Operação</th>
+                            <th className={`${thStyle} w-28 text-right`}>VOP (R$)</th> {/* NOVO CAMPO */}
                             <th className={`${thStyle} w-28 text-right`}>Limite Aprovado</th><th className={`${thStyle} w-28 text-right`}>Carteira Total</th>
                             <th className={`${thStyle} w-24 text-right bg-indigo-50 border-indigo-200`}>Risco 1 (R$)</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Tipo Op 1</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Vcto Final 1</th>
                             <th className={`${thStyle} w-24 text-right bg-amber-50 border-amber-200`}>Risco 2 (R$)</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Tipo Op 2</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Vcto Final 2</th>
-                            <th className={thStyle}>Liq. 5 Dias</th><th className={thStyle}>Liq. Pontual</th><th className={thStyle}>Atrasos (5D)</th><th className={thStyle}>Atrasos (15D+)</th>
+                            
+                            {/* COLUNAS DE LIQUIDEZ REORDENADAS */}
+                            <th className={thStyle}>Liq. Pontual (%)</th><th className={thStyle}>Atrasos (Até 5D) (%)</th><th className={`${thStyle} bg-slate-200`}>Liq. 5 Dias (Total)</th><th className={thStyle}>Atrasos (15D+)</th>
+                            
                             <th className={thStyle}>Freq. Recompra</th><th className={thStyle}>Concentração Máx</th><th className={`${thStyle} w-8`}>-</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {analise.referencias.map((ref, i) => (
+                          {analise.referencias.map((ref, i) => {
+                             const calcLiq5 = (Number(ref.liquidez_pontual) || 0) + (Number(ref.atraso_5_dias) || 0);
+
+                             return (
                             <tr key={i}>
                               <td className={tdStyle}><input value={ref.instituicao} onChange={(e)=>updateArray('referencias', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} /></td>
                               <td className={tdStyle}><input value={ref.rnx} onChange={(e)=>updateArray('referencias', i, 'rnx', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="date" value={ref.cliente_desde} onChange={(e)=>updateArray('referencias', i, 'cliente_desde', e.target.value)} className={`${cellStyle} text-center`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.ultima_operacao} onChange={(e)=>updateArray('referencias', i, 'ultima_operacao', e.target.value)} className={`${cellStyle} text-center`} /></td>
+                              
+                              {/* NOVO CAMPO VOP */}
+                              <td className={tdStyle}><input type="number" value={ref.vop || ""} onChange={(e)=>updateArray('referencias', i, 'vop', Number(e.target.value))} className={`${numStyle} font-bold text-slate-700`} /></td>
+                              
                               <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e)=>updateArray('referencias', i, 'limite_global', Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold bg-indigo-50/20`} /></td>
                               <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e)=>updateArray('referencias', i, 'risco_total', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
                               
@@ -1314,16 +1332,18 @@ function MesaAnaliseConteudo() {
                               <td className={tdStyle}><input value={ref.operacao_2} onChange={(e)=>updateArray('referencias', i, 'operacao_2', e.target.value)} className={`${cellStyle} bg-amber-50/50`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.vcto_2} onChange={(e)=>updateArray('referencias', i, 'vcto_2', e.target.value)} className={`${cellStyle} bg-amber-50/50 text-center`} /></td>
                               
-                              <td className={tdStyle}><input value={ref.liquidez_5_dias} onChange={(e)=>updateArray('referencias', i, 'liquidez_5_dias', e.target.value)} className={cellStyle} /></td>
-                              <td className={tdStyle}><input value={ref.liquidez_pontual} onChange={(e)=>updateArray('referencias', i, 'liquidez_pontual', e.target.value)} className={cellStyle} /></td>
-                              <td className={tdStyle}><input value={ref.atraso_5_dias} onChange={(e)=>updateArray('referencias', i, 'atraso_5_dias', e.target.value)} className={cellStyle} /></td>
-                              <td className={tdStyle}><input value={ref.atraso_15_dias} onChange={(e)=>updateArray('referencias', i, 'atraso_15_dias', e.target.value)} className={cellStyle} /></td>
+                              {/* LIQUIDEZ CALCULADA */}
+                              <td className={tdStyle}><input type="number" value={ref.liquidez_pontual || ""} onChange={(e)=>updateArray('referencias', i, 'liquidez_pontual', Number(e.target.value))} className={numStyle} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.atraso_5_dias || ""} onChange={(e)=>updateArray('referencias', i, 'atraso_5_dias', Number(e.target.value))} className={numStyle} /></td>
+                              <td className={`${tdStyle} bg-slate-100`}><input type="number" value={calcLiq5} disabled className={`${numStyle} bg-slate-100 font-bold text-indigo-700`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.atraso_15_dias || ""} onChange={(e)=>updateArray('referencias', i, 'atraso_15_dias', Number(e.target.value))} className={numStyle} /></td>
+                              
                               <td className={tdStyle}><input value={ref.recompra} onChange={(e)=>updateArray('referencias', i, 'recompra', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="number" value={ref.concentracao} onChange={(e)=>updateArray('referencias', i, 'concentracao', Number(e.target.value))} className={`${numStyle} text-center`} placeholder="%" /></td>
                               
                               <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('referencias', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                             </tr>
-                          ))}
+                          )})}
                         </tbody>
                       </table>
                     </div>

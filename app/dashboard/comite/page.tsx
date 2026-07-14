@@ -100,35 +100,58 @@ const montarHtmlDossie = (item: any) => {
         </tr>`;
     }).join("") : ``;
 
+  // 🔥 AJUSTE NAS REFERÊNCIAS: Inclusão do VOP e da Lógica da Liquidez 5 Dias
   const refRows = analise.referencias && analise.referencias.length > 0
-    ? analise.referencias.map((r: any) => `
-      <tr>
-        <td style="font-weight:600;">${r.instituicao || '-'}</td>
-        <td class="text-center font-mono">${r.cliente_desde ? new Date(r.cliente_desde).toLocaleDateString('pt-BR') : '-'}</td>
-        <td class="text-center font-mono">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
-        <td class="text-right font-bold font-mono text-blue-600">${formatarMoeda(r.limite_global)}</td>
-        <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.risco_total)}</td>
-        <td class="text-center" style="font-size:11px;">Pontual: ${r.liquidez_pontual || '-'} | 5d: ${r.liquidez_5_dias || '-'}</td>
-        <td class="text-center font-mono">${r.concentracao || 0}%</td>
-      </tr>`).join("")
-    : `<tr><td colspan="7" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
+    ? analise.referencias.map((r: any) => {
+        const calcLiq5 = (Number(r.liquidez_pontual) || 0) + (Number(r.atraso_5_dias) || 0);
+        return `
+        <tr>
+          <td style="font-weight:600;">${r.instituicao || '-'}</td>
+          <td class="text-center font-mono">${r.cliente_desde ? new Date(r.cliente_desde).toLocaleDateString('pt-BR') : '-'}</td>
+          <td class="text-center font-mono">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
+          <td class="text-right font-bold font-mono text-slate-700">${formatarMoeda(r.vop || 0)}</td>
+          <td class="text-right font-bold font-mono text-blue-600">${formatarMoeda(r.limite_global)}</td>
+          <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.risco_total)}</td>
+          <td class="text-center" style="font-size:11px; font-weight: 500;">Pt: ${r.liquidez_pontual || 0}% | 5d: <span style="color:var(--blue); font-weight:bold;">${calcLiq5}%</span> | 15d+: ${r.atraso_15_dias || 0}%</td>
+          <td class="text-center font-mono">${r.concentracao || 0}%</td>
+        </tr>`
+      }).join("")
+    : `<tr><td colspan="8" class="text-center" style="color:var(--muted);">Nenhuma referência mapeada.</td></tr>`;
 
   const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
   const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
   const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
+  // 🔥 AJUSTE NO FATURAMENTO: Cálculo de variações e médias 
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-  let tot2024 = 0, tot2025 = 0, tot2026 = 0;
-  let qtd2024 = 0, qtd2025 = 0, qtd2026 = 0;
+  
+  const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento?.[ano]?.[m] || 0), 0);
+  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(analise.dados_faturamento?.[ano]?.[m] || 0) > 0).length;
+  
+  const calcMediaGeralAno = (ano: string) => { 
+      const pre = mesesPreenchidosGeral(ano); 
+      if (pre === 0) return 0;
+      return calcTotAno(ano) / (ano === "2026" ? pre : 12); 
+  };
+
+  const totAno26 = calcTotAno("2026");
+  const totAno25 = calcTotAno("2025");
+  const totAno24 = calcTotAno("2024");
+  
+  const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
+  const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
+
+  const medGeral26 = calcMediaGeralAno("2026");
+  const medGeral25 = calcMediaGeralAno("2025");
+  const medGeral24 = calcMediaGeralAno("2024");
+  
+  const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
+  const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
 
   const fatRows = meses.map(mes => {
     const val2024 = Number(analise.dados_faturamento?.["2024"]?.[mes]) || 0;
     const val2025 = Number(analise.dados_faturamento?.["2025"]?.[mes]) || 0;
     const val2026 = Number(analise.dados_faturamento?.["2026"]?.[mes]) || 0;
-    
-    tot2024 += val2024; if(val2024 > 0) qtd2024++;
-    tot2025 += val2025; if(val2025 > 0) qtd2025++;
-    tot2026 += val2026; if(val2026 > 0) qtd2026++;
 
     const delta1 = val2024 > 0 ? ((val2025 - val2024) / val2024) * 100 : 0;
     const delta2 = val2025 > 0 ? ((val2026 - val2025) / val2025) * 100 : 0;
@@ -144,11 +167,7 @@ const montarHtmlDossie = (item: any) => {
     </tr>`;
   }).join("");
 
-  const med2024 = qtd2024 > 0 ? tot2024 / qtd2024 : 0;
-  const med2025 = qtd2025 > 0 ? tot2025 / qtd2025 : 0;
-  const med2026 = qtd2026 > 0 ? tot2026 / qtd2026 : 0;
-
-  const faturamentoReferencia = med2026 > 0 ? med2026 : (med2025 > 0 ? med2025 : med2024);
+  const faturamentoReferencia = medGeral26 > 0 ? medGeral26 : (medGeral25 > 0 ? medGeral25 : medGeral24);
   const alavancagem = faturamentoReferencia > 0 ? (totalBancosDet / faturamentoReferencia).toFixed(2) : "0.00";
 
   const arrayFat2024 = JSON.stringify(meses.map(m => analise.dados_faturamento?.["2024"]?.[m] || 0));
@@ -452,19 +471,19 @@ const montarHtmlDossie = (item: any) => {
                   ${fatRows}
                   <tr class="row-total">
                       <td>TOTAL ANUAL</td>
-                      <td class="text-center" style="color:var(--blue-dark);">${formatarMoeda(tot2026)}</td>
-                      <td class="text-center">--</td>
-                      <td class="text-center">${formatarMoeda(tot2025)}</td>
-                      <td class="text-center">--</td>
-                      <td class="text-center">${formatarMoeda(tot2024)}</td>
+                      <td class="text-center" style="color:var(--blue-dark);">${formatarMoeda(totAno26)}</td>
+                      <td class="text-center font-mono ${varTot26_25 > 0 ? 'delta-pos' : varTot26_25 < 0 ? 'delta-neg' : ''}">${varTot26_25 !== 0 ? varTot26_25.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center">${formatarMoeda(totAno25)}</td>
+                      <td class="text-center font-mono ${varTot25_24 > 0 ? 'delta-pos' : varTot25_24 < 0 ? 'delta-neg' : ''}">${varTot25_24 !== 0 ? varTot25_24.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center">${formatarMoeda(totAno24)}</td>
                   </tr>
                   <tr class="row-total" style="background:#f8fafc; border-top: 1px solid var(--border);">
-                      <td>MÉDIA DO PERÍODO</td>
-                      <td class="text-center">${formatarMoeda(med2026)}</td>
-                      <td class="text-center">--</td>
-                      <td class="text-center">${formatarMoeda(med2025)}</td>
-                      <td class="text-center">--</td>
-                      <td class="text-center">${formatarMoeda(med2024)}</td>
+                      <td>MÉDIA GERAL (Mês)</td>
+                      <td class="text-center">${formatarMoeda(medGeral26)}</td>
+                      <td class="text-center font-mono ${varMedGeral26_25 > 0 ? 'delta-pos' : varMedGeral26_25 < 0 ? 'delta-neg' : ''}">${varMedGeral26_25 !== 0 ? varMedGeral26_25.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center">${formatarMoeda(medGeral25)}</td>
+                      <td class="text-center font-mono ${varMedGeral25_24 > 0 ? 'delta-pos' : varMedGeral25_24 < 0 ? 'delta-neg' : ''}">${varMedGeral25_24 !== 0 ? varMedGeral25_24.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center">${formatarMoeda(medGeral24)}</td>
                   </tr>
               </tbody>
           </table>
@@ -522,7 +541,7 @@ const montarHtmlDossie = (item: any) => {
       <h2>7. Referências e Fundos de Investimentos</h2>
       <div class="table-wrap">
           <table>
-              <thead><tr><th>Fundo / Parceiro</th><th class="text-center">Desde</th><th class="text-center">Últ. Op</th><th class="text-right">Limite Global</th><th class="text-right">Risco Total</th><th class="text-center">Liq / Atraso</th><th class="text-center">Conc.(%)</th></tr></thead>
+              <thead><tr><th>Fundo / Parceiro</th><th class="text-center">Desde</th><th class="text-center">Últ. Op</th><th class="text-right">VOP (R$)</th><th class="text-right">Limite Global</th><th class="text-right">Risco Total</th><th class="text-center">Liq / Atraso (%)</th><th class="text-center">Conc.(%)</th></tr></thead>
               <tbody>
                   ${refRows}
               </tbody>
