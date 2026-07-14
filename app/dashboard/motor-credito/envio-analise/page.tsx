@@ -22,6 +22,7 @@ interface FilaItem {
   ia_inicio?: string;
   ia_fim?: string;
   status_comite?: string;
+  comercial?: string; // NOVO: Mapeamento do Comercial
 }
 
 export default function MotorCreditoPage() {
@@ -45,7 +46,8 @@ export default function MotorCreditoPage() {
     try {
       const { data, error } = await supabase
         .from("analises")
-        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite")
+        // 🔥 Adicionado 'comercial' no select
+        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial")
         .in("status", ["aberta", "aprovado", "reprovado", "aguardando_docs", "em_revisao_humana", "em_comite"])
         .order("criado_em", { ascending: false });
 
@@ -205,6 +207,30 @@ export default function MotorCreditoPage() {
     }
   };
 
+  // 🔥 NOVO: FUNÇÃO PARA VINCULAR COMERCIAL MANUALMENTE NA ESTEIRA
+  const handleVincularComercial = async (id: string, comercialAtual?: string) => {
+    const novoComercial = prompt("Digite o nome completo do Comercial responsável por esta empresa:", comercialAtual || "");
+    if (novoComercial === null) return; // Cancelou
+    
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from("analises")
+        .update({ comercial: novoComercial.trim() })
+        .eq("id", id);
+        
+      if (error) throw error;
+      
+      // Atualiza o estado local para não precisar refazer o fetch inteiro
+      setFilaReal(prev => prev.map(item => item.id === id ? { ...item, comercial: novoComercial.trim() } : item));
+      alert("✅ Comercial vinculado com sucesso!");
+    } catch (err: any) {
+      alert("❌ Falha ao vincular o comercial: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatarCnpj = (cnpj: string) => {
     if (!cnpj) return "";
     const limpo = cnpj.replace(/\D/g, "");
@@ -232,75 +258,78 @@ export default function MotorCreditoPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-700 p-6 font-sans antialiased text-[13px]">
-      <div className="max-w-[1700px] mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
+      <div className="max-w-[1700px] mx-auto space-y-8">
         
+        {/* OVERLAY DE LOADING */}
         {statusTexto && (
-          <div className="fixed inset-0 bg-slate-900/60 z-50 flex flex-col items-center justify-center font-bold text-white text-sm gap-2">
-            <span className="animate-spin text-xl">⚡</span>
-            {statusTexto}
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex flex-col items-center justify-center font-bold text-white text-sm gap-4 transition-all">
+            <div className="w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+            <span className="tracking-wide">{statusTexto}</span>
           </div>
         )}
 
-        <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        {/* HEADER */}
+        <div className="border-b border-slate-200 pb-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase shadow-sm">
                 Cloudflare R2 Active
               </span>
-              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase">
+              <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase shadow-sm">
                 Mesa V8 Síncrona
               </span>
             </div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
-              🚀 Motor de Análise de Crédito <span className="text-indigo-600">Esteira V8</span>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-3">
+              🚀 Motor de Análise <span className="text-indigo-600 font-bold">Esteira V8</span>
             </h1>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all"></div>
+        {/* BLOCO DE BUSCA E UPLOAD */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md relative overflow-hidden group transition-all">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
           
           {!empresaSelecionada ? (
-            <form onSubmit={handleBuscarPorCnpj} className="space-y-4">
+            <form onSubmit={handleBuscarPorCnpj} className="space-y-5 pl-2">
               <div>
-                <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-2">
-                  Buscar Empresa por CNPJ Oficial
+                <label className="block font-bold text-slate-600 uppercase text-[11px] tracking-widest mb-3">
+                  🔍 Iniciar Nova Análise (Busca Oficial de CNPJ)
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-3">
                   <input
                     type="text"
                     value={cnpjBusca}
                     onChange={(e) => aplicarMascaraCnpj(e.target.value)}
                     placeholder="00.000.000/0000-00"
-                    className="flex-1 p-3 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all max-w-[300px]"
+                    className="flex-1 p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all max-w-[350px]"
                   />
                   <button
                     type="submit"
                     disabled={loading || cnpjBusca.replace(/\D/g, "").length < 14}
-                    className="px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-all disabled:opacity-40 shadow-md cursor-pointer"
+                    className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-md cursor-pointer"
                   >
-                    {loading ? "Verificando..." : "Verificar CNPJ"}
+                    {loading ? "Processando..." : "Localizar Empresa"}
                   </button>
                 </div>
               </div>
 
               {empresas.length > 0 && (
-                <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 bg-slate-50 overflow-hidden mt-3 max-w-[600px]">
+                <div className="border border-indigo-100 rounded-xl divide-y divide-indigo-50 bg-white overflow-hidden mt-4 max-w-[700px] shadow-sm">
                   {empresas.map((emp) => (
                     <div
                       key={emp.cnpj}
-                      className="p-4 flex justify-between items-center bg-slate-50 hover:bg-indigo-50/40 cursor-pointer transition-colors"
+                      className="p-5 flex justify-between items-center bg-white hover:bg-indigo-50/50 cursor-pointer transition-colors group"
                       onClick={() => setEmpresaSelecionada(emp)}
                     >
                       <div>
-                        <p className="text-xs font-black text-slate-900 uppercase">{emp.razao_social}</p>
-                        <p className="text-[11px] font-mono font-bold text-slate-500 mt-1">
+                        <p className="text-sm font-black text-slate-900 uppercase group-hover:text-indigo-900 transition-colors">{emp.razao_social}</p>
+                        <p className="text-[12px] font-mono font-medium text-slate-500 mt-1">
                           CNPJ: {formatarCnpj(emp.cnpj)} — {emp.cidadeExtenso || "MATRIZ"}/{emp.uf.toUpperCase()}
                         </p>
                       </div>
-                      <span className="text-[10px] bg-indigo-600 text-white font-black uppercase tracking-wider px-3 py-1.5 rounded-md shadow-sm">
-                        Confirmar & Avançar
+                      <span className="text-[10px] bg-indigo-100 text-indigo-700 font-bold uppercase tracking-wider px-4 py-2 rounded-lg shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        Avançar →
                       </span>
                     </div>
                   ))}
@@ -308,59 +337,61 @@ export default function MotorCreditoPage() {
               )}
             </form>
           ) : (
-            <div className="space-y-4">
-              <div className="p-4 border border-emerald-200 bg-emerald-50/40 rounded-lg flex justify-between items-center">
+            <div className="space-y-5 pl-2 animate-in fade-in slide-in-from-bottom-2">
+              <div className="p-5 border-2 border-emerald-100 bg-emerald-50/50 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded-md block w-max mb-1">
-                    CNPJ Vinculado à Mesa de Crédito
+                  <span className="bg-emerald-200 text-emerald-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-md block w-max mb-2 shadow-sm">
+                    ✅ CNPJ Vinculado Ativo
                   </span>
-                  <h3 className="text-sm font-black text-slate-900 uppercase leading-none">{empresaSelecionada.razao_social}</h3>
-                  <span className="font-mono font-bold text-slate-500 text-xs mt-1 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
+                  <h3 className="text-lg font-black text-slate-900 uppercase leading-none">{empresaSelecionada.razao_social}</h3>
+                  <span className="font-mono font-bold text-slate-600 text-sm mt-1 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
                 </div>
                 <button
                   onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); }}
-                  className="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer"
+                  className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-lg hover:bg-slate-100 text-[11px] shadow-sm cursor-pointer transition-colors"
                 >
-                  ✕ Mudar CNPJ
+                  ✕ Trocar Empresa
                 </button>
               </div>
 
-              <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-inner space-y-4">
+              <div className="border border-slate-200 rounded-xl p-5 bg-white shadow-sm space-y-4">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-100 pb-3 gap-3">
-                  <span className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">
-                    📄 Painel de Documentação
+                  <span className="font-bold text-slate-800 uppercase text-[12px] tracking-wider flex items-center gap-2">
+                    📄 Painel de Documentação R2
                   </span>
                 </div>
                 
+                {/* COMPONENTE DE UPLOAD PRESERVADO */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
           )}
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-            <span className="font-black text-slate-700 uppercase tracking-widest text-[11px]">
-              📊 Retorno da Mesa de Risco ({filaReal.length})
+        {/* TABELA DA ESTEIRA */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-md overflow-hidden">
+          <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+            <span className="font-black text-slate-800 uppercase tracking-widest text-[12px]">
+              📊 Retorno da Mesa de Risco <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-1">{filaReal.length}</span>
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
-                <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
-                  <th className="p-3.5">Empresa</th>
-                  <th className="p-3.5 text-center">Início IA</th>
-                  <th className="p-3.5 text-center">Fim IA</th>
-                  <th className="p-3.5 text-center">Decisão Crédito</th>
-                  <th className="p-3.5 text-center">Decisão Comitê</th>
-                  <th className="p-3.5 text-center">Ações</th>
+                <tr className="bg-slate-100 text-slate-600 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
+                  <th className="p-4">Empresa & Comercial</th>
+                  <th className="p-4 text-center">Largada IA</th>
+                  <th className="p-4 text-center">Fim IA</th>
+                  <th className="p-4 text-center">Status Análise</th>
+                  <th className="p-4 text-center">Decisão Comitê</th>
+                  <th className="p-4 text-center">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-xs">
+              <tbody className="divide-y divide-slate-100 font-medium text-[12px]">
                 {filaReal.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400 font-bold bg-slate-50/50">
+                    <td colSpan={6} className="p-10 text-center text-slate-400 font-bold bg-slate-50/50">
                       Nenhum resultado processado pela mesa no momento.
                     </td>
                   </tr>
@@ -369,79 +400,95 @@ export default function MotorCreditoPage() {
                     const statusComite = item.status_comite?.toLowerCase() || "pendente";
                     
                     return (
-                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3.5">
-                          <p className="font-black text-slate-900 uppercase truncate max-w-[250px]">{item.empresa_nome}</p>
-                          <p className="font-mono font-bold text-slate-500 text-[10px] mt-0.5">{formatarCnpj(item.cnpj)}</p>
+                      <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
+                        <td className="p-4">
+                          <p className="font-black text-slate-900 uppercase truncate max-w-[300px]" title={item.empresa_nome}>{item.empresa_nome}</p>
+                          <div className="flex items-center gap-3 mt-1">
+                            <p className="font-mono font-bold text-slate-500 text-[11px]">{formatarCnpj(item.cnpj)}</p>
+                            {item.comercial && (
+                              <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded truncate max-w-[150px]" title={`Resp: ${item.comercial}`}>
+                                👤 {item.comercial}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         
-                        <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
+                        <td className="p-4 text-center font-mono text-slate-500 font-medium text-[11px]">
                           {item.ia_inicio ? formatarDataHora(item.ia_inicio) : "---"}
                         </td>
                         
-                        <td className="p-3.5 text-center font-mono text-slate-500 font-bold">
+                        <td className="p-4 text-center font-mono text-slate-500 font-medium text-[11px]">
                           {item.ia_fim 
                             ? formatarDataHora(item.ia_fim) 
                             : item.ia_inicio 
-                              ? <span className="text-indigo-400 italic">⏳ Processando...</span>
+                              ? <span className="text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded animate-pulse">⏳ Processando...</span>
                               : "---"}
                         </td>
                         
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-center">
                           {item.status === "aberta" ? (
-                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                            <span className="bg-slate-100 text-slate-700 border border-slate-300 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
                               📄 Aberta
                             </span>
                           ) : item.status === "aguardando_docs" ? (
-                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                              📥 Devolvido
+                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
+                              📥 Devolvido req.
                             </span>
                           ) : item.status === "em_revisao_humana" ? (
-                            <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">
-                              🔮 Mesa Risco
+                            <span className="bg-purple-100 text-purple-800 border border-purple-300 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm animate-pulse">
+                              🔮 Em Análise (Mesa)
                             </span>
                           ) : item.status === "aprovado" ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                              ✅ Aprovado
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
+                              ✅ Parecer Positivo
                             </span>
                           ) : item.status === "reprovado" ? (
-                            <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                              ❌ Reprovado
+                            <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
+                              ❌ Parecer Negativo
                             </span>
                           ) : item.status === "em_comite" ? (
-                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
-                              ⚖️ Comitê
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
+                              ⚖️ Comitê de Crédito
                             </span>
                           ) : (
-                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
                               {item.status}
                             </span>
                           )}
                         </td>
 
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-center">
                           {statusComite === "aprovado" ? (
-                            <span className="bg-emerald-600 text-white px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider shadow-sm">
+                            <span className="bg-emerald-600 border border-emerald-700 text-white px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
                               🟢 Aprovado
                             </span>
                           ) : statusComite === "reprovado" ? (
-                            <span className="bg-red-600 text-white px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider shadow-sm">
+                            <span className="bg-rose-600 border border-rose-700 text-white px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
                               🔴 Reprovado
                             </span>
                           ) : (
-                            <span className="bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider">
+                            <span className="bg-amber-100 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider shadow-sm">
                               🟡 Pendente
                             </span>
                           )}
                         </td>
 
-                        <td className="p-3.5 text-center">
-                          <button
-                            onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
-                            className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-black px-3 py-1 rounded text-[11px] flex items-center gap-1 mx-auto shadow-sm cursor-pointer transition-all"
-                          >
-                            👁️ Ver Parecer
-                          </button>
+                        <td className="p-4 text-center">
+                          <div className="flex justify-center items-center gap-2">
+                            <button
+                              onClick={() => handleVincularComercial(item.id, item.comercial)}
+                              className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-bold px-2.5 py-1.5 rounded-md text-[10px] uppercase shadow-sm cursor-pointer transition-all"
+                              title="Vincular ou alterar o Responsável Comercial"
+                            >
+                              👤 Vincular
+                            </button>
+                            <button
+                              onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
+                              className="bg-indigo-50 hover:bg-indigo-600 hover:text-white border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded-md text-[10px] uppercase flex items-center gap-1 shadow-sm cursor-pointer transition-all"
+                            >
+                              👁️ Parecer
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

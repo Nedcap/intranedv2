@@ -97,6 +97,7 @@ interface AnaliseData {
   cnpj: string; 
   razao_social: string; 
   status?: string;
+  comercial?: string; // NOVO: Mapeamento do Comercial
 
   // CAPA
   empresas_principais: EmpresaPrincipal[];
@@ -169,7 +170,7 @@ interface AnaliseData {
 }
 
 const DADOS_MODELO: AnaliseData = {
-  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA",
+  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA", comercial: "",
   empresas_principais: [{ razao_social: "EMPRESA MODELO LTDA", cnpj: "00.000.000/0001-00" }],
   data_analise: new Date().toISOString().split("T")[0], 
   relacionamento: "Prospect", analista: "Alyson", gerente: "Luiz", rating: "B - Risco médio", 
@@ -239,8 +240,8 @@ function MathInput({ value, onChange, className }: { value: any, onChange: (v: s
 // =========================================================================
 export default function MesaAnalisePage() {
   return (
-    <div className="font-sans antialiased text-slate-800">
-      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center font-mono text-xs text-indigo-500 animate-pulse">⚡ Inicializando Motor Excel V8...</div>}>
+    <div className="font-sans antialiased text-slate-800 bg-slate-50">
+      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center font-mono text-sm text-indigo-500 animate-pulse">⚡ Inicializando Motor V8...</div>}>
         <MesaAnaliseConteudo />
       </Suspense>
     </div>
@@ -329,7 +330,8 @@ function MesaAnaliseConteudo() {
           id: data.id, 
           cnpj: cnpj, 
           razao_social: razao_social, 
-          status: data.status 
+          status: data.status,
+          comercial: data.comercial || "" // INJETANDO O COMERCIAL AQUI
         });
       }
     } catch (err) { 
@@ -346,7 +348,7 @@ function MesaAnaliseConteudo() {
     }
     try {
       setProcessandoDecisao(true);
-      const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
+      const { id, cnpj, razao_social, status, comercial, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       
       const { error } = await supabase.from("analises").update({ 
@@ -355,7 +357,7 @@ function MesaAnaliseConteudo() {
       }).eq("id", analise.id);
       
       if (error) throw error;
-      if (mostrarAlerta) alert("✅ Matriz Excel salva com sucesso no banco de dados!");
+      if (mostrarAlerta) alert("✅ Matriz salva com sucesso no banco de dados!");
       return true;
     } catch (err: any) { 
       alert("❌ Erro ao salvar dados: " + err.message); return false; 
@@ -364,7 +366,30 @@ function MesaAnaliseConteudo() {
     }
   };
 
-  // 🔥 AQUI ESTÁ O NOVO ENCAMINHAR COM O MÓDULO DE APRENDIZADO
+  // 🔥 NOVO: LÓGICA DE VINCULAR COMERCIAL MANUALMENTE
+  const vincularComercial = async () => {
+    if (!idSelecionado || !analise.id) {
+      alert("💡 Selecione uma análise real na esteira antes de vincular o Comercial.");
+      return;
+    }
+    const novoComercial = prompt("Digite o nome completo do Comercial para vincular a esta conta:", analise.comercial || "");
+    if (novoComercial === null) return; // Cancelou
+    
+    try {
+      setProcessandoDecisao(true);
+      const { error } = await supabase.from("analises").update({ comercial: novoComercial.trim() }).eq("id", analise.id);
+      if (error) throw error;
+      
+      setAnalise({ ...analise, comercial: novoComercial.trim() });
+      alert("✅ Comercial vinculado com sucesso à análise!");
+    } catch (err: any) {
+      alert("❌ Falha ao vincular o comercial: " + err.message);
+    } finally {
+      setProcessandoDecisao(false);
+    }
+  };
+
+  // ENCAMINHAR COM MÓDULO DE APRENDIZADO
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
@@ -376,52 +401,25 @@ function MesaAnaliseConteudo() {
 
     try {
       setProcessandoDecisao(true);
-      
-      // 1. Salva a versão final da sua planilha no banco
       await persistirNoBanco(false); 
       
-      // 🔥 2. ROTINA DE APRENDIZADO DA IA (O X9 DA ESTEIRA)
       try {
-        const { data: analiseDB } = await supabase
-          .from("analises")
-          .select("dados_ia_brutos")
-          .eq("id", analise.id)
-          .single();
+        const { data: analiseDB } = await supabase.from("analises").select("dados_ia_brutos").eq("id", analise.id).single();
 
         if (analiseDB?.dados_ia_brutos) {
             const iaOriginal = analiseDB.dados_ia_brutos;
-            
-            // Verifica Endividamento
             if (JSON.stringify(iaOriginal.endividamento_detalhado) !== JSON.stringify(analise.endividamento_detalhado)) {
-                await supabase.from("memoria_credito").insert({
-                    analise_id: analise.id,
-                    cnpj: analise.cnpj,
-                    categoria: "endividamento",
-                    erro_ia: iaOriginal.endividamento_detalhado,
-                    correcao_humana: analise.endividamento_detalhado
-                });
-                console.log("🧠 Desvio de Endividamento mapeado para aprendizado.");
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "endividamento", erro_ia: iaOriginal.endividamento_detalhado, correcao_humana: analise.endividamento_detalhado });
             }
-
-            // Verifica Faturamento
             if (JSON.stringify(iaOriginal.dados_faturamento) !== JSON.stringify(analise.dados_faturamento)) {
-                await supabase.from("memoria_credito").insert({
-                    analise_id: analise.id,
-                    cnpj: analise.cnpj,
-                    categoria: "faturamento",
-                    erro_ia: iaOriginal.dados_faturamento,
-                    correcao_humana: analise.dados_faturamento
-                });
-                console.log("🧠 Desvio de Faturamento mapeado para aprendizado.");
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "faturamento", erro_ia: iaOriginal.dados_faturamento, correcao_humana: analise.dados_faturamento });
             }
         }
       } catch (memError) {
         console.error("Erro na rotina de memória da IA (não impede o envio):", memError);
       }
       
-      // 3. Finaliza a esteira e manda pro Comitê
-      const novoStatus = "aberta";
-      const { error } = await supabase.from("analises").update({ status: novoStatus }).eq("id", analise.id);
+      const { error } = await supabase.from("analises").update({ status: "aberta" }).eq("id", analise.id);
       if (error) throw error;
       
       alert(`🚀 Análise finalizada com sucesso! Se houve correções, a IA foi notificada para aprender com o erro.`);
@@ -441,7 +439,7 @@ function MesaAnaliseConteudo() {
     if (!justificativa?.trim()) return; 
     try {
       setProcessandoDecisao(true);
-      const { id, cnpj, razao_social, status, ...dadosParaCompactar } = analise;
+      const { id, cnpj, razao_social, status, comercial, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
       const { error } = await supabase.from("analises").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
@@ -457,21 +455,15 @@ function MesaAnaliseConteudo() {
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
     const novoArray = [...(analise[campo] as any[])];
     novoArray[index][subCampo] = valor;
-    
     if (campo === 'empresas_principais' && index === 0) {
        if (subCampo === 'razao_social') setAnalise({ ...analise, [campo]: novoArray, razao_social: valor });
        else if (subCampo === 'cnpj') setAnalise({ ...analise, [campo]: novoArray, cnpj: valor });
        else setAnalise({ ...analise, [campo]: novoArray });
-    } else {
-       setAnalise({ ...analise, [campo]: novoArray });
-    }
+    } else setAnalise({ ...analise, [campo]: novoArray });
   };
   const addArray = (campo: keyof AnaliseData, obj: any) => setAnalise({ ...analise, [campo]: [...(analise[campo] as any[]), obj] });
   const rmArray = (campo: keyof AnaliseData, index: number) => setAnalise({ ...analise, [campo]: (analise[campo] as any[]).filter((_, i) => i !== index) });
-  
-  const updateNested = (campoPai: keyof AnaliseData, campoFilho: string, valor: any) => {
-    setAnalise({ ...analise, [campoPai]: { ...(analise[campoPai] as any), [campoFilho]: valor } });
-  };
+  const updateNested = (campoPai: keyof AnaliseData, campoFilho: string, valor: any) => setAnalise({ ...analise, [campoPai]: { ...(analise[campoPai] as any), [campoFilho]: valor } });
 
   const handleFat = (ano: string, mes: string, val: string) => {
     const fatAtual = { ...analise.dados_faturamento };
@@ -487,10 +479,7 @@ function MesaAnaliseConteudo() {
   
   let lastFilledIndex26 = -1;
   for (let i = 11; i >= 0; i--) {
-      if (Number(analise.dados_faturamento["2026"]?.[meses[i]] || 0) > 0) {
-          lastFilledIndex26 = i;
-          break;
-      }
+      if (Number(analise.dados_faturamento["2026"]?.[meses[i]] || 0) > 0) { lastFilledIndex26 = i; break; }
   }
   
   const has26Data = lastFilledIndex26 >= 0;
@@ -514,8 +503,7 @@ function MesaAnaliseConteudo() {
   const calcMediaGeralAno = (ano: string) => { 
       const pre = mesesPreenchidosGeral(ano); 
       if (pre === 0) return 0;
-      const divisor = ano === "2026" ? pre : 12;
-      return calcTotAno(ano) / divisor; 
+      return calcTotAno(ano) / (ano === "2026" ? pre : 12); 
   }; 
   
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
@@ -553,140 +541,157 @@ function MesaAnaliseConteudo() {
   const totalDplsCP = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
 
-  const cellStyle = "w-full h-full py-1 px-1.5 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-sans text-[11px] transition-all";
-  const numStyle = "w-full h-full py-1 px-1.5 bg-transparent outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-blue-500 font-mono text-[11px] text-right transition-all";
-  const thStyle = "p-1.5 bg-[#e2e8f0] border border-[#94a3b8] font-bold text-[10px] text-slate-800 text-center";
-  const tdStyle = "border border-[#94a3b8] p-0 bg-white hover:bg-slate-50 relative focus-within:bg-blue-50/30 transition-colors h-7";
+  // =========================================================================
+  // NOVOS ESTILOS REFINADOS (UI/UX)
+  // =========================================================================
+  const cellStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-500 font-sans text-[11px] text-slate-700 transition-all placeholder-slate-400";
+  const numStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-500 font-mono text-[11px] text-right text-slate-800 transition-all placeholder-slate-400";
+  const thStyle = "p-2 bg-slate-100 border border-slate-200 font-semibold text-[10px] text-slate-600 uppercase tracking-wider text-center";
+  const tdStyle = "border border-slate-200 p-0 bg-white hover:bg-slate-50 relative focus-within:bg-indigo-50/40 transition-colors h-8";
+  const sectionHeaderStyle = "flex justify-between items-center bg-indigo-950 text-white text-[11px] font-semibold tracking-wide p-2.5 rounded-t-md shadow-sm border border-indigo-950";
+  const btnSecundario = "bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer";
+  const btnPrimario = "bg-indigo-600 border border-indigo-700 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer disabled:opacity-50";
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start bg-[#cbd5e1] min-h-screen p-2 md:p-4">
+    <div className="flex flex-col xl:flex-row gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6">
       
-      {/* SIDEBAR */}
-      <div className="w-full lg:w-64 shrink-0 bg-white border border-slate-400 rounded-sm shadow-md flex flex-col h-[calc(100vh-2rem)] sticky top-4 z-20">
-        <div className="flex justify-between items-center border-b border-slate-400 bg-slate-200 p-2">
-          <span className="font-bold text-slate-800 text-[11px] block">ESTEIRA ({fila.length})</span>
-          <button onClick={() => buscarFilaSupabase(true)} className="text-blue-700 hover:text-blue-900 text-[10px] font-bold cursor-pointer">Atualizar</button>
+      {/* SIDEBAR REFINADA */}
+      <div className="w-full xl:w-72 shrink-0 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] sticky top-6 z-20 overflow-hidden">
+        <div className="flex justify-between items-center bg-slate-100/80 p-4 border-b border-slate-200">
+          <span className="font-bold text-slate-800 text-xs tracking-wide">ESTEIRA DE ANÁLISES <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-1">{fila.length}</span></span>
+          <button onClick={() => buscarFilaSupabase(true)} className="text-indigo-600 hover:text-indigo-800 text-[10px] font-bold cursor-pointer transition-colors">Atualizar</button>
         </div>
-        <div className="space-y-0.5 overflow-y-auto p-1 flex-1">
-          <div onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO); }} className={`p-2 border cursor-pointer ${idSelecionado === null ? "bg-blue-100 border-blue-500" : "bg-white border-transparent hover:bg-slate-100"}`}>
-            <p className="text-[10px] font-bold text-slate-800">📄 NOVO / TEMPLATE</p>
+        <div className="space-y-1 overflow-y-auto p-2 flex-1 scrollbar-thin scrollbar-thumb-slate-300">
+          <div onClick={() => { setIdSelecionado(null); setAnalise(DADOS_MODELO); }} className={`p-3 rounded-lg cursor-pointer transition-all ${idSelecionado === null ? "bg-indigo-50 border-indigo-500 border shadow-sm" : "bg-transparent border border-transparent hover:bg-slate-50"}`}>
+            <p className="text-[11px] font-bold text-indigo-900 flex items-center gap-2">📄 Novo Template Vazio</p>
           </div>
           {loadingFila ? (
-            <div className="text-center py-4 text-slate-500 text-[10px]">Sincronizando...</div>
+            <div className="text-center py-6 text-slate-400 text-[11px] animate-pulse">Sincronizando esteira...</div>
           ) : (
             fila.map((item) => (
               <div 
                 key={item.id} 
                 onClick={() => selecionarEmpresaDaEsteira(item.id)} 
-                className={`p-2 border cursor-pointer border-b-slate-200 ${
+                className={`p-3 rounded-lg cursor-pointer transition-all border ${
                   idSelecionado === item.id 
-                    ? "bg-blue-600 border-blue-700 text-white" 
+                    ? "bg-indigo-600 border-indigo-700 text-white shadow-md" 
                     : item.status === "em_processamento_ia" 
-                    ? "bg-purple-50/70 border-purple-200 hover:bg-purple-100" 
-                    : "bg-white hover:bg-slate-100"
+                    ? "bg-purple-50 border-purple-200 hover:bg-purple-100" 
+                    : "bg-white border-slate-100 hover:border-slate-300 hover:bg-slate-50"
                 }`}
               >
-                <div className="flex justify-between items-start gap-1">
-                  <p className={`text-[10px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`}>{item.empresa_nome}</p>
+                <div className="flex justify-between items-start gap-2">
+                  <p className={`text-[11px] font-bold truncate flex-1 ${idSelecionado === item.id ? "text-white" : "text-slate-800"}`} title={item.empresa_nome}>{item.empresa_nome}</p>
                   {item.status === "em_processamento_ia" && idSelecionado !== item.id && (
-                    <span className="bg-purple-100 text-purple-700 font-black text-[8px] px-1 py-0.5 rounded animate-pulse uppercase shrink-0">ROBÔ</span>
+                    <span className="bg-purple-200 text-purple-800 font-black text-[9px] px-1.5 py-0.5 rounded shadow-sm animate-pulse uppercase shrink-0">ROBÔ LENDO</span>
                   )}
                 </div>
-                <p className={`text-[9px] font-mono mt-0.5 ${idSelecionado === item.id ? "text-blue-200" : "text-slate-500"}`}>{item.cnpj}</p>
+                <p className={`text-[10px] font-mono mt-1 ${idSelecionado === item.id ? "text-indigo-200" : "text-slate-500"}`}>{item.cnpj}</p>
               </div>
             ))
           )}
         </div>
       </div>
 
-      {/* WORKSPACE */}
-      <div className="flex-1 w-full bg-white border border-slate-400 shadow-md flex flex-col h-[calc(100vh-2rem)] overflow-hidden">
+      {/* WORKSPACE PRINCIPAL REFINADO */}
+      <div className="flex-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
         {loadingAnalise ? (
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <span className="animate-spin text-2xl block text-green-600">⌛</span>
-            <p className="text-[11px] font-bold text-slate-600 mt-2">Carregando Planilha...</p>
+          <div className="flex-1 flex flex-col items-center justify-center bg-slate-50">
+            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-[12px] font-semibold text-slate-600 mt-4 tracking-wide">Carregando dados estruturados...</p>
           </div>
         ) : (
           <>
-            {/* TOOLBAR */}
-            <div className="p-2 border-b border-slate-400 bg-[#f1f5f9] flex flex-wrap justify-between items-center gap-2">
-              <div className="flex items-center gap-2">
+            {/* TOOLBAR MODERNA */}
+            <div className="p-4 border-b border-slate-200 bg-white flex flex-wrap justify-between items-center gap-4">
+              <div className="flex items-center gap-3">
                 {analise.status === "em_processamento_ia" ? (
-                  <div className="bg-purple-600 text-white px-2 py-1 text-[10px] font-bold rounded-sm animate-pulse">IA PROCESSANDO</div>
+                  <div className="bg-purple-100 border border-purple-300 text-purple-800 px-2 py-1 text-[10px] font-bold rounded shadow-sm animate-pulse">⚙️ IA EM AÇÃO</div>
                 ) : (
-                  <div className="bg-green-700 text-white px-2 py-1 text-[10px] font-bold rounded-sm">AUTO-SAVE</div>
+                  <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 px-2 py-1 text-[10px] font-bold rounded shadow-sm">✅ AUTO-SAVE</div>
                 )}
                 <div className="flex flex-col">
-                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-800 text-sm bg-transparent outline-none border-b border-transparent focus:border-blue-400 w-96 uppercase" />
-                  <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-[10px] text-slate-500 bg-transparent outline-none w-96" />
+                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-900 text-lg bg-transparent outline-none border-b-2 border-transparent focus:border-indigo-400 w-full min-w-[300px] xl:w-[450px] uppercase transition-colors" placeholder="NOME DA EMPRESA" />
+                  <div className="flex gap-4 mt-0.5">
+                    <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-xs text-slate-500 bg-transparent outline-none w-36" placeholder="00.000.000/0001-00" />
+                    {analise.comercial && <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 rounded-full border border-indigo-100">🤝 Resp: {analise.comercial}</span>}
+                  </div>
                 </div>
               </div>
               
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => alert("Acionando extração em lote dos documentos mais recentes...")} className="bg-slate-800 border border-slate-900 hover:bg-slate-700 text-white font-bold px-3 py-1 text-[10px] shadow-sm cursor-pointer">
-                  🤖 Ler Novos Docs
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={() => alert("Acionando extração em lote dos documentos mais recentes...")} className={btnSecundario} title="Ler Novos Docs">
+                  🤖 Atualizar via Docs
                 </button>
-                <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className="bg-slate-200 border border-slate-400 hover:bg-slate-300 text-slate-800 font-bold px-3 py-1 text-[10px] shadow-sm cursor-pointer">
-                  💾 Salvar
+                <button onClick={vincularComercial} disabled={!idSelecionado || processandoDecisao} className={btnSecundario}>
+                  👤 Vincular Comercial
+                </button>
+                <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className={btnSecundario}>
+                  💾 Salvar Manual
                 </button>
                 {idSelecionado && (
                   <>
-                    <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className="bg-blue-600 border border-blue-800 hover:bg-blue-700 text-white font-bold px-3 py-1 text-[10px] cursor-pointer shadow-sm disabled:opacity-40">
-                      ▶ Enviar Parecer
-                    </button>
-                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-red-100 border border-red-300 text-red-800 hover:bg-red-200 font-bold px-3 py-1 text-[10px] cursor-pointer shadow-sm">
-                      ✖ Devolver
+                    <button onClick={devolverParaComercialPendente} disabled={processandoDecisao} className="bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer">
+                      ✖ Devolver Req.
                     </button>
                     <GerarAnalise analise={analise} />
+                    <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className={btnPrimario}>
+                      ▶ Emitir Parecer Final
+                    </button>
                   </>
                 )}
               </div>
             </div>
 
-            {/* ABAS */}
-            <div className="bg-[#e2e8f0] border-b border-slate-400 flex gap-0.5 px-1 pt-1 overflow-x-auto">
+            {/* ABAS ESTILO PILLS */}
+            <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto scrollbar-none">
               {[
-                { id: "capa", label: "Capa & Proposta" },
-                { id: "cadastro", label: "Dados da Empresa" },
-                { id: "societario", label: "Societário & Patrimônio" },
-                { id: "fat", label: "Faturamento & Potencial" },
-                { id: "endividamento", label: "Endividamento & Refs" },
-                { id: "restritivos", label: "Restritivos & Jurídico" },
-                { id: "parecer", label: "Parecer Final" }
+                { id: "capa", label: "📄 Capa & Proposta" },
+                { id: "cadastro", label: "🏢 Dados da Empresa" },
+                { id: "societario", label: "👥 Societário & Patrimônio" },
+                { id: "fat", label: "📈 Faturamento & Potencial" },
+                { id: "endividamento", label: "🏦 Endividamento & Refs" },
+                { id: "restritivos", label: "⚖️ Restritivos & Jurídico" },
+                { id: "parecer", label: "📝 Parecer Final" }
               ].map((tab) => (
-                <button key={tab.id} onClick={() => setAbaAtiva(tab.id)} className={`px-4 py-1.5 font-bold text-[10px] border border-b-0 cursor-pointer whitespace-nowrap ${abaAtiva === tab.id ? "bg-white text-slate-900 border-slate-400 border-t-2 border-t-green-600 shadow-[0_1px_0_white] z-10" : "bg-[#cbd5e1] border-[#94a3b8] text-slate-600 hover:bg-slate-300"}`}>
+                <button 
+                  key={tab.id} 
+                  onClick={() => setAbaAtiva(tab.id)} 
+                  className={`px-4 py-2 font-semibold text-[11px] rounded-full cursor-pointer whitespace-nowrap transition-all shadow-sm ${abaAtiva === tab.id ? "bg-indigo-600 text-white shadow-md" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"}`}
+                >
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            {/* CONTEÚDO DA PLANILHA */}
-            <div className="flex-1 overflow-y-auto p-4 bg-white relative">
+            {/* ÁREA DA PLANILHA */}
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 relative scrollbar-thin scrollbar-thumb-slate-300">
               
               {/* ABA 1: CAPA E PROPOSTA */}
               {abaAtiva === "capa" && (
-                <div className="max-w-6xl space-y-6">
+                <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   {analise.status === "em_processamento_ia" && (
-                    <div className="p-3 border border-purple-200 bg-purple-50 text-purple-900 font-bold text-xs rounded-sm flex items-center gap-2">
-                      <span>🔮 O Motor Python V8 está lendo e estruturando os arquivos anexados a essa conta. Os dados abaixo vão atualizar dinamicamente!</span>
+                    <div className="p-4 border-l-4 border-purple-500 bg-purple-50 text-purple-900 font-semibold text-xs rounded-r-md shadow-sm flex items-center gap-3">
+                      <span className="text-lg">🔮</span>
+                      <span>O Motor Python V8 está lendo e estruturando os arquivos anexados a essa conta. Os dados abaixo vão atualizar dinamicamente enquanto você acompanha!</span>
                     </div>
                   )}
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200">
+                    <div className={sectionHeaderStyle}>
                       <span>Empresas (Principal e Coobrigados Base)</span>
-                      <button onClick={() => addArray('empresas_principais', {razao_social:"", cnpj:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Linha Empresa</button>
+                      <button onClick={() => addArray('empresas_principais', {razao_social:"", cnpj:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Linha</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <tbody>
                         {analise.empresas_principais?.map((emp, i) => (
                           <tr key={i}>
                             <td className={`${thStyle} w-1/6 text-right`}>{i === 0 ? "Empresa Principal" : "Coobrigado"}</td>
-                            <td className={`${tdStyle} w-2/6`}><input value={emp.razao_social} onChange={(e)=>updateArray('empresas_principais', i, 'razao_social', e.target.value)} className={`${cellStyle} font-bold bg-slate-50`} /></td>
+                            <td className={`${tdStyle} w-2/6`}><input value={emp.razao_social} onChange={(e)=>updateArray('empresas_principais', i, 'razao_social', e.target.value)} className={`${cellStyle} font-bold bg-slate-50/50`} /></td>
                             <td className={`${thStyle} w-1/6 text-right`}>CNPJ</td>
                             <td className={`${tdStyle} w-2/6 relative`}>
-                              <input value={emp.cnpj} onChange={(e)=>updateArray('empresas_principais', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono bg-slate-50`} />
-                              {i > 0 && <button onClick={()=>rmArray('empresas_principais', i)} className="absolute right-0 top-0 text-red-500 font-bold hover:bg-red-50 px-2 h-full border-l border-slate-300">X</button>}
+                              <input value={emp.cnpj} onChange={(e)=>updateArray('empresas_principais', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono bg-slate-50/50 pr-8`} />
+                              {i > 0 && <button onClick={()=>rmArray('empresas_principais', i)} className="absolute right-0 top-0 text-red-500 font-bold hover:bg-red-50 w-8 h-full border-l border-slate-200 transition-colors">X</button>}
                             </td>
                           </tr>
                         ))}
@@ -694,72 +699,75 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  <table className="w-full border-collapse border border-slate-400">
-                    <tbody>
-                      <tr>
-                        <td className={`${thStyle} text-right w-1/6`}>Relacionamento</td>
-                        <td className={`${tdStyle} w-2/6`}>
-                          <select value={analise.relacionamento} onChange={(e)=>setAnalise({...analise, relacionamento: e.target.value})} className={cellStyle}>
-                            <option value="Prospect">Prospect</option><option value="Cliente">Cliente</option>
-                          </select>
-                        </td>
-                        <td className={`${thStyle} text-right w-1/6`}>Data Análise</td><td className={`${tdStyle} w-2/6`}><input type="date" value={analise.data_analise} onChange={(e)=>setAnalise({...analise, data_analise: e.target.value})} className={cellStyle} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>Gerente Comercial</td><td className={tdStyle}><input value={analise.gerente} onChange={(e)=>setAnalise({...analise, gerente: e.target.value})} className={cellStyle} /></td>
-                        <td className={`${thStyle} text-right`}>Analista</td><td className={tdStyle}><input value={analise.analista} onChange={(e)=>setAnalise({...analise, analista: e.target.value})} className={cellStyle} /></td>
-                      </tr>
-                      <tr>
-                        <td className={`${thStyle} text-right`}>RATING FINAL</td>
-                        <td colSpan={3} className={tdStyle}>
-                          <select value={analise.rating} onChange={(e)=>setAnalise({...analise, rating: e.target.value})} className={`${cellStyle} font-bold text-yellow-700 bg-yellow-50`}>
-                            <option value="A - Risco reduzido">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
-                          </select>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <table className="w-full border-collapse">
+                      <tbody>
+                        <tr>
+                          <td className={`${thStyle} text-right w-1/6`}>Relacionamento</td>
+                          <td className={`${tdStyle} w-2/6`}>
+                            <select value={analise.relacionamento} onChange={(e)=>setAnalise({...analise, relacionamento: e.target.value})} className={cellStyle}>
+                              <option value="Prospect">Prospect</option><option value="Cliente">Cliente</option>
+                            </select>
+                          </td>
+                          <td className={`${thStyle} text-right w-1/6`}>Data Análise</td>
+                          <td className={`${tdStyle} w-2/6`}><input type="date" value={analise.data_analise} onChange={(e)=>setAnalise({...analise, data_analise: e.target.value})} className={cellStyle} /></td>
+                        </tr>
+                        <tr>
+                          <td className={`${thStyle} text-right`}>Gerente Comercial</td><td className={tdStyle}><input value={analise.gerente} onChange={(e)=>setAnalise({...analise, gerente: e.target.value})} className={cellStyle} /></td>
+                          <td className={`${thStyle} text-right`}>Analista Resp.</td><td className={tdStyle}><input value={analise.analista} onChange={(e)=>setAnalise({...analise, analista: e.target.value})} className={cellStyle} /></td>
+                        </tr>
+                        <tr>
+                          <td className={`${thStyle} text-right bg-amber-50 border-amber-200 text-amber-900`}>RATING PRÉVIO</td>
+                          <td colSpan={3} className={`${tdStyle} border-amber-200`}>
+                            <select value={analise.rating} onChange={(e)=>setAnalise({...analise, rating: e.target.value})} className={`${cellStyle} font-bold text-amber-800 bg-amber-50/50`}>
+                              <option value="A - Risco reduzido">A - Risco reduzido</option><option value="B - Risco médio">B - Risco médio</option><option value="C - Risco elevado">C - Risco elevado</option><option value="D - Fora do perfil">D - Fora do perfil</option>
+                            </select>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-blue-800 text-white text-[11px] font-bold p-1.5 border border-blue-900">
-                      <span>Proposta e Condições Comerciais</span>
-                      <button onClick={() => addArray('propostas', {modalidade:"", limite:0, prazo:"", tranche:0, taxa:"", garantia:""})} className="bg-blue-600 hover:bg-blue-500 border border-blue-400 px-2 rounded text-[9px]">+ Linha</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="flex justify-between items-center bg-indigo-600 text-white text-[11px] font-semibold tracking-wide p-2.5 shadow-sm">
+                      <span>Proposta e Condições Comerciais Requeridas</span>
+                      <button onClick={() => addArray('propostas', {modalidade:"", limite:0, prazo:"", tranche:0, taxa:"", garantia:""})} className="bg-indigo-500 hover:bg-indigo-400 border border-indigo-400 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Linha</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>Modalidade</th><th className={`${thStyle} w-28`}>Limite</th><th className={`${thStyle} w-24`}>Prazo Médio</th>
-                          <th className={`${thStyle} w-28`}>Tranche</th><th className={`${thStyle} w-20`}>Taxa</th><th className={thStyle}>Garantia</th><th className={`${thStyle} w-8`}>-</th>
+                          <th className={thStyle}>Modalidade</th><th className={`${thStyle} w-32`}>Limite Solicitado</th><th className={`${thStyle} w-28`}>Prazo Médio</th>
+                          <th className={`${thStyle} w-28`}>Tranche</th><th className={`${thStyle} w-24`}>Taxa Base</th><th className={thStyle}>Garantia Adicional</th><th className={`${thStyle} w-8`}>-</th>
                         </tr>
                       </thead>
                       <tbody>
                         {analise.propostas.map((p, i) => (
                           <tr key={i}>
                             <td className={tdStyle}><input value={p.modalidade} onChange={(e)=>updateArray('propostas', i, 'modalidade', e.target.value)} className={cellStyle}/></td>
-                            <td className={tdStyle}><input type="number" value={p.limite} onChange={(e)=>updateArray('propostas', i, 'limite', Number(e.target.value))} className={`${numStyle} font-bold text-blue-700 bg-blue-50`}/></td>
+                            <td className={tdStyle}><input type="number" value={p.limite} onChange={(e)=>updateArray('propostas', i, 'limite', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/30`}/></td>
                             <td className={tdStyle}><input value={p.prazo} onChange={(e)=>updateArray('propostas', i, 'prazo', e.target.value)} className={cellStyle}/></td>
                             <td className={tdStyle}><input type="number" value={p.tranche} onChange={(e)=>updateArray('propostas', i, 'tranche', Number(e.target.value))} className={numStyle}/></td>
                             <td className={tdStyle}><input value={p.taxa} onChange={(e)=>updateArray('propostas', i, 'taxa', e.target.value)} className={`${cellStyle} text-center`}/></td>
                             <td className={tdStyle}><input value={p.garantia} onChange={(e)=>updateArray('propostas', i, 'garantia', e.target.value)} className={cellStyle}/></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('propostas', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('propostas', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                           </tr>
                         ))}
-                        <tr className="bg-slate-200 border-t-2 border-slate-400">
-                          <td className="p-1.5 text-right font-bold text-[10px]">LIMITE TOTAL</td>
-                          <td className="p-1.5 text-right font-mono font-bold text-blue-800 text-[11px]">R$ {totLimites.toLocaleString('pt-BR')}</td>
+                        <tr className="bg-slate-100 border-t-2 border-slate-300">
+                          <td className="p-2 text-right font-bold text-[10px] text-slate-700">LIMITE TOTAL PLEITEADO</td>
+                          <td className="p-2 text-right font-mono font-bold text-indigo-800 text-[12px]">R$ {totLimites.toLocaleString('pt-BR')}</td>
                           <td colSpan={5}></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">Relatório de Visitas</div>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>Relatório de Visitas Corporativas</div>
                     <textarea 
                       value={analise.resumo_visita} 
                       onChange={(e) => setAnalise({...analise, resumo_visita: e.target.value})}
-                      className="w-full p-2 border border-slate-400 h-40 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
-                      placeholder="Detalhes da visita corporativa..."
+                      className="w-full p-3 border-none h-40 font-sans text-[12px] text-slate-700 outline-none resize-none bg-slate-50/50 focus:bg-white transition-colors"
+                      placeholder="Insira detalhes qualitativos da visita, impressões sobre a sede, maquinário, gestão..."
                     />
                   </div>
                 </div>
@@ -767,10 +775,10 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 2: DADOS DA EMPRESA */}
               {abaAtiva === "cadastro" && (
-                <div className="max-w-6xl space-y-6">
-                  <div>
-                    <div className="bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">Dados Cadastrais e Financeiros Básicos</div>
-                    <table className="w-full border-collapse border border-slate-400">
+                <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>Dados Cadastrais e Financeiros Básicos</div>
+                    <table className="w-full border-collapse">
                       <tbody>
                         <tr>
                           <td className={`${thStyle} text-right w-1/6`}>Fundação / Idade</td><td className={`${tdStyle} w-2/6`}><input value={analise.fundacao} onChange={(e)=>setAnalise({...analise, fundacao: e.target.value})} className={cellStyle} /></td>
@@ -781,40 +789,40 @@ function MesaAnaliseConteudo() {
                           <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
                         </tr>
                         <tr>
-                          <td className={`${thStyle} text-right`}>Licenças/Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
+                          <td className={`${thStyle} text-right`}>Licenças / Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
                           <td className={`${thStyle} text-right`}>Balanço Auditado?</td>
                           <td className={tdStyle}>
                             <select value={analise.balanco_auditado} onChange={(e)=>setAnalise({...analise, balanco_auditado: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
                           </td>
                         </tr>
                         <tr>
-                          <td className={`${thStyle} text-right`}>Consultoria/Gestão?</td>
+                          <td className={`${thStyle} text-right`}>Consultoria Externa?</td>
                           <td className={tdStyle}>
                             <select value={analise.consultoria_gestao} onChange={(e)=>setAnalise({...analise, consultoria_gestao: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
                           </td>
-                          <td className={`${thStyle} text-right`}>Site da Empresa</td><td className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
+                          <td className={`${thStyle} text-right`}>Site Corporativo</td><td className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Organograma, Fotos e Endereços Externos (URLs)</div>
-                    <table className="w-full border-collapse border border-slate-400">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Arquivos Vinculados, Organograma e Endereços Externos</div>
+                    <table className="w-full border-collapse">
                       <tbody>
                         <tr>
                           <td className={`${thStyle} w-1/4 text-right bg-purple-50 text-purple-900 border-purple-200`}>Organograma Interativo (Teia JSON)</td>
-                          <td className={`${tdStyle} bg-purple-50/30`}>
-                            <div className="flex gap-2 items-center h-full px-2">
+                          <td className={`${tdStyle} bg-purple-50/20`}>
+                            <div className="flex gap-3 items-center h-full px-3 py-1">
                               <button
                                 onClick={() => {
                                   if(!analise.id) return alert("💡 Salve a análise no banco antes de gerar a teia!");
                                   const cnpjLimpo = analise.cnpj.replace(/\D/g, '');
                                   window.open(`/dashboard/busca-grupo?analise_id=${analise.id}&cnpj=${cnpjLimpo}`, '_blank');
                                 }}
-                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 text-[10px] rounded shadow-sm flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-1.5 px-4 text-[10px] rounded shadow-sm flex items-center gap-2 cursor-pointer whitespace-nowrap transition-colors"
                               >
-                                🕸️ Abrir Gerador de Teia
+                                🕸️ Abrir Gerador de Teia Interativa
                               </button>
                               
                               <input 
@@ -840,25 +848,25 @@ function MesaAnaliseConteudo() {
                               />
                               <button 
                                 onClick={() => uploadJsonRef.current?.click()} 
-                                className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 px-3 text-[10px] rounded border border-slate-400 shadow-sm whitespace-nowrap"
+                                className="bg-white hover:bg-slate-50 text-slate-700 font-semibold py-1.5 px-3 text-[10px] rounded border border-slate-300 shadow-sm whitespace-nowrap transition-colors"
                               >
-                                📎 Anexar JSON
+                                📎 Anexar JSON Manual
                               </button>
                               
                               {analise.organograma_json && analise.organograma_json.nodes?.length > 0 ? (
-                                <span className="text-green-600 font-bold text-[10px] flex items-center gap-1 ml-2">
-                                  ✅ Teia vinculada! ({analise.organograma_json.nodes.length} nós)
+                                <span className="text-emerald-600 font-bold text-[11px] flex items-center gap-1 ml-2">
+                                  ✅ Teia processada ({analise.organograma_json.nodes.length} nós)
                                 </span>
                               ) : (
-                                <span className="text-slate-400 text-[10px] italic ml-2">Sem teia mapeada</span>
+                                <span className="text-slate-400 text-[10px] italic ml-2">Sem teia mapeada no sistema</span>
                               )}
                             </div>
                           </td>
                         </tr>
-                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma (Imagem estática)</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Link da Imagem..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fachada</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Link do Google Street View..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Satélite (Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Link da Visão do Satélite..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Pasta de Evidências Fotográficas..." /></td></tr>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma (Imagem estática)</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da Imagem do Grupo..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fachada (Google Street View)</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão da rua..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Satélite (Google Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão aérea..." /></td></tr>
+                        <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita Interna</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Link do Drive com Evidências Fotográficas..." /></td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -867,15 +875,15 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
               {abaAtiva === "societario" && (
-                <div className="space-y-6">
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
-                      <span>Background da Empresa (Grupo Econômico)</span>
-                      <button onClick={() => addArray('empresas_grupo', {empresa:"", cnpj:"", fundacao:"", idade:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Empresa</button>
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>
+                      <span>Background do Grupo Econômico</span>
+                      <button onClick={() => addArray('empresas_grupo', {empresa:"", cnpj:"", fundacao:"", idade:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Nova Empresa</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <thead>
-                        <tr><th className={thStyle}>Empresa</th><th className={`${thStyle} w-40`}>CNPJ</th><th className={`${thStyle} w-32`}>Fundação</th><th className={`${thStyle} w-24`}>Idade</th><th className={`${thStyle} w-8`}>-</th></tr>
+                        <tr><th className={thStyle}>Razão Social</th><th className={`${thStyle} w-44`}>CNPJ</th><th className={`${thStyle} w-32`}>Data Fundação</th><th className={`${thStyle} w-24`}>Idade Aprox.</th><th className={`${thStyle} w-8`}>-</th></tr>
                       </thead>
                       <tbody>
                         {analise.empresas_grupo.map((e, i) => (
@@ -884,72 +892,73 @@ function MesaAnaliseConteudo() {
                             <td className={tdStyle}><input value={e.cnpj} onChange={(e)=>updateArray('empresas_grupo', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono`} /></td>
                             <td className={tdStyle}><input value={e.fundacao} onChange={(e)=>updateArray('empresas_grupo', i, 'fundacao', e.target.value)} className={`${cellStyle} text-center`} /></td>
                             <td className={tdStyle}><input value={e.idade} onChange={(e)=>updateArray('empresas_grupo', i, 'idade', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('empresas_grupo', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('empresas_grupo', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
-                      <span>Estrutura Societária</span>
-                      <button onClick={() => addArray('socios', {nome:"", perc:0, funcao:"Sócio", figure_contrato:"Sim"})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Sócio</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 p-1">
+                    <div className="rounded border border-slate-200 overflow-hidden mb-2">
+                        <div className={sectionHeaderStyle}>
+                        <span>Quadro Societário Atual</span>
+                        <button onClick={() => addArray('socios', {nome:"", perc:0, funcao:"Sócio", figure_contrato:"Sim"})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Sócio</button>
+                        </div>
+                        <table className="w-full border-collapse">
+                        <thead>
+                            <tr><th className={thStyle}>Nome Civil / PJ Associada</th><th className={`${thStyle} w-24`}>Cotas (%)</th><th className={`${thStyle} w-64`}>Papel / Cargo</th><th className={`${thStyle} w-36`}>Figura no Contrato?</th><th className={`${thStyle} w-8`}>-</th></tr>
+                        </thead>
+                        <tbody>
+                            {analise.socios.map((s, i) => (
+                            <tr key={i}>
+                                <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArray('socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
+                                <td className={tdStyle}><input type="number" value={s.perc} onChange={(e)=>updateArray('socios', i, 'perc', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/20`} /></td>
+                                <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArray('socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
+                                <td className={tdStyle}>
+                                <select value={s.figure_contrato} onChange={(e)=>updateArray('socios', i, 'figure_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                                </td>
+                                <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                            </tr>
+                            ))}
+                        </tbody>
+                        </table>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
-                      <thead>
-                        <tr><th className={thStyle}>Nome | Diretores</th><th className={`${thStyle} w-20`}>%</th><th className={`${thStyle} w-48`}>Função | Cargo</th><th className={`${thStyle} w-32`}>Figura Contrato</th><th className={`${thStyle} w-8`}>-</th></tr>
-                      </thead>
-                      <tbody>
-                        {analise.socios.map((s, i) => (
-                          <tr key={i}>
-                            <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArray('socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input type="number" value={s.perc} onChange={(e)=>updateArray('socios', i, 'perc', Number(e.target.value))} className={numStyle} /></td>
-                            <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArray('socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
-                            <td className={tdStyle}>
-                              <select value={s.figure_contrato} onChange={(e)=>updateArray('socios', i, 'figure_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                            </td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    
-                    <table className="w-full mt-2 border-collapse border border-slate-400">
+                    <table className="w-full border-collapse rounded border border-slate-200 overflow-hidden">
                       <tbody>
                         <tr>
-                          <td className={`${thStyle} w-1/4 text-right`}>Regra de Assinatura</td>
+                          <td className={`${thStyle} w-1/4 text-right`}>Regra de Assinatura Consolidada</td>
                           <td className={tdStyle}><input value={analise.regra_assinatura} onChange={(e)=>setAnalise({...analise, regra_assinatura: e.target.value})} className={cellStyle} placeholder="( ) em conjunto (x) isolada" /></td>
                         </tr>
                         <tr>
-                          <td className={`${thStyle} w-1/4 text-right`}>Aval Societário</td>
+                          <td className={`${thStyle} w-1/4 text-right`}>Aval Societário Coletado</td>
                           <td className={tdStyle}><input value={analise.aval_societario} onChange={(e)=>setAnalise({...analise, aval_societario: e.target.value})} className={cellStyle} /></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[11px] font-bold p-1.5 border border-slate-800">
-                      <span>Patrimônio Informado (IRPF)</span>
-                      <button onClick={() => addArray('patrimonios', {socio:"", descricao:"", valor:0})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Bem</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>
+                      <span>Patrimônio Avalizado (IRPF Vinculado)</span>
+                      <button onClick={() => addArray('patrimonios', {socio:"", descricao:"", valor:0})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Declarar Bem</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <thead>
-                        <tr><th className={thStyle}>Sócio Detentor</th><th className={thStyle}>Descrição do Bem</th><th className={`${thStyle} w-48`}>Valor (R$)</th><th className={`${thStyle} w-8`}>-</th></tr>
+                        <tr><th className={thStyle}>Titular / Sócio Detentor</th><th className={thStyle}>Descrição Detalhada do Bem</th><th className={`${thStyle} w-56 text-right`}>Valor Estimado (R$)</th><th className={`${thStyle} w-8`}>-</th></tr>
                       </thead>
                       <tbody>
                         {analise.patrimonios.map((p, i) => (
                           <tr key={i}>
-                            <td className={tdStyle}><input value={p.socio} onChange={(e)=>updateArray('patrimonios', i, 'socio', e.target.value)} className={`${cellStyle} font-bold text-slate-600`} /></td>
-                            <td className={tdStyle}><input value={p.descricao} onChange={(e)=>updateArray('patrimonios', i, 'descricao', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input type="number" value={p.valor} onChange={(e)=>updateArray('patrimonios', i, 'valor', Number(e.target.value))} className={`${numStyle} text-green-700 font-bold`} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('patrimonios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                            <td className={tdStyle}><input value={p.socio} onChange={(e)=>updateArray('patrimonios', i, 'socio', e.target.value)} className={`${cellStyle} font-semibold text-slate-800`} /></td>
+                            <td className={tdStyle}><input value={p.descricao} onChange={(e)=>updateArray('patrimonios', i, 'descricao', e.target.value)} className={cellStyle} /></td>
+                            <td className={tdStyle}><input type="number" value={p.valor} onChange={(e)=>updateArray('patrimonios', i, 'valor', Number(e.target.value))} className={`${numStyle} text-emerald-700 font-bold bg-emerald-50/20`} /></td>
+                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('patrimonios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                           </tr>
                         ))}
-                        <tr className="bg-slate-200 border-t-2 border-slate-400">
-                          <td colSpan={2} className="p-1.5 text-right font-bold text-[10px]">TOTAL BENS ARRESTÁVEIS</td>
-                          <td className="p-1.5 text-right font-mono font-bold text-green-800 text-[11px]">R$ {totPatrimonio.toLocaleString('pt-BR')}</td>
+                        <tr className="bg-slate-100 border-t-2 border-slate-300">
+                          <td colSpan={2} className="p-2 text-right font-bold text-[10px] text-slate-700 tracking-wide">TOTAL DE BENS ARRESTÁVEIS IDENTIFICADOS</td>
+                          <td className="p-2 text-right font-mono font-bold text-emerald-800 text-[12px]">R$ {totPatrimonio.toLocaleString('pt-BR')}</td>
                           <td></td>
                         </tr>
                       </tbody>
@@ -960,17 +969,17 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 4: FATURAMENTO E POTENCIAL */}
               {abaAtiva === "fat" && (
-                <div className="space-y-6">
-                  <div>
-                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Faturamento Consolidado</div>
-                    <div className="overflow-x-auto border border-slate-400">
-                      <table className="w-full border-collapse text-left bg-white min-w-[700px]">
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>Matriz de Faturamento Histórico Consolidado</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-left min-w-[800px]">
                         <thead>
                           <tr>
-                            <th className={`${thStyle} w-24 text-left`}>Mês</th>
-                            <th className={thStyle}>Realizado 2026</th><th className={`${thStyle} w-20`}>Var (%)</th>
-                            <th className={thStyle}>Realizado 2025</th><th className={`${thStyle} w-20`}>Var (%)</th>
-                            <th className={thStyle}>Realizado 2024</th>
+                            <th className={`${thStyle} w-28 text-left`}>Mês Referência</th>
+                            <th className={thStyle}>Realizado 2026 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
+                            <th className={thStyle}>Realizado 2025 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
+                            <th className={thStyle}>Realizado 2024 (R$)</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -979,15 +988,15 @@ function MesaAnaliseConteudo() {
                             const d25 = calcDelta(mes, "2025", "2024");
                             return (
                               <tr key={mes}>
-                                <td className={`${tdStyle} bg-slate-100 font-bold uppercase text-[10px] pl-2`}>{mes}</td>
+                                <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
                                 <td className={tdStyle}>
                                   <MathInput value={analise.dados_faturamento["2026"]?.[mes]} onChange={(val) => handleFat("2026", mes, val)} className={numStyle} />
                                 </td>
-                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-green-600' : d26 < 0 ? 'text-red-600' : 'text-slate-400'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
+                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d26 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
                                 <td className={tdStyle}>
                                   <MathInput value={analise.dados_faturamento["2025"]?.[mes]} onChange={(val) => handleFat("2025", mes, val)} className={numStyle} />
                                 </td>
-                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-green-600' : d25 < 0 ? 'text-red-600' : 'text-slate-400'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
+                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
                                 <td className={tdStyle}>
                                   <MathInput value={analise.dados_faturamento["2024"]?.[mes]} onChange={(val) => handleFat("2024", mes, val)} className={numStyle} />
                                 </td>
@@ -995,87 +1004,89 @@ function MesaAnaliseConteudo() {
                             );
                           })}
 
-                          <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400 text-slate-800">TOTAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
+                          <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
+                            <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{calcTotAno("2026").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-200 bg-white/50"></td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcTotAno("2025").toLocaleString("pt-BR")}</td>
+                            <td className="border border-slate-200 bg-white/50"></td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcTotAno("2024").toLocaleString("pt-BR")}</td>
                           </tr>
                           
-                          <tr className="bg-slate-200 border-t border-slate-400 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400 text-slate-800">MÉDIA GERAL ANO</td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className="border border-slate-400 bg-white"></td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-700">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                          <tr className="bg-slate-200/50 border-t border-slate-300 font-bold text-[11px]">
+                            <td className="p-2 border border-slate-200 text-slate-700 text-right">MÉDIA GERAL (Mês)</td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-800">{calcMediaGeralAno("2026").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-200 bg-white/50"></td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcMediaGeralAno("2025").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="border border-slate-200 bg-white/50"></td>
+                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{calcMediaGeralAno("2024").toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
 
-                          <tr className="bg-blue-50 border-t-2 border-blue-300 font-bold text-[10px]">
-                            <td className="p-1.5 border border-slate-400 text-blue-900 uppercase" title="Média apenas dos meses correspondentes preenchidos">
+                          <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
+                            <td className="p-2 border border-indigo-100 text-indigo-900 text-right" title="Média pareada apenas dos meses preenchidos no ano corrente">
                                 {labelMascaraYTD}
                             </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-blue-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-400 text-center ${varYTD26_25 > 0 ? 'text-green-600' : varYTD26_25 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>
                               {varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}
                             </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-800">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-400 text-center ${varYTD25_24 > 0 ? 'text-green-600' : varYTD25_24 < 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>
                               {varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}
                             </td>
-                            <td className="p-1.5 border border-slate-400 text-right font-mono text-slate-800">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div>
-                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Parâmetros de Recebimento e Prazos</div>
-                      <table className="w-full border-collapse border border-slate-400">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                      <div className={sectionHeaderStyle}>Parâmetros e Prazos Operacionais</div>
+                      <table className="w-full border-collapse">
                         <tbody>
-                          <tr><td className={`${thStyle} text-right w-1/2`}>Ticket Médio (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e)=>updateNested("dados_potencial", "ticket_medio", Number(e.target.value))} className={numStyle} /></td></tr>
-                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Dpls</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_dpls", e.target.value)} className={cellStyle} /></td></tr>
-                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Comissária</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_comissaria", e.target.value)} className={cellStyle} /></td></tr>
+                          <tr><td className={`${thStyle} text-right w-1/2`}>Ticket Médio da Base (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio} onChange={(e)=>updateNested("dados_potencial", "ticket_medio", Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold`} /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Duplicatas</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_dpls", e.target.value)} className={cellStyle} placeholder="Ex: 45 dias" /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Comissária</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_comissaria", e.target.value)} className={cellStyle} placeholder="Ex: 15 dias" /></td></tr>
                           <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Intercompany</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_intercompany || ""} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_intercompany", e.target.value)} className={cellStyle} /></td></tr>
                           
-                          <tr className="bg-slate-100 border-t-2 border-slate-300">
-                            <td className={`${thStyle} text-right font-bold`}>Forma Receb. (À Vista %)</td>
-                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.forma_recebimento_vista} onChange={(e)=>updateNested("dados_potencial", "forma_recebimento_vista", Number(e.target.value))} className={`${numStyle} text-blue-700`} /></td>
+                          <tr className="bg-slate-50 border-t-2 border-slate-200">
+                            <td className={`${thStyle} text-right font-bold text-slate-800`}>Volume de Recebimento (À Vista %)</td>
+                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.forma_recebimento_vista} onChange={(e)=>updateNested("dados_potencial", "forma_recebimento_vista", Number(e.target.value))} className={`${numStyle} font-semibold`} /></td>
                           </tr>
-                          <tr>
-                            <td className={`${thStyle} text-right font-bold`}>Forma Receb. (A Prazo %)</td>
-                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.forma_recebimento_prazo} onChange={(e)=>updateNested("dados_potencial", "forma_recebimento_prazo", Number(e.target.value))} className={`${numStyle} text-blue-700 font-bold bg-yellow-50`} /></td>
+                          <tr className="bg-indigo-50/30">
+                            <td className={`${thStyle} text-right font-bold text-indigo-900 bg-indigo-50/50`}>Volume de Recebimento (A Prazo %)</td>
+                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.forma_recebimento_prazo} onChange={(e)=>updateNested("dados_potencial", "forma_recebimento_prazo", Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold bg-indigo-100/30`} /></td>
                           </tr>
-                          <tr className="bg-slate-100 border-t border-slate-300">
-                            <td className={`${thStyle} text-right`}>Composição (Duplicatas %)</td>
+                          <tr className="border-t border-slate-200">
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Duplicatas %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_dpls} onChange={(e)=>updateNested("dados_potencial", "composicao_dpls", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
                           <tr>
-                            <td className={`${thStyle} text-right`}>Composição (Comissária %)</td>
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Comissária %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_comissaria} onChange={(e)=>updateNested("dados_potencial", "composicao_comissaria", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
                           <tr>
-                            <td className={`${thStyle} text-right`}>Composição (Intercompany %)</td>
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Intercompany %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_intercompany || 0} onChange={(e)=>updateNested("dados_potencial", "composicao_intercompany", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
                           <tr>
-                            <td className={`${thStyle} text-right`}>Composição (Outros %)</td>
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Outros %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_outros || 0} onChange={(e)=>updateNested("dados_potencial", "composicao_outros", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
-                    <div className="bg-blue-50 border border-blue-300 p-6 flex flex-col justify-center items-center text-center rounded-sm">
-                      <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">Potencial Real Estimado (Ciclo a Prazo)</span>
-                      <span className="font-mono text-3xl font-black text-blue-700 mt-2">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    
+                    <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700">
+                      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
+                      <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Mensal)</span>
+                      <span className="font-mono text-4xl font-black drop-shadow-md z-10 my-3">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       
-                      <div className="text-[9px] text-slate-500 mt-4 space-y-1">
-                          <p><strong>Faturamento Base (Média Parcial/YTD):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
-                          <p><strong>Cálculo Realizado:</strong> ((Fat. Base ÷ 30) × Prazo) × Composição(%) × Receb. a Prazo(%)</p>
+                      <div className="text-[10px] text-indigo-200 mt-6 space-y-1.5 z-10 bg-black/10 p-3 rounded backdrop-blur-sm w-full max-w-sm text-left">
+                          <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
+                          <p className="border-t border-indigo-400/30 pt-1.5"><strong>Modelo:</strong> (Fat.Base ÷ 30) × Prazo × Compos(%) × APrazo(%)</p>
                       </div>
                     </div>
                   </div>
@@ -1084,101 +1095,101 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 5: ENDIVIDAMENTO E REFERÊNCIAS */}
               {abaAtiva === "endividamento" && (
-                <div className="space-y-6">
-                  <div>
-                    <div className="bg-slate-800 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-900">Endividamento Bancos e Fundos (Visão Resumida Geral)</div>
-                    <table className="w-full border-collapse border border-slate-400">
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900`}>Radar de Alavancagem Global (Visão Cedente)</div>
+                    <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>Curto Prazo</th>
-                          <th className={thStyle}>Longo Prazo</th>
-                          <th className={`${thStyle} bg-red-100 text-red-900`}>TOTAL GERAL CEDENTE</th>
-                          <th className={thStyle}>Curto Prazo DPLS (%)</th>
-                          <th className={thStyle}>Fundos (%)</th>
-                          <th className={thStyle}>Bancos (%)</th>
-                          <th className={thStyle}>Renegociando?</th>
+                          <th className={thStyle}>Passivo Curto Prazo</th>
+                          <th className={thStyle}>Passivo Longo Prazo</th>
+                          <th className={`${thStyle} bg-rose-50 text-rose-800 border-rose-200`}>ENDIVIDAMENTO TOTAL</th>
+                          <th className={thStyle}>Pressão Antecipação DPLS (CP)</th>
+                          <th className={thStyle}>Concentração Fundos</th>
+                          <th className={thStyle}>Concentração Bancos</th>
+                          <th className={thStyle}>Conta em Renegociação?</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="bg-slate-50 font-mono text-[11px] text-right font-bold">
-                          <td className="p-1.5 border border-slate-400 text-slate-700">R$ {endivCurtoPrazo.toLocaleString("pt-BR")}</td>
-                          <td className="p-1.5 border border-slate-400 text-slate-700">R$ {endivLongoPrazo.toLocaleString("pt-BR")}</td>
-                          <td className="p-1.5 border border-slate-400 text-red-700 bg-red-50/50">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
-                          <td className="p-1.5 border border-slate-400 text-center text-slate-600">{percDplsCP.toFixed(1)}%</td>
-                          <td className="p-1.5 border border-slate-400 text-center text-slate-600">{percFundos.toFixed(1)}%</td>
-                          <td className="p-1.5 border border-slate-400 text-center text-slate-600">{percBancos.toFixed(1)}%</td>
-                          <td className="p-0 border border-slate-400 text-center bg-white">
-                             <select value={analise.endividamento_resumo.renegociando} onChange={(e)=>updateNested("endividamento_resumo", "renegociando", e.target.value)} className="w-full h-full p-1 text-center font-sans text-[11px] bg-transparent outline-none"><option value="Não">Não</option><option value="Sim">Sim</option></select>
+                        <tr className="bg-slate-50 font-mono text-[12px] text-center">
+                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivCurtoPrazo.toLocaleString("pt-BR")}</td>
+                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivLongoPrazo.toLocaleString("pt-BR")}</td>
+                          <td className="p-3 border border-slate-200 text-rose-700 bg-rose-50 font-bold">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
+                          <td className="p-3 border border-slate-200 text-slate-600">{percDplsCP.toFixed(1)}%</td>
+                          <td className="p-3 border border-slate-200 text-slate-600">{percFundos.toFixed(1)}%</td>
+                          <td className="p-3 border border-slate-200 text-slate-600">{percBancos.toFixed(1)}%</td>
+                          <td className="p-0 border border-slate-200 bg-white">
+                             <select value={analise.endividamento_resumo.renegociando} onChange={(e)=>updateNested("endividamento_resumo", "renegociando", e.target.value)} className="w-full h-full p-2 text-center font-sans font-bold text-[11px] bg-transparent outline-none cursor-pointer hover:bg-slate-50 transition-colors"><option value="Não">Não</option><option value="Sim">Sim</option></select>
                           </td>
                         </tr>
                         <tr>
-                          <td colSpan={7} className="p-2 text-center text-[10px] text-slate-500 bg-slate-100 font-sans border border-slate-400">
-                            Alavancagem Cedente / Faturamento Base Oficial: <strong className="text-slate-800 text-xs">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
+                          <td colSpan={7} className="p-3 text-center text-[11px] text-slate-600 bg-slate-100/50 font-sans border-t border-slate-200">
+                            Multiplicador de Alavancagem base faturamento: <strong className="text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-300 ml-1 shadow-sm">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
                           </td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
-                      <span>Detalhamento Informado (Dívidas no Documento)</span>
-                      <button onClick={() => addArray('endividamento_detalhado', {instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Instituição</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>
+                      <span>Mapa de Dívidas Declaradas (Balancete/Documentos)</span>
+                      <button onClick={() => addArray('endividamento_detalhado', {instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Nova Instituição</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>Credor / Instituição</th>
-                          <th className={thStyle}>Modalidade</th>
-                          <th className={`${thStyle} w-40 text-right`}>Saldo Devedor (R$)</th>
-                          <th className={`${thStyle} w-28`}>Tipo Fundo/Banco</th>
-                          <th className={`${thStyle} w-28`}>Prazo CP/LP</th>
+                          <th className={thStyle}>Credor Oficial</th>
+                          <th className={thStyle}>Linha / Modalidade</th>
+                          <th className={`${thStyle} w-48 text-right`}>Saldo Aberto Estimado (R$)</th>
+                          <th className={`${thStyle} w-32`}>Categoria Mercado</th>
+                          <th className={`${thStyle} w-32`}>Vencimento Original</th>
                           <th className={`${thStyle} w-8`}>-</th>
                         </tr>
                       </thead>
                       <tbody>
                         {analise.endividamento_detalhado.map((div, i) => (
                           <tr key={i}>
-                            <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArray('endividamento_detalhado', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArray('endividamento_detalhado', i, 'modalidade', e.target.value)} className={cellStyle} placeholder="Ex: Capital de Giro, Desconto..." /></td>
-                            <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-red-600`} /></td>
+                            <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArray('endividamento_detalhado', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} placeholder="Nome do Banco/FIDC..." /></td>
+                            <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArray('endividamento_detalhado', i, 'modalidade', e.target.value)} className={cellStyle} placeholder="Ex: Capital de Giro, Antecipação..." /></td>
+                            <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-rose-600 bg-rose-50/10`} /></td>
                             <td className={tdStyle}>
                               <select value={div.tipo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'tipo', e.target.value)} className={cellStyle}>
-                                <option value="Banco">Banco</option><option value="Fundo">Fundo</option>
+                                <option value="Banco">Banco Varejo/Atacado</option><option value="Fundo">Fundo Estruturado</option>
                               </select>
                             </td>
                             <td className={tdStyle}>
                               <select value={div.prazo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'prazo', e.target.value)} className={cellStyle}>
-                                <option value="Curto Prazo">Curto Prazo</option><option value="Longo Prazo">Longo Prazo</option>
+                                <option value="Curto Prazo">Curto Prazo (CP)</option><option value="Longo Prazo">Longo Prazo (LP)</option>
                               </select>
                             </td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('endividamento_detalhado', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('endividamento_detalhado', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                           </tr>
                         ))}
-                        <tr className="bg-slate-200 border-t-2 border-slate-400">
-                          <td colSpan={2} className="p-1.5 text-right font-bold text-[10px]">SOMA TOTAL DETALHADA</td>
-                          <td className="p-1.5 text-right font-mono font-bold text-red-700 text-[11px]">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
+                        <tr className="bg-slate-100 border-t-2 border-slate-300">
+                          <td colSpan={2} className="p-2 text-right font-bold text-[11px] text-slate-700 tracking-wide">SOMA TOTAL MAPEADA ACIMA</td>
+                          <td className="p-2 text-right font-mono font-bold text-rose-700 text-[12px]">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
                           <td colSpan={3}></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold p-1.5 border border-slate-800">
-                      <span>Informações com Fundos de Investimentos / Referências (Com Risco, Liq e VOP)</span>
-                      <button onClick={() => addArray('referencias', {instituicao:"", rnx:"", cliente_desde:"", ultima_operacao:"", limite_global:0, risco_total:0, risco_1:0, operacao_1:"", vcto_1:"", risco_2:0, operacao_2:"", vcto_2:"", liquidez_5_dias:"", liquidez_pontual:"", atraso_5_dias:"", atraso_15_dias:"", recompra:"", concentracao:0})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Referência</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>
+                      <span>Market Check & Referências Comerciais Ativas</span>
+                      <button onClick={() => addArray('referencias', {instituicao:"", rnx:"", cliente_desde:"", ultima_operacao:"", limite_global:0, risco_total:0, risco_1:0, operacao_1:"", vcto_1:"", risco_2:0, operacao_2:"", vcto_2:"", liquidez_5_dias:"", liquidez_pontual:"", atraso_5_dias:"", atraso_15_dias:"", recompra:"", concentracao:0})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Cadastrar Referência</button>
                     </div>
-                    <div className="overflow-x-auto border border-slate-400">
-                      <table className="w-full border-collapse min-w-[1400px]">
+                    <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300">
+                      <table className="w-full border-collapse min-w-[1500px]">
                         <thead>
                           <tr>
-                            <th className={thStyle}>Fundo</th><th className={thStyle}>RNX</th><th className={`${thStyle} w-20`}>Desde</th><th className={`${thStyle} w-24`}>Últ. Op</th>
-                            <th className={`${thStyle} w-28 text-right`}>Limite</th><th className={`${thStyle} w-28 text-right`}>Risco Total</th>
-                            <th className={`${thStyle} w-24 text-right bg-blue-100`}>Risco 1 (R$)</th><th className={`${thStyle} bg-blue-100`}>Op 1</th><th className={`${thStyle} bg-blue-100`}>Vcto 1</th>
-                            <th className={`${thStyle} w-24 text-right bg-yellow-100`}>Risco 2 (R$)</th><th className={`${thStyle} bg-yellow-100`}>Op 2</th><th className={`${thStyle} bg-yellow-100`}>Vcto 2</th>
-                            <th className={thStyle}>Liq 5d</th><th className={thStyle}>Liq Pontual</th><th className={thStyle}>Atraso 5d</th><th className={thStyle}>Atraso 15d</th>
-                            <th className={thStyle}>Recompra</th><th className={thStyle}>Conc(%)</th><th className={`${thStyle} w-8`}>-</th>
+                            <th className={thStyle}>Agente Financeiro</th><th className={thStyle}>Rating/RNX</th><th className={`${thStyle} w-24`}>Início Relac.</th><th className={`${thStyle} w-24`}>Última Operação</th>
+                            <th className={`${thStyle} w-28 text-right`}>Limite Aprovado</th><th className={`${thStyle} w-28 text-right`}>Carteira Total</th>
+                            <th className={`${thStyle} w-24 text-right bg-indigo-50 border-indigo-200`}>Risco 1 (R$)</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Tipo Op 1</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Vcto Final 1</th>
+                            <th className={`${thStyle} w-24 text-right bg-amber-50 border-amber-200`}>Risco 2 (R$)</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Tipo Op 2</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Vcto Final 2</th>
+                            <th className={thStyle}>Liq. 5 Dias</th><th className={thStyle}>Liq. Pontual</th><th className={thStyle}>Atrasos (5D)</th><th className={thStyle}>Atrasos (15D+)</th>
+                            <th className={thStyle}>Freq. Recompra</th><th className={thStyle}>Concentração Máx</th><th className={`${thStyle} w-8`}>-</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1188,25 +1199,25 @@ function MesaAnaliseConteudo() {
                               <td className={tdStyle}><input value={ref.rnx} onChange={(e)=>updateArray('referencias', i, 'rnx', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="date" value={ref.cliente_desde} onChange={(e)=>updateArray('referencias', i, 'cliente_desde', e.target.value)} className={`${cellStyle} text-center`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.ultima_operacao} onChange={(e)=>updateArray('referencias', i, 'ultima_operacao', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                              <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e)=>updateArray('referencias', i, 'limite_global', Number(e.target.value))} className={`${numStyle} text-blue-700 font-bold`} /></td>
-                              <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e)=>updateArray('referencias', i, 'risco_total', Number(e.target.value))} className={`${numStyle} text-red-600 font-bold`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e)=>updateArray('referencias', i, 'limite_global', Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold bg-indigo-50/20`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e)=>updateArray('referencias', i, 'risco_total', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
                               
-                              <td className={tdStyle}><input type="number" value={ref.risco_1} onChange={(e)=>updateArray('referencias', i, 'risco_1', Number(e.target.value))} className={`${numStyle} bg-blue-50`} /></td>
-                              <td className={tdStyle}><input value={ref.operacao_1} onChange={(e)=>updateArray('referencias', i, 'operacao_1', e.target.value)} className={`${cellStyle} bg-blue-50`} /></td>
-                              <td className={tdStyle}><input value={ref.vcto_1} onChange={(e)=>updateArray('referencias', i, 'vcto_1', e.target.value)} className={`${cellStyle} bg-blue-50 text-center`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.risco_1} onChange={(e)=>updateArray('referencias', i, 'risco_1', Number(e.target.value))} className={`${numStyle} bg-indigo-50/50`} /></td>
+                              <td className={tdStyle}><input value={ref.operacao_1} onChange={(e)=>updateArray('referencias', i, 'operacao_1', e.target.value)} className={`${cellStyle} bg-indigo-50/50`} /></td>
+                              <td className={tdStyle}><input type="date" value={ref.vcto_1} onChange={(e)=>updateArray('referencias', i, 'vcto_1', e.target.value)} className={`${cellStyle} bg-indigo-50/50 text-center`} /></td>
                               
-                              <td className={tdStyle}><input type="number" value={ref.risco_2} onChange={(e)=>updateArray('referencias', i, 'risco_2', Number(e.target.value))} className={`${numStyle} bg-yellow-50`} /></td>
-                              <td className={tdStyle}><input value={ref.operacao_2} onChange={(e)=>updateArray('referencias', i, 'operacao_2', e.target.value)} className={`${cellStyle} bg-yellow-50`} /></td>
-                              <td className={tdStyle}><input value={ref.vcto_2} onChange={(e)=>updateArray('referencias', i, 'vcto_2', e.target.value)} className={`${cellStyle} bg-yellow-50 text-center`} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.risco_2} onChange={(e)=>updateArray('referencias', i, 'risco_2', Number(e.target.value))} className={`${numStyle} bg-amber-50/50`} /></td>
+                              <td className={tdStyle}><input value={ref.operacao_2} onChange={(e)=>updateArray('referencias', i, 'operacao_2', e.target.value)} className={`${cellStyle} bg-amber-50/50`} /></td>
+                              <td className={tdStyle}><input type="date" value={ref.vcto_2} onChange={(e)=>updateArray('referencias', i, 'vcto_2', e.target.value)} className={`${cellStyle} bg-amber-50/50 text-center`} /></td>
                               
                               <td className={tdStyle}><input value={ref.liquidez_5_dias} onChange={(e)=>updateArray('referencias', i, 'liquidez_5_dias', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input value={ref.liquidez_pontual} onChange={(e)=>updateArray('referencias', i, 'liquidez_pontual', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input value={ref.atraso_5_dias} onChange={(e)=>updateArray('referencias', i, 'atraso_5_dias', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input value={ref.atraso_15_dias} onChange={(e)=>updateArray('referencias', i, 'atraso_15_dias', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input value={ref.recompra} onChange={(e)=>updateArray('referencias', i, 'recompra', e.target.value)} className={cellStyle} /></td>
-                              <td className={tdStyle}><input type="number" value={ref.concentracao} onChange={(e)=>updateArray('referencias', i, 'concentracao', Number(e.target.value))} className={numStyle} /></td>
+                              <td className={tdStyle}><input type="number" value={ref.concentracao} onChange={(e)=>updateArray('referencias', i, 'concentracao', Number(e.target.value))} className={`${numStyle} text-center`} placeholder="%" /></td>
                               
-                              <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('referencias', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('referencias', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                             </tr>
                           ))}
                         </tbody>
@@ -1218,37 +1229,37 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 6: RESTRITIVOS E JURÍDICO */}
               {abaAtiva === "restritivos" && (
-                <div className="space-y-6">
-                  <div>
-                    <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Restritivos (Quadro Resumo)</div>
-                    <table className="w-full border-collapse border border-slate-400">
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>Painel de Apontamentos do Bureau (Serasa/Boa Vista)</div>
+                    <table className="w-full border-collapse">
                       <thead>
-                        <tr><th className={thStyle}>Pefin</th><th className={thStyle}>Refin</th><th className={thStyle}>Protesto</th><th className={thStyle}>Div Vencida</th><th className={thStyle}>Ação Judicial</th><th className={thStyle}>Cheque s/ Fundo</th></tr>
+                        <tr><th className={thStyle}>Pefin</th><th className={thStyle}>Refin</th><th className={thStyle}>Protestos</th><th className={thStyle}>Dívidas Vencidas</th><th className={thStyle}>Ações Judiciais (Cíveis/Trab)</th><th className={thStyle}>Cheques Devolvidos</th></tr>
                       </thead>
                       <tbody>
                         <tr>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.pefin} onChange={(e)=>updateNested("restritivos_quadro", "pefin", Number(e.target.value))} className={numStyle} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.refin} onChange={(e)=>updateNested("restritivos_quadro", "refin", Number(e.target.value))} className={numStyle} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.protesto} onChange={(e)=>updateNested("restritivos_quadro", "protesto", Number(e.target.value))} className={numStyle} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.div_vencida} onChange={(e)=>updateNested("restritivos_quadro", "div_vencida", Number(e.target.value))} className={numStyle} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.acao_judicial} onChange={(e)=>updateNested("restritivos_quadro", "acao_judicial", Number(e.target.value))} className={numStyle} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.cheque_sem_fundo} onChange={(e)=>updateNested("restritivos_quadro", "cheque_sem_fundo", Number(e.target.value))} className={numStyle} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.pefin} onChange={(e)=>updateNested("restritivos_quadro", "pefin", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.refin} onChange={(e)=>updateNested("restritivos_quadro", "refin", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.protesto} onChange={(e)=>updateNested("restritivos_quadro", "protesto", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.div_vencida} onChange={(e)=>updateNested("restritivos_quadro", "div_vencida", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.acao_judicial} onChange={(e)=>updateNested("restritivos_quadro", "acao_judicial", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.cheque_sem_fundo} onChange={(e)=>updateNested("restritivos_quadro", "cheque_sem_fundo", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">
-                      <span>Apontamentos Restritivos Detalhados (Serasa/Boa Vista)</span>
-                      <button onClick={() => addArray('restritivos', {empresa_socio:"", restritivo:"", qtd:1, valor:0, data:"", observacao:""})} className="bg-slate-600 hover:bg-slate-500 border border-slate-400 px-2 rounded text-[9px]">+ Apontamento</button>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>
+                      <span>Extrato Restritivo Detalhado</span>
+                      <button onClick={() => addArray('restritivos', {empresa_socio:"", restritivo:"", qtd:1, valor:0, data:"", observacao:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Incluir Apontamento</button>
                     </div>
-                    <table className="w-full border-collapse border border-slate-400">
+                    <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>Empresa / Sócio</th><th className={thStyle}>Restritivo</th>
-                          <th className={`${thStyle} w-16`}>Qtd</th><th className={`${thStyle} w-32 text-right`}>Valor (R$)</th>
-                          <th className={`${thStyle} w-24`}>Data</th><th className={`${thStyle} w-64`}>Observação</th>
+                          <th className={thStyle}>Requerido (CNPJ / Sócio)</th><th className={thStyle}>Natureza do Apontamento</th>
+                          <th className={`${thStyle} w-16`}>Vol.</th><th className={`${thStyle} w-40 text-right`}>Valor Acumulado (R$)</th>
+                          <th className={`${thStyle} w-28`}>Data Ocorrência</th><th className={`${thStyle} w-64`}>Observações Relevantes</th>
                           <th className={`${thStyle} w-8`}>-</th>
                         </tr>
                       </thead>
@@ -1256,40 +1267,44 @@ function MesaAnaliseConteudo() {
                         {analise.restritivos.map((r, i) => (
                           <tr key={i}>
                             <td className={tdStyle}><input value={r.empresa_socio} onChange={(e)=>updateArray('restritivos', i, 'empresa_socio', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input value={r.restritivo} onChange={(e)=>updateArray('restritivos', i, 'restritivo', e.target.value)} className={cellStyle} /></td>
+                            <td className={tdStyle}><input value={r.restritivo} onChange={(e)=>updateArray('restritivos', i, 'restritivo', e.target.value)} className={cellStyle} placeholder="Ex: Ação Trabalhista, Protesto Cartório..." /></td>
                             <td className={tdStyle}><input type="number" value={r.qtd} onChange={(e)=>updateArray('restritivos', i, 'qtd', Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                            <td className={tdStyle}><input type="number" value={r.valor} onChange={(e)=>updateArray('restritivos', i, 'valor', Number(e.target.value))} className={`${numStyle} text-red-600 font-bold`} /></td>
+                            <td className={tdStyle}><input type="number" value={r.valor} onChange={(e)=>updateArray('restritivos', i, 'valor', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
                             <td className={tdStyle}><input type="date" value={r.data} onChange={(e)=>updateArray('restritivos', i, 'data', e.target.value)} className={`${cellStyle} text-center`} /></td>
                             <td className={tdStyle}><input value={r.observacao} onChange={(e)=>updateArray('restritivos', i, 'observacao', e.target.value)} className={cellStyle} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('restritivos', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full">X</button></td>
+                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('restritivos', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                           </tr>
                         ))}
-                        <tr className="bg-slate-200 border-t-2 border-slate-400">
-                          <td colSpan={3} className="p-1.5 text-right font-bold uppercase text-[10px] text-slate-800">Total Detalhado</td>
-                          <td className="p-1.5 text-right font-mono font-bold text-red-700 text-[11px]">R$ {totRestritivos.toLocaleString("pt-BR")}</td>
+                        <tr className="bg-slate-100 border-t-2 border-slate-300">
+                          <td colSpan={3} className="p-2 text-right font-bold tracking-wide uppercase text-[10px] text-slate-700">Risco Restritivo Total Calculado</td>
+                          <td className="p-2 text-right font-mono font-bold text-rose-700 text-[12px]">R$ {totRestritivos.toLocaleString("pt-BR")}</td>
                           <td colSpan={3}></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      {/* 🔥 PARECER DO KAPPI */}
-                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800 flex gap-2 items-center">
-                         <span>⚖️ Parecer Jurídico Consolidado (Kappi / Jusbrasil)</span>
-                         {analise.status === "em_processamento_ia" && <span className="bg-purple-600 px-1 rounded animate-pulse">LENDO PROCESSOS...</span>}
+                  <div className="grid grid-cols-1 gap-8">
+                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                      <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex gap-3 items-center`}>
+                         <span>⚖️ Dossier Jurídico Textual (Crawler Jusbrasil / Kappi)</span>
+                         {analise.status === "em_processamento_ia" && <span className="bg-purple-500 text-white font-bold text-[9px] px-2 py-0.5 rounded animate-pulse">EXTRAINDO PROCESSOS...</span>}
                       </div>
                       <textarea 
                          value={analise.dados_juridico?.relatorio_completo || ""} 
                          onChange={(e)=>updateNested("dados_juridico", "relatorio_completo", e.target.value)} 
-                         className="w-full h-64 p-3 border border-slate-400 outline-none text-[11px] font-sans resize-none bg-slate-50 leading-relaxed" 
-                         placeholder="Aguardando dados da IA ou digite manualmente..."
+                         className="w-full h-72 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 leading-relaxed focus:bg-white transition-colors" 
+                         placeholder="Aguardando consolidação inteligente ou digite a síntese dos principais litígios trabalhistas, cíveis e tributários..."
                       />
                     </div>
-                    <div>
-                      <div className="bg-slate-700 text-white text-[10px] font-bold uppercase p-1.5 border border-slate-800">Pesquisas e Notícias de Mídia</div>
-                      <textarea value={analise.noticias_midia} onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} className="w-full h-20 p-2 border border-slate-400 outline-none text-[11px] font-sans resize-none" />
+                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                      <div className={sectionHeaderStyle}>Clipping, Pesquisas Reputacionais e Mídia</div>
+                      <textarea 
+                        value={analise.noticias_midia} 
+                        onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
+                        className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
+                        placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
+                      />
                     </div>
                   </div>
                 </div>
@@ -1297,41 +1312,46 @@ function MesaAnaliseConteudo() {
 
               {/* ABA 7: PARECER FINAL */}
               {abaAtiva === "parecer" && (
-                <div className="space-y-6 max-w-5xl">
+                <div className="space-y-8 max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-300">
                 
-                  <div className="bg-white border-2 border-slate-400 p-3">
-                    <h3 className="text-[11px] font-bold text-slate-800 uppercase mb-2 border-b border-slate-300 pb-1">Parecer Técnico do Analista (Humano)</h3>
+                  <div className="bg-white rounded-md shadow-md border border-slate-200 overflow-hidden">
+                    <div className={`${sectionHeaderStyle} bg-indigo-900 border-indigo-900 pb-3 pt-3`}>
+                      <span className="text-sm">Voto e Justificativa Técnica da Mesa de Crédito (Analista)</span>
+                    </div>
                     <textarea 
                       value={analise.parecer_analista} 
                       onChange={(e) => setAnalise({...analise, parecer_analista: e.target.value})}
-                      className="w-full p-3 border border-slate-300 h-64 font-sans text-[12px] outline-none resize-none bg-[#f8fafc]"
-                      placeholder="Conclusão final da mesa de análise. Use a súmula da IA acima como base..."
+                      className="w-full p-6 border-none h-80 font-sans text-[13px] text-slate-800 outline-none resize-none bg-slate-50 focus:bg-white transition-colors leading-relaxed"
+                      placeholder="Redija a conclusão narrativa embasando a decisão comercial e os riscos atenuados mapeados. Use a súmula executiva como trampolim de contexto..."
                     />
                   </div>
 
                   {analise.parecer_comite && (
-                    <div className="bg-white border-2 border-blue-400 p-3 mt-4">
-                      <h3 className="text-[11px] font-bold text-blue-800 uppercase mb-2 border-b border-blue-200 pb-1">Votos e Deliberação do Comitê</h3>
-                      <div className="text-[12px] text-slate-700 bg-blue-50 p-2 whitespace-pre-wrap">
+                    <div className="bg-indigo-50 rounded-md shadow-sm border-2 border-indigo-200 overflow-hidden">
+                      <div className="bg-indigo-100 border-b border-indigo-200 text-indigo-900 text-[11px] font-bold tracking-wide p-3 uppercase flex items-center gap-2">
+                        <span>🛡️</span> Retorno Oficial do Comitê de Crédito
+                      </div>
+                      <div className="text-[13px] text-indigo-900 p-6 whitespace-pre-wrap leading-relaxed font-medium">
                         {analise.parecer_comite}
                       </div>
                     </div>
                   )}
 
-                  <div className="bg-slate-100 border-2 border-slate-400 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-[12px] font-bold text-slate-800 uppercase">Sugestão de Veredito / Recomendação Final:</h3>
-                      <p className="text-[10px] text-slate-500">Essa escolha definirá o parecer enviado para a validação final do comitê.</p>
+                  <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
+                    <div className="pl-4">
+                      <h3 className="text-[14px] font-bold text-slate-800 uppercase tracking-wide">Veredito Pré-Comitê (Recomendação)</h3>
+                      <p className="text-[12px] text-slate-500 mt-1">Este carimbo irá pautar a reunião colegiada. Escolha a sua recomendação final.</p>
                     </div>
                     <select 
                       value={analise.recomendacao_analista || ""} 
                       onChange={(e)=>setAnalise({...analise, recomendacao_analista: e.target.value})} 
-                      className="bg-yellow-100 border border-yellow-500 text-yellow-900 font-bold px-4 py-2 text-[12px] outline-none cursor-pointer shadow-sm w-full md:w-64"
+                      className="bg-indigo-50 border-2 border-indigo-200 hover:border-indigo-400 text-indigo-900 font-bold px-5 py-3 text-[14px] rounded-lg outline-none cursor-pointer shadow-sm w-full md:w-80 transition-all focus:ring-4 focus:ring-indigo-500/20"
                     >
-                      <option value="">Escolha o Veredito...</option>
-                      <option value="Aprovado">✅ Aprovado</option>
-                      <option value="Reprovado">❌ Reprovado</option>
-                      <option value="Em Análise">⏳ Em Análise / Pendente</option>
+                      <option value="">Aguardando Definição...</option>
+                      <option value="Aprovado">✅ RECOMENDAR APROVAÇÃO</option>
+                      <option value="Reprovado">❌ RECOMENDAR DECLÍNIO</option>
+                      <option value="Em Análise">⏳ PENDENCIAR / DILIGÊNCIA EXT.</option>
                     </select>
                   </div>
                 </div>
@@ -1341,7 +1361,6 @@ function MesaAnaliseConteudo() {
           </>
         )}
       </div>
-
     </div>
   );
 }
