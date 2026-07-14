@@ -171,33 +171,31 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         if (limpa === '') return null;
 
         try {
-          // Resolve URLs relativas injetando o origin se necessário
           const parsedUrl = new URL(limpa.startsWith('/') ? `${window.location.origin}${limpa}` : limpa);
           const pathname = parsedUrl.pathname;
 
-          // 🔥 CORREÇÃO DA REGEX: Removemos o engessamento do $ final para aceitar parênteses ou parâmetros residuais do R2
           const ehImagem = /\.(jpeg|jpg|gif|png|webp)/i.test(pathname);
-          
-          if (ehImagem) {
-            return limpa; 
-          }
+          if (ehImagem) return limpa; 
           return null;
         } catch (e) {
-          // Fallback mais permissivo caso o parser de URL falhe
-          if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) {
-            return limpa;
-          }
+          if (/\.(jpeg|jpg|gif|png|webp)/i.test(limpa)) return limpa;
           return null;
         }
       };
 
-      // 1. Vasculha galeria_urls
+      // 1. Vasculha galeria_urls solta (legado)
       if (Array.isArray(analise.galeria_urls)) {
         analise.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
       }
       
-      // 2. Vasculha anexos
+      // 2. Vasculha anexos (AQUI ENTRA A NOSSA CHAVE NOVA)
       if (analise.anexos) {
+        // 🔥 Lê a chave 'todas_as_imagens' que nós criamos no Envio Análise!
+        if (Array.isArray(analise.anexos.todas_as_imagens)) {
+          analise.anexos.todas_as_imagens.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
+        }
+        
+        // Mantém a leitura antiga por segurança
         if (Array.isArray(analise.anexos.galeria_urls)) {
           analise.anexos.galeria_urls.forEach((u: string) => { const url = normalizarUrl(u); if(url) imagensMapeadas.add(url); });
         }
@@ -208,11 +206,11 @@ export default function GerarAnalise({ analise }: { analise: any }) {
         if (visita) imagensMapeadas.add(visita);
       }
       
-      // 3. Vasculha dados_documentos (Aqui filtramos os PDFs e pegamos só os JPEGs do WhatsApp)
+      // 3. Vasculha dados_documentos (Como agora mandamos fotos pra IA ler, elas caem aqui também)
       if (Array.isArray(analise.dados_documentos)) {
         analise.dados_documentos.forEach((u: string) => {
           const url = normalizarUrl(u);
-          if (url) imagensMapeadas.add(url);
+          if (url) imagensMapeadas.add(url); // O Set previne que a foto apareça duplicada se já foi pega no passo 2!
         });
       }
 
