@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     let docLimpo = String(documentoBusca).replace(/\D/g, "");
     
     // Extrai o miolo de 6 dígitos se o CPF for enviado completo
-    if ((tipoBusca === "CPF" || tipoBusca === "PF") && docLimpo.length === 11) {
+    if ((tipoBusca === "CPF" || tipoBusca === "PF") && docLimpo.length >= 11) {
       docLimpo = docLimpo.substring(3, 9);
     }
 
@@ -85,8 +85,11 @@ export async function POST(req: Request) {
         id: `CNPJ-${cnpjBasico}`,
         position: { x: centerX, y: centerY },
         data: { 
-          label: dadosPrincipais.razao_social, isMatriz: true,
-          totalFiliais: listaFiliais.length, filiais: listaFiliais 
+          label: dadosPrincipais.razao_social, 
+          nomeOriginal: dadosPrincipais.razao_social, // Adicionado para ancoragem
+          isMatriz: true,
+          totalFiliais: listaFiliais.length, 
+          filiais: listaFiliais 
         },
         style: {
           backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 120, height: 120,
@@ -169,7 +172,10 @@ export async function POST(req: Request) {
       nodes.push({
         id: `PF-${docLimpo}`,
         position: { x: centerX, y: centerY },
-        data: { label: `${nomeRealSocio}\n(***${docLimpo}**)` },
+        data: { 
+          label: `${nomeRealSocio}\n(***${docLimpo}**)`,
+          nomeOriginal: nomeRealSocio // Adicionado para ancoragem
+        },
         style: {
           backgroundColor: '#9d174d', color: 'white', borderRadius: '50%', width: 105, height: 105,
           display: 'flex', justifyContent: 'center', alignItems: 'center',
@@ -190,7 +196,9 @@ export async function POST(req: Request) {
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
           data: { 
             label: `${emp.razao_social || 'Desconhecida'}\n(${filiaisValidas.length} Unid.)`,
-            totalFiliais: filiaisValidas.length, filiais: filiaisValidas
+            nomeOriginal: emp.razao_social, // Adicionado para ancoragem
+            totalFiliais: filiaisValidas.length, 
+            filiais: filiaisValidas
           },
           style: {
             backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 100, height: 100,

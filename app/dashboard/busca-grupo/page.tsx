@@ -75,7 +75,7 @@ function BuscaGrupoConteudo() {
   const [manualNome, setManualNome] = useState("");
   const [manualDoc, setManualDoc] = useState("");
   const [manualTipo, setManualTipo] = useState<"CPF" | "CNPJ">("CPF");
-  const [manualRelacao, setManualRelacao] = useState("Sócio oculto");
+  const [manualRelacao, setManualRelacao] = useState("Sócio");
   const [noVinculoAlvo, setNoVinculoAlvo] = useState("");
 
   useEffect(() => {
@@ -114,7 +114,7 @@ function BuscaGrupoConteudo() {
       let backendEdges = data.edges || [];
 
       // =========================================================================
-      // 🧠 LÓGICA DE ANCORAGEM: Evita duplicar o nó manual ao expandir a busca
+      // 🧠 LÓGICA DE ANCORAGEM (CORRIGIDA): Evita duplicar o nó manual ao expandir
       // =========================================================================
       if (clickedNodeId) {
         const docLimpo = documento.replace(/\D/g, "");
@@ -128,17 +128,17 @@ function BuscaGrupoConteudo() {
         });
 
         if (rootNode && rootNode.id !== clickedNodeId) {
-            const oldId = rootNode.id;
+            const novoIdBackend = rootNode.id;
             
-            // Redireciona todas as arestas para o nó que já existe na tela
-            backendEdges = backendEdges.map((e: any) => ({
+            // 1. Redireciona todas as arestas JÁ EXISTENTES na tela para o novo nó rico da API
+            setEdges((prevEdges) => prevEdges.map((e: any) => ({
                 ...e,
-                source: e.source === oldId ? clickedNodeId : e.source,
-                target: e.target === oldId ? clickedNodeId : e.target,
-            }));
+                source: e.source === clickedNodeId ? novoIdBackend : e.source,
+                target: e.target === clickedNodeId ? novoIdBackend : e.target,
+            })));
 
-            // Remove o nó duplicado (pois ele já está na tela)
-            backendNodes = backendNodes.filter((n: any) => n.id !== oldId);
+            // 2. Remove o nó manual antigo da tela (para não duplicar, pois o backendNodes trará o correto)
+            setNodes((prevNodes) => prevNodes.filter((n: any) => n.id !== clickedNodeId));
         }
       }
 
@@ -202,7 +202,6 @@ function BuscaGrupoConteudo() {
   }, []);
 
   const exportarEstruturaEstrategica = () => {
-    // Adiciona uma flag "shape: 'circle'" pro JSON para ajudar no vis-network do HTML Premium
     const customizedNodes = getNodes().map(n => ({ ...n, shape: 'circle' }));
     
     const backupSnapshot = { nodes: customizedNodes, edges: getEdges(), exportadoEm: new Date().toISOString() };
@@ -222,7 +221,7 @@ function BuscaGrupoConteudo() {
     setIsLoading(true);
 
     toPng(element, {
-      backgroundColor: '#ffffff', // Fundo branco na captura de imagem
+      backgroundColor: '#ffffff',
       width: element.offsetWidth,
       height: element.offsetHeight,
       style: {
@@ -261,7 +260,7 @@ function BuscaGrupoConteudo() {
         nomeOriginal: manualNome.toUpperCase() 
       },
       style: { 
-          backgroundColor: '#8b5cf6', 
+          backgroundColor: manualTipo === 'CNPJ' ? '#1e40af' : '#8b5cf6', 
           color: 'white', 
           borderRadius: '50%', 
           width: 95, 
@@ -273,7 +272,7 @@ function BuscaGrupoConteudo() {
           fontSize: '9px', 
           textAlign: 'center', 
           padding: '6px', 
-          border: '2px solid #a855f7' 
+          border: `2px solid ${manualTipo === 'CNPJ' ? '#3b82f6' : '#a855f7'}` 
       }
     }]);
 
@@ -284,10 +283,10 @@ function BuscaGrupoConteudo() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-full bg-slate-50 p-4 font-sans text-slate-800 selection:bg-blue-200">
+    <div className="flex flex-col h-screen w-full bg-slate-50 p-4 font-sans text-slate-800 selection:bg-blue-200 overflow-hidden">
       
       {/* TOOLBAR CLARA */}
-      <div className="flex flex-wrap gap-3 items-center bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
+      <div className="flex flex-wrap gap-3 items-center bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200 shrink-0">
         <div className="flex flex-col pr-4 border-r border-slate-200">
           <h1 className="text-lg font-extrabold tracking-tight text-blue-700">Órbita FIDC</h1>
           <span className="text-[10px] text-slate-500 font-medium tracking-wide">Mapeamento Antihomônimo de Grupos</span>
@@ -313,7 +312,7 @@ function BuscaGrupoConteudo() {
             📸 Capturar Imagem
           </button>
           <button onClick={exportarEstruturaEstrategica} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all shadow-md shadow-emerald-600/30 cursor-pointer">
-            💾 Exportar Dossiê JSON
+            💾 Exportar JSON
           </button>
           <button onClick={() => { setNodes([]); setEdges([]); }} className="bg-white hover:bg-slate-100 text-red-600 font-bold py-2 px-3 rounded-lg text-xs transition-all border border-red-200 cursor-pointer">
             Limpar Canvas
@@ -321,33 +320,93 @@ function BuscaGrupoConteudo() {
         </div>
       </div>
 
-      {/* CANVAS FUNDO BRANCO */}
-      <div className="h-[82vh] w-full bg-white rounded-xl border border-slate-200 overflow-hidden shadow-lg relative">
-        <div className="absolute top-3 left-3 z-10 bg-white/90 backdrop-blur-sm p-3 rounded-lg text-[10px] text-slate-600 pointer-events-none shadow-sm border border-slate-200 space-y-1">
-          <p className="font-bold text-blue-600">🛡️ Filtro Antihomônimo Ativado</p>
-          <p>🖱️ <span className="text-slate-800 font-bold">1 Clique:</span> Detalha filiais da PJ</p>
-          <p>🖱️🖱️ <span className="text-slate-800 font-bold">2 Cliques:</span> Expande conexões limpas</p>
-        </div>
+      {/* ÁREA INFERIOR: MAPA E TABELA */}
+      <div className="flex gap-4 w-full h-full pb-2 overflow-hidden flex-1">
         
-        <ReactFlow 
-          nodes={nodes} 
-          edges={edges} 
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange} 
-          onEdgesChange={onEdgesChange} 
-          onNodeClick={onNodeClick} 
-          onNodeDoubleClick={onNodeDoubleClick}
-          fitView
-        >
-          <Background color="#cbd5e1" gap={18} size={1} />
-          <Controls className="bg-white border-slate-200 text-slate-800 rounded fill-slate-800 shadow-md" />
-          <MiniMap nodeStrokeWidth={3} zoomable pannable maskColor="rgba(248,250,252,0.8)" style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} />
-        </ReactFlow>
+        {/* CANVAS FUNDO BRANCO */}
+        <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-lg relative overflow-hidden">
+          <div className="absolute top-3 left-3 z-10 bg-white/90 backdrop-blur-sm p-3 rounded-lg text-[10px] text-slate-600 pointer-events-none shadow-sm border border-slate-200 space-y-1">
+            <p className="font-bold text-blue-600">🛡️ Filtro Antihomônimo Ativado</p>
+            <p>🖱️ <span className="text-slate-800 font-bold">1 Clique:</span> Detalha filiais da PJ</p>
+            <p>🖱️🖱️ <span className="text-slate-800 font-bold">2 Cliques:</span> Expande conexões limpas</p>
+          </div>
+          
+          <ReactFlow 
+            nodes={nodes} 
+            edges={edges} 
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange} 
+            onEdgesChange={onEdgesChange} 
+            onNodeClick={onNodeClick} 
+            onNodeDoubleClick={onNodeDoubleClick}
+            fitView
+          >
+            <Background color="#cbd5e1" gap={18} size={1} />
+            <Controls className="bg-white border-slate-200 text-slate-800 rounded fill-slate-800 shadow-md" />
+            <MiniMap nodeStrokeWidth={3} zoomable pannable maskColor="rgba(248,250,252,0.8)" style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', right: 10, bottom: 10 }} />
+          </ReactFlow>
+        </div>
+
+        {/* TABELA LATERAL INTELIGENTE */}
+        <div className="w-1/4 min-w-[280px] bg-white rounded-xl border border-slate-200 shadow-lg flex flex-col overflow-hidden">
+          <div className="bg-slate-800 text-white p-3.5 font-bold text-xs flex justify-between items-center shrink-0">
+            <span className="tracking-wide">📋 Relação de Entidades</span>
+            <span className="bg-slate-700 px-2.5 py-1 rounded-md text-[10px] border border-slate-600 shadow-inner">
+              {nodes.length} Registros
+            </span>
+          </div>
+          <div className="overflow-y-auto flex-1 p-2">
+            <table className="w-full text-left border-collapse text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 bg-white sticky top-0 z-10">
+                  <th className="p-2 pb-3 font-semibold uppercase tracking-wider text-[9px]">Tipo</th>
+                  <th className="p-2 pb-3 font-semibold uppercase tracking-wider text-[9px]">Documento / Razão Social</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="text-center p-6 text-slate-400 font-mono">O mapa está vazio</td>
+                  </tr>
+                )}
+                {nodes.map(n => {
+                  const isCNPJ = n.id.startsWith('CNPJ') || n.id.startsWith('PJ');
+                  const isCPF = n.id.startsWith('CPF') || n.id.startsWith('PF');
+                  const docNumber = n.id.split('-').slice(1).join('-');
+                  
+                  return (
+                    <tr key={n.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="p-2 align-top">
+                        <span className={`px-2 py-1 rounded font-bold text-[9px] shadow-sm inline-block whitespace-nowrap ${
+                          isCNPJ ? 'bg-blue-100 text-blue-700 border border-blue-200' : 
+                          isCPF ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 
+                          'bg-purple-100 text-purple-700 border border-purple-200'
+                        }`}>
+                          {isCNPJ ? 'CNPJ' : isCPF ? 'CPF' : 'MANUAL'}
+                        </span>
+                      </td>
+                      <td className="p-2">
+                        <div className="font-bold text-slate-700 leading-tight">
+                          {n.data?.label as string}
+                        </div>
+                        {docNumber && docNumber.length > 5 && !docNumber.includes('.') && (
+                          <div className="font-mono text-[9px] text-slate-400 mt-1.5 tracking-wider bg-slate-100 inline-block px-1.5 rounded">
+                            {docNumber}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      {/* PAINEL DE INSPEÇÃO (EMPRESA) - TEMA CLARO */}
+      {/* PAINEL DE INSPEÇÃO (EMPRESA) */}
       {empresaInspecionada && (
-        <div className="absolute top-28 right-8 w-96 bg-white rounded-xl shadow-2xl border border-slate-200 z-30 overflow-hidden flex flex-col max-h-[65vh] animate-in fade-in slide-in-from-right duration-200">
+        <div className="absolute top-28 right-[27%] w-96 bg-white rounded-xl shadow-2xl border border-slate-200 z-30 overflow-hidden flex flex-col max-h-[65vh] animate-in fade-in slide-in-from-right duration-200">
           <div className="bg-slate-50 text-slate-800 p-3.5 font-bold text-xs flex justify-between items-center border-b border-slate-200">
             <span className="truncate pr-2 text-blue-700">🏢 Unidades: {empresaInspecionada.nome}</span>
             <button onClick={() => setEmpresaInspecionada(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold transition-all">Fechar X</button>
@@ -375,7 +434,7 @@ function BuscaGrupoConteudo() {
         </div>
       )}
 
-      {/* MODAL VÍNCULO MANUAL - TEMA CLARO */}
+      {/* MODAL VÍNCULO MANUAL */}
       {modalAberto && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
           <div className="bg-white border border-slate-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs text-slate-800">
@@ -391,7 +450,10 @@ function BuscaGrupoConteudo() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-slate-700">Tipo:</label>
-                  <select value={manualTipo} onChange={(e) => setManualTipo(e.target.value as any)} className="p-2.5 bg-slate-50 border border-slate-300 rounded-lg outline-none text-slate-800 focus:border-purple-500 cursor-pointer"><option value="CPF">CPF</option><option value="CNPJ">CNPJ</option></select>
+                  <select value={manualTipo} onChange={(e) => setManualTipo(e.target.value as any)} className="p-2.5 bg-slate-50 border border-slate-300 rounded-lg outline-none text-slate-800 focus:border-purple-500 cursor-pointer">
+                    <option value="CPF">Pessoa Física (CPF)</option>
+                    <option value="CNPJ">Pessoa Jurídica (CNPJ)</option>
+                  </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-slate-700">Doc (Opcional):</label>
@@ -401,7 +463,27 @@ function BuscaGrupoConteudo() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-slate-700">Relação:</label>
-                  <select value={manualRelacao} onChange={(e) => setManualRelacao(e.target.value)} className="p-2.5 bg-slate-50 border border-slate-300 rounded-lg outline-none text-slate-800 focus:border-purple-500 cursor-pointer"><option value="Sócio oculto">Sócio Oculto / Laranja</option><option value="Holding Familiar">Holding Familiar</option><option value="Primo(a)">Primo(a)</option></select>
+                  <select value={manualRelacao} onChange={(e) => setManualRelacao(e.target.value)} className="p-2.5 bg-slate-50 border border-slate-300 rounded-lg outline-none text-slate-800 focus:border-purple-500 cursor-pointer">
+                    <optgroup label="Societário">
+                      <option value="Sócio">Sócio</option>
+                      <option value="Sócio-Administrador">Sócio-Administrador</option>
+                      <option value="Sócio Oculto">Sócio Oculto / Laranja</option>
+                      <option value="Holding Familiar">Holding Familiar</option>
+                    </optgroup>
+                    <optgroup label="Corporativo">
+                      <option value="Empresa Coligada">Empresa Coligada</option>
+                      <option value="Filial">Filial</option>
+                      <option value="Mesmo Endereço">Mesmo Endereço</option>
+                      <option value="Procurador">Procurador</option>
+                      <option value="Diretor/Presidente">Diretor/Presidente</option>
+                    </optgroup>
+                    <optgroup label="Familiar">
+                      <option value="Esposo(a)">Esposo(a)</option>
+                      <option value="Filho(a)">Filho(a)</option>
+                      <option value="Irmão(ã)">Irmão(ã)</option>
+                      <option value="Parente">Parente (Outro)</option>
+                    </optgroup>
+                  </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-slate-700">Linkar ao Nó:</label>
