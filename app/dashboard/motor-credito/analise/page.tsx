@@ -4,7 +4,7 @@
 import { useState, useEffect, Suspense, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
-import GerarAnalise from "@/components/gerar-analise";
+import GerarAnalise, { gerarHtmlDossie } from "@/components/gerar-analise";
 
 // =========================================================================
 // INTERFACES
