@@ -22,21 +22,19 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const enderecoQuery = encodeURIComponent(localizacaoReal);
 
       // ==========================================
-      // CABEÇALHO: PRINCIPAL E COOBRIGADOS
+      // CABEÇALHO: PROPONENTES (S/ Coobrigado)
       // ==========================================
       const renderizarCabecalhoEmpresas = () => {
         if (analise.empresas_principais && analise.empresas_principais.length > 0) {
-          return analise.empresas_principais.map((emp: any, index: number) => `
-            <div style="margin-bottom: 1rem;">
-              <h1 style="font-size: ${index === 0 ? '2.2rem' : '1.4rem'}; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
-                ${emp.razao_social || 'EMPRESA NÃO INFORMADA'}
-                <span style="font-size: 0.65rem; padding: 4px 10px; border-radius: 6px; background: ${index === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)'}; border: 1px solid rgba(255,255,255,0.3); vertical-align: middle; font-weight: 800; letter-spacing: 1px;">
-                  ${index === 0 ? 'PRINCIPAL' : 'COOBRIGADO'}
-                </span>
-              </h1>
-              <div class="meta" style="font-family: monospace; font-size: 1rem; color: rgba(255,255,255,0.9);">CNPJ: ${emp.cnpj || 'Não informado'}</div>
+          return `
+            <div>
+              <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.9;">Proponentes:</div>
+              ${analise.empresas_principais.map((emp: any) => `
+                <h1 style="font-size: 1.8rem; margin-bottom: 0.2rem;">${emp.razao_social || 'EMPRESA NÃO INFORMADA'}</h1>
+                <div class="meta" style="font-family: monospace; font-size: 0.95rem; margin-bottom: 1rem;">CNPJ: ${emp.cnpj || 'Não informado'}</div>
+              `).join('')}
             </div>
-          `).join('');
+          `;
         }
         // Fallback legado
         return `
@@ -154,6 +152,10 @@ export default function GerarAnalise({ analise }: { analise: any }) {
             </tr>`
           }).join("")
         : `<tr><td colspan="7" class="text-center" style="color:var(--muted); padding: 1.5rem;">Nenhuma referência mapeada.</td></tr>`;
+
+      const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+      const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
+      const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
 
       // ==========================================
       // CÁLCULOS DE FATURAMENTO
@@ -287,7 +289,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Dossiê Executivo - ${analise.razao_social || 'Mesa de Análise'}</title>
+          <title>Dossiê Executivo - Mesa de Análise</title>
           
           <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
           <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
@@ -397,6 +399,16 @@ export default function GerarAnalise({ analise }: { analise: any }) {
               </div>
           </div>
 
+          ${analise.parecer_executivo ? `
+          <!-- 🔥 BLOCO INJETADO PELA IA MOTOR V8 -->
+          <div class="card hover-card" style="margin-bottom: 2rem; border-top: 4px solid var(--blue); background: #f4f7ff;">
+              <div style="font-weight: 900; font-size: 1rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                  <span>🧠</span> Súmula Executiva de Crédito (Parecer Motor IA V8)
+              </div>
+              <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.7; white-space: pre-wrap; text-align: justify;">${analise.parecer_executivo}</div>
+          </div>
+          ` : ''}
+
           <h2>1. Estrutura Pleiteada (Condições Comerciais)</h2>
           <div class="table-wrap">
               <table>
@@ -465,6 +477,23 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                   </div>
               </div>
           </div>
+
+          ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
+          <div class="grid-3" style="margin-top: 1.5rem;">
+              <div class="card">
+                  <div class="metric-label">Principais Clientes</div>
+                  <ul class="simple-list">${clientesRows}</ul>
+              </div>
+              <div class="card">
+                  <div class="metric-label">Principais Fornecedores</div>
+                  <ul class="simple-list">${fornecedoresRows}</ul>
+              </div>
+              <div class="card">
+                  <div class="metric-label">Principais Concorrentes</div>
+                  <ul class="simple-list">${concorrentesRows}</ul>
+              </div>
+          </div>
+          ` : ''}
 
           <h2 style="margin-top: 3.5rem;">3. Organograma Estrutural / Teia</h2>
           <div style="margin-bottom: 2.5rem;">
@@ -782,7 +811,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
                       return {
                           id: n.id, 
                           label: finalLabel,
-                          shape: 'box',
+                          shape: 'circle',
                           margin: 12, 
                           font: { color: '#ffffff', size: 11, face: 'Inter', bold: true },
                           color: { 
