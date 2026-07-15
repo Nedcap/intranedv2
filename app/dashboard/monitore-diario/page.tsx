@@ -28,18 +28,33 @@ export default function MonitoreDiarioPage() {
     try {
       setCarregando(true);
 
-      // 🎯 ADEUS LOCALSTORAGE E FILTROS MANUAIS! O RLS FAZ TUDO POR NÓS.
+      // 🎯 CORREÇÃO: Busca APENAS a última data disponível primeiro
+      const { data: maxDateList } = await supabase
+        .from("historico_consolidado")
+        .select("data_processamento")
+        .order("data_processamento", { ascending: false })
+        .limit(1);
+
+      if (!maxDateList || maxDateList.length === 0) {
+        setDados([]);
+        return;
+      }
+
+      const ultimaData = maxDateList[0].data_processamento;
+
+      // 🎯 CORREÇÃO: Faz a busca restrita à última data, driblando o limite de 1000 linhas
       const [resHist, resCadastro] = await Promise.all([
-        supabase.from("historico_consolidado").select("*").order("data_processamento", { ascending: false }),
-        supabase.from("cadastro_cedentes").select("cedente, risco_sec, risco_fidc")
+        supabase
+          .from("historico_consolidado")
+          .select("*")
+          .eq("data_processamento", ultimaData),
+        supabase
+          .from("cadastro_cedentes")
+          .select("cedente, risco_sec, risco_fidc")
       ]);
 
       if (resHist.data && resHist.data.length > 0) {
-        const ultimaData = resHist.data[0].data_processamento;
-        
         const filtrados = resHist.data.filter(r => {
-          if (r.data_processamento !== ultimaData) return false;
-          
           const evo = parseFloat(r.evolucao || 0);
           const temRestritivos = [
             r.total_pefin, r.total_refin, r.total_protesto, 
@@ -80,12 +95,17 @@ export default function MonitoreDiarioPage() {
       const texto = await file.text();
       const linhas = texto.split(/\r?\n/);
 
-      // Descobre a data
+      // 🎯 CORREÇÃO: Descobre a data corretamente no padrão DDMMAA -> YYYY-MM-DD
       let dataArquivo = new Date().toISOString().split("T")[0];
       if (file.name.includes("RET.D")) {
         const posData = file.name.indexOf("RET.D") + 5;
         const dataStr = file.name.substring(posData, posData + 6);
-        if (dataStr.length === 6) dataArquivo = `20${dataStr.substring(0, 2)}-${dataStr.substring(2, 4)}-${dataStr.substring(4, 6)}`;
+        if (dataStr.length === 6) {
+          const dia = dataStr.substring(0, 2);
+          const mes = dataStr.substring(2, 4);
+          const ano = dataStr.substring(4, 6);
+          dataArquivo = `20${ano}-${mes}-${dia}`;
+        }
       }
 
       setStatusProcessamento("Minerando CNPJs e Sócios...");
@@ -182,7 +202,6 @@ export default function MonitoreDiarioPage() {
 
       const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
       
-      // 🎯 BUSCA O DONO DE CADA CEDENTE PARA ATRIBUIR RESPONSABILIDADE
       const [histDBResponse, cedentesDBResponse] = await Promise.all([
         supabase.from("historico_consolidado").select("*").in("cnpj_cliente", cnpjsCompletos).order("data_processamento", { ascending: false }),
         supabase.from("cadastro_cedentes").select("cedente, responsavel_id")
@@ -228,7 +247,6 @@ export default function MonitoreDiarioPage() {
 
         const cedNome = dadosHoje.cedente !== "N/A" ? dadosHoje.cedente : (regsAnteriores[0]?.cedente || "N/A");
 
-        // 🎯 ACHA O DONO PARA INSERIR NO BANCO
         const cedNomeLimpo = simplificarNome(cedNome);
         const donoMatch = cedentesDB?.find(c => simplificarNome(c.cedente) === cedNomeLimpo);
         const idResponsavel = donoMatch ? donoMatch.responsavel_id : null;
@@ -237,7 +255,7 @@ export default function MonitoreDiarioPage() {
           data_processamento: dataArquivo, 
           cnpj_cliente: cnpjCompleto, 
           cedente: cedNome,
-          responsavel_id: idResponsavel, // VÍNCULO SALVO AQUI!
+          responsavel_id: idResponsavel,
           saldo_anterior: saldoAnterior, 
           evolucao, 
           saldo_atual: saldoAtual, 
@@ -262,7 +280,7 @@ export default function MonitoreDiarioPage() {
                 data_processamento: dataArquivo, 
                 cnpj_empresa: cnpjCompleto, 
                 nome_socio: nomeSocio,
-                responsavel_id: idResponsavel, // 🎯 VÍNCULO SALVO PARA OS SÓCIOS TAMBÉM!
+                responsavel_id: idResponsavel,
                 total_pefin: vSocio.PEFIN, 
                 total_refin: vSocio.REFIN, 
                 total_protesto: vSocio.PROTESTO,
@@ -279,7 +297,6 @@ export default function MonitoreDiarioPage() {
       await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
       await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
 
-      // Inserção em chunks (lotes) de 500
       for (let i = 0; i < registrosHistorico.length; i += 500) {
         await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
       }
