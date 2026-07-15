@@ -31,14 +31,13 @@ interface Lead {
   cidadeExtenso?: string;
 }
 
-// 🔥 INTERFACE ATUALIZADA PARA BATER COM A API "SNIPER"
 interface PerfilAI {
   atividade: string;
   cidade_nome: string | null;
   codigo_municipio: string | null;
   uf: string;
-  codigos_cnae?: string[]; // Propriedade nova do Sniper
-  familias_cnae?: string[]; // Mantido como opcional para não quebrar cache antigo
+  codigos_cnae?: string[];
+  familias_cnae?: string[];
   termos_fortes?: string[];
   termos_fracos?: string[];
 }
@@ -63,7 +62,6 @@ const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new 
 
 export default function ProspeccaoIAPage() {
   const [prompt, setPrompt] = useState("");
-  const [limite, setLimite] = useState(150);
   const [carregando, setCarregando] = useState(false);
   
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -139,13 +137,13 @@ export default function ProspeccaoIAPage() {
     setLeadSelecionado(null);
 
     try {
+      // ⚡ TRAVADO EM 50 CONSULTAS DIRETAMENTE NO PAYLOAD DE ENVIO
       const response = await fetch("/api/prospeccao-ia", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ promptUsuario: prompt, limite }),
+        body: JSON.stringify({ promptUsuario: prompt, limite: 50 }),
       });
 
-      // 🛡️ BLINDAGEM DE JSON (Evita erro fatal se voltar HTML)
       const textoPuro = await response.text();
       let dados;
       
@@ -304,18 +302,12 @@ export default function ProspeccaoIAPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 pt-4 border-t border-slate-200 mt-4">
+              {/* INDICADOR VISUAL DO LIMITE FIXO DE SEGURANÇA */}
               <div className="flex items-center gap-3">
                 <span className="font-bold text-slate-500 text-[11px] uppercase tracking-wider">Profundidade da busca:</span>
-                <select 
-                  value={limite} 
-                  onChange={(e) => setLimite(Number(e.target.value))}
-                  className="p-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-700 font-bold outline-none focus:border-indigo-500 cursor-pointer shadow-sm"
-                  disabled={carregando}
-                >
-                  <option value={50}>50 registros (Rápido)</option>
-                  <option value={150}>150 registros (Recomendado)</option>
-                  <option value={300}>300 registros (Profundo)</option>
-                </select>
+                <span className="bg-amber-50 text-amber-800 border border-amber-200 font-black px-3 py-1.5 rounded-lg text-xs tracking-tight shadow-sm flex items-center gap-1.5">
+                  🛡️ Máx. 50 Registros por Consulta (Modo Econômico)
+                </span>
               </div>
 
               <button
@@ -345,7 +337,6 @@ export default function ProspeccaoIAPage() {
             <div className="space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CNAEs Sniper Detectados</span>
               <div className="flex flex-wrap gap-1 mt-0.5">
-                {/* 🛡️ TRATAMENTO SEGURO: Lê a lista nova, ou a antiga do cache, ou exibe vazio sem quebrar */}
                 {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 0 ? (
                   (perfilAI.codigos_cnae || perfilAI.familias_cnae || []).map(c => (
                     <span key={c} className="bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200">
