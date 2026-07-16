@@ -24,8 +24,9 @@ interface FilaItem {
   ia_fim?: string;
   status_comite?: string;
   comercial?: string; 
-  dados_documentos?: string[]; // Adicionado para puxar os PDFs
-  dados_consolidados?: any;    // Adicionado para puxar as leituras do robô
+  dados_documentos?: string[]; 
+  dados_consolidados?: any;    
+  checklist_ia?: any; // 🔥 NOVO: Coluna dedicada para o checklist do Porteiro
 }
 
 export default function MotorCreditoPage() {
@@ -52,8 +53,8 @@ export default function MotorCreditoPage() {
     try {
       const { data, error } = await supabase
         .from("analises")
-        // 🔥 INCLUÍDOS dados_documentos e dados_consolidados na query
-        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados")
+        // 🔥 INCLUÍDO checklist_ia na query do Supabase
+        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia")
         .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"])
         .order("criado_em", { ascending: false });
 
@@ -150,6 +151,9 @@ export default function MotorCreditoPage() {
           responsavel_id: user.id,
 
           dados_documentos: urlsDocumentos,
+          // Deixa o json vazio pra IA não precisar do payload inteiro se não quiser, 
+          // ela atualizará automaticamente essa nova coluna `checklist_ia`
+          checklist_ia: {}, 
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
             cidade: empresaSelecionada.cidadeExtenso || "Curitiba",
@@ -167,9 +171,7 @@ export default function MotorCreditoPage() {
               fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
-            parecer_comite: "",
-            // 🌱 PONTO DE INJEÇÃO DO CHECKLIST FUTURO DO ROBÔ
-            checklist_documentos: null
+            parecer_comite: ""
           }
         })
         .select("id")
@@ -369,6 +371,7 @@ export default function MotorCreditoPage() {
                   </span>
                 </div>
                 
+                {/* COMPONENTE DE UPLOAD PRESERVADO */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -474,7 +477,6 @@ export default function MotorCreditoPage() {
 
                         <td className="p-4 text-center">
                           <div className="flex justify-center items-center gap-2">
-                            {/* 🔥 NOVO BOTÃO: PAINEL DE DOCUMENTOS */}
                             <button
                               onClick={() => abrirPainelDocumentos(item)}
                               className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
@@ -528,16 +530,16 @@ export default function MotorCreditoPage() {
               {/* Corpo do Modal */}
               <div className="p-6 overflow-y-auto max-h-[65vh] space-y-6 bg-slate-50/50">
                 
-                {/* 🧠 Seção 1: Checklist da IA (Base Teórica) */}
+                {/* 🧠 Seção 1: Checklist da IA */}
                 <div className="space-y-3">
                   <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
                     Leitura do Robô / Checklist Mapeado
                   </h3>
                   
-                  {empresaParaDocs.dados_consolidados?.checklist_documentos ? (
+                  {empresaParaDocs.checklist_ia && Object.keys(empresaParaDocs.checklist_ia).length > 0 ? (
                     <div className="grid grid-cols-2 gap-3">
-                       {Object.entries(empresaParaDocs.dados_consolidados.checklist_documentos).map(([chave, valor]) => (
+                       {Object.entries(empresaParaDocs.checklist_ia).map(([chave, valor]) => (
                          <div key={chave} className={`p-3 rounded-xl border flex items-center justify-between shadow-sm ${valor ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
                            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">{chave.replace(/_/g, ' ')}</span>
                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${valor ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
@@ -549,7 +551,7 @@ export default function MotorCreditoPage() {
                   ) : (
                     <div className="p-5 bg-white border border-indigo-100 rounded-xl shadow-sm">
                       <p className="text-xs text-indigo-900 font-medium leading-relaxed">
-                        💡 <strong>Estrutura de Validação Pronta:</strong> Quando você configurar o Robô V8 para devolver a chave <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold">checklist_documentos</code> contendo <em>true/false</em> para os documentos vitais (Balanço, Contrato Social, etc.), eles aparecerão listados automaticamente aqui, permitindo bloquear a análise caso falte algo.
+                        💡 <strong>Estrutura de Validação Pronta:</strong> Quando você configurar o Robô V8 para devolver a chave <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold">checklist_ia</code> contendo <em>true/false</em> para os documentos vitais (Balanço, Contrato Social, etc.), eles aparecerão listados automaticamente aqui.
                       </p>
                     </div>
                   )}
