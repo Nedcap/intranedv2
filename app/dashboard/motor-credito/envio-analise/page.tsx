@@ -24,6 +24,8 @@ interface FilaItem {
   ia_fim?: string;
   status_comite?: string;
   comercial?: string; 
+  dados_documentos?: string[]; // Adicionado para puxar os PDFs
+  dados_consolidados?: any;    // Adicionado para puxar as leituras do robô
 }
 
 export default function MotorCreditoPage() {
@@ -34,6 +36,10 @@ export default function MotorCreditoPage() {
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
+
+  // 🔥 ESTADOS DO NOVO MODAL DE DOCUMENTOS
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
 
   useEffect(() => {
     carregarFilaComercial();
@@ -46,8 +52,8 @@ export default function MotorCreditoPage() {
     try {
       const { data, error } = await supabase
         .from("analises")
-        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial")
-        // 🔥 CORREÇÃO: "aprovado" e "reprovado" foram removidos daqui. Assim, quando o comitê decidir, a empresa some da tela.
+        // 🔥 INCLUÍDOS dados_documentos e dados_consolidados na query
+        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados")
         .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"])
         .order("criado_em", { ascending: false });
 
@@ -161,7 +167,9 @@ export default function MotorCreditoPage() {
               fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
-            parecer_comite: ""
+            parecer_comite: "",
+            // 🌱 PONTO DE INJEÇÃO DO CHECKLIST FUTURO DO ROBÔ
+            checklist_documentos: null
           }
         })
         .select("id")
@@ -226,6 +234,11 @@ export default function MotorCreditoPage() {
     }
   };
 
+  const abrirPainelDocumentos = (item: FilaItem) => {
+    setEmpresaParaDocs(item);
+    setIsDocsModalOpen(true);
+  };
+
   const formatarCnpj = (cnpj: string) => {
     if (!cnpj) return "";
     const limpo = cnpj.replace(/\D/g, "");
@@ -254,7 +267,7 @@ export default function MotorCreditoPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
-      <div className="max-w-[1700px] mx-auto space-y-8">
+      <div className="max-w-[1700px] mx-auto space-y-8 relative">
         
         {/* OVERLAY DE LOADING */}
         {statusTexto && (
@@ -356,7 +369,6 @@ export default function MotorCreditoPage() {
                   </span>
                 </div>
                 
-                {/* COMPONENTE DE UPLOAD PRESERVADO */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -462,12 +474,20 @@ export default function MotorCreditoPage() {
 
                         <td className="p-4 text-center">
                           <div className="flex justify-center items-center gap-2">
+                            {/* 🔥 NOVO BOTÃO: PAINEL DE DOCUMENTOS */}
+                            <button
+                              onClick={() => abrirPainelDocumentos(item)}
+                              className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
+                              title="Visualizar documentos lidos pela IA"
+                            >
+                              📂 Docs
+                            </button>
                             <button
                               onClick={() => handleVincularComercial(item.id, item.comercial)}
                               className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
                               title="Vincular ou alterar o Responsável Comercial"
                             >
-                              👤 Vincular
+                              👤 Vinc.
                             </button>
                             <button
                               onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
@@ -485,6 +505,101 @@ export default function MotorCreditoPage() {
             </table>
           </div>
         </div>
+
+        {/* 🔥 MODAL DE DOCUMENTOS E CHECKLIST */}
+        {isDocsModalOpen && empresaParaDocs && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200">
+              
+              {/* Header do Modal */}
+              <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                <div>
+                  <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">📂 Base de Documentos Injetados</h2>
+                  <p className="text-xs text-slate-500 font-medium font-mono mt-1">{empresaParaDocs.empresa_nome} — {formatarCnpj(empresaParaDocs.cnpj)}</p>
+                </div>
+                <button 
+                  onClick={() => setIsDocsModalOpen(false)} 
+                  className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors shadow-sm font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              {/* Corpo do Modal */}
+              <div className="p-6 overflow-y-auto max-h-[65vh] space-y-6 bg-slate-50/50">
+                
+                {/* 🧠 Seção 1: Checklist da IA (Base Teórica) */}
+                <div className="space-y-3">
+                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    Leitura do Robô / Checklist Mapeado
+                  </h3>
+                  
+                  {empresaParaDocs.dados_consolidados?.checklist_documentos ? (
+                    <div className="grid grid-cols-2 gap-3">
+                       {Object.entries(empresaParaDocs.dados_consolidados.checklist_documentos).map(([chave, valor]) => (
+                         <div key={chave} className={`p-3 rounded-xl border flex items-center justify-between shadow-sm ${valor ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
+                           <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">{chave.replace(/_/g, ' ')}</span>
+                           <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${valor ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                             {valor ? "✔️ LIDO" : "❌ PENDENTE"}
+                           </span>
+                         </div>
+                       ))}
+                    </div>
+                  ) : (
+                    <div className="p-5 bg-white border border-indigo-100 rounded-xl shadow-sm">
+                      <p className="text-xs text-indigo-900 font-medium leading-relaxed">
+                        💡 <strong>Estrutura de Validação Pronta:</strong> Quando você configurar o Robô V8 para devolver a chave <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold">checklist_documentos</code> contendo <em>true/false</em> para os documentos vitais (Balanço, Contrato Social, etc.), eles aparecerão listados automaticamente aqui, permitindo bloquear a análise caso falte algo.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-200 border-dashed pt-4"></div>
+
+                {/* 📎 Seção 2: Arquivos Brutos na Nuvem */}
+                <div className="space-y-3">
+                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
+                      empresaParaDocs.dados_documentos.map((url, i) => {
+                        const isPdf = url.toLowerCase().includes('.pdf');
+                        return (
+                          <a 
+                            key={i} 
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
+                          >
+                            <div className="flex items-center gap-2 truncate pr-2">
+                              <span className="text-xl">{isPdf ? "📄" : "🖼️"}</span>
+                              <span className="text-xs font-bold text-slate-600 truncate group-hover:text-blue-700 transition-colors">
+                                Anexo_Injetado_0${i+1}{isPdf ? ".pdf" : ".jpg"}
+                              </span>
+                            </div>
+                            <span className="text-[9px] bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
+                              Abrir ↗
+                            </span>
+                          </a>
+                        )
+                      })
+                    ) : (
+                      <div className="col-span-2 p-6 bg-slate-100 rounded-xl border border-slate-200 border-dashed text-center">
+                        <p className="text-xs text-slate-400 italic font-bold">Nenhum arquivo físico de leitura atrelado a este envio.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

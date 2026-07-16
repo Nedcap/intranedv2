@@ -313,11 +313,11 @@ export const gerarHtmlDossie = async (item: any) => {
           .delta-neg { color: var(--red); font-weight: 800; background: #fef2f2; }
           .row-total td { background: #f8fafc; font-weight: 800; font-size: 0.95rem; border-top: 2px solid var(--border); }
           .chart-container { position: relative; height: 300px; width: 100%; }
-          .parecer-wrapper { background: white; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); overflow: hidden; position: relative; margin-bottom: 2rem;}
-          .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--blue); }
-          .parecer-header { background: #f8fafc; padding: 1.5rem 2.5rem; font-weight: 900; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size: 1.1rem; letter-spacing: 0.5px;}
-          .parecer-body { padding: 2.5rem; font-size: 1.05rem; line-height: 1.8; color: #334155; white-space: pre-wrap; text-align: justify;}
-          .parecer-footer { background: #f8fafc; padding: 1.25rem 2.5rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.9rem; font-weight: 700; text-align: right;}
+          .parecer-wrapper { background: white; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); overflow: hidden; position: relative; margin-bottom: 2rem;}
+          .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--blue); }
+          .parecer-header { background: #f8fafc; padding: 1rem 1.5rem; font-weight: 900; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size: 1.05rem; letter-spacing: 0.5px;}
+          .parecer-body { padding: 1.5rem; font-size: 1rem; line-height: 1.6; color: #334155; white-space: pre-wrap; word-break: break-word; text-align: justify;}
+          .parecer-footer { background: #f8fafc; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.85rem; font-weight: 700; text-align: right;}
           .btn-maps { background: var(--blue); color: white; padding: 12px 20px; border-radius: 0.5rem; text-decoration: none; font-size: 0.85rem; font-weight: 800; display: inline-block; transition: 0.2s; box-shadow: 0 4px 6px rgba(37,99,235,0.2); border: 1px solid rgba(0,0,0,0.1); text-transform: uppercase; letter-spacing: 0.5px; }
           .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 8px 15px rgba(37,99,235,0.3); }
           .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #ffffff; border: 1px solid #e2e8f0; }
@@ -663,24 +663,24 @@ export const gerarHtmlDossie = async (item: any) => {
 
       <div class="print-break"></div>
 
-      <div class="parecer-wrapper" style="margin-top: 3.5rem;">
+      <div class="parecer-wrapper" style="margin-top: 2rem;">
           <div class="parecer-header">Parecer Técnico Formal - Mesa de Risco</div>
           <div class="parecer-body">
-              <span style="color: var(--blue-dark); font-weight: 900; font-size: 1.3rem; display:block; margin-bottom: 1.5rem; text-decoration: underline; text-underline-offset: 4px;">
-                  RECOMENDAÇÃO DO ANALISTA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}
+              <span style="color: var(--blue-dark); font-weight: 900; font-size: 1.15rem; display:block; margin-bottom: 1rem;">
+                  RECOMENDAÇÃO DO ANALISTA: <span style="color: var(--blue);">${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</span>
               </span>
               
-              <div style="margin-bottom: 1.5rem;">
-                  <strong style="color: var(--blue-dark); font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.5px;">Justificativa do Analista:</strong><br/><br/>
-                  <div style="background: #f8fafc; border: 1px solid var(--border); padding: 1.5rem; border-radius: 0.75rem;">
+              <div style="margin-bottom: 1rem;">
+                  <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Justificativa do Analista:</strong>
+                  <div style="background: #f8fafc; border: 1px solid var(--border); padding: 1rem; border-radius: 0.5rem; font-size: 0.95rem;">
                     ${analise.parecer_analista || 'Sem parecer técnico elaborado para este dossiê.'}
                   </div>
               </div>
 
               ${analise.parecer_comite ? `
-              <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px dashed #cbd5e1;">
-                  <strong style="color: var(--blue-dark); font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.5px;">Deliberação Oficial do Comitê:</strong><br/><br/>
-                  <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1.5rem; border-radius: 0.75rem; color: #1e3a8a; font-weight: 500;">
+              <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
+                  <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Deliberação Oficial do Comitê:</strong>
+                  <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1rem; border-radius: 0.5rem; color: #1e3a8a; font-weight: 500; font-size: 0.95rem;">
                     ${analise.parecer_comite}
                   </div>
               </div>
