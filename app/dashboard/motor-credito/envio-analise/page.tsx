@@ -26,7 +26,7 @@ interface FilaItem {
   comercial?: string; 
   dados_documentos?: string[]; 
   dados_consolidados?: any;    
-  checklist_ia?: any; // 🔥 NOVO: Coluna dedicada para o checklist do Porteiro
+  checklist_ia?: any; 
 }
 
 export default function MotorCreditoPage() {
@@ -53,7 +53,6 @@ export default function MotorCreditoPage() {
     try {
       const { data, error } = await supabase
         .from("analises")
-        // 🔥 INCLUÍDO checklist_ia na query do Supabase
         .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia")
         .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"])
         .order("criado_em", { ascending: false });
@@ -151,8 +150,6 @@ export default function MotorCreditoPage() {
           responsavel_id: user.id,
 
           dados_documentos: urlsDocumentos,
-          // Deixa o json vazio pra IA não precisar do payload inteiro se não quiser, 
-          // ela atualizará automaticamente essa nova coluna `checklist_ia`
           checklist_ia: {}, 
           dados_consolidados: {
             uf: empresaSelecionada.uf || "PR",
@@ -371,7 +368,6 @@ export default function MotorCreditoPage() {
                   </span>
                 </div>
                 
-                {/* COMPONENTE DE UPLOAD PRESERVADO */}
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -608,3 +604,14 @@ export default function MotorCreditoPage() {
                       </div>
                     )}
                   </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
