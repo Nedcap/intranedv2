@@ -582,7 +582,7 @@ export default function ComitePage() {
                   </td>
                   <td className="p-4 text-center">
                     <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md shadow-blue-500/20 transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 mx-auto w-[160px]">
-                      🏛️ Entrar na Mesa
+                      🏛️ Entrar no Comitê 
                     </button>
                   </td>
                   {isMaster && (
