@@ -667,7 +667,7 @@ export const gerarHtmlDossie = async (item: any) => {
           <div class="parecer-header">Parecer Técnico Formal - Mesa de Risco</div>
           <div class="parecer-body">
               <span style="color: var(--blue-dark); font-weight: 900; font-size: 1.3rem; display:block; margin-bottom: 1.5rem; text-decoration: underline; text-underline-offset: 4px;">
-                  Veredito de Crédito: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}
+                  RECOMENDAÇÃO DO ANALISTA: ${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}
               </span>
               
               <div style="margin-bottom: 1.5rem;">
