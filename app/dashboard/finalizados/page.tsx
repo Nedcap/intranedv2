@@ -4,6 +4,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
+import JSZip from "jszip";
 
 // ============================================================================
 // FUNÇÕES AUXILIARES
@@ -86,6 +87,11 @@ export default function FinalizadosPage() {
 
   const [openMes, setOpenMes] = useState(false);
   const [openCedente, setOpenCedente] = useState(false);
+
+  // 🔥 Estados do Painel de Documentos
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [empresaParaDocs, setEmpresaParaDocs] = useState<any>(null);
+  const [isZipping, setIsZipping] = useState(false);
 
   const refMes = useRef<HTMLDivElement>(null);
   const refCed = useRef<HTMLDivElement>(null);
@@ -371,6 +377,66 @@ export default function FinalizadosPage() {
   function modoConsultaFocoAtivarModo(item: any) {
     ativarModoConsultaFoco(item);
   }
+
+  const formatarCnpj = (cnpj: string) => {
+    if (!cnpj) return "";
+    const limpo = cnpj.replace(/\D/g, "");
+    if (limpo.length !== 14) return cnpj;
+    return `${limpo.substring(0, 2)}.${limpo.substring(2, 5)}.${limpo.substring(5, 8)}/${limpo.substring(8, 12)}-${limpo.substring(12, 14)}`;
+  };
+
+  const abrirPainelDocumentos = (item: any) => {
+    setEmpresaParaDocs(item);
+    setIsDocsModalOpen(true);
+  };
+
+  const baixarTudoZip = async () => {
+    if (!empresaParaDocs?.dados_documentos || empresaParaDocs.dados_documentos.length === 0) return;
+    
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      const nomePasta = empresaParaDocs.empresa_nome.replace(/[^a-zA-Z0-9]/g, "_"); 
+      const folder = zip.folder(nomePasta);
+
+      if (!folder) throw new Error("Erro ao criar diretório ZIP.");
+
+      const fetchPromises = empresaParaDocs.dados_documentos.map(async (url: string, i: number) => {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        
+        let fileName = `Anexo_${i+1}`;
+        try {
+          const urlPartes = url.split(/[?#]/)[0].split('/');
+          fileName = decodeURIComponent(urlPartes[urlPartes.length - 1]);
+        } catch (e) {
+          const isPdf = url.toLowerCase().includes('.pdf');
+          fileName = `Anexo_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
+        }
+        
+        folder.file(fileName, blob);
+      });
+
+      await Promise.all(fetchPromises);
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `Docs_${nomePasta}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+
+    } catch (err) {
+      console.error("Erro ao gerar ZIP:", err);
+      alert("⚠️ Erro ao empacotar arquivos. Se persistir, o navegador pode estar bloqueando múltiplos downloads (CORS).");
+    } finally {
+      setIsZipping(false);
+    }
+  };
 
   // 🔮 INTERFACE 1: MODO CONSULTA EXECUTIVO TELA CHEIA ATIVO (LIGHT MODE)
   if (modoFocoConsulta && empresaFocoAtivo) {
@@ -682,6 +748,17 @@ export default function FinalizadosPage() {
                           </>
                         ) : (
                           <>
+                            {/* 🔥 BOTÃO DOCS */}
+                            <button 
+                              onClick={() => {
+                                setEmpresaParaDocs(item);
+                                setIsDocsModalOpen(true);
+                              }} 
+                              className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow-sm" 
+                              title="Visualizar documentos"
+                            >
+                              📂 Docs
+                            </button>
                             <button 
                               onClick={() => iniciarEdicao(item)} 
                               className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow-sm" 
@@ -714,6 +791,123 @@ export default function FinalizadosPage() {
         </div>
       </div>
       
+      {/* 🔥 MODAL DE DOCUMENTOS E CHECKLIST */}
+      {isDocsModalOpen && empresaParaDocs && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200">
+            
+            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">📂 Base de Documentos Injetados</h2>
+                <p className="text-xs text-slate-500 font-medium font-mono mt-1">
+                  {empresaParaDocs.empresa_nome} {empresaParaDocs.cnpj && `— ${empresaParaDocs.cnpj}`}
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsDocsModalOpen(false)} 
+                className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors shadow-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[65vh] space-y-6 bg-slate-50/50">
+              
+              <div className="space-y-3">
+                <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  Leitura do Robô / Checklist Mapeado
+                </h3>
+                
+                {empresaParaDocs.checklist_ia && Object.keys(empresaParaDocs.checklist_ia).length > 0 ? (
+                  <div className="grid grid-cols-2 gap-3">
+                     {Object.entries(empresaParaDocs.checklist_ia).map(([chave, valor]) => (
+                       <div key={chave} className={`p-3 rounded-xl border flex items-center justify-between shadow-sm ${valor ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
+                         <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">{chave.replace(/_/g, ' ')}</span>
+                         <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${valor ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                           {valor ? "✔️ LIDO" : "❌ PENDENTE"}
+                         </span>
+                       </div>
+                     ))}
+                  </div>
+                ) : (
+                  <div className="p-5 bg-white border border-indigo-100 rounded-xl shadow-sm">
+                    <p className="text-xs text-indigo-900 font-medium leading-relaxed">
+                      💡 <strong>Estrutura de Validação Pronta:</strong> Os documentos lidos pelo robô aparecerão listados automaticamente aqui. Nenhuma tag `checklist_ia` encontrada para esta análise.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200 border-dashed pt-4"></div>
+
+              <div className="space-y-3">
+                
+                <div className="flex justify-between items-center">
+                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
+                  </h3>
+                  
+                  {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
+                    <button 
+                      onClick={baixarTudoZip}
+                      disabled={isZipping}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {isZipping ? "⏳ Empacotando..." : "📦 Baixar Todos (.ZIP)"}
+                    </button>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                  {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
+                    empresaParaDocs.dados_documentos.map((url: string, i: number) => {
+                      const isPdf = url.toLowerCase().includes('.pdf');
+                      
+                      let nomeRealArquivo = `Anexo_${i+1}`;
+                      try {
+                        const urlPartes = url.split(/[?#]/)[0].split('/'); 
+                        let ultimoTrecho = urlPartes[urlPartes.length - 1];
+                        nomeRealArquivo = decodeURIComponent(ultimoTrecho); 
+                      } catch (e) {
+                        nomeRealArquivo = `Anexo_Injetado_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
+                      }
+
+                      return (
+                        <a 
+                          key={i} 
+                          href={url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
+                          title={nomeRealArquivo}
+                        >
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
+                            <span className="text-xs font-bold text-slate-600 truncate group-hover:text-blue-700 transition-colors">
+                              {nomeRealArquivo}
+                            </span>
+                          </div>
+                          <span className="text-[9px] bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
+                            Abrir ↗
+                          </span>
+                        </a>
+                      )
+                    })
+                  ) : (
+                    <div className="col-span-2 p-6 bg-slate-100 rounded-xl border border-slate-200 border-dashed text-center">
+                      <p className="text-xs text-slate-400 italic font-bold">Nenhum arquivo físico de leitura atrelado a este envio.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
