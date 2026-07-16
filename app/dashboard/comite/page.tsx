@@ -261,13 +261,13 @@ export default function ComitePage() {
       const e = empresaItem.empresa_nome;
       const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
 
-      await supabase.from("votos").insert({ 
+      await supabase.from("votos").upsert({ 
         empresa_nome: e, 
         membro_nome: autorDoVoto, 
         voto: opcaoVoto, 
         justificativa: justificativaVoto, 
         email_enviado: autorDoVoto === "Decisão"
-      });
+      }, { onConflict: 'membro_nome,empresa_nome' });
       
       const { data: listaVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
       const totalSim = listaVotos?.filter(v => v.voto === "Aprovado").length || 0;
@@ -320,7 +320,7 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").insert({
         empresa_nome: nomeNovaEmpresa.trim().toUpperCase(),
         caminho_local: "INCLUSAO_MANUAL", 
-        cnpj: "00000000000000",
+        cnpj: `MANUAL-${Date.now()}`, // 👈 Nunca vai repetir!
         status: "aguardando_docs"
       });
       if (error) throw error;
