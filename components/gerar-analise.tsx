@@ -324,7 +324,7 @@ export const gerarHtmlDossie = async (item: any) => {
           ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.9rem; line-height: 1.6; color: var(--text); font-weight: 500;}
           .hover-card { transition: box-shadow 0.3s, transform 0.3s; }
           .hover-card:hover { box-shadow: 0 15px 30px -5px rgba(0,0,0,0.1); transform: translateY(-2px); }
-          .expandable-box { position: relative; max-height: 90px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
+          .expandable-box { position: relative; max-height: 120px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
           .expandable-fade { position: absolute; bottom: 0; left: 0; right: 0; height: 50px; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1) 90%); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; font-size: 0.75rem; font-weight: 800; color: var(--blue); transition: opacity 0.3s; }
           .expandable-fade::after { content: "Passar o mouse para expandir ▼"; }
           .hover-card:hover .expandable-box { max-height: 2000px; }
@@ -646,7 +646,7 @@ export const gerarHtmlDossie = async (item: any) => {
       <div class="grid-2">
           <div class="card hover-card" style="padding:2rem; border-left: 6px solid #fca5a5; cursor: pointer; background: #fff;">
               <div style="font-weight:900; font-size:1rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Relatório Jurídico (Processos)</div>
-              <div class="expandable-box" style="max-height: 120px;">
+              <div class="expandable-box">
                   <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado nas raspagens.'}</div>
                   <div class="expandable-fade" style="height: 60px;"></div>
               </div>
@@ -654,7 +654,7 @@ export const gerarHtmlDossie = async (item: any) => {
           
           <div class="card hover-card" style="padding:2rem; border-left: 6px solid #93c5fd; cursor: pointer; background: #fff;">
               <div style="font-weight:900; font-size:1rem; color:var(--blue-dark); margin-bottom:1rem; text-transform:uppercase;">🔍 Clipping Mídia / Reputação</div>
-              <div class="expandable-box" style="max-height: 120px;">
+              <div class="expandable-box">
                   <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.noticias_midia || 'Nada consta em pesquisas reputacionais desabonadoras ativas.'}</div>
                   <div class="expandable-fade" style="height: 60px;"></div>
               </div>
