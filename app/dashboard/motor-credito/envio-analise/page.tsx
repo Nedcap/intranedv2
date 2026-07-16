@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import UploadDocs from "@/components/UploadDocs";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import JSZip from "jszip"; // 🔥 BIBLIOTECA NOVA IMPORTADA AQUI!
 
 interface Empresa {
   cnpj: string;
@@ -38,9 +39,11 @@ export default function MotorCreditoPage() {
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
 
-  // 🔥 ESTADOS DO NOVO MODAL DE DOCUMENTOS
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
+  
+  // 🔥 ESTADO DE LOADING DO ZIP
+  const [isZipping, setIsZipping] = useState(false);
 
   useEffect(() => {
     carregarFilaComercial();
@@ -236,6 +239,61 @@ export default function MotorCreditoPage() {
   const abrirPainelDocumentos = (item: FilaItem) => {
     setEmpresaParaDocs(item);
     setIsDocsModalOpen(true);
+  };
+
+  // 🔥 A MÁGICA DE EMPACOTAR OS DOCUMENTOS ACONTECE AQUI
+  const baixarTudoZip = async () => {
+    if (!empresaParaDocs?.dados_documentos || empresaParaDocs.dados_documentos.length === 0) return;
+    
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      const nomePasta = empresaParaDocs.empresa_nome.replace(/[^a-zA-Z0-9]/g, "_"); // Limpa o nome para virar pasta
+      const folder = zip.folder(nomePasta);
+
+      if (!folder) throw new Error("Erro ao criar diretório ZIP.");
+
+      const fetchPromises = empresaParaDocs.dados_documentos.map(async (url, i) => {
+        // Baixa o arquivo do R2
+        const res = await fetch(url);
+        const blob = await res.blob();
+        
+        // Descobre o nome do arquivo
+        let fileName = `Anexo_${i+1}`;
+        try {
+          const urlPartes = url.split(/[?#]/)[0].split('/');
+          fileName = decodeURIComponent(urlPartes[urlPartes.length - 1]);
+        } catch (e) {
+          const isPdf = url.toLowerCase().includes('.pdf');
+          fileName = `Anexo_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
+        }
+        
+        // Joga dentro da pasta do Zip
+        folder.file(fileName, blob);
+      });
+
+      // Aguarda todos os downloads terminarem
+      await Promise.all(fetchPromises);
+
+      // Gera o arquivo final
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      
+      // Força o navegador a baixar
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `Docs_${nomePasta}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+
+    } catch (err) {
+      console.error("Erro ao gerar ZIP:", err);
+      alert("⚠️ Erro ao empacotar arquivos. Se persistir, o navegador pode estar bloqueando múltiplos downloads (CORS).");
+    } finally {
+      setIsZipping(false);
+    }
   };
 
   const formatarCnpj = (cnpj: string) => {
@@ -557,22 +615,35 @@ export default function MotorCreditoPage() {
 
                 {/* 📎 Seção 2: Arquivos Brutos na Nuvem */}
                 <div className="space-y-3">
-                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                    Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
-                  </h3>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* 🔥 BOTÃO DE DOWNLOAD AQUI NA LINHA DO TÍTULO */}
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                      Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
+                    </h3>
+                    
+                    {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
+                      <button 
+                        onClick={baixarTudoZip}
+                        disabled={isZipping}
+                        className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {isZipping ? "⏳ Empacotando..." : "📦 Baixar Todos (.ZIP)"}
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                     {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
                       empresaParaDocs.dados_documentos.map((url, i) => {
                         const isPdf = url.toLowerCase().includes('.pdf');
                         
-                        // 🔥 Extraindo o nome real do arquivo da URL do R2
                         let nomeRealArquivo = `Anexo_${i+1}`;
                         try {
-                          const urlPartes = url.split(/[?#]/)[0].split('/'); // Ignora query params e quebra pelas barras
+                          const urlPartes = url.split(/[?#]/)[0].split('/'); 
                           let ultimoTrecho = urlPartes[urlPartes.length - 1];
-                          nomeRealArquivo = decodeURIComponent(ultimoTrecho); // Converte %20 em espaço, etc.
+                          nomeRealArquivo = decodeURIComponent(ultimoTrecho); 
                         } catch (e) {
                           nomeRealArquivo = `Anexo_Injetado_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
                         }
@@ -584,7 +655,7 @@ export default function MotorCreditoPage() {
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
-                            title={nomeRealArquivo} // Mostra o nome completo ao passar o mouse
+                            title={nomeRealArquivo}
                           >
                             <div className="flex items-center gap-2 truncate pr-2">
                               <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
