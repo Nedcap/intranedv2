@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { gerarHtmlDossie } from "@/components/gerar-analise"; // 🚀 Importando o motor centralizado!
+import { gerarHtmlDossie } from "@/components/gerar-analise";
 
 // ============================================================================
 // FUNÇÕES AUXILIARES
@@ -107,7 +107,6 @@ export default function FinalizadosPage() {
     }
   }, []);
 
-  // 🔥 VINCULAÇÃO INTELIGENTE DE PREVIEWS (AGORA USANDO O MOTOR CENTRALIZADO)
   const vincularPreVisualizacao = async (item: any) => {
     if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
       const htmlCompilado = await gerarHtmlDossie(item);
@@ -115,7 +114,6 @@ export default function FinalizadosPage() {
       return;
     }
 
-    // Comportamento Legado: Busca arquivo físico .html se não houver o JSON estruturado
     if (!item.caminho_local) return;
     const urlLimpa = item.caminho_local.trim();
     if (urlLimpa.startsWith("http")) { 
@@ -206,7 +204,7 @@ export default function FinalizadosPage() {
 
         historicoMapeado.forEach(item => {
           carregarVotosIniciais(item.empresa_nome);
-          vincularPreVisualizacao(item); // 👈 Corrigido o erro de digitação aqui!
+          vincularPreVisualizacao(item);
         });
       }
     } catch (err) { 
@@ -259,7 +257,6 @@ export default function FinalizadosPage() {
     setChatMsgs([]);
   };
 
-  // 🔥 BANCO DE IMPRESSÃO INTEGRADO
   const baixarPdfAnalise = async (item: any) => {
     setGerandoPdfId(item.id);
     try {
@@ -282,7 +279,6 @@ export default function FinalizadosPage() {
 
       let analiseHtmlText = "";
       if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
-        // Usa o motor centralizado aguardando a promessa
         analiseHtmlText = await gerarHtmlDossie(item);
       } else if (item.caminho_local) {
         const urlLimpa = item.caminho_local.trim();
@@ -302,7 +298,6 @@ export default function FinalizadosPage() {
       const parser = new DOMParser();
       const doc = parser.parseFromString(analiseHtmlText, "text/html");
       
-      // Injeta os históricos na mesa do PDF compilado
       const targetWrapper = doc.querySelector(".parecer-body");
       if (targetWrapper) {
         targetWrapper.insertAdjacentHTML('beforeend', `<br><strong style="color: var(--blue-dark); font-size: 0.95rem; text-transform: uppercase;">Histórico de Debates (Comitê):</strong><br>` + chatHtml);
@@ -387,30 +382,34 @@ export default function FinalizadosPage() {
     return (
       <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
         {/* CABEÇALHO */}
-        <div className="bg-white text-slate-800 p-3 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
+        <div className="bg-white text-slate-800 p-4 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-4">
-            <span className="text-xl">🗂</span>
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+            </div>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Consulta de Dossiê Arquivado</span>
-              <h2 className="text-base font-black uppercase text-slate-800 tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
+              <div className="flex items-center gap-2">
+                 <h2 className="text-base font-black uppercase text-slate-800 tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
+                 <span className={`ml-2 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                    isStatusPositivo ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
+                 }`}>
+                   {empresaFocoAtivo.status || "Finalizado"}
+                 </span>
+              </div>
             </div>
-            <span className={`ml-2 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-              isStatusPositivo ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
-            }`}>
-              {empresaFocoAtivo.status || "Finalizado"}
-            </span>
           </div>
           <div className="flex items-center gap-3">
             <button 
               onClick={() => baixarPdfAnalise(empresaFocoAtivo)} 
               disabled={isGerando}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-wider rounded-md shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs tracking-wide rounded-lg shadow-sm transition-all flex items-center gap-2 disabled:opacity-50 uppercase"
             >
               {isGerando ? "⏳ Extraindo HTML..." : "🖨️ Imprimir Dossiê"}
             </button>
             <button 
               onClick={desativarModoConsultaFoco} 
-              className="px-5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-md shadow-sm transition-all cursor-pointer uppercase tracking-wide"
+              className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wide"
             >
               ✕ Fechar Tela
             </button>
@@ -418,9 +417,9 @@ export default function FinalizadosPage() {
         </div>
 
         {/* CORPO PRINCIPAL */}
-        <div className="flex-1 flex overflow-hidden w-full bg-slate-50">
-          <div className="w-[70%] h-full p-4 flex flex-col">
-            <div className="flex-1 bg-white rounded-xl shadow-md overflow-hidden border border-slate-200 flex flex-col">
+        <div className="flex-1 flex overflow-hidden w-full bg-slate-50/50">
+          <div className="w-[70%] h-full p-5 flex flex-col">
+            <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex flex-col">
               {htmlPreview ? (
                 <iframe srcDoc={htmlPreview} className="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
               ) : (
@@ -432,30 +431,30 @@ export default function FinalizadosPage() {
             </div>
           </div>
 
-          <div className="w-[30%] h-full p-4 pl-0 flex flex-col space-y-4">
+          <div className="w-[30%] h-full py-5 pr-5 flex flex-col space-y-5">
             
             {/* PAINEL DE VOTOS REGISTRADOS */}
-            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left relative">
-              <span className="text-[12px] font-black text-slate-600 uppercase tracking-wider border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left relative">
+              <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-100 pb-2.5 mb-3 flex items-center gap-2">
                 📋 Votos Registrados
               </span>
-              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
                 {listaDeVotos.length === 0 ? (
                   <p className="text-slate-400 italic text-xs py-10 text-center font-medium">Nenhum voto lançado em comitê para esta análise.</p>
                 ) : (
                   listaDeVotos.map((v: any, idx: number) => {
                     const isVotoPositivo = (v.voto || "").toLowerCase().includes("aprov");
                     return (
-                      <div key={idx} className="p-3 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-1.5 shadow-sm transition-colors hover:border-slate-200">
+                      <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 shadow-sm transition-colors hover:border-slate-200">
                         <div className="flex justify-between items-start font-bold">
                           <span className="text-slate-800 text-xs tracking-wide">{v.membro_nome}</span>
-                          <span className={`px-2 py-0.5 rounded-md text-[9px] uppercase font-black tracking-wider border ${
+                          <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider border ${
                             isVotoPositivo ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-rose-100 text-rose-700 border-rose-200"
                           }`}>
                             {v.voto}
                           </span>
                         </div>
-                        <span className="text-slate-600 font-medium text-xs leading-relaxed">"{v.justificativa}"</span>
+                        <span className="text-slate-600 font-medium text-xs leading-relaxed italic">"{v.justificativa}"</span>
                       </div>
                     );
                   })
@@ -464,16 +463,16 @@ export default function FinalizadosPage() {
             </div>
 
             {/* PAINEL DE ATAS E CHAT */}
-            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left relative">
-              <span className="text-[12px] font-black text-slate-600 uppercase tracking-wider border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left relative">
+              <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-100 pb-2.5 mb-3 flex items-center gap-2">
                 💬 Atas e Alinhamentos Finais
               </span>
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
                 {chatMsgs.length === 0 ? (
                   <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhuma discussão registada.</p>
                 ) : (
                   chatMsgs.map((m: any) => (
-                    <div key={m.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-1 hover:border-slate-300 transition-colors">
+                    <div key={m.id} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1 hover:border-slate-300 transition-colors">
                       <span className="font-black text-[10px] text-slate-400 uppercase tracking-wider">{m.usuario}</span>
                       <span className="text-slate-700 text-xs leading-relaxed whitespace-pre-wrap break-words">{m.mensagem}</span>
                     </div>
@@ -498,30 +497,37 @@ export default function FinalizadosPage() {
   if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse text-xs uppercase tracking-widest">A varrer arquivo histórico do comitê...</div>;
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-700">
+    <div className="space-y-8 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800">
       <div className="hidden">{avisoCopia && "Copiado!"}</div>
       
-      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+      {/* HEADER PRINCIPAL */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight uppercase">📚 Arquivo do Comitê (Finalizados)</h2>
-          <span className="text-xs text-slate-500 font-medium">Consulte relatórios antigos, votos e prazos de SLA das análises já encerradas.</span>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Arquivo do Comitê</h2>
+          </div>
+          <span className="text-sm text-slate-500 font-medium ml-12">Consulte relatórios antigos, votos e prazos de SLA das análises já encerradas.</span>
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+      {/* FILTROS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
         <div ref={refMes} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">Mês de Recebimento:</label>
-          <button onClick={() => setOpenMes(!openMes)} className="w-full text-left p-2.5 border border-slate-300 rounded-lg bg-slate-50 hover:bg-slate-100 font-bold text-xs flex justify-between items-center outline-none transition-colors shadow-sm">
+          <button onClick={() => setOpenMes(!openMes)} className="w-full text-left p-3 border border-slate-300 rounded-xl bg-slate-50 hover:bg-slate-100 font-bold text-xs flex justify-between items-center outline-none transition-colors shadow-sm">
             <span className="truncate">{mesesSel.length === 0 ? "Todos os Meses (Histórico Geral)" : mesesSel.length === listaMeses.length ? "Todos os Meses Selecionados" : `${mesesSel.length} Meses Selecionados`}</span>
             <span className="text-slate-400">▼</span>
           </button>
           {openMes && (
-            <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl p-3 space-y-2 max-h-64 overflow-y-auto">
-              <button onClick={() => setMesesSel(mesesSel.length === listaMeses.length ? [] : listaMeses)} className="w-full text-left text-[11px] font-black text-blue-600 uppercase pb-2 border-b border-slate-100 mb-1">
+            <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-2xl shadow-xl p-4 space-y-2 max-h-64 overflow-y-auto">
+              <button onClick={() => setMesesSel(mesesSel.length === listaMeses.length ? [] : listaMeses)} className="w-full text-left text-[11px] font-black text-blue-600 uppercase pb-2.5 border-b border-slate-100 mb-1.5 hover:text-blue-800 transition-colors">
                 {mesesSel.length === listaMeses.length ? "🔲 Desmarcar Todos" : "☑️ Selecionar Todos"}
               </button>
               {listaMeses.map(mes => (
-                <label key={mes} className="flex items-center gap-2.5 font-bold text-slate-700 text-xs cursor-pointer p-1 hover:bg-slate-50 rounded">
+                <label key={mes} className="flex items-center gap-3 font-bold text-slate-700 text-xs cursor-pointer p-1.5 hover:bg-slate-50 rounded-lg transition-colors">
                   <input type="checkbox" checked={mesesSel.includes(mes)} onChange={() => setMesesSel(mesesSel.includes(mes) ? mesesSel.filter(m => m !== mes) : [...mesesSel, mes])} className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500" />
                   {mes}
                 </label>
@@ -532,25 +538,25 @@ export default function FinalizadosPage() {
 
         <div ref={refCed} className="relative">
           <label className="block font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">Filtrar por Cedentes:</label>
-          <button onClick={() => setOpenCedente(!openCedente)} className="w-full text-left p-2.5 border border-slate-300 rounded-lg bg-slate-50 hover:bg-slate-100 font-bold text-xs flex justify-between items-center outline-none transition-colors shadow-sm">
+          <button onClick={() => setOpenCedente(!openCedente)} className="w-full text-left p-3 border border-slate-300 rounded-xl bg-slate-50 hover:bg-slate-100 font-bold text-xs flex justify-between items-center outline-none transition-colors shadow-sm">
             <span className="truncate">{cedentesSel.length === 0 || cedentesSel.length === listaCedentes.length ? "Todos os Cedentes" : `${cedentesSel.length} Selecionados`}</span>
             <span className="text-slate-400">▼</span>
           </button>
           {openCedente && (
-            <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl p-3 flex flex-col gap-2 max-h-72">
+            <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-2xl shadow-xl p-4 flex flex-col gap-3 max-h-72">
               <input 
                 type="text"
                 placeholder="🔎 Digite para pesquisar..."
                 value={termoBuscaCedente}
                 onChange={(e) => setTermoBuscaCedente(e.target.value)}
-                className="w-full p-2 border border-slate-300 rounded-md outline-none text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-bold bg-slate-50 shadow-inner"
+                className="w-full p-2.5 border border-slate-300 rounded-xl outline-none text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-bold bg-slate-50 shadow-inner"
               />
               <div className="overflow-y-auto space-y-1.5 flex-1 pr-1 custom-scrollbar">
-                <button type="button" onClick={handleToggleTodosFiltrados} className="w-full text-left text-[11px] font-black text-blue-600 uppercase pb-2 border-b border-slate-100 mb-1 block">
+                <button type="button" onClick={handleToggleTodosFiltrados} className="w-full text-left text-[11px] font-black text-blue-600 uppercase pb-2.5 border-b border-slate-100 mb-1.5 block hover:text-blue-800 transition-colors">
                   {todosFiltradosAtivos ? "🔲 Limpar Resultados" : "☑️ Marcar Resultados"}
                 </button>
                 {cedentesFiltradosPelaBusca.map(ced => (
-                  <label key={ced} className="flex items-center gap-2.5 font-bold text-slate-700 text-xs cursor-pointer p-1 hover:bg-slate-50 rounded">
+                  <label key={ced} className="flex items-center gap-3 font-bold text-slate-700 text-xs cursor-pointer p-1.5 hover:bg-slate-50 rounded-lg transition-colors">
                     <input type="checkbox" checked={cedentesSel.includes(ced)} onChange={() => setCedentesSel(cedentesSel.includes(ced) ? cedentesSel.filter(c => c !== ced) : [...cedentesSel, ced])} className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500" />
                     {ced}
                   </label>
@@ -561,29 +567,35 @@ export default function FinalizadosPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-        <div className="bg-slate-900 text-white p-6 rounded-xl text-center shadow-md flex flex-col justify-center transition-transform hover:-translate-y-1">
-          <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider">Total de Análises</span>
-          <div className="text-3xl font-black font-mono mt-1.5">{historicoFiltrado.length}</div>
+      {/* KPIS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="bg-slate-900 text-white p-6 rounded-2xl text-left shadow-md transition-transform hover:-translate-y-1 relative overflow-hidden">
+          <svg className="absolute -bottom-4 -right-4 w-24 h-24 text-slate-800" fill="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <span className="text-[11px] font-black text-slate-400 block uppercase tracking-wider relative z-10">Total de Análises</span>
+          <div className="text-4xl font-black mt-2 relative z-10">{historicoFiltrado.length}</div>
         </div>
-        <div className="bg-emerald-50/50 border border-emerald-100 p-6 rounded-xl text-center shadow-xs flex flex-col justify-center transition-transform hover:-translate-y-1">
-          <span className="text-[10px] font-black text-emerald-600 block uppercase tracking-wider">Aprovados</span>
-          <div className="text-3xl font-black font-mono text-emerald-700 mt-1.5">{aprovados}</div>
+        <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl text-left shadow-sm transition-transform hover:-translate-y-1">
+          <span className="text-[11px] font-black text-emerald-600 block uppercase tracking-wider flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Aprovados</span>
+          <div className="text-4xl font-black text-slate-800 mt-2">{aprovados}</div>
         </div>
-        <div className="bg-rose-50/50 border border-rose-100 p-6 rounded-xl text-center shadow-xs flex flex-col justify-center transition-transform hover:-translate-y-1">
-          <span className="text-[10px] font-black text-rose-600 block uppercase tracking-wider">Recusados / Reprov.</span>
-          <div className="text-3xl font-black font-mono text-rose-700 mt-1.5">{recusados}</div>
+        <div className="bg-rose-50 border border-rose-200 p-6 rounded-2xl text-left shadow-sm transition-transform hover:-translate-y-1">
+          <span className="text-[11px] font-black text-rose-600 block uppercase tracking-wider flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Recusados / Reprov.</span>
+          <div className="text-4xl font-black text-slate-800 mt-2">{recusados}</div>
         </div>
-        <div className="bg-blue-50/50 border border-blue-100 p-6 rounded-xl text-center shadow-xs flex flex-col justify-center transition-transform hover:-translate-y-1">
-          <span className="text-[10px] font-black text-blue-600 block uppercase tracking-wider">SLA Médio (Dias Úteis)</span>
-          <div className="text-3xl font-black font-mono text-blue-700 mt-1.5">
-            {mediaSLA} <span className="text-sm font-sans font-bold text-blue-400">{parseFloat(mediaSLA) === 1 ? "dia" : "dias"}</span>
+        <div className="bg-blue-50 border border-blue-200 p-6 rounded-2xl text-left shadow-sm transition-transform hover:-translate-y-1">
+          <span className="text-[11px] font-black text-blue-600 block uppercase tracking-wider flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SLA Médio</span>
+          <div className="flex items-baseline gap-1.5 mt-2 text-slate-800">
+            <span className="text-4xl font-black">{mediaSLA}</span>
+            <span className="text-sm font-bold text-slate-500">{parseFloat(mediaSLA) === 1 ? "dia" : "dias"}</span>
           </div>
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-3 pt-4">
-        <h2 className="text-xs font-black text-slate-500 tracking-wider uppercase">📋 Registros Filtrados da Carteira</h2>
+        <h2 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+          <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-500">📋</div>
+          Registros Filtrados da Carteira
+        </h2>
         <div className="relative w-full md:w-80">
           <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔎</span>
           <input 
@@ -591,17 +603,18 @@ export default function FinalizadosPage() {
             placeholder="Buscar empresa diretamente..." 
             value={busca} 
             onChange={(e) => setBusca(e.target.value)} 
-            className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg outline-none bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-xs text-slate-700 shadow-xs"
+            className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-xl outline-none bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-xs text-slate-700 shadow-sm"
           />
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden mt-2">
-        <div className="overflow-x-auto">
+      {/* TABELA DE RESULTADOS */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden mt-2">
+        <div className="overflow-x-auto pb-4">
           <table className="w-full text-left border-collapse text-[13px] min-w-[1000px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400 h-12">
-                <th className="p-4 w-72">Empresa / Cedente</th>
+              <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-widest h-14 text-slate-500">
+                <th className="p-4 pl-6 w-72">Empresa / Cedente</th>
                 <th className="p-4 text-center w-36">Recebimento</th>
                 <th className="p-4 text-center w-36">Envio Comitê</th>
                 <th className="p-4 text-center w-32 bg-blue-50/50 text-blue-700 border-l border-r border-blue-100/50">⏳ SLA Útil</th>
@@ -609,7 +622,7 @@ export default function FinalizadosPage() {
                 <th className="p-4 text-center w-56">Ações Executivas</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+            <tbody className="divide-y divide-slate-100 text-sm">
               {historicoFiltrado.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center p-10 text-slate-400 font-bold italic">
@@ -625,13 +638,13 @@ export default function FinalizadosPage() {
 
                   return (
                     <tr key={item.id} className={`${editando ? "bg-amber-50/30" : "hover:bg-slate-50/70"} transition-colors`}>
-                      <td className="p-4 font-black text-slate-900 truncate max-w-[280px] uppercase" title={item.empresa_nome}>
+                      <td className="p-4 pl-6 font-extrabold text-slate-900 truncate max-w-[280px] uppercase tracking-tight" title={item.empresa_nome}>
                         {item.empresa_nome}
                       </td>
                       
                       <td className="p-4 text-center text-slate-500">
                         {editando ? (
-                          <input type="date" value={editDataRec} onChange={(e) => setEditDataRec(e.target.value)} className="w-full p-1.5 border border-slate-300 rounded text-[11px] outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
+                          <input type="date" value={editDataRec} onChange={(e) => setEditDataRec(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
                         ) : (
                           formatarDataLocal(item.data_recebimento)
                         )}
@@ -639,18 +652,18 @@ export default function FinalizadosPage() {
 
                       <td className="p-4 text-center text-slate-500">
                         {editando ? (
-                          <input type="date" value={editDataEnvio} onChange={(e) => setEditDataEnvio(e.target.value)} className="w-full p-1.5 border border-slate-300 rounded text-[11px] outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
+                          <input type="date" value={editDataEnvio} onChange={(e) => setEditDataEnvio(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 font-bold bg-white uppercase shadow-sm" />
                         ) : (
                           formatarDataLocal(item.criated_em || item.criado_em)
                         )}
                       </td>
 
-                      <td className="p-4 text-center font-black font-mono text-blue-700 bg-blue-50/20 border-l border-r border-blue-50">
+                      <td className="p-4 text-center font-black font-mono text-blue-700 bg-blue-50/20 border-l border-r border-blue-100/50">
                         {item._sla} d
                       </td>
                       
                       <td className="p-4 text-center">
-                        <span className={`inline-flex items-center px-2.5 py-1 text-[9px] font-black rounded border uppercase tracking-wider shadow-xs ${
+                        <span className={`inline-flex items-center px-2.5 py-1 text-[10px] font-black rounded-md uppercase tracking-wider shadow-xs ${
                           eAprovado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
                         }`}>
                           {item.status || "Finalizado"}
@@ -660,10 +673,10 @@ export default function FinalizadosPage() {
                       <td className="p-4 flex gap-2 justify-center">
                         {editando ? (
                           <>
-                            <button onClick={() => salvarEdicao(item.id)} disabled={salvandoEdicao} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-md text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50">
+                            <button onClick={() => salvarEdicao(item.id)} disabled={salvandoEdicao} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50">
                               {salvandoEdicao ? "⏳" : "💾 Salvar"}
                             </button>
-                            <button onClick={() => setLinhaEditando(null)} disabled={salvandoEdicao} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors">
+                            <button onClick={() => setLinhaEditando(null)} disabled={salvandoEdicao} className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors">
                               Cancelar
                             </button>
                           </>
@@ -671,21 +684,21 @@ export default function FinalizadosPage() {
                           <>
                             <button 
                               onClick={() => iniciarEdicao(item)} 
-                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors shadow-sm" 
+                              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow-sm" 
                               title="Corrigir datas de entrada e saída manualmente"
                             >
                               ✏️ Datas
                             </button>
                             <button 
                               onClick={() => modoConsultaFocoAtivarModo(item)} 
-                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-blue-600 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors shadow-md flex items-center gap-1"
+                              className="px-3 py-2 bg-slate-900 hover:bg-blue-600 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow-md flex items-center gap-1.5"
                             >
-                              <span className="text-[12px] leading-none">🏛️</span> Analisar
+                              <span className="text-sm leading-none">🏛️</span> Analisar
                             </button>
                             <button 
                               onClick={() => baixarPdfAnalise(item)} 
                               disabled={isGerando}
-                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors shadow-sm disabled:opacity-50 flex items-center gap-1"
+                              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow-sm disabled:opacity-50 flex items-center gap-1.5"
                             >
                               {isGerando ? "⏳..." : "📥 Dossiê"}
                             </button>

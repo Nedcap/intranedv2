@@ -399,28 +399,34 @@ export default function ComitePage() {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
 
     return (
-      <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px]">
+      <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
         {/* CABEÇALHO DO COMITÊ (CLARO) */}
-        <div className="bg-white text-slate-800 p-3 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-base font-black tracking-tight text-blue-600">🏛️ COMITÊ DE CRÉDITO</span>
-            <span className="text-slate-300">|</span>
-            <h2 className="text-base font-black uppercase tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
-            <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-bold px-2 py-0.5 rounded-full uppercase ml-2">{empresaFocoAtivo.status || "Em análise"}</span>
+        <div className="bg-white text-slate-800 p-4 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Comitê Executivo Ativo</span>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black uppercase text-slate-900 tracking-tight">{empresaFocoAtivo.empresa_nome}</h2>
+                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-bold px-2 py-0.5 rounded-md uppercase">{empresaFocoAtivo.status || "Em análise"}</span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-4">
-            <button onClick={desativarModoLupaExecutiva} className="px-5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-md shadow-sm transition-all cursor-pointer uppercase tracking-wide">
+            <button onClick={desativarModoLupaExecutiva} className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wide">
               ✕ Sair da Mesa
             </button>
           </div>
         </div>
 
         {/* CORPO PRINCIPAL */}
-        <div className="flex-1 flex overflow-hidden w-full bg-slate-50">
+        <div className="flex-1 flex overflow-hidden w-full bg-slate-50/50">
           
           {/* DOSSIÊ HTML (ESQUERDA) */}
-          <div className="w-[70%] h-full p-4 flex flex-col">
-            <div className="flex-1 bg-white rounded-xl shadow-md overflow-hidden border border-slate-200 relative">
+          <div className="w-[70%] h-full p-5 flex flex-col">
+            <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 relative">
               <iframe 
                 srcDoc={htmlDossieRenderizado} 
                 className="w-full h-full border-0 bg-white" 
@@ -430,39 +436,41 @@ export default function ComitePage() {
           </div>
 
           {/* PAINEL DE CONTROLE (DIREITA) */}
-          <div className="w-[30%] h-full p-4 pl-0 flex flex-col space-y-4">
+          <div className="w-[30%] h-full py-5 pr-5 flex flex-col space-y-5">
             
             {/* PAINEL DE VOTAÇÃO */}
-            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-3 shrink-0 text-left">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                <span className="text-[12px] font-black text-slate-600 uppercase tracking-wider">🗳️ Painel de Voto</span>
-                <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
+                <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  🗳️ Painel de Voto
+                </span>
+                <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
                   👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
                 </span>
               </div>
               
               {(!isMaster && !isDiretor) ? (
-                <div className="p-3 bg-slate-50 text-slate-500 font-bold text-xs rounded-lg border border-slate-200 text-center">
+                <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
                   🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-2.5 pt-1">
-                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-2.5 bg-slate-50 text-slate-800 border border-slate-200 rounded-lg text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 transition-all">
+                <div className="grid grid-cols-1 gap-3">
+                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
                     <option value="">Selecione o seu Veredito...</option>
                     <option value="Aprovado">🟢 Aprovado</option>
                     <option value="Reprovado">🔴 Reprovado</option>
                   </select>
 
                   {isMaster && (
-                    <label className="flex items-center gap-2 p-2.5 text-slate-700 font-bold text-xs bg-amber-50 rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors select-none shadow-sm">
+                    <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
                       <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
                       Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
                     </label>
                   )}
 
-                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 h-16 resize-none transition-all" />
+                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
                   
-                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer shadow-md uppercase tracking-wide">
+                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
                     {enviandoVoto ? "Computando..." : "Confirmar Voto"}
                   </button>
                 </div>
@@ -470,19 +478,19 @@ export default function ComitePage() {
             </div>
 
             {/* HISTÓRICO DE PARECERES */}
-            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[12px] font-black text-slate-600 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2">📋 Pareceres Registrados</span>
-              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
                 {listaDeVotos.length === 0 ? (
-                  <p className="text-slate-400 italic text-xs py-8 text-center">A mesa ainda não possui votos computados.</p>
+                  <p className="text-slate-400 italic text-xs py-8 text-center font-medium">A mesa ainda não possui votos computados.</p>
                 ) : (
                   listaDeVotos.map((v: any, idx: number) => (
-                    <div key={idx} className="p-3 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-1.5 text-xs shadow-sm">
+                    <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
                       <div className="flex justify-between items-center font-bold">
                         <span className="text-slate-800">{v.membro_nome}</span>
-                        <span className={`px-2 py-0.5 rounded-md text-[9px] uppercase font-black tracking-wide ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
+                        <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
                       </div>
-                      <span className="text-slate-600 font-medium leading-relaxed">"{v.justificativa}"</span>
+                      <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
                     </div>
                   ))
                 )}
@@ -490,78 +498,96 @@ export default function ComitePage() {
             </div>
 
             {/* CHAT / MESA DE DEBATES */}
-            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[12px] font-black text-slate-600 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2">💬 Mesa de Debates (Ao Vivo)</span>
-              <div className="flex-1 overflow-y-auto rounded-lg p-1 space-y-2.5 custom-scrollbar">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
+              <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
                 {chatMsgs.length === 0 ? (
-                  <p className="text-center text-slate-400 py-10 text-xs italic">Nenhum comentário registrado no chat.</p>
+                  <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
                 ) : (
                   chatMsgs.map((m: any) => {
                     const ehMeu = m.usuario === nomeUsuarioLogado;
                     return (
                       <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] font-bold text-slate-400 mb-0.5 px-1">{m.usuario}</span>
-                        <div className={`p-2.5 rounded-xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
-                          <span className="font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
+                        <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
+                        <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
+                          <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
                         </div>
                       </div>
                     )
                   })
                 )}
               </div>
-              <div className="flex gap-2 mt-3 shrink-0 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+              <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
                 <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
-                <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 rounded-md cursor-pointer transition-all shadow-sm">Enviar</button>
+                <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
               </div>
             </div>
 
           </div>
         </div>
+
+        <style dangerouslySetInnerHTML={{__html: `
+          .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+          .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+          .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+          .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        `}} />
       </div>
     );
   }
 
   // 🏛️ RENDERIZAÇÃO DA VISÃO PADRÃO (CAPA)
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-8 text-[13px]">
+    <div className="space-y-8 max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800">
       {carregando && <div className="fixed inset-0 bg-white/60 backdrop-blur-sm z-50 flex items-center justify-center font-bold text-slate-600 text-lg tracking-wide">Sincronizando esteira...</div>}
       
-      <div className="space-y-3">
-        <div className="border-b border-slate-200 pb-2 flex justify-between items-center">
-          <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-            📋 Análises Em Comitê <span className="text-sm font-semibold text-slate-400 font-normal">(Mesa V8)</span>
-          </h2>
-          {isMaster && <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-md">⚡ Perfil Master</span>}
+      {/* HEADER PRINCIPAL */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Análises em Comitê</h2>
+          </div>
+          <span className="text-sm text-slate-500 font-medium ml-12">Mesa V8 - Deliberação e Votação de Crédito</span>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse text-[13px]">
+        {isMaster && <span className="bg-amber-50 text-amber-700 border border-amber-200 font-bold text-xs uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-sm">⚡ Perfil Master</span>}
+      </div>
+
+      {/* TABELA DE COMITÊ */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto pb-4">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-xs tracking-wider">
-                <th className="p-3.5 pl-4">Empresa / Cedente</th>
-                <th className="p-3.5">CNPJ</th>
-                <th className="p-3.5 text-center">Data Entrada</th>
-                <th className="p-3.5 text-center">Status Atual</th>
-                <th className="p-3.5 text-center">Ações</th>
-                {isMaster && <th className="p-3.5 text-center text-amber-700 bg-amber-50/50 border-l border-slate-200">Ação Executiva</th>}
+              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-14">
+                <th className="p-4 pl-6">Empresa / Cedente</th>
+                <th className="p-4 w-40">CNPJ</th>
+                <th className="p-4 text-center w-36">Data Entrada</th>
+                <th className="p-4 text-center w-40">Status Atual</th>
+                <th className="p-4 text-center w-48">Ações</th>
+                {isMaster && <th className="p-4 text-center text-amber-700 bg-amber-50/50 border-l border-slate-200 w-48">Ação Executiva</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+            <tbody className="divide-y divide-slate-100 text-sm">
               {analises.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-3.5 pl-4 font-bold text-slate-900 uppercase">{item.empresa_nome}</td>
-                  <td className="p-3.5 font-mono text-slate-500 text-xs">{item.cnpj}</td>
-                  <td className="p-3.5 text-center text-slate-500 font-mono text-xs">{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
-                  <td className="p-3.5 text-center">
-                    <span className={`px-2.5 py-1 text-[10px] font-bold rounded-md uppercase tracking-wider ${item.status === 'aprovado' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : item.status === 'reprovado' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>{item.status}</span>
+                  <td className="p-4 pl-6 font-extrabold text-slate-900 uppercase tracking-tight">{item.empresa_nome}</td>
+                  <td className="p-4 font-mono text-slate-500">{item.cnpj}</td>
+                  <td className="p-4 text-center text-slate-500 font-mono">{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
+                  <td className="p-4 text-center">
+                    <span className={`inline-flex items-center px-2.5 py-1 text-[10px] font-black rounded-md uppercase tracking-wider shadow-xs ${item.status === 'aprovado' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : item.status === 'reprovado' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                      {item.status}
+                    </span>
                   </td>
-                  <td className="p-3.5 text-center">
-                    <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-sm transition-colors uppercase tracking-wide">
+                  <td className="p-4 text-center">
+                    <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md shadow-blue-500/20 transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 mx-auto w-[160px]">
                       🏛️ Entrar na Mesa
                     </button>
                   </td>
                   {isMaster && (
-                    <td className="p-3.5 bg-amber-50/20 border-l border-slate-200 text-center">
-                      <button onClick={() => handleForcarDecisaoPrompt(item)} className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 font-bold text-xs rounded-lg uppercase tracking-wide transition-all shadow-sm">
+                    <td className="p-4 bg-amber-50/20 border-l border-slate-200 text-center">
+                      <button onClick={() => handleForcarDecisaoPrompt(item)} className="px-3 py-2 bg-white border border-amber-300 hover:bg-amber-50 hover:border-amber-400 text-amber-700 font-bold text-[11px] rounded-xl uppercase tracking-wide transition-all shadow-sm flex items-center justify-center gap-1.5 mx-auto w-[150px]">
                         ⚡ Forçar Veredito
                       </button>
                     </td>
@@ -569,53 +595,64 @@ export default function ComitePage() {
                 </tr>
               ))}
               {analises.length === 0 && (
-                <tr><td colSpan={isMaster ? 6 : 5} className="p-8 text-center text-slate-400 italic">Nenhuma análise aguardando comitê no momento.</td></tr>
+                <tr><td colSpan={isMaster ? 6 : 5} className="p-10 text-center text-slate-400 italic font-bold">Nenhuma análise aguardando comitê no momento.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="space-y-3 pt-6">
-        <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-          <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-            ⚙️ Esteira de Processamento <span className="text-sm font-semibold text-slate-400 font-normal">(IA / Docs Pendentes)</span>
-          </h2>
-          <form onSubmit={handleCriarAnalise} className="flex gap-2 items-center">
-            <input type="text" placeholder="Nome da Empresa..." value={nomeNovaEmpresa} onChange={(e) => setNomeNovaEmpresa(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 w-[240px] font-medium" />
-            <button type="submit" className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap">➕ Nova Esteira</button>
+      <div className="space-y-4 pt-4">
+        {/* HEADER ESTEIRA SECUNDÁRIA */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-5 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-slate-100 text-slate-500 rounded-lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-800 tracking-tight">Esteira de Processamento</h2>
+              <span className="text-xs text-slate-500 font-medium">IA em andamento / Documentos Pendentes</span>
+            </div>
+          </div>
+          <form onSubmit={handleCriarAnalise} className="flex gap-2 items-center w-full md:w-auto">
+            <input type="text" placeholder="Nome da Empresa..." value={nomeNovaEmpresa} onChange={(e) => setNomeNovaEmpresa(e.target.value)} className="flex-1 md:w-[260px] p-2.5 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium shadow-inner" />
+            <button type="submit" className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer whitespace-nowrap">➕ Adicionar</button>
           </form>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse text-[13px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-xs tracking-wider">
-                <th className="p-3.5 pl-4">Empresa</th>
-                <th className="p-3.5 font-center">CNPJ</th>
-                <th className="p-3.5">Status Interno</th>
-                <th className="p-3.5 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-              {empresasAnalise.length === 0 ? (
-                <tr><td colSpan={4} className="p-8 text-center text-slate-400 italic">Nenhuma esteira pendente de docs ou processamento IA.</td></tr>
-              ) : (
-                empresasAnalise.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-3.5 pl-4 font-bold text-slate-900 uppercase">{item.empresa_nome}</td>
-                    <td className="p-3.5 font-mono text-slate-500 text-xs">{item.cnpj}</td>
-                    <td className="p-3.5">
-                      <span className="px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md font-bold text-[10px] uppercase tracking-wider animate-pulse">{item.status}</span>
-                    </td>
-                    <td className="p-3.5 text-center space-x-1.5">
-                      <button onClick={() => handleDeletarAnalise(item.id)} className="px-3 py-1 bg-white text-rose-600 border border-rose-200 font-bold rounded-md text-xs cursor-pointer hover:bg-rose-50 shadow-sm transition-all">✕ Remover</button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[900px]">
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-14">
+                  <th className="p-4 pl-6">Empresa</th>
+                  <th className="p-4 w-40">CNPJ</th>
+                  <th className="p-4 w-56">Status Interno</th>
+                  <th className="p-4 text-center w-36">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {empresasAnalise.length === 0 ? (
+                  <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic font-bold">Nenhuma esteira pendente de docs ou processamento IA.</td></tr>
+                ) : (
+                  empresasAnalise.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 pl-6 font-extrabold text-slate-900 uppercase tracking-tight">{item.empresa_nome}</td>
+                      <td className="p-4 font-mono text-slate-500">{item.cnpj}</td>
+                      <td className="p-4">
+                        <span className="inline-flex items-center px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md font-black text-[10px] uppercase tracking-wider animate-pulse shadow-xs">
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <button onClick={() => handleDeletarAnalise(item.id)} className="px-4 py-1.5 bg-white text-rose-600 border border-rose-200 hover:border-rose-300 font-bold rounded-xl text-xs cursor-pointer hover:bg-rose-50 shadow-sm transition-all">✕ Remover</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
