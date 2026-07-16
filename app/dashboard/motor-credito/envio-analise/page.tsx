@@ -570,6 +570,17 @@ export default function MotorCreditoPage() {
                     {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
                       empresaParaDocs.dados_documentos.map((url, i) => {
                         const isPdf = url.toLowerCase().includes('.pdf');
+                        
+                        // 🔥 Extraindo o nome real do arquivo da URL do R2
+                        let nomeRealArquivo = `Anexo_${i+1}`;
+                        try {
+                          const urlPartes = url.split(/[?#]/)[0].split('/'); // Ignora query params e quebra pelas barras
+                          let ultimoTrecho = urlPartes[urlPartes.length - 1];
+                          nomeRealArquivo = decodeURIComponent(ultimoTrecho); // Converte %20 em espaço, etc.
+                        } catch (e) {
+                          nomeRealArquivo = `Anexo_Injetado_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
+                        }
+
                         return (
                           <a 
                             key={i} 
@@ -577,11 +588,12 @@ export default function MotorCreditoPage() {
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
+                            title={nomeRealArquivo} // Mostra o nome completo ao passar o mouse
                           >
                             <div className="flex items-center gap-2 truncate pr-2">
-                              <span className="text-xl">{isPdf ? "📄" : "🖼️"}</span>
+                              <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
                               <span className="text-xs font-bold text-slate-600 truncate group-hover:text-blue-700 transition-colors">
-                                Anexo_Injetado_0${i+1}{isPdf ? ".pdf" : ".jpg"}
+                                {nomeRealArquivo}
                               </span>
                             </div>
                             <span className="text-[9px] bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
@@ -596,14 +608,3 @@ export default function MotorCreditoPage() {
                       </div>
                     )}
                   </div>
-                </div>
-
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-}
