@@ -360,7 +360,7 @@ export const gerarHtmlDossie = async (item: any) => {
                   RATING: <span style="color: #fde047;">${analise.rating || 'N/A'}</span>
               </div>
               <div class="badge-top" style="background: white; color: var(--blue-dark);">
-                  PARECER: ${analise.recomendacao_analista || 'EM ANÁLISE'}
+                  RECOMENDAÇÃO DO ANALISTA: ${analise.recomendacao_analista || 'EM ANÁLISE'}
               </div>
           </div>
       </div>
