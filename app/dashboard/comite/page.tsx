@@ -61,7 +61,6 @@ export default function ComitePage() {
   const vasculharImagensR2 = async (analiseItem: any) => {
     let prefixoPasta = `clientes/${analiseItem.id}/`; 
     
-    // Descobre o prefixo pela primeira URL de documento
     if (analiseItem.dados_documentos && analiseItem.dados_documentos.length > 0) {
       try {
         const urlBase = new URL(analiseItem.dados_documentos[0]);
@@ -104,18 +103,14 @@ export default function ComitePage() {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-        // 🛡️ Filtro de escopo comercial blindado (ilike)
         if (cargoUser === "comercial" && user.nome) {
           queryComite = queryComite.ilike("comercial", `%${user.nome}%`);
           queryEsteira = queryEsteira.ilike("comercial", `%${user.nome}%`);
         }
       }
       
-      // Carrega pauta ativa do comitê
       const { data: dataComite } = await queryComite.eq("status", "aberta").order("criado_em", { ascending: false });
       if (dataComite) {
-        
-        // 🚀 Injeta as fotos únicas de nuvem dentro do objeto ANTES de renderizar o comitê!
         const analisesComImagensR2 = await Promise.all(dataComite.map(async (item) => {
            const urlsR2 = await vasculharImagensR2(item);
            return { ...item, todas_as_imagens_r2: urlsR2 };
@@ -127,7 +122,6 @@ export default function ComitePage() {
         }
       }
 
-      // Carrega esteira operacional pendente 
       const { data: dataAnalise } = await queryEsteira.in("status", ["em_processamento_ia", "aguardando_docs"]).order("criado_em", { ascending: false });
       if (dataAnalise) setEmpresasAnalise(dataAnalise);
 
@@ -320,7 +314,7 @@ export default function ComitePage() {
       const { error } = await supabase.from("analises").insert({
         empresa_nome: nomeNovaEmpresa.trim().toUpperCase(),
         caminho_local: "INCLUSAO_MANUAL", 
-        cnpj: `MANUAL-${Date.now()}`, // 👈 Nunca vai repetir!
+        cnpj: `MANUAL-${Date.now()}`,
         status: "aguardando_docs"
       });
       if (error) throw error;
@@ -345,7 +339,19 @@ export default function ComitePage() {
     } finally { setCarregando(false); }
   };
 
-  // 🔥 A MÁGICA ACONTECE AQUI: Geramos o HTML pelo import e jogamos no state
+  const handleForcarDecisaoPrompt = (item: any) => {
+    const res = prompt(`Forçar Decisão Executiva para ${item.empresa_nome}\n\nDigite "Aprovar" ou "Reprovar":`);
+    if (!res) return;
+    const cleanRes = res.trim().toLowerCase();
+    if (cleanRes === "aprovar" || cleanRes === "aprovado") {
+      forcarDecisaoMaster(item, "Aprovado");
+    } else if (cleanRes === "reprovar" || cleanRes === "reprovado") {
+      forcarDecisaoMaster(item, "Reprovado");
+    } else {
+      alert("Comando inválido. Operação cancelada.");
+    }
+  };
+
   const activarModoLupaExecutiva = async (empresa: any) => {
     setCarregando(true);
     try {
@@ -353,7 +359,6 @@ export default function ComitePage() {
       setIdEmpresaExpandida(empresa.id); 
       setModoFocoComite(true);
       
-      // Usa a nova função importada do arquivo de gerar-analise!
       const htmlMontado = await gerarHtmlDossie(empresa);
       setHtmlDossieRenderizado(htmlMontado);
       
@@ -382,42 +387,40 @@ export default function ComitePage() {
     if (!novaMsg.trim()) return;
     const { data } = await supabase.from("chat_comite").insert({ 
       empresa_nome: empresaNome, 
-      usuario: nomeUsuarioLogado || "Alyson (Web)", 
+      usuario: nomeUsuarioLogado || "Membro (Web)", 
       mensagem: novaMsg.trim() 
     }).select();
     if (data) setChatMsgs([...chatMsgs, data[0]]);
     setNovaMsg("");
   };
 
-  // 🔮 MODO COMITÊ TELA CHEIA ATIVO
+  // 🔮 MODO COMITÊ TELA CHEIA ATIVO (VISUAL LIGHT & CLEAN)
   if (modoFocoComite && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
 
     return (
-      <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px]">
-        <div className="bg-slate-950 text-white p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-800 shrink-0">
+      <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px]">
+        {/* CABEÇALHO DO COMITÊ (CLARO) */}
+        <div className="bg-white text-slate-800 p-3 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-base font-black tracking-tight text-blue-400">🏛️ COMITÊ EXECUTIVO DE CRÉDITO:</span>
-            <h2 className="text-base font-black uppercase text-white tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
-            <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/30 font-bold px-2 py-0.5 rounded uppercase">{empresaFocoAtivo.status || "Em análise"}</span>
+            <span className="text-base font-black tracking-tight text-blue-600">🏛️ COMITÊ DE CRÉDITO</span>
+            <span className="text-slate-300">|</span>
+            <h2 className="text-base font-black uppercase tracking-wide">{empresaFocoAtivo.empresa_nome}</h2>
+            <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-bold px-2 py-0.5 rounded-full uppercase ml-2">{empresaFocoAtivo.status || "Em análise"}</span>
           </div>
           <div className="flex items-center gap-4">
-            {isMaster && (
-              <div className="flex gap-2 bg-slate-900/60 p-1 rounded-lg border border-slate-800 mr-2">
-                <button onClick={() => forcarDecisaoMaster(empresaFocoAtivo, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded uppercase transition-all">✅ Aprovar</button>
-                <button onClick={() => forcarDecisaoMaster(empresaFocoAtivo, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded uppercase transition-all">⛔ Reprovar</button>
-              </div>
-            )}
-            <button onClick={desativarModoLupaExecutiva} className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wider">
-              ✕ Sair do Modo Comitê
+            <button onClick={desativarModoLupaExecutiva} className="px-5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-md shadow-sm transition-all cursor-pointer uppercase tracking-wide">
+              ✕ Sair da Mesa
             </button>
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden w-full bg-slate-900">
-          <div className="w-[70%] h-full p-4 border-r border-slate-800 flex flex-col">
-            <div className="flex-1 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800 relative">
-              {/* ALIMENTANDO O IFRAME COM O STATE GERADO PELA FUNÇÃO UNIVERSAL */}
+        {/* CORPO PRINCIPAL */}
+        <div className="flex-1 flex overflow-hidden w-full bg-slate-50">
+          
+          {/* DOSSIÊ HTML (ESQUERDA) */}
+          <div className="w-[70%] h-full p-4 flex flex-col">
+            <div className="flex-1 bg-white rounded-xl shadow-md overflow-hidden border border-slate-200 relative">
               <iframe 
                 srcDoc={htmlDossieRenderizado} 
                 className="w-full h-full border-0 bg-white" 
@@ -426,174 +429,190 @@ export default function ComitePage() {
             </div>
           </div>
 
-          <div className="w-[30%] h-full p-4 flex flex-col space-y-4 bg-slate-950/40">
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md space-y-3 shrink-0 text-left">
-              <div className="flex justify-between items-center">
-                <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">🗳️ Painel de Voto</span>
-                <span className="text-[11px] text-blue-400 font-bold bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900/50">👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}</span>
+          {/* PAINEL DE CONTROLE (DIREITA) */}
+          <div className="w-[30%] h-full p-4 pl-0 flex flex-col space-y-4">
+            
+            {/* PAINEL DE VOTAÇÃO */}
+            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-3 shrink-0 text-left">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <span className="text-[12px] font-black text-slate-600 uppercase tracking-wider">🗳️ Painel de Voto</span>
+                <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                  👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
+                </span>
               </div>
               
               {(!isMaster && !isDiretor) ? (
-                <div className="p-3 bg-red-950/30 text-red-400 font-bold text-xs rounded border border-red-900/50">
-                  🔒 Seu perfil atual ({nomeUsuarioLogado}) está mapeado como consulta/operacional. Voto bloqueado.
+                <div className="p-3 bg-slate-50 text-slate-500 font-bold text-xs rounded-lg border border-slate-200 text-center">
+                  🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-2">
-                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-bold outline-none cursor-pointer">
-                    <option value="">Selecione o seu Voto</option>
+                <div className="grid grid-cols-1 gap-2.5 pt-1">
+                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-2.5 bg-slate-50 text-slate-800 border border-slate-200 rounded-lg text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 transition-all">
+                    <option value="">Selecione o seu Veredito...</option>
                     <option value="Aprovado">🟢 Aprovado</option>
                     <option value="Reprovado">🔴 Reprovado</option>
                   </select>
 
                   {isMaster && (
-                    <label className="flex items-center gap-2 p-1 text-slate-300 font-bold text-xs bg-slate-950/50 rounded border border-slate-800/80 cursor-pointer hover:bg-slate-950 select-none">
-                      <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-blue-600 rounded bg-slate-950 border-slate-800" />
-                      Assegurar este voto como a <span className="text-amber-400">Decisão Final</span>
+                    <label className="flex items-center gap-2 p-2.5 text-slate-700 font-bold text-xs bg-amber-50 rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors select-none shadow-sm">
+                      <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
+                      Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
                     </label>
                   )}
 
-                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Justificativa ou parecer técnico do comitê..." className="w-full p-2 bg-slate-950 text-white border border-slate-800 rounded text-xs font-medium outline-none h-16 resize-none" />
-                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition-all cursor-pointer shadow-md">
-                    {enviandoVoto ? "Computando Parecer..." : "Confirmar e Lançar Voto"}
+                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 h-16 resize-none transition-all" />
+                  
+                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer shadow-md uppercase tracking-wide">
+                    {enviandoVoto ? "Computando..." : "Confirmar Voto"}
                   </button>
                 </div>
               )}
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">📋 Histórico de Pareceres</span>
-              <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+            {/* HISTÓRICO DE PARECERES */}
+            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[12px] font-black text-slate-600 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2">📋 Pareceres Registrados</span>
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
                 {listaDeVotos.length === 0 ? (
-                  <p className="text-slate-500 italic text-xs py-8 text-center">Nenhum voto lançado em mesa.</p>
+                  <p className="text-slate-400 italic text-xs py-8 text-center">A mesa ainda não possui votos computados.</p>
                 ) : (
                   listaDeVotos.map((v: any, idx: number) => (
-                    <div key={idx} className="p-2.5 border border-slate-800 rounded-lg bg-slate-950/60 flex flex-col gap-1 text-xs">
+                    <div key={idx} className="p-3 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-1.5 text-xs shadow-sm">
                       <div className="flex justify-between items-center font-bold">
-                        <span className="text-slate-200">{v.membro_nome}</span>
-                        <span className={`px-2 py-0.5 rounded text-[9px] uppercase font-black ${v.voto === "Aprovado" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}>{v.voto}</span>
+                        <span className="text-slate-800">{v.membro_nome}</span>
+                        <span className={`px-2 py-0.5 rounded-md text-[9px] uppercase font-black tracking-wide ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
                       </div>
-                      <span className="text-slate-400 italic font-medium">"{v.justificativa}"</span>
+                      <span className="text-slate-600 font-medium leading-relaxed">"{v.justificativa}"</span>
                     </div>
                   ))
                 )}
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[11px] font-black text-slate-400 uppercase block tracking-wider mb-2">💬 Mesa de Debates</span>
-              <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg p-2 space-y-2 bg-slate-950/40">
+            {/* CHAT / MESA DE DEBATES */}
+            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+              <span className="text-[12px] font-black text-slate-600 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2">💬 Mesa de Debates (Ao Vivo)</span>
+              <div className="flex-1 overflow-y-auto rounded-lg p-1 space-y-2.5 custom-scrollbar">
                 {chatMsgs.length === 0 ? (
-                  <p className="text-center text-slate-600 py-10 text-xs italic">Nenhum comentário registrado.</p>
+                  <p className="text-center text-slate-400 py-10 text-xs italic">Nenhum comentário registrado no chat.</p>
                 ) : (
-                  chatMsgs.map((m: any) => (
-                    <div key={m.id} className="bg-slate-950 p-2 rounded-lg border border-slate-800/60 text-xs">
-                      <span className="font-bold text-blue-400">{m.usuario}</span>: <span className="text-slate-300 font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
-                    </div>
-                  ))
+                  chatMsgs.map((m: any) => {
+                    const ehMeu = m.usuario === nomeUsuarioLogado;
+                    return (
+                      <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
+                        <span className="text-[10px] font-bold text-slate-400 mb-0.5 px-1">{m.usuario}</span>
+                        <div className={`p-2.5 rounded-xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
+                          <span className="font-medium whitespace-pre-wrap break-words">{m.mensagem}</span>
+                        </div>
+                      </div>
+                    )
+                  })
                 )}
               </div>
-              <div className="flex gap-2 mt-2 shrink-0">
-                <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Mensagem..." className="flex-1 p-2 bg-slate-950 text-white border border-slate-800 rounded-lg text-xs outline-none focus:border-blue-500 font-medium" />
-                <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 rounded-lg cursor-pointer transition-all">Mandar</button>
+              <div className="flex gap-2 mt-3 shrink-0 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
+                <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 rounded-md cursor-pointer transition-all shadow-sm">Enviar</button>
               </div>
             </div>
+
           </div>
         </div>
       </div>
     );
   }
 
-  // 🏛️ RENDERIZAÇÃO DA VISÃO PADRÃO
+  // 🏛️ RENDERIZAÇÃO DA VISÃO PADRÃO (CAPA)
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto pb-8 text-[13px]">
-      {carregando && <div className="fixed inset-0 bg-white/40 z-50 flex items-center justify-center font-bold text-slate-500">Sincronizando esteira...</div>}
+      {carregando && <div className="fixed inset-0 bg-white/60 backdrop-blur-sm z-50 flex items-center justify-center font-bold text-slate-600 text-lg tracking-wide">Sincronizando esteira...</div>}
       
-      <div className="space-y-2">
-        <div className="border-b border-slate-200 pb-1.5 flex justify-between items-center">
-          <h2 className="text-lg font-bold text-slate-800 tracking-tight">📋 Análises Em Comitê (Mesa V8)</h2>
-          {isMaster && <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded">⚡ Master Ativo</span>}
+      <div className="space-y-3">
+        <div className="border-b border-slate-200 pb-2 flex justify-between items-center">
+          <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
+            📋 Análises Em Comitê <span className="text-sm font-semibold text-slate-400 font-normal">(Mesa V8)</span>
+          </h2>
+          {isMaster && <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-md">⚡ Perfil Master</span>}
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse text-[13px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-xs tracking-wider">
-                <th className="p-2.5">Empresa / Cedente</th>
-                <th className="p-2.5">CNPJ</th>
-                <th className="p-2.5 text-center">Entrada</th>
-                <th className="p-2.5 text-center">Status</th>
-                <th className="p-2.5 text-center">Ações Gerais</th>
-                {isMaster && <th className="p-2.5 text-center bg-slate-100 text-slate-800 border-l border-slate-200">⚡ AÇÃO MASTER</th>}
+              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-xs tracking-wider">
+                <th className="p-3.5 pl-4">Empresa / Cedente</th>
+                <th className="p-3.5">CNPJ</th>
+                <th className="p-3.5 text-center">Data Entrada</th>
+                <th className="p-3.5 text-center">Status Atual</th>
+                <th className="p-3.5 text-center">Ações</th>
+                {isMaster && <th className="p-3.5 text-center text-amber-700 bg-amber-50/50 border-l border-slate-200">Ação Executiva</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
               {analises.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/50">
-                  <td className="p-2.5 font-bold text-slate-900 uppercase">{item.empresa_nome}</td>
-                  <td className="p-2.5 font-mono text-slate-500">{item.cnpj}</td>
-                  <td className="p-2.5 text-center text-slate-500 font-mono">{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
-                  <td className="p-2.5 text-center">
-                    <span className={`px-2 py-0.5 text-[11px] font-bold rounded-md uppercase ${item.status === 'aprovado' ? 'bg-green-50 text-green-700 border border-green-200' : item.status === 'reprovado' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>{item.status}</span>
+                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-3.5 pl-4 font-bold text-slate-900 uppercase">{item.empresa_nome}</td>
+                  <td className="p-3.5 font-mono text-slate-500 text-xs">{item.cnpj}</td>
+                  <td className="p-3.5 text-center text-slate-500 font-mono text-xs">{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
+                  <td className="p-3.5 text-center">
+                    <span className={`px-2.5 py-1 text-[10px] font-bold rounded-md uppercase tracking-wider ${item.status === 'aprovado' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : item.status === 'reprovado' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>{item.status}</span>
                   </td>
-                  <td className="p-2.5 text-center">
-                    <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors uppercase tracking-wide">
-                      🏛️ Entrar em Mesa
+                  <td className="p-3.5 text-center">
+                    <button onClick={() => activarModoLupaExecutiva(item)} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-sm transition-colors uppercase tracking-wide">
+                      🏛️ Entrar na Mesa
                     </button>
                   </td>
                   {isMaster && (
-                    <td className="p-2.5 bg-slate-50 border-l border-slate-200 text-center space-x-2">
-                      <button onClick={() => forcarDecisaoMaster(item, "Aprovado")} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded uppercase tracking-wider transition-all">✅ Aprovar</button>
-                      <button onClick={() => forcarDecisaoMaster(item, "Reprovado")} className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded uppercase tracking-wider transition-all">⛔ Reprovar</button>
+                    <td className="p-3.5 bg-amber-50/20 border-l border-slate-200 text-center">
+                      <button onClick={() => handleForcarDecisaoPrompt(item)} className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 font-bold text-xs rounded-lg uppercase tracking-wide transition-all shadow-sm">
+                        ⚡ Forçar Veredito
+                      </button>
                     </td>
                   )}
                 </tr>
               ))}
               {analises.length === 0 && (
-                <tr><td colSpan={isMaster ? 6 : 5} className="p-4 text-center text-slate-400 italic">Nenhuma análise em pauta na mesa com status "aberta".</td></tr>
+                <tr><td colSpan={isMaster ? 6 : 5} className="p-8 text-center text-slate-400 italic">Nenhuma análise aguardando comitê no momento.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="space-y-3 pt-4">
+      <div className="space-y-3 pt-6">
         <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-          <div>
-            <h2 className="text-lg font-bold text-slate-800 tracking-tight">🔍 Esteira em Processamento Automático (IA / Docs)</h2>
-          </div>
+          <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
+            ⚙️ Esteira de Processamento <span className="text-sm font-semibold text-slate-400 font-normal">(IA / Docs Pendentes)</span>
+          </h2>
           <form onSubmit={handleCriarAnalise} className="flex gap-2 items-center">
-            <input type="text" placeholder="Nome da Empresa..." value={nomeNovaEmpresa} onChange={(e) => setNomeNovaEmpresa(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 w-[240px] font-medium" />
-            <button type="submit" className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer">➕ Nova Esteira</button>
+            <input type="text" placeholder="Nome da Empresa..." value={nomeNovaEmpresa} onChange={(e) => setNomeNovaEmpresa(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 w-[240px] font-medium" />
+            <button type="submit" className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap">➕ Nova Esteira</button>
           </form>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse text-[13px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-xs tracking-wider">
-                <th className="p-2.5">Empresa</th>
-                <th className="p-2.5 font-center">CNPJ</th>
-                <th className="p-2.5">Status Interno</th>
-                <th className="p-2.5 text-center">Ações</th>
+              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500 text-xs tracking-wider">
+                <th className="p-3.5 pl-4">Empresa</th>
+                <th className="p-3.5 font-center">CNPJ</th>
+                <th className="p-3.5">Status Interno</th>
+                <th className="p-3.5 text-center">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
               {empresasAnalise.length === 0 ? (
-                <tr><td colSpan={4} className="p-4 text-center text-slate-400 italic">Nenhuma esteira pendente de docs ou IA.</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400 italic">Nenhuma esteira pendente de docs ou processamento IA.</td></tr>
               ) : (
-                empresasAnalise.map((item) => {
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-50/40">
-                      <td className="p-2.5 font-bold text-blue-900 uppercase">{item.empresa_nome}</td>
-                      <td className="p-2.5 font-mono text-slate-500">{item.cnpj}</td>
-                      <td className="p-2.5">
-                        <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded font-black text-[10px] uppercase tracking-wider animate-pulse">{item.status}</span>
-                      </td>
-                      <td className="p-2.5 text-center space-x-1.5">
-                        <button onClick={() => handleDeletarAnalise(item.id)} className="px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 font-bold rounded text-xs cursor-pointer hover:bg-rose-100">✕ Remover</button>
-                      </td>
-                    </tr>
-                  );
-                })
+                empresasAnalise.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-3.5 pl-4 font-bold text-slate-900 uppercase">{item.empresa_nome}</td>
+                    <td className="p-3.5 font-mono text-slate-500 text-xs">{item.cnpj}</td>
+                    <td className="p-3.5">
+                      <span className="px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md font-bold text-[10px] uppercase tracking-wider animate-pulse">{item.status}</span>
+                    </td>
+                    <td className="p-3.5 text-center space-x-1.5">
+                      <button onClick={() => handleDeletarAnalise(item.id)} className="px-3 py-1 bg-white text-rose-600 border border-rose-200 font-bold rounded-md text-xs cursor-pointer hover:bg-rose-50 shadow-sm transition-all">✕ Remover</button>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
