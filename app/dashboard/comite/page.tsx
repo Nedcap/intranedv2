@@ -516,8 +516,8 @@ export default function ComitePage() {
                 )
               ) : (
                 <div className="flex-1 overflow-y-auto p-2 bg-slate-50 custom-scrollbar">
-                   {/* Injeção do Gerador Kappi */}
-                   <GerarKappiViewer />
+                   {/* Injeção do Gerador Kappi Automático com os documentos passados */}
+                   <GerarKappiViewer urlsDocumentos={empresaFocoAtivo?.dados_documentos || []} />
                 </div>
               )}
             </div>

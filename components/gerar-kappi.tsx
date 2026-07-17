@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 
 // ============================================================================
 // 1. MOTOR DE LEITURA E PARSING INTELIGENTE DO EXCEL KAPPI
 // ============================================================================
-export const lerExcelKappi = async (file: File) => {
-  const data = await file.arrayBuffer();
+export const lerExcelKappi = async (fileOrBuffer: File | ArrayBuffer) => {
+  const data = fileOrBuffer instanceof File ? await fileOrBuffer.arrayBuffer() : fileOrBuffer;
   const workbook = XLSX.read(data, { type: "array" });
   const result: any = {};
 
@@ -315,68 +315,86 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
 };
 
 // ============================================================================
-// 3. COMPONENTE REACT DE INTERFACE (O VIEWER / UPLOADER)
+// 3. COMPONENTE REACT DE INTERFACE (AUTO VIEWER EMBED)
 // ============================================================================
-export default function GerarKappiViewer() {
-  const [file, setFile] = useState<File | null>(null);
-  const [gerando, setGerando] = useState(false);
+export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: string[] }) {
+  const [htmlKappiRenderizado, setHtmlKappiRenderizado] = useState<string>("");
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-    }
-  };
+  useEffect(() => {
+    const puxarEProcessarPlanilha = async () => {
+      if (!urlsDocumentos || urlsDocumentos.length === 0) {
+        setCarregando(false);
+        setErro("Nenhum documento anexado à esta análise.");
+        return;
+      }
 
-  const gerarDossieKappi = async () => {
-    if (!file) return;
-    setGerando(true);
-    try {
-      // 1. Converte o Excel para JSON Estruturado
-      const dataJson = await lerExcelKappi(file);
-      
-      // 2. Converte o JSON para o HTML do Dossiê
-      const htmlContent = await gerarHtmlKappi(dataJson, file.name);
-      
-      // 3. Abre em uma nova aba pronta pra impressão
-      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      
-    } catch (error) {
-      console.error(error);
-      alert("❌ Falha ao processar e transformar a planilha do Kappi.");
-    } finally {
-      setGerando(false);
-    }
-  };
+      // Procura a URL que seja uma planilha do Excel
+      const urlKappi = urlsDocumentos.find(url => url.toLowerCase().includes('.xlsx') || url.toLowerCase().includes('.xls'));
+
+      if (!urlKappi) {
+        setCarregando(false);
+        setErro("Nenhuma planilha do Kappi (.xlsx) localizada nos anexos.");
+        return;
+      }
+
+      try {
+        setCarregando(true);
+        // Baixa o arquivo em formato ArrayBuffer
+        const response = await fetch(urlKappi);
+        if (!response.ok) throw new Error("Falha ao baixar o arquivo da nuvem R2.");
+        const buffer = await response.arrayBuffer();
+
+        // Faz o parse do Excel
+        const dataJson = await lerExcelKappi(buffer);
+        
+        // Monta o HTML
+        let nomeLimpo = "Planilha_Kappi.xlsx";
+        try {
+          const partes = urlKappi.split('/');
+          nomeLimpo = decodeURIComponent(partes[partes.length - 1].split('?')[0]);
+        } catch(e) {}
+
+        const html = await gerarHtmlKappi(dataJson, nomeLimpo);
+        setHtmlKappiRenderizado(html);
+        setCarregando(false);
+
+      } catch (err: any) {
+        console.error(err);
+        setErro("Falha ao compilar a planilha do Kappi. O arquivo pode estar corrompido ou o navegador bloqueou o download (CORS).");
+        setCarregando(false);
+      }
+    };
+
+    puxarEProcessarPlanilha();
+  }, [urlsDocumentos]);
+
+  if (carregando) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-500 italic text-xs gap-3 font-mono border border-slate-200 rounded-2xl">
+        <span className="animate-spin text-2xl">⏳</span>
+        Compilando relatórios Kappi da nuvem...
+      </div>
+    );
+  }
+
+  if (erro) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-500 italic text-xs gap-3 font-mono border border-slate-200 rounded-2xl p-6 text-center">
+        <span className="text-3xl">⚠️</span>
+        {erro}
+        <br/><br/>
+        O visualizador necessita de um arquivo <b>.xlsx</b> anexado junto aos documentos base da empresa para gerar o dossiê executivo.
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-4 p-6 bg-white border border-slate-200 rounded-xl shadow-sm">
-      <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wider flex items-center gap-2">
-        <span>🕵️‍♂️</span> Visualizador Avançado Kappi
-      </h3>
-      <p className="text-xs text-slate-500 leading-relaxed">
-        Faça o upload da planilha bruta extraída do Kappi. O sistema irá consolidar as dezenas de abas, agrupar os passivos judiciais e destacar apenas as restrições relevantes em um Dossiê HTML limpo para a Mesa de Crédito.
-      </p>
-      
-      <input 
-        type="file" 
-        accept=".xlsx, .xls"
-        onChange={handleFileUpload}
-        className="block w-full text-xs text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition-colors cursor-pointer"
-      />
-
-      <button 
-        onClick={gerarDossieKappi}
-        disabled={!file || gerando}
-        className="bg-slate-900 hover:bg-black text-white font-bold px-4 py-3 rounded-lg text-xs uppercase tracking-wider transition-colors disabled:opacity-50 flex justify-center items-center gap-2 mt-2"
-      >
-        {gerando ? (
-           <><span className="animate-spin text-base">⏳</span> Processando Planilha...</>
-        ) : (
-           <>🖨️ Gerar Dossiê Executivo (HTML)</>
-        )}
-      </button>
-    </div>
+    <iframe 
+      srcDoc={htmlKappiRenderizado} 
+      className="w-full h-full border-0 bg-white" 
+      sandbox="allow-scripts allow-same-origin" 
+    />
   );
 }
