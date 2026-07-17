@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import UploadDocs from "@/components/UploadDocs";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import JSZip from "jszip"; // 🔥 BIBLIOTECA NOVA IMPORTADA AQUI!
+import JSZip from "jszip"; 
 
 interface Empresa {
   cnpj: string;
@@ -39,11 +39,14 @@ export default function MotorCreditoPage() {
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
 
+  // Estados do Modal de Documentos Mapeados (Visualização)
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
-  
-  // 🔥 ESTADO DE LOADING DO ZIP
   const [isZipping, setIsZipping] = useState(false);
+
+  // 🔥 NOVOS ESTADOS: Modal de Envio Complementar
+  const [isUploadExtraOpen, setIsUploadExtraOpen] = useState(false);
+  const [analiseAlvoUpload, setAnaliseAlvoUpload] = useState<FilaItem | null>(null);
 
   useEffect(() => {
     carregarFilaComercial();
@@ -107,6 +110,9 @@ export default function MotorCreditoPage() {
     }
   };
 
+  // =========================================================================
+  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA)
+  // =========================================================================
   const registrarAnaliseNoSupabase = async (urlsDocumentos: string[], urlsImagens: string[] = []) => {
     if (!empresaSelecionada) return;
 
@@ -139,6 +145,11 @@ export default function MotorCreditoPage() {
         throw new Error("Usuário não autenticado. Faça login novamente.");
       }
 
+      // 🔥 AUTO-VINCULAÇÃO INTELIGENTE DO COMERCIAL
+      const userStr = localStorage.getItem("intraned_user");
+      const localUser = userStr ? JSON.parse(userStr) : null;
+      const nomeComercialLogado = localUser?.nome || "";
+
       setStatusTexto("🤖 Registrando lote virgem de entrada na mesa...");
 
       const { data: novaAnalise, error: insertError } = await supabase
@@ -151,6 +162,7 @@ export default function MotorCreditoPage() {
           status_comite: "pendente",
           ia_inicio: new Date().toISOString(),
           responsavel_id: user.id,
+          comercial: nomeComercialLogado, // 👈 Registrando automaticamente!
 
           dados_documentos: urlsDocumentos,
           checklist_ia: {}, 
@@ -184,18 +196,15 @@ export default function MotorCreditoPage() {
       if (novaAnalise && urlsDocumentos.length > 0) {
         setStatusTexto("🔮 Robô V8 processando os PDFs da nova análise em background...");
         
-        const resIA = await fetch("/api/motor-ia", {
+        await fetch("/api/motor-ia", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             analise_id: novaAnalise.id,
-            urls_documentos: urlsDocumentos
+            urls_documentos: urlsDocumentos,
+            modo_atualizacao: false // Largada inicial
           })
         });
-
-        if (!resIA.ok) {
-          console.error("Aviso: Falha na requisição de largada do motor V8.");
-        }
       }
 
       alert("🚀 Nova análise registrada com segurança! O Motor V8 assumiu o processamento.");
@@ -208,6 +217,71 @@ export default function MotorCreditoPage() {
     } catch (err: any) {
       console.error("Erro no fluxo de registro:", err);
       alert("⚠️ Erro ao registrar na esteira: " + err.message);
+    } finally {
+      setLoading(false);
+      setStatusTexto("");
+    }
+  };
+
+  // =========================================================================
+  // ➕ ENVIO COMPLEMENTAR DE DOCUMENTOS
+  // =========================================================================
+  const abrirModalEnvioExtra = (item: FilaItem) => {
+    setAnaliseAlvoUpload(item);
+    setIsUploadExtraOpen(true);
+  };
+
+  const lidarUploadExtra = async (urlsDocumentosNovos: string[], urlsImagensNovas: string[]) => {
+    if (!analiseAlvoUpload) return;
+    if (urlsDocumentosNovos.length === 0 && urlsImagensNovas.length === 0) return;
+
+    setLoading(true);
+    setStatusTexto("🔄 Acoplando documentos complementares à base...");
+
+    try {
+      // 1. Busca o array de documentos atual que já estava na nuvem
+      const { data: analiseAtual, error: fetchErr } = await supabase
+        .from("analises")
+        .select("dados_documentos")
+        .eq("id", analiseAlvoUpload.id)
+        .single();
+
+      if (fetchErr) throw fetchErr;
+
+      const docsAtuais = analiseAtual.dados_documentos || [];
+      const todosDocsCombinados = [...docsAtuais, ...urlsDocumentosNovos]; // Merge dos links
+
+      // 2. Atualiza o banco de dados da análise com o array somado
+      const { error: updateErr } = await supabase
+        .from("analises")
+        .update({ dados_documentos: todosDocsCombinados })
+        .eq("id", analiseAlvoUpload.id);
+
+      if (updateErr) throw updateErr;
+
+      // 3. Dispara a IA passando APENAS OS DOCUMENTOS NOVOS (modo merge)
+      if (urlsDocumentosNovos.length > 0) {
+        setStatusTexto("🧠 Robô V8 lendo arquivos extras...");
+        
+        await fetch("/api/motor-ia", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analise_id: analiseAlvoUpload.id,
+            urls_documentos: urlsDocumentosNovos, // Apenas os novos para economizar tokens
+            modo_atualizacao: true // 👈 Essa flag avisa o Python para não sobrescrever e não zerar status
+          })
+        });
+      }
+
+      alert("✅ Documentos complementares injetados e processando com sucesso!");
+      setIsUploadExtraOpen(false);
+      setAnaliseAlvoUpload(null);
+      await carregarFilaComercial();
+
+    } catch (err: any) {
+      console.error(err);
+      alert("❌ Erro no envio complementar: " + err.message);
     } finally {
       setLoading(false);
       setStatusTexto("");
@@ -241,24 +315,21 @@ export default function MotorCreditoPage() {
     setIsDocsModalOpen(true);
   };
 
-  // 🔥 A MÁGICA DE EMPACOTAR OS DOCUMENTOS ACONTECE AQUI
   const baixarTudoZip = async () => {
     if (!empresaParaDocs?.dados_documentos || empresaParaDocs.dados_documentos.length === 0) return;
     
     setIsZipping(true);
     try {
       const zip = new JSZip();
-      const nomePasta = empresaParaDocs.empresa_nome.replace(/[^a-zA-Z0-9]/g, "_"); // Limpa o nome para virar pasta
+      const nomePasta = empresaParaDocs.empresa_nome.replace(/[^a-zA-Z0-9]/g, "_"); 
       const folder = zip.folder(nomePasta);
 
       if (!folder) throw new Error("Erro ao criar diretório ZIP.");
 
       const fetchPromises = empresaParaDocs.dados_documentos.map(async (url, i) => {
-        // Baixa o arquivo do R2
         const res = await fetch(url);
         const blob = await res.blob();
         
-        // Descobre o nome do arquivo
         let fileName = `Anexo_${i+1}`;
         try {
           const urlPartes = url.split(/[?#]/)[0].split('/');
@@ -268,18 +339,14 @@ export default function MotorCreditoPage() {
           fileName = `Anexo_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
         }
         
-        // Joga dentro da pasta do Zip
         folder.file(fileName, blob);
       });
 
-      // Aguarda todos os downloads terminarem
       await Promise.all(fetchPromises);
 
-      // Gera o arquivo final
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const downloadUrl = URL.createObjectURL(zipBlob);
       
-      // Força o navegador a baixar
       const a = document.createElement("a");
       a.href = downloadUrl;
       a.download = `Docs_${nomePasta}.zip`;
@@ -290,7 +357,7 @@ export default function MotorCreditoPage() {
 
     } catch (err) {
       console.error("Erro ao gerar ZIP:", err);
-      alert("⚠️ Erro ao empacotar arquivos. Se persistir, o navegador pode estar bloqueando múltiplos downloads (CORS).");
+      alert("⚠️ Erro ao empacotar arquivos. Verifique bloqueios de CORS do navegador.");
     } finally {
       setIsZipping(false);
     }
@@ -326,9 +393,9 @@ export default function MotorCreditoPage() {
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1700px] mx-auto space-y-8 relative">
         
-        {/* OVERLAY DE LOADING */}
+        {/* OVERLAY DE LOADING GLOBAL */}
         {statusTexto && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center font-bold text-white text-sm gap-4 transition-all">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex flex-col items-center justify-center font-bold text-white text-sm gap-4 transition-all">
             <div className="w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
             <span className="tracking-wide uppercase text-xs">{statusTexto}</span>
           </div>
@@ -351,7 +418,7 @@ export default function MotorCreditoPage() {
           </div>
         </div>
 
-        {/* BLOCO DE BUSCA E UPLOAD */}
+        {/* BLOCO DE BUSCA E UPLOAD LARGADA */}
         <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm relative overflow-hidden group transition-all">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
           
@@ -425,7 +492,6 @@ export default function MotorCreditoPage() {
                     📄 Painel de Documentação R2
                   </span>
                 </div>
-                
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -531,6 +597,15 @@ export default function MotorCreditoPage() {
 
                         <td className="p-4 text-center">
                           <div className="flex justify-center items-center gap-2">
+                            {/* 🔥 BOTÃO DE ENVIO COMPLEMENTAR */}
+                            <button
+                              onClick={() => abrirModalEnvioExtra(item)}
+                              className="bg-white hover:bg-blue-50 border border-slate-300 hover:border-blue-300 hover:text-blue-700 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
+                              title="Anexar mais documentos a esta análise em andamento"
+                            >
+                              ➕ Anexar
+                            </button>
+
                             <button
                               onClick={() => abrirPainelDocumentos(item)}
                               className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
@@ -538,6 +613,7 @@ export default function MotorCreditoPage() {
                             >
                               📂 Docs
                             </button>
+                            
                             <button
                               onClick={() => handleVincularComercial(item.id, item.comercial)}
                               className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
@@ -545,6 +621,7 @@ export default function MotorCreditoPage() {
                             >
                               👤 Vinc.
                             </button>
+                            
                             <button
                               onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
                               className="bg-indigo-50 hover:bg-indigo-600 hover:text-white border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide flex items-center gap-1 shadow-sm cursor-pointer transition-all"
@@ -562,12 +639,45 @@ export default function MotorCreditoPage() {
           </div>
         </div>
 
+        {/* 🔥 MODAL DE ENVIO DE DOCUMENTOS COMPLEMENTARES */}
+        {isUploadExtraOpen && analiseAlvoUpload && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-4xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
+              <div className="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <div>
+                  <h2 className="font-black text-slate-800 uppercase tracking-tight text-lg">➕ Envio Complementar de Documentos</h2>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">{analiseAlvoUpload.empresa_nome} — {formatarCnpj(analiseAlvoUpload.cnpj)}</p>
+                </div>
+                <button 
+                  onClick={() => { setIsUploadExtraOpen(false); setAnaliseAlvoUpload(null); }} 
+                  className="p-2 bg-white border border-slate-300 hover:bg-rose-50 hover:text-rose-600 rounded-lg font-bold transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-6 bg-white space-y-4">
+                <div className="bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-200 text-xs font-medium leading-relaxed">
+                  <strong>Atenção:</strong> Os documentos anexados aqui serão <strong>somados</strong> aos que já estão na nuvem. O Motor V8 será notificado para ler apenas os novos arquivos e atualizar a análise sem zerar o status da mesa!
+                </div>
+                
+                {/* Reaproveitamos o componente UploadDocs mapeando os dados da análise! */}
+                <UploadDocs 
+                  empresa={{
+                    cnpj: analiseAlvoUpload.cnpj,
+                    razao_social: analiseAlvoUpload.empresa_nome,
+                    uf: "PR"
+                  } as any} 
+                  onSucesso={lidarUploadExtra} 
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 🔥 MODAL DE DOCUMENTOS E CHECKLIST */}
         {isDocsModalOpen && empresaParaDocs && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200">
-              
-              {/* Header do Modal */}
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
               <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">📂 Base de Documentos Injetados</h2>
@@ -581,10 +691,7 @@ export default function MotorCreditoPage() {
                 </button>
               </div>
               
-              {/* Corpo do Modal */}
               <div className="p-6 overflow-y-auto max-h-[65vh] space-y-6 bg-slate-50/50">
-                
-                {/* 🧠 Seção 1: Checklist da IA */}
                 <div className="space-y-3">
                   <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
@@ -605,7 +712,7 @@ export default function MotorCreditoPage() {
                   ) : (
                     <div className="p-5 bg-white border border-indigo-100 rounded-xl shadow-sm">
                       <p className="text-xs text-indigo-900 font-medium leading-relaxed">
-                        💡 <strong>Estrutura de Validação Pronta:</strong> Quando você configurar o Robô V8 para devolver a chave <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold">checklist_ia</code> contendo <em>true/false</em> para os documentos vitais (Balanço, Contrato Social, etc.), eles aparecerão listados automaticamente aqui.
+                        💡 <strong>Estrutura de Validação Pronta:</strong> Os arquivos processados com sucesso listarão seus checks automáticos de categoria aqui em breve.
                       </p>
                     </div>
                   )}
@@ -613,10 +720,7 @@ export default function MotorCreditoPage() {
 
                 <div className="border-t border-slate-200 border-dashed pt-4"></div>
 
-                {/* 📎 Seção 2: Arquivos Brutos na Nuvem */}
                 <div className="space-y-3">
-                  
-                  {/* 🔥 BOTÃO DE DOWNLOAD AQUI NA LINHA DO TÍTULO */}
                   <div className="flex justify-between items-center">
                     <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-slate-400"></span>
