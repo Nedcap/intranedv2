@@ -59,16 +59,45 @@ export const lerExcelKappi = async (fileOrBuffer: File | ArrayBuffer) => {
   return result;
 };
 
-// Formatação Segura para Moedas (caso a coluna pareça dinheiro)
-const formatarValor = (val: any) => {
-  if (typeof val === 'number') {
-    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+// 🔥 FORMATADOR INTELIGENTE (BRL)
+const formatarValor = (chave: string, val: any) => {
+  if (val === null || val === undefined || val === '') return '-';
+  
+  const chaveLower = chave.toLowerCase();
+  const isMoeda = chaveLower.includes('valor') || 
+                  chaveLower.includes('montante') || 
+                  chaveLower.includes('saldo') || 
+                  chaveLower.includes('limite') || 
+                  chaveLower.includes('capital') || 
+                  chaveLower.includes('dívida') || 
+                  chaveLower.includes('divida');
+
+  if (isMoeda) {
+      let num = val;
+      if (typeof val === 'string') {
+         // Limpa formatações anteriores caso venha como string "R$ 1.500,00"
+         let limpo = val.replace(/[R$\s]/gi, '');
+         // Verifica se é padrão PT-BR (com vírgula nos decimais)
+         if (limpo.includes(',')) {
+             limpo = limpo.replace(/\./g, '').replace(',', '.');
+         }
+         num = Number(limpo);
+      }
+      if (!isNaN(num)) {
+          return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num);
+      }
   }
+
+  // Se for apenas um número genérico (ex: CEP, Quantidade) que foi lido como float
+  if (typeof val === 'number') {
+      return new Intl.NumberFormat("pt-BR").format(val);
+  }
+  
   return String(val).replace(/\n/g, '<br/>');
 };
 
 // ============================================================================
-// 2. TRANSFORMADOR HTML (ESTÉTICA "DOSSIÊ NED")
+// 2. TRANSFORMADOR HTML (ESTÉTICA FLUIDA "DOSSIÊ NED")
 // ============================================================================
 export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   if (!kappiData) return "";
@@ -99,11 +128,11 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
 
      return `
      <tr>
-        <td style="font-weight: 700; color: var(--text);">${r['Nome/Razão Social'] || '-'}</td>
-        <td style="color: var(--muted);">${r['Tipo'] || '-'}</td>
+        <td style="font-weight: 700; color: var(--text); font-size: 11px;">${r['Nome/Razão Social'] || '-'}</td>
+        <td style="color: var(--muted); font-size: 10px;">${r['Tipo'] || '-'}</td>
         <td class="text-center"><span class="badge ${critico > 0 ? 'badge-critico' : 'badge-ok'}">${critico}</span></td>
         <td class="text-center"><span class="badge ${medio > 0 ? 'badge-medio' : 'badge-ok'}">${medio}</span></td>
-        <td class="text-center font-bold" style="color: var(--green);">${conf}</td>
+        <td class="text-center font-bold" style="color: var(--green); font-size: 11px;">${conf}</td>
      </tr>`;
   }).join('');
 
@@ -113,7 +142,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   
   const processosPorEntidade: Record<string, any[]> = {};
   todosProcessos.forEach((p: any) => {
-     const doc = String(p['Documento'] || p['Partes Passivas'] || '').replace(/\D/g, '').substring(0, 14); // Tenta achar o doc
+     const doc = String(p['Documento'] || p['Partes Passivas'] || '').replace(/\D/g, '').substring(0, 14); 
      const chave = doc || 'Mapeamento Geral';
      if (!processosPorEntidade[chave]) processosPorEntidade[chave] = [];
      processosPorEntidade[chave].push(p);
@@ -135,13 +164,13 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
           if (status.includes('tramit') || status.includes('recurso') || status.includes('execu')) ativos.push(p);
           else if (status.includes('suspen') || status.includes('sobrest') || status.includes('provis')) suspensos.push(p);
           else if (status.includes('arquiv') || status.includes('baix') || status.includes('extint') || status.includes('conform')) encerrados.push(p);
-          else ativos.push(p); // Na dúvida, é ativo
+          else ativos.push(p); 
       });
 
       htmlJudicial += `
-      <div class="card" style="margin-bottom: 1.5rem;">
-         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px;">
-            <strong style="font-size: 1.05rem; text-transform: uppercase; color: var(--blue-dark);">${nomeEntidade}</strong>
+      <div class="card" style="margin-bottom: 1rem; padding: 1rem;">
+         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px;">
+            <strong style="font-size: 12px; text-transform: uppercase; color: var(--blue-dark);">${nomeEntidade}</strong>
             <div style="display: flex; gap: 6px;">
                <span class="badge badge-critico">🔴 ${ativos.length} ATIVOS</span>
                <span class="badge badge-medio">🟡 ${suspensos.length} SUSP.</span>
@@ -150,7 +179,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
          </div>
          
          ${ativos.length > 0 ? `
-           <div style="font-weight: 800; color: var(--red); font-size: 0.8rem; text-transform: uppercase; margin-bottom: 8px;">Ações Ativas (Detalhamento):</div>
+           <div style="font-weight: 800; color: var(--red); font-size: 9px; text-transform: uppercase; margin-bottom: 8px;">Ações Ativas (Detalhamento):</div>
            <div class="table-wrap" style="margin-bottom: 0;">
               <table>
                  <thead>
@@ -166,18 +195,18 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
                  <tbody>
                    ${ativos.map(a => `
                      <tr>
-                        <td><strong style="color: var(--text);">${a['Classe de Processo'] || a['Classe'] || '-'}</strong><br><span style="font-size: 0.8rem; color: var(--muted);">${a['Área'] || '-'}</span></td>
-                        <td>${a['Assuntos'] || a['Assunto'] || '-'}</td>
-                        <td style="font-weight: bold; color: var(--red);">${a['Status'] || '-'}</td>
-                        <td class="text-right font-mono font-bold" style="color: var(--blue-dark);">${formatarValor(a['Valor da Causa'] || a['Valor'])}</td>
-                        <td style="font-size: 0.85rem;">${a['Órgão Julgador'] || a['Tribunal'] || '-'}</td>
-                        <td class="text-center font-mono" style="font-size: 0.85rem;">${a['Data de Distribuição'] || a['Data'] || '-'}</td>
+                        <td><strong style="color: var(--text);">${a['Classe de Processo'] || a['Classe'] || '-'}</strong><br><span style="font-size: 9px; color: var(--muted);">${a['Área'] || '-'}</span></td>
+                        <td style="font-size: 10px;">${a['Assuntos'] || a['Assunto'] || '-'}</td>
+                        <td style="font-size: 10px; font-weight: bold; color: var(--red);">${a['Status'] || '-'}</td>
+                        <td class="text-right font-mono font-bold" style="color: var(--blue-dark); font-size: 11px;">${formatarValor('Valor', a['Valor da Causa'] || a['Valor'])}</td>
+                        <td style="font-size: 10px;">${a['Órgão Julgador'] || a['Tribunal'] || '-'}</td>
+                        <td class="text-center font-mono" style="font-size: 10px;">${a['Data de Distribuição'] || a['Data'] || '-'}</td>
                      </tr>
                    `).join('')}
                  </tbody>
               </table>
            </div>
-         ` : `<p style="font-size: 0.9rem; color: var(--green); font-weight: bold; margin: 0;">✅ Nenhuma ação pendente ou ativa localizada para este CNPJ/CPF.</p>`}
+         ` : `<p style="font-size: 10px; color: var(--green); font-weight: bold; margin: 0;">✅ Nenhuma ação pendente ou ativa localizada para este CNPJ/CPF.</p>`}
       </div>
       `;
   });
@@ -187,19 +216,16 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   const abasIgnoradas = ['Painel de Alertas', 'Lista de Alertas por Documento'];
 
   Object.keys(kappiData).forEach(sheetName => {
-      // Pula os que já renderizamos
       if (abasIgnoradas.includes(sheetName) || sheetName.includes('Processo Judicia')) return;
 
       const rows = kappiData[sheetName];
       if (!rows || rows.length === 0) return;
 
-      // Pega TODAS as chaves (colunas) existentes nesta aba
       const allKeys = Array.from(new Set(rows.flatMap((r: any) => Object.keys(r))));
-      // Remove colunas inúteis ou sujas
       const validKeys = allKeys.filter(k => k !== 'Documento' && k.trim() !== '' && !k.startsWith('__EMPTY'));
 
       htmlOutrasAbas += `
-      <h2 style="font-size: 1.15rem; color: var(--blue-dark); margin-top: 2rem;">📄 ${sheetName.replace(/P[FJ]-/, '')}</h2>
+      <h2 style="font-size: 1.15rem; color: var(--blue-dark); margin-top: 1.5rem;">📄 ${sheetName.replace(/P[FJ]-/, '')}</h2>
       <div class="table-wrap">
           <table style="min-width: max-content;">
               <thead>
@@ -210,7 +236,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
               <tbody>
                   ${rows.map((r: any) => `
                       <tr>
-                          ${validKeys.map(k => `<td style="font-size: 0.85rem; max-width: 300px; white-space: normal; word-wrap: break-word;">${r[k] !== null && r[k] !== "" ? formatarValor(r[k]) : '-'}</td>`).join('')}
+                          ${validKeys.map(k => `<td style="font-size: 10px; max-width: 350px; white-space: normal; word-wrap: break-word;">${r[k] !== null && r[k] !== "" ? formatarValor(k, r[k]) : '-'}</td>`).join('')}
                       </tr>
                   `).join('')}
               </tbody>
@@ -219,69 +245,74 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       `;
   });
 
-  // 📝 MONTAGEM FINAL DO HTML (Usando 100% o CSS do Dossiê Ned)
+  // 📝 MONTAGEM FINAL DO HTML
   return `
   <!DOCTYPE html>
   <html lang="pt-BR">
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Dossiê Background Check - ${nomePrincipal}</title>
+      <title>Auditoria Background Check Kappi</title>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
       <style>
           :root { 
               --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #64748b; 
+              --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1; --slate-400: #94a3b8; --slate-500: #64748b; 
+              --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b; --slate-900: #0f172a;
               --blue: #2563eb; --blue-dark: #1e3a8a; --border: #e2e8f0; 
               --green: #16a34a; --red: #dc2626; --yellow: #ca8a04;
               --rose-100: #ffe4e6; --rose-200: #fecdd3; --rose-700: #be123c;
               --amber-100: #fef3c7; --amber-200: #fde68a; --amber-700: #b45309;
               --emerald-100: #d1fae5; --emerald-200: #a7f3d0; --emerald-700: #047857;
           }
-          body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 2rem; font-size: 13px; line-height: 1.5; }
-          .container { max-width: 1300px; margin: 0 auto; background: var(--card); padding: 2.5rem; border-radius: 1rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05); border: 1px solid var(--border); }
-          .header { background: linear-gradient(135deg, var(--slate-900), var(--slate-800)); color: white; padding: 3rem; border-radius: 1rem; box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.3); margin-bottom: 2.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
-          .header h1 { margin: 0; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.1; font-size: 2.2rem;}
+          body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 1rem; font-size: 11px; line-height: 1.4; }
+          .container { width: 100%; max-width: 100%; margin: 0; background: var(--card); padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid var(--border); box-sizing: border-box; }
+          
+          .header { background: linear-gradient(135deg, var(--slate-900), var(--slate-800)); color: white; padding: 2rem; border-radius: 0.75rem; box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.2); margin-bottom: 2rem; display: flex; flex-direction: column; gap: 1rem; }
+          .header h1 { margin: 0; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.1; font-size: 1.8rem;}
           .header .meta { font-size: 0.95rem; opacity: 0.9; font-weight: 500; font-family: monospace;}
           
-          .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2.5rem; }
-          .kpi-box { padding: 1.5rem; border-radius: 0.75rem; text-align: center; border: 1px solid var(--border); background: white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);}
-          .kpi-label { font-size: 0.8rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; margin-bottom: 0.5rem; }
-          .kpi-val { font-size: 2.5rem; font-weight: 900; letter-spacing: -1px; }
+          .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+          .kpi-box { padding: 1.25rem; border-radius: 0.5rem; text-align: center; border: 1px solid var(--border); background: white; box-shadow: 0 2px 4px -1px rgba(0,0,0,0.02);}
+          .kpi-label { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+          .kpi-val { font-size: 2rem; font-weight: 900; letter-spacing: -1px; }
 
-          h2 { font-size: 1.35rem; font-weight: 900; color: var(--blue-dark); margin: 3rem 0 1.5rem 0; display: flex; align-items: center; gap: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.75rem;}
-          h2::before { content: ""; display: inline-block; width: 6px; height: 1.35rem; background-color: var(--blue); border-radius: 4px; }
+          h2 { font-size: 1.15rem; font-weight: 900; color: var(--blue-dark); margin: 2rem 0 1rem 0; display: flex; align-items: center; gap: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;}
+          h2::before { content: ""; display: inline-block; width: 6px; height: 1.15rem; background-color: var(--blue); border-radius: 4px; }
           
-          .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
-          .table-wrap { overflow-x: auto; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); margin-bottom: 1.5rem; }
+          .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
+          
+          .table-wrap { overflow-x: auto; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; margin-bottom: 1.5rem; }
           .table-wrap::-webkit-scrollbar { height: 8px; }
           .table-wrap::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
           .table-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
           
           table { width: 100%; border-collapse: collapse; text-align: left; }
-          th, td { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); vertical-align: middle;}
-          th { background: #f8fafc; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; white-space: nowrap; position: sticky; top: 0; z-index: 10;}
+          th, td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle;}
+          th { background: #f8fafc; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; white-space: nowrap; position: sticky; top: 0; z-index: 10;}
           tr:hover { background: #f1f5f9; }
           
           .text-right { text-align: right; }
           .text-center { text-align: center; }
           .font-mono { font-family: monospace; }
           
-          .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-weight: 900; font-size: 10px; text-transform: uppercase; white-space: nowrap; }
+          .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: 900; font-size: 9px; text-transform: uppercase; white-space: nowrap; }
           .badge-critico { background: var(--rose-100); color: var(--rose-700); border: 1px solid var(--rose-200); }
           .badge-medio { background: var(--amber-100); color: var(--amber-700); border: 1px solid var(--amber-200); }
           .badge-ok { background: var(--emerald-100); color: var(--emerald-700); border: 1px solid var(--emerald-200); }
           
           @media print { 
-              body { padding: 0; background: white; font-size: 10px;} 
+              body { padding: 0; background: white; font-size: 9px;} 
               .container { border: none; box-shadow: none; padding: 0; max-width: 100%; } 
-              .header { background: white; color: black; border: 2px solid black; box-shadow: none; padding: 1.5rem;}
-              .header h1 { color: black; }
-              .header .meta { color: black; border-top: 1px solid black; }
+              .header { background: white !important; color: black !important; border: 2px solid black; box-shadow: none; padding: 1.5rem;}
+              .header h1 { color: black !important; }
+              .header .meta { color: black !important; border-top: 1px solid black; }
               .card, .table-wrap { border: 1px solid black !important; box-shadow: none !important; }
               .table-wrap { overflow-x: visible; }
               th, td { padding: 6px; }
               h2 { color: black; border-bottom-color: black;}
               h2::before { background-color: black; }
+              .badge { border: 1px solid black; background: transparent !important; color: black !important;}
           }
       </style>
   </head>
@@ -290,7 +321,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   <div class="container">
       <div class="header">
           <div>
-              <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.9;">Relatório de Auditoria Kappi</div>
+              <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.8;">Relatório de Auditoria Kappi</div>
               <h1>${nomePrincipal}</h1>
               <div class="meta">${docPrincipalCnpj ? `CNPJ/CPF: ${docPrincipalCnpj}` : 'Base Oficial'}</div>
               
@@ -333,12 +364,12 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       <h2>2. Auditoria e Varredura Processual</h2>
       ${htmlJudicial || '<div class="card"><p style="color: var(--muted); font-style: italic; font-weight: bold; text-align: center; margin: 0;">Nenhum detalhamento de processos judiciais encontrado na matriz.</p></div>'}
 
-      <h2 style="page-break-before: always;">3. Relatório Integral: Mídias, Sanções e Restritivos</h2>
-      <p style="font-size: 0.95rem; color: var(--muted); margin-bottom: 1.5rem;">As tabelas abaixo refletem <strong>todas</strong> as pesquisas realizadas na matriz oficial, mapeando dados fiscais, trabalhistas, ambientais, mídias e cadastrais.</p>
+      <h2 style="page-break-before: always;">3. Base Restritiva Integral (Demais Apontamentos)</h2>
+      <p style="font-size: 0.95rem; color: var(--muted); margin-bottom: 1.5rem;">As tabelas abaixo refletem <strong>100%</strong> das pesquisas realizadas na matriz oficial, mapeando dados fiscais, trabalhistas, ambientais, mídias e cadastrais (sem omissão de colunas).</p>
       
       ${htmlOutrasAbas || '<div class="card"><p style="color: var(--muted); text-align: center; margin: 0;">Nenhuma outra aba de dados encontrada.</p></div>'}
 
-      <div style="margin-top: 4rem; text-align: center; font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1.5rem;">
+      <div style="margin-top: 4rem; text-align: center; font-size: 0.8rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1.5rem;">
          Relatório renderizado e estruturado via Engine V8 Intraned. Uso exclusivo e restrito ao Comitê Executivo de Crédito.
       </div>
   </div>
@@ -364,7 +395,6 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
         return;
       }
 
-      // Procura a URL que seja uma planilha do Excel
       const urlKappi = urlsDocumentos.find(url => url.toLowerCase().includes('.xlsx') || url.toLowerCase().includes('.xls'));
 
       if (!urlKappi) {
@@ -375,15 +405,12 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
 
       try {
         setCarregando(true);
-        // Baixa o arquivo em formato ArrayBuffer
         const response = await fetch(urlKappi);
         if (!response.ok) throw new Error("Falha ao baixar o arquivo da nuvem R2.");
         const buffer = await response.arrayBuffer();
 
-        // Faz o parse do Excel 100%
         const dataJson = await lerExcelKappi(buffer);
         
-        // Monta o HTML Absoluto
         let nomeLimpo = "Planilha_Kappi.xlsx";
         try {
           const partes = urlKappi.split('/');
@@ -427,7 +454,7 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
   return (
     <iframe 
       srcDoc={htmlKappiRenderizado} 
-      className="w-full h-full border-0 bg-white rounded-2xl" 
+      className="w-full h-full border-0 bg-transparent rounded-2xl" 
       sandbox="allow-scripts allow-same-origin" 
     />
   );
