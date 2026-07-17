@@ -219,7 +219,6 @@ export const gerarHtmlDossie = async (item: any) => {
   if (item.todas_as_imagens_r2 && Array.isArray(item.todas_as_imagens_r2)) {
     fotosUnicas = item.todas_as_imagens_r2;
   } else {
-    // Processamento das imagens caso não venha no objeto (uso direto do formulário)
     let prefixoPasta = `clientes/${analise.id || item.id}/`; 
     const imagensMapeadas = new Set<string>();
 
@@ -409,9 +408,11 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="font-weight: 800; font-size: 1rem; color: var(--text); margin-bottom: 0.5rem;">${analise.localizacao || '-'}</div>
                 <div style="font-weight: 600; font-size: 0.9rem; color: var(--muted);">${analise.ramo || '-'}</div>
               </div>
-              <div style="font-size:0.85rem; color:var(--muted); margin-top:1.5rem; padding-top:1.5rem; border-top: 1px solid var(--border);">
-                  Balanço Auditado: <strong>${analise.balanco_auditado || '-'}</strong> <br>
-                  Consultoria de Gestão: <strong>${analise.consultoria_gestao || '-'}</strong>
+              <div style="font-size:0.85rem; color:var(--muted); margin-top:1.5rem; padding-top:1.5rem; border-top: 1px solid var(--border); line-height: 1.6;">
+                  Capital Social: <strong class="font-mono" style="color:var(--text);">${formatarMoeda(analise.capital_social)}</strong> <br>
+                  Balanço Auditado: <strong style="color:var(--text);">${analise.balanco_auditado || '-'}</strong> <br>
+                  Consultoria de Gestão: <strong style="color:var(--text);">${analise.consultoria_gestao || '-'}</strong> <br>
+                  Licenças / Certificações: <strong style="color:var(--text);">${analise.licencas || '-'}</strong>
               </div>
           </div>
           <div class="card" style="margin-bottom:0; padding: 0;">
@@ -545,12 +546,38 @@ export const gerarHtmlDossie = async (item: any) => {
       <div class="grid-2">
           <div class="card hover-card" style="margin-bottom:0; display: flex; flex-direction: column; justify-content: center;">
               <div class="metric-label" style="margin-bottom: 1.25rem;">Parâmetros da Carteira de Recebíveis</div>
-              <div style="font-size:1rem; margin-bottom:1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">Ticket Médio Operado: <strong class="font-mono" style="color:var(--text); float: right;">${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong></div>
-              <div style="font-size:1rem; margin-bottom:1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">Prazo de Vendas (DPLS): <strong style="color:var(--text); float: right;">${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></div>
-              <div style="font-size:1rem;">Representatividade à Prazo: <strong class="font-mono" style="color:var(--blue); float: right;">${analise.dados_potencial?.forma_recebimento_prazo || 0}% do Volume</strong></div>
+              
+              <div style="font-size:0.95rem; margin-bottom:0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; display:flex; justify-content:space-between;">
+                  <span>Ticket Médio Operado:</span> 
+                  <strong class="font-mono" style="color:var(--blue-dark);">${formatarMoeda(analise.dados_potencial?.ticket_medio)}</strong>
+              </div>
+              
+              <div style="font-size:0.95rem; margin-bottom:0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; display:flex; justify-content:space-between;">
+                  <span>Forma de Recebimento:</span> 
+                  <span><strong>${analise.dados_potencial?.forma_recebimento_vista || 0}%</strong> à vista | <strong style="color:var(--blue);">${analise.dados_potencial?.forma_recebimento_prazo || 0}%</strong> a prazo</span>
+              </div>
+
+              <div style="font-size:0.95rem; margin-bottom:0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">
+                  <div style="color: var(--muted); font-weight: bold; margin-bottom:0.25rem;">Prazos Médios de Venda:</div>
+                  <div style="display:flex; justify-content:space-between; padding-left: 0.5rem; font-size:0.9rem;">
+                      <span>• DPLS: <strong>${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></span>
+                      <span>• Comissária: <strong>${analise.dados_potencial?.prazo_medio_comissaria || '-'}</strong></span>
+                      <span>• Inter: <strong>${analise.dados_potencial?.prazo_medio_intercompany || '-'}</strong></span>
+                  </div>
+              </div>
+
+              <div style="font-size:0.95rem;">
+                  <div style="color: var(--muted); font-weight: bold; margin-bottom:0.25rem;">Composição da Natureza do Prazo:</div>
+                  <div style="display:flex; justify-content:space-between; padding-left: 0.5rem; font-size:0.9rem;">
+                      <span>• DPLS: <strong>${analise.dados_potencial?.composicao_dpls || 0}%</strong></span>
+                      <span>• Comis: <strong>${analise.dados_potencial?.composicao_comissaria || 0}%</strong></span>
+                      <span>• Inter: <strong>${analise.dados_potencial?.composicao_intercompany || 0}%</strong></span>
+                      <span>• Outros: <strong>${analise.dados_potencial?.composicao_outros || 0}%</strong></span>
+                  </div>
+              </div>
           </div>
           <div class="card hover-card" style="margin-bottom:0; background:#f0fdf4; border: 1px solid #86efac; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-              <div class="metric-label" style="color:#166534; font-size: 0.9rem;">Expectativa Real de Antecipação (Mensal)</div>
+              <div class="metric-label" style="color:#166534; font-size: 0.9rem; text-align:center;">Expectativa Real de Antecipação (Mensal)</div>
               <div class="metric-value font-mono" style="color:#15803d; font-size:2.8rem; margin-top:0.75rem;">${formatarMoeda(analise.dados_potencial?.potencial_estimado)}</div>
           </div>
       </div>
@@ -570,6 +597,9 @@ export const gerarHtmlDossie = async (item: any) => {
                           Multiplicador de Alavancagem:<br>
                           <strong style="color:var(--blue-dark); font-size: 1.5rem; display: block; margin-top: 0.5rem;">${alavancagem} x Fat. Médio</strong>
                       </td></tr>
+                      <tr><td colspan="2" class="text-center" style="font-size:0.9rem; padding: 1rem 1.5rem; border-top: 1px solid var(--border);">
+                          Conta em Renegociação? <strong style="color:${analise.endividamento_resumo?.renegociando === 'Sim' ? 'var(--red)' : 'var(--text)'};">${analise.endividamento_resumo?.renegociando || 'Não'}</strong>
+                      </td></tr>
                   </tbody>
               </table>
           </div>
@@ -585,7 +615,7 @@ export const gerarHtmlDossie = async (item: any) => {
               <thead><tr><th>Agente Financeiro (Credor)</th><th>Linha de Crédito / Modalidade</th><th class="text-right">Saldo Devedor Declarado</th></tr></thead>
               <tbody>
                   ${bancoRows}
-                  <tr class="row-total"><td colspan="2">SOMA DO ENDIVIDAMENTO MAPEADO</td><td class="text-right font-mono" style="color:var(--red); font-size:1.15rem;">${formatarMoeda(totalBancosDet)}</td></tr>
+                  ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">SOMA DO ENDIVIDAMENTO MAPEADO</td><td class="text-right font-mono" style="color:var(--red); font-size:1.15rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
               </tbody>
           </table>
       </div>
