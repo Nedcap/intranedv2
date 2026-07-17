@@ -5,12 +5,39 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { MAPA_DE_ROTAS } from "@/lib/rotas";
 
-// 🔥 DEFINIÇÃO DOS CANAIS DE NOTIFICAÇÃO DISPONÍVEIS NO SISTEMA
-const OPCOES_NOTIFICACAO = [
-  { key: "analises", label: "Motor V8 (Mudanças de Status na Esteira)", icone: "🚀" },
-  { key: "votos", label: "Comitê (Votos dos Diretores)", icone: "🗳️" },
-  { key: "chat_comite", label: "Comitê (Mensagens na Mesa)", icone: "💬" },
-  { key: "cadastro_cedentes", label: "Cadastro (Entrada de Novos Cedentes)", icone: "🏢" }
+// 🔥 ESTRUTURA GRANULAR DE NOTIFICAÇÕES (AGRUPADA POR MÓDULOS)
+const GRUPOS_NOTIFICACOES = [
+  {
+    categoria: "Crédito & Mesa V8",
+    opcoes: [
+      { key: "analises_status", label: "Mudanças de Status na Esteira", icone: "🚀" },
+      { key: "analises_docs", label: "Alerta de Documentos Pendentes/Injetados", icone: "📂" },
+      { key: "analises_finalizadas", label: "Dossiês Finalizados / Prontos", icone: "🏁" },
+    ]
+  },
+  {
+    categoria: "Comitê de Crédito",
+    opcoes: [
+      { key: "votos", label: "Votos Lançados pelos Diretores", icone: "🗳️" },
+      { key: "chat_comite", label: "Mensagens de Alinhamento na Mesa", icone: "💬" },
+    ]
+  },
+  {
+    categoria: "Comercial & Cadastro",
+    opcoes: [
+      { key: "cadastro_cedentes", label: "Entrada de Novos Cedentes na Base", icone: "🏢" },
+      { key: "comercial_leads", label: "Novos Leads / Prospectos Aprovados", icone: "🎯" },
+      { key: "comercial_revisao", label: "Pedidos de Revisão de Limite", icone: "🔍" },
+    ]
+  },
+  {
+    categoria: "Consultas & Financeiro",
+    opcoes: [
+      { key: "cons_restritivos", label: "Novos Apontamentos Restritivos (Radar)", icone: "🚨" },
+      { key: "fin_comissoes", label: "Fechamento de Cálculos de Comissão", icone: "💵" },
+      { key: "fin_checagem", label: "Pendências na Mesa de Checagem", icone: "✅" },
+    ]
+  }
 ];
 
 export default function GerenciarUsuariosPage() {
@@ -26,7 +53,7 @@ export default function GerenciarUsuariosPage() {
   const [cargo, setCargo] = useState("Comercial");
   const [permissoes, setPermissoes] = useState<Record<string, boolean>>({});
   
-  // 🔥 NOVO ESTADO: Configurações do Sininho
+  // 🔥 Estado das Configurações do Sininho
   const [notificacoesConfig, setNotificacoesConfig] = useState<Record<string, boolean>>({});
 
   const carregarUsuarios = async () => {
@@ -81,7 +108,7 @@ export default function GerenciarUsuariosPage() {
     });
     setPermissoes(novasPerms);
 
-    // 🔥 Restaura as preferências de notificação do banco
+    // Restaura as preferências de notificação do banco
     const notifBanco = user.notificacoes_config || {};
     setNotificacoesConfig(notifBanco);
   };
@@ -93,91 +120,90 @@ export default function GerenciarUsuariosPage() {
     setSenha("");
     setCargo("Comercial");
     setPermissoes({});
-    setNotificacoesConfig({}); // 🔥 Limpa os alertas
+    setNotificacoesConfig({}); 
   };
 
   const salvarUsuario = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!nome.trim() || !email.trim()) return;
+    e.preventDefault();
+    if (!nome.trim() || !email.trim()) return;
 
-  try {
-    setSalvando(true);
-    const emailTratado = email.trim().toLowerCase();
+    try {
+      setSalvando(true);
+      const emailTratado = email.trim().toLowerCase();
 
-    if (selecionado) {
-      const payloadPermissoes = (selecionado?.permissoes && !Array.isArray(selecionado.permissoes)) 
-        ? { ...selecionado.permissoes } 
-        : {};
+      if (selecionado) {
+        const payloadPermissoes = (selecionado?.permissoes && !Array.isArray(selecionado.permissoes)) 
+          ? { ...selecionado.permissoes } 
+          : {};
 
-      MAPA_DE_ROTAS.forEach(r => {
-        if (permissoes[r.path]) {
-          payloadPermissoes[r.path] = true;
-        } else {
-          delete payloadPermissoes[r.path];
-        }
-      });
+        MAPA_DE_ROTAS.forEach(r => {
+          if (permissoes[r.path]) {
+            payloadPermissoes[r.path] = true;
+          } else {
+            delete payloadPermissoes[r.path];
+          }
+        });
 
-      const payloadUpdate: any = {
-        nome: nome.trim(),
-        email: emailTratado,
-        cargo: cargo,
-        permissoes: payloadPermissoes,
-        notificacoes_config: notificacoesConfig // 🔥 Injeta as configurações do sininho
-      };
-
-      const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
-      if (error) throw error;
-      alert("🎉 Permissões e dados atualizados com sucesso!");
-    } else {
-      if (!senha.trim()) {
-        alert("A senha de acesso inicial é obrigatória.");
-        return;
-      }
-
-      const payloadPermissoes: Record<string, boolean> = {};
-      MAPA_DE_ROTAS.forEach(r => {
-        if (permissoes[r.path]) payloadPermissoes[r.path] = true;
-      });
-
-      const response = await fetch("/api/usuarios", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        const payloadUpdate: any = {
           nome: nome.trim(),
           email: emailTratado,
-          senha: senha.trim(),
           cargo: cargo,
           permissoes: payloadPermissoes,
-          notificacoes_config: notificacoesConfig, // 🔥 Envia para a API Route
-        }),
-      });
+          notificacoes_config: notificacoesConfig // Injeta as configurações do sininho
+        };
 
-      const resultado = await response.json();
+        const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
+        if (error) throw error;
+        alert("🎉 Permissões e dados atualizados com sucesso!");
+      } else {
+        if (!senha.trim()) {
+          alert("A senha de acesso inicial é obrigatória.");
+          return;
+        }
 
-      if (!response.ok) {
-        throw new Error(resultado.error || "Erro desconhecido na API");
+        const payloadPermissoes: Record<string, boolean> = {};
+        MAPA_DE_ROTAS.forEach(r => {
+          if (permissoes[r.path]) payloadPermissoes[r.path] = true;
+        });
+
+        const response = await fetch("/api/usuarios", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            nome: nome.trim(),
+            email: emailTratado,
+            senha: senha.trim(),
+            cargo: cargo,
+            permissoes: payloadPermissoes,
+            notificacoes_config: notificacoesConfig, 
+          }),
+        });
+
+        const resultado = await response.json();
+
+        if (!response.ok) {
+          throw new Error(resultado.error || "Erro desconhecido na API");
+        }
+
+        alert("🎉 Novo colaborador registrado AUTOMATICAMENTE no Auth e no Banco!");
       }
 
-      alert("🎉 Novo colaborador registrado AUTOMATICAMENTE no Auth e no Banco!");
+      limparFormulario();
+      await carregarUsuarios();
+    } catch (err: any) {
+      console.error(err);
+      alert(`Erro ao persistir informações: ${err.message}`);
+    } finally {
+      setSalvando(false);
     }
-
-    limparFormulario();
-    await carregarUsuarios();
-  } catch (err: any) {
-    console.error(err);
-    alert(`Erro ao persistir informações: ${err.message}`);
-  } finally {
-    setSalvando(false);
-  }
-};
+  };
 
   const alternarPermissao = (path: string) => {
     setPermissoes(prev => ({ ...prev, [path]: !prev[path] }));
   };
 
-  // 🔥 Função para alternar o toggle dos Alertas
   const alternarNotificacao = (key: string) => {
     setNotificacoesConfig(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -188,10 +214,21 @@ export default function GerenciarUsuariosPage() {
     return Object.keys(perms).filter(k => k.startsWith("/")).length;
   };
 
-  // Conta os alertas ativados
   const contarAlertas = (notifs: any) => {
     if (!notifs) return 0;
     return Object.values(notifs).filter(v => v === true).length;
+  };
+
+  // Botão rápido para marcar todos de uma categoria
+  const toggleCategoriaNotificacao = (grupo: any) => {
+    const todasAtivas = grupo.opcoes.every((op: any) => notificacoesConfig[op.key]);
+    const novoEstado = { ...notificacoesConfig };
+    
+    grupo.opcoes.forEach((op: any) => {
+      novoEstado[op.key] = !todasAtivas;
+    });
+    
+    setNotificacoesConfig(novoEstado);
   };
 
   if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Carregando painel de acessos...</div>;
@@ -285,25 +322,50 @@ export default function GerenciarUsuariosPage() {
               </div>
             </div>
 
-            {/* 🔥 CHECKLIST DE NOTIFICAÇÕES (NOVO) */}
+            {/* 🔥 CHECKLIST DE NOTIFICAÇÕES GRANULARES */}
             <div className="pt-3 border-t border-slate-100">
-              <label className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider mb-2">Alertas e Notificações (Sininho Global):</label>
-              <div className="space-y-1.5 bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-inner">
-                {OPCOES_NOTIFICACAO.map(n => (
-                  <label key={n.key} className="flex items-center gap-3 p-1.5 rounded hover:bg-white transition-colors cursor-pointer text-xs font-bold text-slate-700 border border-transparent hover:border-slate-200">
-                    <input 
-                      type="checkbox" 
-                      checked={!!notificacoesConfig[n.key]} 
-                      onChange={() => alternarNotificacao(n.key)} 
-                      className="w-4 h-4 text-amber-500 rounded border-slate-300 cursor-pointer focus:ring-amber-500" 
-                    />
-                    <span>{n.icone} {n.label}</span>
-                  </label>
-                ))}
+              <label className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider mb-2">
+                Alertas e Notificações (Sininho Global):
+              </label>
+              
+              <div className="space-y-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                {GRUPOS_NOTIFICACOES.map((grupo, idx) => {
+                  const todasAtivas = grupo.opcoes.every(op => notificacoesConfig[op.key]);
+                  return (
+                    <div key={idx} className="bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-inner">
+                      <div className="flex justify-between items-center border-b border-slate-200 pb-2 mb-2">
+                        <span className="font-extrabold text-[10px] uppercase tracking-widest text-slate-400">
+                          {grupo.categoria}
+                        </span>
+                        <button 
+                          type="button"
+                          onClick={() => toggleCategoriaNotificacao(grupo)}
+                          className="text-[9px] font-bold text-blue-600 uppercase hover:underline"
+                        >
+                          {todasAtivas ? "Desmarcar Grupo" : "Marcar Grupo"}
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        {grupo.opcoes.map(n => (
+                          <label key={n.key} className="flex items-center gap-3 p-1.5 rounded hover:bg-white transition-colors cursor-pointer text-xs font-bold text-slate-700 border border-transparent hover:border-slate-200">
+                            <input 
+                              type="checkbox" 
+                              checked={!!notificacoesConfig[n.key]} 
+                              onChange={() => alternarNotificacao(n.key)} 
+                              className="w-4 h-4 text-amber-500 rounded border-slate-300 cursor-pointer focus:ring-amber-500" 
+                            />
+                            <span>{n.icone} {n.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="flex gap-3 pt-3">
+            <div className="flex gap-3 pt-3 border-t border-slate-100">
               <button 
                 type="submit" 
                 disabled={salvando} 
@@ -387,6 +449,14 @@ export default function GerenciarUsuariosPage() {
         </div>
 
       </div>
+      
+      {/* Scrollbar Customizada da div de notificações */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
     </div>
   );
 }
