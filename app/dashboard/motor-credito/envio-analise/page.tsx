@@ -38,13 +38,14 @@ export default function MotorCreditoPage() {
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
+  
+  // 🔥 NOVO ESTADO: Armazena o relatório de visitas antes de largar pro banco
+  const [relatorioVisita, setRelatorioVisita] = useState("");
 
-  // Estados do Modal de Documentos Mapeados (Visualização)
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
   const [isZipping, setIsZipping] = useState(false);
 
-  // 🔥 NOVOS ESTADOS: Modal de Envio Complementar
   const [isUploadExtraOpen, setIsUploadExtraOpen] = useState(false);
   const [analiseAlvoUpload, setAnaliseAlvoUpload] = useState<FilaItem | null>(null);
 
@@ -52,6 +53,7 @@ export default function MotorCreditoPage() {
     carregarFilaComercial();
     return () => {
       setEmpresaSelecionada(null);
+      setRelatorioVisita(""); // Limpa o relatório ao sair
     };
   }, []);
 
@@ -145,7 +147,6 @@ export default function MotorCreditoPage() {
         throw new Error("Usuário não autenticado. Faça login novamente.");
       }
 
-      // 🔥 AUTO-VINCULAÇÃO INTELIGENTE DO COMERCIAL
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
       const nomeComercialLogado = localUser?.nome || "";
@@ -162,7 +163,7 @@ export default function MotorCreditoPage() {
           status_comite: "pendente",
           ia_inicio: new Date().toISOString(),
           responsavel_id: user.id,
-          comercial: nomeComercialLogado, // 👈 Registrando automaticamente!
+          comercial: nomeComercialLogado,
 
           dados_documentos: urlsDocumentos,
           checklist_ia: {}, 
@@ -183,7 +184,8 @@ export default function MotorCreditoPage() {
               fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
-            parecer_comite: ""
+            parecer_comite: "",
+            resumo_visita: relatorioVisita // 🔥 Salvando o Relatório que ele digitou
           }
         })
         .select("id")
@@ -202,7 +204,7 @@ export default function MotorCreditoPage() {
           body: JSON.stringify({
             analise_id: novaAnalise.id,
             urls_documentos: urlsDocumentos,
-            modo_atualizacao: false // Largada inicial
+            modo_atualizacao: false 
           })
         });
       }
@@ -212,6 +214,7 @@ export default function MotorCreditoPage() {
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
+      setRelatorioVisita(""); // Limpa o relatório de visita
       await carregarFilaComercial();
 
     } catch (err: any) {
@@ -223,9 +226,6 @@ export default function MotorCreditoPage() {
     }
   };
 
-  // =========================================================================
-  // ➕ ENVIO COMPLEMENTAR DE DOCUMENTOS
-  // =========================================================================
   const abrirModalEnvioExtra = (item: FilaItem) => {
     setAnaliseAlvoUpload(item);
     setIsUploadExtraOpen(true);
@@ -239,7 +239,6 @@ export default function MotorCreditoPage() {
     setStatusTexto("🔄 Acoplando documentos complementares à base...");
 
     try {
-      // 1. Busca o array de documentos atual que já estava na nuvem
       const { data: analiseAtual, error: fetchErr } = await supabase
         .from("analises")
         .select("dados_documentos")
@@ -249,9 +248,8 @@ export default function MotorCreditoPage() {
       if (fetchErr) throw fetchErr;
 
       const docsAtuais = analiseAtual.dados_documentos || [];
-      const todosDocsCombinados = [...docsAtuais, ...urlsDocumentosNovos]; // Merge dos links
+      const todosDocsCombinados = [...docsAtuais, ...urlsDocumentosNovos];
 
-      // 2. Atualiza o banco de dados da análise com o array somado
       const { error: updateErr } = await supabase
         .from("analises")
         .update({ dados_documentos: todosDocsCombinados })
@@ -259,7 +257,6 @@ export default function MotorCreditoPage() {
 
       if (updateErr) throw updateErr;
 
-      // 3. Dispara a IA passando APENAS OS DOCUMENTOS NOVOS (modo merge)
       if (urlsDocumentosNovos.length > 0) {
         setStatusTexto("🧠 Robô V8 lendo arquivos extras...");
         
@@ -268,8 +265,8 @@ export default function MotorCreditoPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             analise_id: analiseAlvoUpload.id,
-            urls_documentos: urlsDocumentosNovos, // Apenas os novos para economizar tokens
-            modo_atualizacao: true // 👈 Essa flag avisa o Python para não sobrescrever e não zerar status
+            urls_documentos: urlsDocumentosNovos,
+            modo_atualizacao: true 
           })
         });
       }
@@ -479,11 +476,24 @@ export default function MotorCreditoPage() {
                   <span className="font-mono font-bold text-slate-600 text-sm mt-1.5 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
                 </div>
                 <button
-                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); }}
+                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setRelatorioVisita(""); }}
                   className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer transition-colors uppercase tracking-wide"
                 >
                   ✕ Trocar Empresa
                 </button>
+              </div>
+
+              {/* 🔥 NOVO BLOCO: RELATÓRIO DE VISITAS */}
+              <div className="border border-indigo-200/80 rounded-2xl p-5 bg-indigo-50/20 shadow-sm space-y-3">
+                <label className="font-black text-indigo-900 uppercase text-[12px] tracking-widest flex items-center gap-2">
+                  📝 Súmula Comercial (Relatório de Visitas)
+                </label>
+                <textarea
+                  value={relatorioVisita}
+                  onChange={(e) => setRelatorioVisita(e.target.value)}
+                  placeholder="Descreva as impressões da visita presencial, porte do maquinário, tempo de casa, relacionamento, garantias, etc."
+                  className="w-full p-4 border border-indigo-200 rounded-xl text-[13px] text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all h-28 resize-none bg-white shadow-inner"
+                />
               </div>
 
               <div className="border border-slate-200/80 rounded-2xl p-5 bg-white shadow-sm space-y-4">
