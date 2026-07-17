@@ -61,7 +61,7 @@ export const lerExcelKappi = async (fileOrBuffer: File | ArrayBuffer) => {
 };
 
 // ============================================================================
-// 2. TRANSFORMADOR HTML (O DOSSIÊ EXECUTIVO)
+// 2. TRANSFORMADOR HTML EXTREMO (100% DA INFORMAÇÃO)
 // ============================================================================
 export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   if (!kappiData) return "";
@@ -70,7 +70,6 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
   const documentoPrincipal = painelAlertas.find((r: any) => String(r['Tipo'] || '').includes('Principal'));
   const nomePrincipal = documentoPrincipal ? documentoPrincipal['Nome/Razão Social'] : 'DOSSIÊ DE BACKGROUND CHECK';
   
-  // Dicionário para traduzir CNPJ/CPF em Nomes nas tabelas dinâmicas
   const docToName: Record<string, string> = {};
   painelAlertas.forEach((r: any) => {
       const doc = String(r['Documento da Diligência'] || r['Documento'] || '').replace(/\D/g, '');
@@ -98,7 +97,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
      </tr>`;
   }).join('');
 
-  // ⚖️ PROCESSOS JUDICIAIS
+  // ⚖️ PROCESSOS JUDICIAIS 100%
   const processSheets = Object.keys(kappiData).filter(k => k.includes('Processo Judicia'));
   const todosProcessos = processSheets.flatMap(sheet => kappiData[sheet]);
   
@@ -133,7 +132,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       });
 
       htmlJudicial += `
-      <div class="card" style="border-left: 4px solid var(--slate-800); margin-bottom: 1.5rem;">
+      <div class="card" style="border-left: 4px solid var(--slate-800); margin-bottom: 1.5rem; overflow: hidden;">
          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--slate-200); padding-bottom: 12px; margin-bottom: 12px;">
             <strong style="font-size: 13px; text-transform: uppercase;">${nomeEntidade}</strong>
             <div style="display: flex; gap: 6px;">
@@ -144,19 +143,28 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
          </div>
          
          ${ativos.length > 0 ? `
-           <div style="font-weight: 800; color: var(--rose-700); font-size: 10px; text-transform: uppercase; margin-bottom: 8px;">Processos Ativos Mapeados:</div>
+           <div style="font-weight: 800; color: var(--rose-700); font-size: 10px; text-transform: uppercase; margin-bottom: 8px;">Processos Ativos Mapeados (Detalhe Completo):</div>
            <div class="table-wrap" style="margin-bottom: 0;">
               <table>
                  <thead>
-                   <tr><th>Classe / Área</th><th>Assunto Principal</th><th>Valor da Causa</th><th>Data Distr.</th></tr>
+                   <tr>
+                     <th>Classe / Área</th>
+                     <th>Assunto Principal</th>
+                     <th>Status Extenso</th>
+                     <th>Valor da Causa</th>
+                     <th>Tribunal / Órgão</th>
+                     <th>Data Distr.</th>
+                   </tr>
                  </thead>
                  <tbody>
                    ${ativos.map(a => `
                      <tr>
                         <td><strong>${a['Classe de Processo'] || a['Classe'] || '-'}</strong><br><span style="font-size: 9px; color: var(--slate-500);">${a['Área'] || '-'}</span></td>
-                        <td style="font-size: 11px;">${a['Assuntos'] || a['Assunto'] || '-'}</td>
-                        <td style="font-family: monospace; font-weight: bold; color: var(--rose-600);">${a['Valor da Causa'] ? 'R$ ' + a['Valor da Causa'] : '-'}</td>
-                        <td style="font-size: 11px; text-align: center;">${a['Data de Distribuição'] || a['Data'] || '-'}</td>
+                        <td style="font-size: 10px;">${a['Assuntos'] || a['Assunto'] || '-'}</td>
+                        <td style="font-size: 10px; font-weight: bold; color: var(--rose-600);">${a['Status'] || '-'}</td>
+                        <td style="font-family: monospace; font-weight: bold; color: var(--slate-800);">${a['Valor da Causa'] ? 'R$ ' + a['Valor da Causa'] : '-'}</td>
+                        <td style="font-size: 10px;">${a['Órgão Julgador'] || a['Tribunal'] || '-'}</td>
+                        <td style="font-size: 10px; text-align: center; white-space: nowrap;">${a['Data de Distribuição'] || a['Data'] || '-'}</td>
                      </tr>
                    `).join('')}
                  </tbody>
@@ -167,7 +175,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       `;
   });
 
-  // ⚠️ OUTROS ALERTAS DINÂMICOS (Varre as 30 abas)
+  // ⚠️ TODOS OS OUTROS ALERTAS (SEM LIMITAR COLUNAS)
   let htmlOutrosAlertas = '';
   const skipSheets = ['Painel de Alertas', 'Lista de Alertas por Documento'];
 
@@ -183,18 +191,19 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       if (alertRows.length > 0) {
           const allKeys = Object.keys(alertRows[0]);
           const keysToSkip = ['Documento', 'Alerta', 'Possui Alerta', 'Possui apontamento?'];
-          const displayKeys = allKeys.filter(k => !keysToSkip.includes(k)).slice(0, 5); // Pega as 5 colunas mais importantes pra caber na tela
+          // 🔥 AGORA PEGAMOS TODAS AS COLUNAS QUE IMPORTAM
+          const displayKeys = allKeys.filter(k => !keysToSkip.includes(k));
 
           htmlOutrosAlertas += `
-          <div class="card" style="border-left: 4px solid var(--amber-500); margin-bottom: 1.5rem;">
+          <div class="card" style="border-left: 4px solid var(--amber-500); margin-bottom: 1.5rem; overflow: hidden;">
               <h3 style="margin-top: 0; color: var(--slate-800); text-transform: uppercase; font-size: 12px; display: flex; align-items: center; gap: 6px;">
                  <span style="font-size: 16px;">⚠️</span> ${sheetName.replace(/P[FJ]-/, '')}
               </h3>
               <div class="table-wrap" style="margin-bottom: 0;">
-                  <table>
+                  <table style="min-width: max-content;">
                      <thead>
                         <tr>
-                           <th>Entidade Envolvida</th>
+                           <th style="min-width: 150px; position: sticky; left: 0; background: var(--slate-100);">Entidade Envolvida</th>
                            ${displayKeys.map(k => `<th>${k}</th>`).join('')}
                         </tr>
                      </thead>
@@ -204,8 +213,8 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
                             const nome = docToName[doc] || r['Documento'] || 'Desconhecido';
                             return `
                             <tr>
-                               <td style="font-weight: bold; color: var(--slate-800); font-size: 11px;">${nome}</td>
-                               ${displayKeys.map(k => `<td style="font-size: 11px;">${r[k] || '-'}</td>`).join('')}
+                               <td style="font-weight: bold; color: var(--slate-800); font-size: 10px; position: sticky; left: 0; background: white;">${nome}</td>
+                               ${displayKeys.map(k => `<td style="font-size: 10px; max-width: 300px; white-space: normal; word-wrap: break-word;">${r[k] !== null && r[k] !== undefined ? String(r[k]).replace(/\n/g, '<br/>') : '-'}</td>`).join('')}
                             </tr>`;
                         }).join('')}
                      </tbody>
@@ -218,7 +227,7 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
 
   const dataAtualStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 
-  // 📝 MONTAGEM FINAL DO HTML
+  // 📝 MONTAGEM FINAL DO HTML COM ESTILO OVERHAUL
   return `
   <!DOCTYPE html>
   <html lang="pt-BR">
@@ -228,33 +237,44 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
       <style>
           :root {
-              --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-500: #64748b; 
+              --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1; --slate-500: #64748b; 
               --slate-600: #475569; --slate-800: #1e293b; --slate-900: #0f172a;
               --blue-600: #2563eb; --blue-900: #1e3a8a;
               --emerald-50: #ecfdf5; --emerald-100: #d1fae5; --emerald-600: #059669; --emerald-700: #047857;
               --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-600: #d97706; --amber-700: #b45309;
               --rose-50: #fff1f2; --rose-100: #ffe4e6; --rose-600: #e11d48; --rose-700: #be123c;
           }
-          body { font-family: 'Inter', sans-serif; background: var(--slate-50); color: var(--slate-800); margin: 0; padding: 2rem; font-size: 12px; }
-          .container { max-width: 1100px; margin: 0 auto; background: white; padding: 2.5rem; border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid var(--slate-200); }
+          body { font-family: 'Inter', sans-serif; background: var(--slate-50); color: var(--slate-800); margin: 0; padding: 2rem; font-size: 11px; line-height: 1.4; }
+          .container { max-width: 1300px; margin: 0 auto; background: white; padding: 2.5rem; border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid var(--slate-200); }
           .header { background: var(--slate-900); color: white; padding: 2.5rem; border-radius: 1rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
           .header h1 { margin: 0; font-size: 1.6rem; text-transform: uppercase; letter-spacing: -0.5px; line-height: 1.2; }
-          .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-weight: 900; font-size: 9px; text-transform: uppercase; }
+          .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: 900; font-size: 9px; text-transform: uppercase; }
           .badge-critico { background: var(--rose-100); color: var(--rose-700); border: 1px solid var(--rose-200); }
           .badge-medio { background: var(--amber-100); color: var(--amber-700); border: 1px solid var(--amber-200); }
           .badge-ok { background: var(--emerald-100); color: var(--emerald-700); border: 1px solid var(--emerald-200); }
+          
+          /* Table Wrapper for Horizontal Scroll */
           .table-wrap { overflow-x: auto; margin-bottom: 2rem; border-radius: 0.5rem; border: 1px solid var(--slate-200); background: white; }
+          .table-wrap::-webkit-scrollbar { height: 8px; }
+          .table-wrap::-webkit-scrollbar-track { background: var(--slate-100); border-radius: 4px; }
+          .table-wrap::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 4px; }
+          .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--slate-500); }
+          
           table { width: 100%; border-collapse: collapse; text-align: left; }
-          th, td { padding: 10px 12px; border-bottom: 1px solid var(--slate-200); }
-          th { background: var(--slate-100); color: var(--slate-600); font-weight: 800; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; }
+          th, td { padding: 10px 12px; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+          th { background: var(--slate-100); color: var(--slate-600); font-weight: 800; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; white-space: nowrap; }
+          
           .card { background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 0.5rem; padding: 1.25rem; }
           .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
           .kpi-box { padding: 1.5rem; border-radius: 0.75rem; text-align: center; border: 1px solid var(--slate-200); background: white; }
           h2.section-title { font-size: 14px; text-transform: uppercase; font-weight: 900; color: var(--slate-900); margin: 2.5rem 0 1rem 0; padding-bottom: 8px; border-bottom: 2px solid var(--slate-100); display: flex; align-items: center; gap: 8px; }
+          
           @media print { 
-              body { padding: 0; background: white; } 
+              body { padding: 0; background: white; font-size: 9px; } 
               .container { border: none; box-shadow: none; padding: 0; max-width: 100%; } 
-              .header { background: white; color: black; border: 2px solid black; }
+              .header { background: white; color: black; border: 2px solid black; padding: 1.5rem; }
+              .table-wrap { overflow-x: visible; }
+              th, td { padding: 6px; }
           }
       </style>
   </head>
@@ -297,16 +317,16 @@ export const gerarHtmlKappi = async (kappiData: any, nomeArquivo: string) => {
               </table>
           </div>
 
-          <h2 class="section-title"><span>⚖️</span> 2. Auditoria de Processos Judiciais</h2>
+          <h2 class="section-title"><span>⚖️</span> 2. Auditoria de Processos Judiciais Detalhada</h2>
           ${htmlJudicial || '<p style="color: var(--slate-500); font-style: italic;">Nenhum detalhamento processual contido nesta planilha.</p>'}
 
           ${htmlOutrosAlertas ? `
-             <h2 class="section-title" style="page-break-before: always;"><span>🚨</span> 3. Alertas Restritivos e Mídias Mapeadas</h2>
+             <h2 class="section-title" style="page-break-before: always;"><span>🚨</span> 3. Base Restritiva Completa (Mídias, Sanções e Ibama)</h2>
              ${htmlOutrosAlertas}
           ` : ''}
 
           <div style="margin-top: 3rem; text-align: center; font-size: 10px; color: var(--slate-400); border-top: 1px solid var(--slate-200); padding-top: 1rem;">
-             Relatório gerado automaticamente pela plataforma. Confidencial e de uso restrito ao Comitê de Crédito.
+             Relatório gerado automaticamente pela plataforma a partir de cruzamento massivo. Confidencial e de uso restrito ao Comitê de Crédito.
           </div>
       </div>
   </body>
@@ -341,15 +361,12 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
 
       try {
         setCarregando(true);
-        // Baixa o arquivo em formato ArrayBuffer
         const response = await fetch(urlKappi);
         if (!response.ok) throw new Error("Falha ao baixar o arquivo da nuvem R2.");
         const buffer = await response.arrayBuffer();
 
-        // Faz o parse do Excel
         const dataJson = await lerExcelKappi(buffer);
         
-        // Monta o HTML
         let nomeLimpo = "Planilha_Kappi.xlsx";
         try {
           const partes = urlKappi.split('/');
@@ -374,7 +391,7 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
     return (
       <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-500 italic text-xs gap-3 font-mono border border-slate-200 rounded-2xl">
         <span className="animate-spin text-2xl">⏳</span>
-        Compilando relatórios Kappi da nuvem...
+        Compilando relatórios Kappi detalhados da nuvem...
       </div>
     );
   }
@@ -385,7 +402,7 @@ export default function GerarKappiViewer({ urlsDocumentos }: { urlsDocumentos?: 
         <span className="text-3xl">⚠️</span>
         {erro}
         <br/><br/>
-        O visualizador necessita de um arquivo <b>.xlsx</b> anexado junto aos documentos base da empresa para gerar o dossiê executivo.
+        O visualizador necessita de um arquivo <b>.xlsx</b> anexado junto aos documentos base da empresa para gerar o dossiê executivo completo.
       </div>
     );
   }
