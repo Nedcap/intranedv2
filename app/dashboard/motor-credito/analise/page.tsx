@@ -5,6 +5,8 @@ import { useState, useEffect, Suspense, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
 import GerarAnalise, { gerarHtmlDossie } from "@/components/gerar-analise";
+import GerarKappiViewer from "@/components/gerar-kappi"; // 🔥 IMPORT DO KAPPI VIEWER
+import JSZip from "jszip"; 
 
 // =========================================================================
 // INTERFACES
@@ -99,6 +101,7 @@ interface AnaliseData {
   razao_social: string; 
   status?: string;
   comercial?: string; 
+  dados_documentos?: string[]; // 🔥 Adicionado para sabermos quais docs tem na análise
 
   empresas_principais: EmpresaPrincipal[];
   data_analise: string;
@@ -161,7 +164,7 @@ interface AnaliseData {
 }
 
 const DADOS_MODELO: AnaliseData = {
-  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA", comercial: "",
+  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA", comercial: "", dados_documentos: [],
   empresas_principais: [{ razao_social: "EMPRESA MODELO LTDA", cnpj: "00.000.000/0001-00" }],
   data_analise: new Date().toISOString().split("T")[0], 
   relacionamento: "Prospect", analista: "Alyson", gerente: "Luiz", rating: "B - Risco médio", 
@@ -256,6 +259,9 @@ function MesaAnaliseConteudo() {
   const [novosArquivos, setNovosArquivos] = useState<File[]>([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
 
+  // 🔥 NOVO ESTADO: Controla a abertura do Modal Gigante do Kappi Viewer
+  const [isKappiModalOpen, setIsKappiModalOpen] = useState(false);
+
   useEffect(() => {
     buscarFilaSupabase(true);
     const intervalo = setInterval(() => { buscarFilaSupabase(false); }, 10000);
@@ -325,7 +331,8 @@ function MesaAnaliseConteudo() {
           cnpj: cnpj, 
           razao_social: razao_social, 
           status: data.status,
-          comercial: data.comercial || ""
+          comercial: data.comercial || "",
+          dados_documentos: data.dados_documentos || [] // 🔥 Garante que os links R2 venham para a tela
         });
       }
     } catch (err) { 
@@ -342,7 +349,7 @@ function MesaAnaliseConteudo() {
     }
     try {
       setProcessandoDecisao(true);
-      const { id, cnpj, razao_social, status, comercial, ...dadosParaCompactar } = analise;
+      const { id, cnpj, razao_social, status, comercial, dados_documentos, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       
       const { error } = await supabase.from("analises").update({ 
@@ -512,7 +519,7 @@ function MesaAnaliseConteudo() {
     if (!justificativa?.trim()) return; 
     try {
       setProcessandoDecisao(true);
-      const { id, cnpj, razao_social, status, comercial, ...dadosParaCompactar } = analise;
+      const { id, cnpj, razao_social, status, comercial, dados_documentos, ...dadosParaCompactar } = analise;
       dadosParaCompactar.parecer_analista = `🚨 DEVOLVIDO:\nMotivo: ${justificativa}\n\n` + (dadosParaCompactar.parecer_analista || "");
       const { error } = await supabase.from("analises").update({ status: "aguardando_docs", dados_consolidados: dadosParaCompactar }).eq("id", analise.id);
       if (error) throw error;
@@ -584,14 +591,12 @@ function MesaAnaliseConteudo() {
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
-  // Calculando variações para o TOTAL ANO
   const totAno26 = calcTotAno("2026");
   const totAno25 = calcTotAno("2025");
   const totAno24 = calcTotAno("2024");
   const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
   const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
 
-  // Calculando variações para a MÉDIA GERAL (Mês)
   const medGeral26 = calcMediaGeralAno("2026");
   const medGeral25 = calcMediaGeralAno("2025");
   const medGeral24 = calcMediaGeralAno("2024");
@@ -727,6 +732,15 @@ function MesaAnaliseConteudo() {
                       ✖ Devolver Req.
                     </button>
                     <GerarAnalise analise={analise} />
+                    
+                    {/* 🔥 NOVO BOTÃO: ABRIR O KAPPI MODAL AQUI */}
+                    <button 
+                       onClick={() => setIsKappiModalOpen(true)}
+                       className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                       🕵️‍♂️ Auditoria Kappi
+                    </button>
+                    
                     <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className={btnPrimario}>
                       ▶ Emitir Parecer Final
                     </button>
@@ -1541,6 +1555,39 @@ function MesaAnaliseConteudo() {
           </div>
         </div>
       )}
+
+      {/* 🔥 MODAL GIGANTE DO KAPPI VIEWER */}
+      {isKappiModalOpen && (
+        <div className="fixed inset-0 z-[120] flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] bg-slate-900 animate-in fade-in duration-200">
+          
+          <div className="bg-slate-900 text-slate-200 p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-700 shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">🕵️‍♂️</span>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Auditoria Restritiva e Compliance</span>
+                <span className="text-sm font-bold text-white tracking-wide">{analise.empresa_nome || analise.razao_social}</span>
+              </div>
+            </div>
+            
+            <button 
+              onClick={() => setIsKappiModalOpen(false)} 
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wide flex items-center gap-2"
+            >
+              ✕ Fechar Auditoria
+            </button>
+          </div>
+
+          <div className="flex-1 flex overflow-hidden w-full bg-slate-100 relative">
+             <div className="w-full h-full p-4">
+                <div className="w-full h-full bg-white rounded-2xl shadow-xl border border-slate-300 overflow-hidden relative">
+                   <GerarKappiViewer urlsDocumentos={analise.dados_documentos || []} />
+                </div>
+             </div>
+          </div>
+          
+        </div>
+      )}
+
     </div>
   );
 }
