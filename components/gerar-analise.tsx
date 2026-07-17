@@ -53,113 +53,107 @@ export const gerarHtmlDossie = async (item: any) => {
   };
 
   let totalLimites = 0;
-  const propostasRows = analise.propostas && analise.propostas.length > 0 
-    ? analise.propostas.map((p: any) => {
-        totalLimites += Number(p.limite) || 0;
-        return `
-        <tr>
-            <td style="font-weight:700; color: var(--text);">${p.modalidade || '-'}</td>
-            <td class="text-right font-bold" style="color:var(--blue-dark); font-size: 1.1rem;">${formatarMoeda(p.limite)}</td>
-            <td class="text-center">${p.prazo || '-'}</td>
-            <td class="text-center">${p.tranche || '-'}</td>
-            <td class="text-center font-bold" style="background:#f8fafc;">${p.taxa || '-'}</td>
-            <td>${p.garantia || '-'}</td>
-        </tr>`;
-      }).join("")
-    : `<tr><td colspan="6" class="text-center" style="color:var(--muted); padding: 1.5rem;">Nenhuma proposta informada.</td></tr>`;
+  const arrPropostas = (analise.propostas && analise.propostas.length > 0) ? analise.propostas : [{}];
+  const propostasRows = arrPropostas.map((p: any) => {
+      totalLimites += Number(p.limite) || 0;
+      return `
+      <tr>
+          <td style="font-weight:700; color: var(--text);">${p.modalidade || '-'}</td>
+          <td class="text-right font-bold" style="color:var(--blue-dark); font-size: 1.1rem;">${formatarMoeda(p.limite)}</td>
+          <td class="text-center">${p.prazo || '-'}</td>
+          <td class="text-center">${p.tranche || '-'}</td>
+          <td class="text-center font-bold" style="background:#f8fafc;">${p.taxa || '-'}</td>
+          <td>${p.garantia || '-'}</td>
+      </tr>`;
+    }).join("");
 
-  const empresasRows = analise.empresas_grupo && analise.empresas_grupo.length > 0 
-    ? analise.empresas_grupo.map((e: any) => `
+  const arrEmpresas = (analise.empresas_grupo && analise.empresas_grupo.length > 0) ? analise.empresas_grupo : [{}];
+  const empresasRows = arrEmpresas.map((e: any) => `
       <tr>
           <td style="font-weight:600; font-size:0.9rem;">${e.empresa || '-'}</td>
           <td style="font-size:0.9rem;" class="font-mono">${e.cnpj || '-'}</td>
           <td style="font-size:0.9rem; text-align:center;">${e.fundacao || '-'}</td>
           <td style="font-size:0.9rem; text-align:center; font-weight: 600;">${e.idade || '-'}</td>
-      </tr>`).join("") 
-    : `<tr><td colspan="4" class="text-center" style="color:var(--muted); padding: 1.5rem;">Nenhuma empresa coligada mapeada.</td></tr>`;
+      </tr>`).join("");
 
-  const socioRows = analise.socios && analise.socios.length > 0 
-    ? analise.socios.map((s: any) => `
+  const arrSocios = (analise.socios && analise.socios.length > 0) ? analise.socios : [{}];
+  const socioRows = arrSocios.map((s: any) => `
       <tr style="border-bottom: 1px solid #f1f5f9;">
           <td style="padding: 12px 10px; font-weight: 700; color: var(--text);">${s.nome || '-'}</td>
           <td style="padding: 12px 10px; color: var(--muted); text-align:center;">${s.funcao || 'Sócio'}</td>
           <td style="padding: 12px 10px; color: var(--muted); text-align:center;">
-            ${s.figure_contrato === 'Sim' ? '<span style="color:var(--green); font-weight:bold;">✅ Assina</span>' : '❌ Não Assina'}
+            ${s.figure_contrato === 'Sim' ? '<span style="color:var(--green); font-weight:bold;">✅ Assina</span>' : s.figure_contrato === 'Não' ? '❌ Não Assina' : '-'}
           </td>
           <td style="padding: 12px 10px; text-align: right; font-weight: 800; color: var(--blue-dark);" class="font-mono">${s.perc || 0}%</td>
-      </tr>`).join("") 
-    : `<tr><td colspan="4" style="color:var(--muted); text-align:center; padding: 1.5rem;">Nenhum sócio informado.</td></tr>`;
+      </tr>`).join("");
 
   let totalPatrimonio = 0;
-  const patrimonioRows = analise.patrimonios && analise.patrimonios.length > 0 
-    ? analise.patrimonios.map((p: any) => {
-        totalPatrimonio += Number(p.valor) || 0;
-        return `
-          <tr>
-            <td style="font-weight:600;">${p.descricao || '-'} <br><span style="font-weight:normal; font-size: 0.8rem; color:var(--muted);">Titular: ${p.socio || 'Sócio'}</span></td>
-            <td class="text-right font-bold font-mono text-green-700" style="font-size: 1.1rem; vertical-align: middle;">${formatarMoeda(p.valor)}</td>
-          </tr>`;
-      }).join("")
-    : ``;
+  const arrPatrimonio = (analise.patrimonios && analise.patrimonios.length > 0) ? analise.patrimonios : [{}];
+  const patrimonioRows = arrPatrimonio.map((p: any) => {
+      totalPatrimonio += Number(p.valor) || 0;
+      return `
+        <tr>
+          <td style="font-weight:600;">${p.descricao || '-'} <br><span style="font-weight:normal; font-size: 0.8rem; color:var(--muted);">Titular: ${p.socio || '-'}</span></td>
+          <td class="text-right font-bold font-mono text-green-700" style="font-size: 1.1rem; vertical-align: middle;">${formatarMoeda(p.valor)}</td>
+        </tr>`;
+    }).join("");
 
   let totalBancosDet = 0;
   let curtoPrazo = 0, longoPrazo = 0;
-  const bancoRows = analise.endividamento_detalhado && analise.endividamento_detalhado.length > 0 
-    ? analise.endividamento_detalhado.map((b: any) => {
-        const v = Number(b.saldo) || 0;
-        totalBancosDet += v;
-        if (b.prazo === "Curto Prazo") curtoPrazo += v; else longoPrazo += v;
-        return `
-        <tr>
-            <td style="font-weight:700; font-size:0.9rem;">${b.instituicao || '-'}</td>
-            <td style="font-size:0.9rem;">
-              ${b.modalidade || '-'} <br>
-              <span style="color:var(--muted); font-size:10px; font-weight: 600; text-transform: uppercase;">${b.tipo} | ${b.prazo}</span>
-            </td>
-            <td class="text-right font-bold font-mono" style="font-size:1rem; color:var(--red); vertical-align: middle;">${formatarMoeda(v)}</td>
-        </tr>`;
-      }).join("")
-    : `<tr><td colspan="3" class="text-center" style="color:var(--muted); padding: 1.5rem;">Nenhuma linha de endividamento localizada.</td></tr>`;
+  const arrEndiv = (analise.endividamento_detalhado && analise.endividamento_detalhado.length > 0) ? analise.endividamento_detalhado : [{}];
+  const bancoRows = arrEndiv.map((b: any) => {
+      const v = Number(b.saldo) || 0;
+      totalBancosDet += v;
+      if (b.prazo === "Curto Prazo") curtoPrazo += v; else longoPrazo += v;
+      return `
+      <tr>
+          <td style="font-weight:700; font-size:0.9rem;">${b.instituicao || '-'}</td>
+          <td style="font-size:0.9rem;">
+            ${b.modalidade || '-'} <br>
+            <span style="color:var(--muted); font-size:10px; font-weight: 600; text-transform: uppercase;">${b.tipo || '-'} | ${b.prazo || '-'}</span>
+          </td>
+          <td class="text-right font-bold font-mono" style="font-size:1rem; color:var(--red); vertical-align: middle;">${formatarMoeda(v)}</td>
+      </tr>`;
+    }).join("");
 
   let totalRestritivos = 0, qtdRestritivos = 0;
-  const restritivosRows = analise.restritivos && analise.restritivos.length > 0 
-    ? analise.restritivos.map((r: any) => {
-        totalRestritivos += Number(r.valor) || 0;
-        qtdRestritivos += Number(r.qtd) || 1;
-        return `
-        <tr>
-            <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
-            <td style="color:var(--yellow); font-weight:bold;">${r.restritivo || '-'}</td>
-            <td class="text-center font-mono font-bold" style="background:#f8fafc;">${r.qtd || 1}</td>
-            <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.valor)}</td>
-        </tr>`;
-    }).join("") : ``;
+  const arrRestritivos = (analise.restritivos && analise.restritivos.length > 0) ? analise.restritivos : [{}];
+  const restritivosRows = arrRestritivos.map((r: any) => {
+      totalRestritivos += Number(r.valor) || 0;
+      qtdRestritivos += Number(r.qtd) || 0;
+      return `
+      <tr>
+          <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
+          <td style="color:var(--yellow); font-weight:bold;">${r.restritivo || '-'}</td>
+          <td class="text-center font-mono font-bold" style="background:#f8fafc;">${r.qtd || 0}</td>
+          <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(r.valor)}</td>
+      </tr>`;
+  }).join("");
 
-  const refRows = analise.referencias && analise.referencias.length > 0
-    ? analise.referencias.map((r: any) => {
-        const calcLiq5 = (Number(r.liquidez_pontual) || 0) + (Number(r.atraso_5_dias) || 0);
-        return `
-        <tr>
-          <td style="font-weight:700;">${r.instituicao || '-'}</td>
-          <td class="text-center font-mono" style="font-size: 0.8rem; color: var(--muted);">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
-          <td class="text-right font-bold font-mono text-slate-700">${formatarMoeda(r.vop)}</td>
-          <td class="text-right font-bold font-mono" style="color: var(--blue);">${formatarMoeda(r.limite_global)}</td>
-          <td class="text-right">
-             <div style="font-weight:bold; color:var(--red); font-family: monospace; font-size: 1rem;">${formatarMoeda(r.risco_total)}</div>
-             ${r.risco_1 || r.risco_2 ? `<div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">R1: ${formatarMoeda(r.risco_1)} | R2: ${formatarMoeda(r.risco_2)}</div>` : ''}
-          </td>
-          <td class="text-center" style="font-size:11px; font-weight: 600; background: #f8fafc;">
-            Pt: ${r.liquidez_pontual || 0}% <br>
-            5d: <span style="color:var(--blue-dark); font-weight:bold;">${calcLiq5}%</span> | 15d+: ${r.atraso_15_dias || 0}%
-          </td>
-          <td class="text-center font-mono font-bold">${r.concentracao || 0}%</td>
-        </tr>`
-      }).join("")
-    : `<tr><td colspan="7" class="text-center" style="color:var(--muted); padding: 1.5rem;">Nenhuma referência mapeada.</td></tr>`;
+  const arrRefs = (analise.referencias && analise.referencias.length > 0) ? analise.referencias : [{}];
+  const refRows = arrRefs.map((r: any) => {
+      const calcLiq5 = (Number(r.liquidez_pontual) || 0) + (Number(r.atraso_5_dias) || 0);
+      return `
+      <tr>
+        <td style="font-weight:700;">${r.instituicao || '-'}</td>
+        <td class="text-center font-mono" style="font-size: 0.8rem; color: var(--muted);">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
+        <td class="text-right font-bold font-mono text-slate-700">${formatarMoeda(r.vop)}</td>
+        <td class="text-right font-bold font-mono" style="color: var(--blue);">${formatarMoeda(r.limite_global)}</td>
+        <td class="text-right">
+            <div style="font-weight:bold; color:var(--red); font-family: monospace; font-size: 1rem;">${formatarMoeda(r.risco_total)}</div>
+            ${r.risco_1 || r.risco_2 ? `<div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">R1: ${formatarMoeda(r.risco_1)} | R2: ${formatarMoeda(r.risco_2)}</div>` : ''}
+        </td>
+        <td class="text-center" style="font-size:11px; font-weight: 600; background: #f8fafc;">
+          Pt: ${r.liquidez_pontual || 0}% <br>
+          5d: <span style="color:var(--blue-dark); font-weight:bold;">${calcLiq5}%</span> | 15d+: ${r.atraso_15_dias || 0}%
+        </td>
+        <td class="text-center font-mono font-bold">${r.concentracao || 0}%</td>
+      </tr>`
+    }).join("");
 
-  const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
-  const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "Não informado";
-  const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "Não informado";
+  const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
+  const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "<li>Não informado</li>";
+  const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
 
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento?.[ano]?.[m] || 0), 0);
@@ -416,8 +410,8 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="font-weight: 600; font-size: 0.9rem; color: var(--muted);">${analise.ramo || '-'}</div>
               </div>
               <div style="font-size:0.85rem; color:var(--muted); margin-top:1.5rem; padding-top:1.5rem; border-top: 1px solid var(--border);">
-                  Balanço Auditado: <strong>${analise.balanco_auditado || 'Não'}</strong> <br>
-                  Consultoria de Gestão: <strong>${analise.consultoria_gestao || 'Não'}</strong>
+                  Balanço Auditado: <strong>${analise.balanco_auditado || '-'}</strong> <br>
+                  Consultoria de Gestão: <strong>${analise.consultoria_gestao || '-'}</strong>
               </div>
           </div>
           <div class="card" style="margin-bottom:0; padding: 0;">
@@ -460,7 +454,6 @@ export const gerarHtmlDossie = async (item: any) => {
       </div>
       ` : ''}
 
-      ${analise.clientes || analise.fornecedores || analise.concorrentes ? `
       <div class="grid-3" style="margin-top: 1.5rem;">
           <div class="card">
               <div class="metric-label">Principais Clientes</div>
@@ -475,7 +468,6 @@ export const gerarHtmlDossie = async (item: any) => {
               <ul class="simple-list">${concorrentesRows}</ul>
           </div>
       </div>
-      ` : ''}
 
       <h2 style="margin-top: 3.5rem;">3. Organograma Estrutural / Teia</h2>
       <div style="margin-bottom: 2.5rem;">
@@ -494,7 +486,6 @@ export const gerarHtmlDossie = async (item: any) => {
 
       ${galeriaHTML}
 
-      ${totalPatrimonio > 0 ? `
       <h3 style="color: var(--blue-dark); text-transform: uppercase; font-size: 1rem; font-weight: 900; margin-top: 2.5rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.75rem;">Patrimônio de Garantia (Bens Declarados IRPF)</h3>
       <div class="table-wrap">
           <table>
@@ -507,7 +498,6 @@ export const gerarHtmlDossie = async (item: any) => {
               </tbody>
           </table>
       </div>
-      ` : ''}
 
       <div class="print-break"></div>
 
@@ -595,7 +585,7 @@ export const gerarHtmlDossie = async (item: any) => {
               <thead><tr><th>Agente Financeiro (Credor)</th><th>Linha de Crédito / Modalidade</th><th class="text-right">Saldo Devedor Declarado</th></tr></thead>
               <tbody>
                   ${bancoRows}
-                  ${totalBancosDet > 0 ? `<tr class="row-total"><td colspan="2">SOMA DO ENDIVIDAMENTO MAPEADO</td><td class="text-right font-mono" style="color:var(--red); font-size:1.15rem;">${formatarMoeda(totalBancosDet)}</td></tr>` : ''}
+                  <tr class="row-total"><td colspan="2">SOMA DO ENDIVIDAMENTO MAPEADO</td><td class="text-right font-mono" style="color:var(--red); font-size:1.15rem;">${formatarMoeda(totalBancosDet)}</td></tr>
               </tbody>
           </table>
       </div>
@@ -632,7 +622,6 @@ export const gerarHtmlDossie = async (item: any) => {
           </div>
       </div>
 
-      ${totalRestritivos > 0 || qtdRestritivos > 0 ? `
       <div class="table-wrap">
           <table>
               <thead><tr><th>Documento Onerado (Empresa/Sócio)</th><th>Natureza da Pendência</th><th class="text-center">Volume</th><th class="text-right">Montante Restritivo</th></tr></thead>
@@ -641,13 +630,12 @@ export const gerarHtmlDossie = async (item: any) => {
               </tbody>
           </table>
       </div>
-      ` : ''}
 
       <div class="grid-2">
           <div class="card hover-card" style="padding:2rem; border-left: 6px solid #fca5a5; cursor: pointer; background: #fff;">
               <div style="font-weight:900; font-size:1rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Relatório Jurídico (Processos)</div>
               <div class="expandable-box">
-                  <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial crítico localizado nas raspagens.'}</div>
+                  <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial detalhado localizado.'}</div>
                   <div class="expandable-fade" style="height: 60px;"></div>
               </div>
           </div>
