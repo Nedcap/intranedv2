@@ -168,10 +168,15 @@ export default function FinalizadosPage() {
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
+        // 🔥 FILTRO RIGOROSO DE FINALIZADOS
         const filtrado = data.filter(a => {
-          const st = (a.status || "").toLowerCase().trim();
+          const stAnalise = (a.status || "").toLowerCase().trim();
+          const stComite = (a.status_comite || "").toLowerCase().trim();
+          
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
-          return statusFinaisConfirmados.some(s => st.includes(s)) || (st !== "aberta" && !st.includes("comit") && !st.includes("aberto") && st !== "em análise" && st !== "");
+          
+          // Entra na lista SE o status da análise OU o status do comitê contiver alguma das palavras de finalização
+          return statusFinaisConfirmados.some(s => stAnalise.includes(s) || stComite.includes(s));
         });
 
         const mesesUnicos = new Set<string>();
@@ -364,8 +369,8 @@ export default function FinalizadosPage() {
 
   const somaDias = historicoFiltrado.reduce((acc, curr) => acc + curr._sla, 0);
   const mediaSLA = historicoFiltrado.length > 0 ? (somaDias / historicoFiltrado.length).toFixed(1) : "0.0";
-  const aprovados = historicoFiltrado.filter(i => (i.status || "").toLowerCase().includes("aprovado")).length;
-  const recusados = historicoFiltrado.filter(i => ["reprovado", "recusado", "rejeitado"].some(s => (i.status || "").toLowerCase().includes(s))).length;
+  const aprovados = historicoFiltrado.filter(i => (i.status || "").toLowerCase().includes("aprovado") || (i.status_comite || "").toLowerCase().includes("aprovado")).length;
+  const recusados = historicoFiltrado.filter(i => ["reprovado", "recusado", "rejeitado"].some(s => (i.status || "").toLowerCase().includes(s) || (i.status_comite || "").toLowerCase().includes(s))).length;
 
   const cedentesFiltradosPelaBusca = listaCedentes.filter(ced => ced.toLowerCase().includes(termoBuscaCedente.toLowerCase()));
   const todosFiltradosAtivos = cedentesFiltradosPelaBusca.length > 0 && cedentesFiltradosPelaBusca.every(c => cedentesSel.includes(c));
@@ -443,7 +448,7 @@ export default function FinalizadosPage() {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
     const htmlPreview = htmlPreviewsInline[empresaFocoAtivo.id];
     const isGerando = gerandoPdfId === empresaFocoAtivo.id;
-    const isStatusPositivo = (empresaFocoAtivo.status || "").toLowerCase().includes("aprovado");
+    const isStatusPositivo = (empresaFocoAtivo.status || "").toLowerCase().includes("aprovado") || (empresaFocoAtivo.status_comite || "").toLowerCase().includes("aprovado");
 
     return (
       <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
@@ -460,7 +465,7 @@ export default function FinalizadosPage() {
                  <span className={`ml-2 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
                     isStatusPositivo ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
                  }`}>
-                   {empresaFocoAtivo.status || "Finalizado"}
+                    {empresaFocoAtivo.status || "Finalizado"}
                  </span>
               </div>
             </div>
