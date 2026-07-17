@@ -67,7 +67,7 @@ interface ReferenciaItem {
   rnx: string;
   cliente_desde: string;
   ultima_operacao: string;
-  vop?: number; // NOVO CAMPO: Volume de Operação
+  vop?: number; 
   limite_global: number;
   risco_total: number;
   risco_1: number;
@@ -76,7 +76,7 @@ interface ReferenciaItem {
   risco_2: number;
   operacao_2: string;
   vcto_2: string;
-  liquidez_5_dias: string | number; // Agora calculado
+  liquidez_5_dias: string | number; 
   liquidez_pontual: string | number;
   atraso_5_dias: string | number;
   atraso_15_dias: string | number;
@@ -100,7 +100,6 @@ interface AnaliseData {
   status?: string;
   comercial?: string; 
 
-  // CAPA
   empresas_principais: EmpresaPrincipal[];
   data_analise: string;
   relacionamento: string;
@@ -108,7 +107,6 @@ interface AnaliseData {
   gerente: string;
   rating: string;
   
-  // DADOS DA EMPRESA (CADASTRO)
   fundacao: string;
   capital_social: number;
   localizacao: string;
@@ -121,13 +119,11 @@ interface AnaliseData {
   propostas: PropostaItem[];
   empresas_grupo: EmpresaItem[];
   
-  // SOCIETÁRIO E PATRIMÔNIO
   socios: SocioItem[];
   regra_assinatura: string;
   aval_societario: string;
   patrimonios: PatrimonioItem[];
   
-  // FATURAMENTO E POTENCIAL
   dados_faturamento: Record<string, FaturamentoMes>;
   dados_potencial: { 
     ticket_medio: number; 
@@ -143,16 +139,13 @@ interface AnaliseData {
     potencial_estimado: number; 
   };
   
-  // ENDIVIDAMENTO E REFERÊNCIAS
   endividamento_resumo: { renegociando: string };
   endividamento_detalhado: EndividamentoItem[];
   referencias: ReferenciaItem[];
   
-  // RESTRITIVOS E JURÍDICO
   restritivos_quadro: { pefin: number; refin: number; protesto: number; div_vencida: number; acao_judicial: number; cheque_sem_fundo: number };
   restritivos: RestritivoItem[];
   
-  // TEXTOS E LINKS
   resumo_visita: string;
   noticias_midia: string;
   parecer_analista: string;
@@ -160,11 +153,8 @@ interface AnaliseData {
   recomendacao_analista?: string;
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
 
-  // CAMPOS DO MOTOR V8
   dados_juridico: { relatorio_completo: string };
   parecer_executivo: string;
-
-  // GRAFO DE GRUPO ECONÔMICO (JSON DAS BOLINHAS DA TEIA)
   organograma_json?: { nodes: any[], edges: any[] } | null;
 
   [key: string]: any;
@@ -198,7 +188,6 @@ const DADOS_MODELO: AnaliseData = {
   
   dados_juridico: { relatorio_completo: "" },
   parecer_executivo: "",
-  
   organograma_json: null
 };
 

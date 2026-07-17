@@ -1,9 +1,62 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
+import GerarKappiViewer from "@/components/gerar-kappi"; // 🔥 IMPORT NOVO AQUI
+import JSZip from "jszip";
+
+// ============================================================================
+// FUNÇÕES AUXILIARES
+// ============================================================================
+function calcularDiasUteis(dInicio: Date, dFim: Date) {
+  let count = 0;
+  const atual = new Date(dInicio.getTime());
+  atual.setHours(12, 0, 0, 0);
+  const fim = new Date(dFim.getTime());
+  fim.setHours(12, 0, 0, 0);
+  if (fim < atual) return 0;
+  while (atual < fim) {
+    atual.setDate(atual.getDate() + 1);
+    const diaSemana = atual.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function parseDataSegura(dataStr: string) {
+  if (!dataStr) return null;
+  const apenasData = dataStr.trim().split("T")[0];
+  return new Date(`${apenasData}T12:00:00`);
+}
+
+function simplificarNome(nome: string): string {
+  if (!nome) return "";
+  let n = nome.trim().toUpperCase();
+  n = n.replace(/\b(LTDA|SA|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, "");
+  return n.replace(/\s+/g, " ").trim();
+}
+
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
+
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
 
 // ============================================================================
 // COMPONENTE PRINCIPAL
@@ -36,6 +89,9 @@ export default function ComitePage() {
   const [isMaster, setIsMaster] = useState(false);
   const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
+
+  // 🔥 NOVO ESTADO: Controle de Abas na Coluna Direita (Modo Foco)
+  const [abaDireitaFoco, setAbaDireitaFoco] = useState<"debate" | "kappi">("debate");
 
   const carregarDiretores = async () => {
     try {
@@ -357,6 +413,7 @@ export default function ComitePage() {
     try {
       setEmpresaFocoAtivo(empresa);
       setIdEmpresaExpandida(empresa.id); 
+      setAbaDireitaFoco("debate"); // Sempre começa na aba de debate
       setModoFocoComite(true);
       
       const htmlMontado = await gerarHtmlDossie(empresa);
@@ -400,6 +457,7 @@ export default function ComitePage() {
 
     return (
       <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
+        
         {/* CABEÇALHO DO COMITÊ (CLARO) */}
         <div className="bg-white text-slate-800 p-4 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-4">
@@ -425,7 +483,7 @@ export default function ComitePage() {
         <div className="flex-1 flex overflow-hidden w-full bg-slate-50/50">
           
           {/* DOSSIÊ HTML (ESQUERDA) */}
-          <div className="w-[70%] h-full p-5 flex flex-col">
+          <div className="w-[60%] h-full p-5 pr-2.5 flex flex-col">
             <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 relative">
               <iframe 
                 srcDoc={htmlDossieRenderizado} 
@@ -436,91 +494,124 @@ export default function ComitePage() {
           </div>
 
           {/* PAINEL DE CONTROLE (DIREITA) */}
-          <div className="w-[30%] h-full py-5 pr-5 flex flex-col space-y-5">
+          <div className="w-[40%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4">
             
-            {/* PAINEL DE VOTAÇÃO */}
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
-                <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                  🗳️ Painel de Voto
-                </span>
-                <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
-                  👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
-                </span>
-              </div>
+            {/* 🔥 CONTROLE DE ABAS DIREITAS */}
+            <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-xl border border-slate-200">
+               <button 
+                  onClick={() => setAbaDireitaFoco("debate")}
+                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${abaDireitaFoco === "debate" ? "bg-white text-blue-700 shadow-sm border border-slate-200" : "text-slate-500 hover:bg-slate-200"}`}
+               >
+                  💬 Chat & Votos
+               </button>
+               <button 
+                  onClick={() => setAbaDireitaFoco("kappi")}
+                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${abaDireitaFoco === "kappi" ? "bg-slate-900 text-white shadow-sm border border-slate-800" : "text-slate-500 hover:bg-slate-200"}`}
+               >
+                  🕵️‍♂️ Kappi Viewer
+               </button>
+            </div>
+
+            <div className="flex-1 flex flex-col overflow-hidden relative">
               
-              {(!isMaster && !isDiretor) ? (
-                <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
-                  🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3">
-                  <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
-                    <option value="">Selecione o seu Veredito...</option>
-                    <option value="Aprovado">🟢 Aprovado</option>
-                    <option value="Reprovado">🔴 Reprovado</option>
-                  </select>
-
-                  {isMaster && (
-                    <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
-                      <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
-                      Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
-                    </label>
-                  )}
-
-                  <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
+              {/* === ABA 1: DEBATES E VOTOS === */}
+              {abaDireitaFoco === "debate" && (
+                <div className="flex-1 flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                   
-                  <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
-                    {enviandoVoto ? "Computando..." : "Confirmar Voto"}
-                  </button>
+                  {/* PAINEL DE VOTAÇÃO */}
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
+                      <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                        🗳️ Painel de Voto
+                      </span>
+                      <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                        👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
+                      </span>
+                    </div>
+                    
+                    {(!isMaster && !isDiretor) ? (
+                      <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
+                        🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
+                          <option value="">Selecione o seu Veredito...</option>
+                          <option value="Aprovado">🟢 Aprovado</option>
+                          <option value="Reprovado">🔴 Reprovado</option>
+                        </select>
+
+                        {isMaster && (
+                          <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
+                            <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
+                            Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
+                          </label>
+                        )}
+
+                        <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
+                        
+                        <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
+                          {enviandoVoto ? "Computando..." : "Confirmar Voto"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* HISTÓRICO DE PARECERES */}
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex flex-col overflow-hidden text-left h-[25%] shrink-0">
+                    <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                      {listaDeVotos.length === 0 ? (
+                        <p className="text-slate-400 italic text-xs py-4 text-center font-medium">A mesa ainda não possui votos computados.</p>
+                      ) : (
+                        listaDeVotos.map((v: any, idx: number) => (
+                          <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
+                            <div className="flex justify-between items-center font-bold">
+                              <span className="text-slate-800">{v.membro_nome}</span>
+                              <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
+                            </div>
+                            <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* CHAT / MESA DE DEBATES */}
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+                    <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
+                    <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
+                      {chatMsgs.length === 0 ? (
+                        <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
+                      ) : (
+                        chatMsgs.map((m: any) => {
+                          const ehMeu = m.usuario === nomeUsuarioLogado;
+                          return (
+                            <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
+                              <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
+                              <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
+                                <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
+                      <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
+                      <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
+                    </div>
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* HISTÓRICO DE PARECERES */}
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                {listaDeVotos.length === 0 ? (
-                  <p className="text-slate-400 italic text-xs py-8 text-center font-medium">A mesa ainda não possui votos computados.</p>
-                ) : (
-                  listaDeVotos.map((v: any, idx: number) => (
-                    <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
-                      <div className="flex justify-between items-center font-bold">
-                        <span className="text-slate-800">{v.membro_nome}</span>
-                        <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
-                      </div>
-                      <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+              {/* === ABA 2: KAPPI VIEWER === */}
+              {abaDireitaFoco === "kappi" && (
+                <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <GerarKappiViewer />
+                </div>
+              )}
 
-            {/* CHAT / MESA DE DEBATES */}
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-              <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
-              <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
-                {chatMsgs.length === 0 ? (
-                  <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
-                ) : (
-                  chatMsgs.map((m: any) => {
-                    const ehMeu = m.usuario === nomeUsuarioLogado;
-                    return (
-                      <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
-                        <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
-                          <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-              <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
-                <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
-                <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
-              </div>
             </div>
 
           </div>
