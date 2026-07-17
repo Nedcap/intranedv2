@@ -30,6 +30,34 @@ interface FilaItem {
   checklist_ia?: any; 
 }
 
+// 🔥 NOVO: Interface completa para tipar os inputs comerciais
+interface PropostaComercial {
+  relatorio_visita: string;
+  propostas: { modalidade: string; limite: number | ""; prazo: string; tranche: number | ""; taxa: string; garantia: string }[];
+  dados_potencial: {
+    ticket_medio: number | "";
+    prazo_medio_dpls: string;
+    prazo_medio_comissaria: string;
+    prazo_medio_intercompany: string;
+    forma_recebimento_vista: number | "";
+    forma_recebimento_prazo: number | "";
+    composicao_dpls: number | "";
+    composicao_comissaria: number | "";
+    composicao_intercompany: number | "";
+    composicao_outros: number | "";
+  };
+}
+
+const PROPOSTA_INICIAL: PropostaComercial = {
+  relatorio_visita: "",
+  propostas: [{ modalidade: "Desconto", limite: "", prazo: "", tranche: "", taxa: "", garantia: "" }],
+  dados_potencial: {
+    ticket_medio: "", prazo_medio_dpls: "", prazo_medio_comissaria: "", prazo_medio_intercompany: "",
+    forma_recebimento_vista: 0, forma_recebimento_prazo: 100,
+    composicao_dpls: 100, composicao_comissaria: 0, composicao_intercompany: 0, composicao_outros: 0
+  }
+};
+
 export default function MotorCreditoPage() {
   const router = useRouter();
   const [cnpjBusca, setCnpjBusca] = useState("");
@@ -39,8 +67,8 @@ export default function MotorCreditoPage() {
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
   
-  // 🔥 NOVO ESTADO: Armazena o relatório de visitas antes de largar pro banco
-  const [relatorioVisita, setRelatorioVisita] = useState("");
+  // 🔥 ESTADO CENTRALIZADO DA REQUISIÇÃO COMERCIAL
+  const [formComercial, setFormComercial] = useState<PropostaComercial>(PROPOSTA_INICIAL);
 
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
@@ -53,7 +81,7 @@ export default function MotorCreditoPage() {
     carregarFilaComercial();
     return () => {
       setEmpresaSelecionada(null);
-      setRelatorioVisita(""); // Limpa o relatório ao sair
+      setFormComercial(PROPOSTA_INICIAL);
     };
   }, []);
 
@@ -113,7 +141,37 @@ export default function MotorCreditoPage() {
   };
 
   // =========================================================================
-  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA)
+  // FUNÇÕES DE ATUALIZAÇÃO DO FORMULÁRIO COMERCIAL
+  // =========================================================================
+  const atualizarPropostaArray = (index: number, campo: string, valor: any) => {
+    const novasPropostas = [...formComercial.propostas];
+    (novasPropostas[index] as any)[campo] = valor;
+    setFormComercial({ ...formComercial, propostas: novasPropostas });
+  };
+
+  const addPropostaRow = () => {
+    setFormComercial({
+      ...formComercial,
+      propostas: [...formComercial.propostas, { modalidade: "", limite: "", prazo: "", tranche: "", taxa: "", garantia: "" }]
+    });
+  };
+
+  const removePropostaRow = (index: number) => {
+    setFormComercial({
+      ...formComercial,
+      propostas: formComercial.propostas.filter((_, i) => i !== index)
+    });
+  };
+
+  const updateDadosPotencial = (campo: string, valor: any) => {
+    setFormComercial({
+      ...formComercial,
+      dados_potencial: { ...formComercial.dados_potencial, [campo]: valor }
+    });
+  };
+
+  // =========================================================================
+  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA) - Agora injetando o forms todo!
   // =========================================================================
   const registrarAnaliseNoSupabase = async (urlsDocumentos: string[], urlsImagens: string[] = []) => {
     if (!empresaSelecionada) return;
@@ -151,7 +209,7 @@ export default function MotorCreditoPage() {
       const localUser = userStr ? JSON.parse(userStr) : null;
       const nomeComercialLogado = localUser?.nome || "";
 
-      setStatusTexto("🤖 Registrando lote virgem de entrada na mesa...");
+      setStatusTexto("🤖 Registrando lote virgem de entrada na mesa com sua proposta...");
 
       const { data: novaAnalise, error: insertError } = await supabase
         .from("analises")
@@ -172,9 +230,29 @@ export default function MotorCreditoPage() {
             cidade: empresaSelecionada.cidadeExtenso || "Curitiba",
             capital_social: empresaSelecionada.capital_social || 0,
             dados_gerais: { fundacao: "", ramo: "", site: "", relacionamento: "Prospect", gerente: "" },
-            proposta: { modalidade: "Desconto", limite: 50000, prazo: 30, tranche: 10000, taxa: 0.04, garantia: "Aval", rating: "C" },
+            
+            // 🔥 INJETANDO O FORMULÁRIO COMERCIAL DIRETAMENTE AQUI
+            propostas: formComercial.propostas.map(p => ({
+              ...p,
+              limite: Number(p.limite) || 0,
+              tranche: Number(p.tranche) || 0
+            })),
+            dados_potencial: {
+              ticket_medio: Number(formComercial.dados_potencial.ticket_medio) || 0,
+              prazo_medio_dpls: formComercial.dados_potencial.prazo_medio_dpls,
+              prazo_medio_comissaria: formComercial.dados_potencial.prazo_medio_comissaria,
+              prazo_medio_intercompany: formComercial.dados_potencial.prazo_medio_intercompany,
+              forma_recebimento_vista: Number(formComercial.dados_potencial.forma_recebimento_vista) || 0,
+              forma_recebimento_prazo: Number(formComercial.dados_potencial.forma_recebimento_prazo) || 0,
+              composicao_dpls: Number(formComercial.dados_potencial.composicao_dpls) || 0,
+              composicao_comissaria: Number(formComercial.dados_potencial.composicao_comissaria) || 0,
+              composicao_intercompany: Number(formComercial.dados_potencial.composicao_intercompany) || 0,
+              composicao_outros: Number(formComercial.dados_potencial.composicao_outros) || 0,
+              potencial_estimado: 0 
+            },
+            resumo_visita: formComercial.relatorio_visita,
+
             dados_faturamento: { "2024": {}, "2025": {}, "2026": {} },
-            dados_potencial: { ticket_medio: 0, prazo_medio_vendas: 0, vending_prazo_perc: 100 },
             dados_endividamento_resumo: { curto_prazo: 0, longo_prazo: 0 },
             endividamento_detalhado: [],
             restritivos: [],
@@ -184,8 +262,7 @@ export default function MotorCreditoPage() {
               fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
-            parecer_comite: "",
-            resumo_visita: relatorioVisita // 🔥 Salvando o Relatório que ele digitou
+            parecer_comite: ""
           }
         })
         .select("id")
@@ -214,7 +291,7 @@ export default function MotorCreditoPage() {
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
-      setRelatorioVisita(""); // Limpa o relatório de visita
+      setFormComercial(PROPOSTA_INICIAL); // Reseta o form todo
       await carregarFilaComercial();
 
     } catch (err: any) {
@@ -386,6 +463,12 @@ export default function MotorCreditoPage() {
     });
   };
 
+  // Reutilizando os mesmos estilos compactos da Mesa do Analista para harmonia visual
+  const cellStyle = "w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700 bg-white";
+  const numStyle = "w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-mono font-bold text-indigo-700 bg-indigo-50/30 text-right";
+  const thStyle = "p-2 bg-slate-100 border border-slate-200 font-semibold text-[10px] text-slate-600 uppercase tracking-wider text-left";
+  const tdStyle = "p-1.5 border border-slate-200";
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1700px] mx-auto space-y-8 relative">
@@ -403,14 +486,14 @@ export default function MotorCreditoPage() {
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider uppercase shadow-sm">
-                Cloudflare R2 Active
+                Portal Comercial
               </span>
               <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider uppercase shadow-sm">
-                Mesa V8 Síncrona
+                Envio Inteligente
               </span>
             </div>
             <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-3">
-              🚀 Motor de Análise <span className="text-indigo-600 font-bold">Esteira V8</span>
+              🚀 Central de <span className="text-indigo-600 font-bold">Propostas</span>
             </h1>
           </div>
         </div>
@@ -423,7 +506,7 @@ export default function MotorCreditoPage() {
             <form onSubmit={handleBuscarPorCnpj} className="space-y-5 pl-2">
               <div>
                 <label className="block font-black text-slate-500 uppercase text-[11px] tracking-widest mb-3">
-                  🔍 Iniciar Nova Análise (Busca Oficial de CNPJ)
+                  🔍 Iniciar Nova Solicitação de Crédito (Busca Oficial)
                 </label>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <input
@@ -438,7 +521,7 @@ export default function MotorCreditoPage() {
                     disabled={loading || cnpjBusca.replace(/\D/g, "").length < 14}
                     className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-md cursor-pointer"
                   >
-                    {loading ? "Processando..." : "Localizar Empresa"}
+                    {loading ? "Buscando..." : "Localizar Empresa"}
                   </button>
                 </div>
               </div>
@@ -458,7 +541,7 @@ export default function MotorCreditoPage() {
                         </p>
                       </div>
                       <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold uppercase tracking-wider px-4 py-2 rounded-lg border border-indigo-100 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                        Avançar →
+                        Prosseguir com o Envio →
                       </span>
                     </div>
                   ))}
@@ -466,7 +549,9 @@ export default function MotorCreditoPage() {
               )}
             </form>
           ) : (
-            <div className="space-y-5 pl-2 animate-in fade-in slide-in-from-bottom-2">
+            <div className="space-y-6 pl-2 animate-in fade-in slide-in-from-bottom-2">
+              
+              {/* 🎯 HEADER DA EMPRESA SELECIONADA */}
               <div className="p-5 border border-emerald-200 bg-emerald-50/50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
                 <div>
                   <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg block w-max mb-2 border border-emerald-200">
@@ -476,32 +561,160 @@ export default function MotorCreditoPage() {
                   <span className="font-mono font-bold text-slate-600 text-sm mt-1.5 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
                 </div>
                 <button
-                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setRelatorioVisita(""); }}
+                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setFormComercial(PROPOSTA_INICIAL); }}
                   className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer transition-colors uppercase tracking-wide"
                 >
                   ✕ Trocar Empresa
                 </button>
               </div>
 
-              {/* 🔥 NOVO BLOCO: RELATÓRIO DE VISITAS */}
-              <div className="border border-indigo-200/80 rounded-2xl p-5 bg-indigo-50/20 shadow-sm space-y-3">
-                <label className="font-black text-indigo-900 uppercase text-[12px] tracking-widest flex items-center gap-2">
-                  📝 Súmula Comercial (Relatório de Visitas)
-                </label>
+              {/* 🎯 BLOCO 1: PROPOSTA COMERCIAL E LIMITES */}
+              <div className="border border-slate-200/80 rounded-2xl p-5 bg-white shadow-sm space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <span className="font-black text-indigo-900 uppercase text-[12px] tracking-widest flex items-center gap-2">
+                    🎯 1. Estrutura Pleiteada (Condições Comerciais)
+                  </span>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse min-w-[800px]">
+                    <thead>
+                      <tr>
+                        <th className={thStyle}>Modalidade</th>
+                        <th className={`${thStyle} w-36`}>Limite (R$)</th>
+                        <th className={`${thStyle} w-28`}>Prazo Médio</th>
+                        <th className={`${thStyle} w-32`}>Tranche (R$)</th>
+                        <th className={`${thStyle} w-28`}>Taxa Base</th>
+                        <th className={thStyle}>Garantia Adic.</th>
+                        <th className={`${thStyle} w-10 text-center`}>-</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formComercial.propostas.map((p, i) => (
+                        <tr key={i}>
+                          <td className={tdStyle}>
+                            <select value={p.modalidade} onChange={(e)=>atualizarPropostaArray(i, 'modalidade', e.target.value)} className={cellStyle}>
+                              <option value="Desconto">Desconto</option>
+                              <option value="Comissária">Comissária</option>
+                              <option value="Intercompany">Intercompany</option>
+                              <option value="Fomento">Fomento M.P.</option>
+                              <option value="Outros">Outros</option>
+                            </select>
+                          </td>
+                          <td className={tdStyle}><input type="number" placeholder="Ex: 50000" value={p.limite} onChange={(e)=>atualizarPropostaArray(i, 'limite', e.target.value)} className={numStyle}/></td>
+                          <td className={tdStyle}><input type="text" placeholder="Ex: 30 dias" value={p.prazo} onChange={(e)=>atualizarPropostaArray(i, 'prazo', e.target.value)} className={cellStyle}/></td>
+                          <td className={tdStyle}><input type="number" placeholder="Ex: 10000" value={p.tranche} onChange={(e)=>atualizarPropostaArray(i, 'tranche', e.target.value)} className={numStyle}/></td>
+                          <td className={tdStyle}><input type="text" placeholder="Ex: 3.5%" value={p.taxa} onChange={(e)=>atualizarPropostaArray(i, 'taxa', e.target.value)} className={`${cellStyle} text-center`}/></td>
+                          <td className={tdStyle}><input type="text" placeholder="Ex: Aval, Alienação Fiduciária..." value={p.garantia} onChange={(e)=>atualizarPropostaArray(i, 'garantia', e.target.value)} className={cellStyle}/></td>
+                          <td className={`${tdStyle} text-center`}>
+                            {i > 0 && <button onClick={()=>removePropostaRow(i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full p-1.5 rounded transition-colors">X</button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button onClick={addPropostaRow} className="mt-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-3 py-1.5 rounded text-[10px] uppercase shadow-sm transition-colors border border-slate-300">
+                    + Adicionar Nova Linha
+                  </button>
+                </div>
+              </div>
+
+              {/* 🎯 BLOCO 2: PARÂMETROS OPERACIONAIS E POTENCIAL */}
+              <div className="border border-slate-200/80 rounded-2xl p-5 bg-white shadow-sm space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <span className="font-black text-indigo-900 uppercase text-[12px] tracking-widest flex items-center gap-2">
+                    ⏱️ 2. Parâmetros da Carteira e Prazos Operacionais
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Coluna 1: Prazos e Ticket */}
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-slate-600 uppercase">Ticket Médio Operado (R$)</label>
+                      <input type="number" placeholder="Ex: 5000" value={formComercial.dados_potencial.ticket_medio} onChange={(e)=>updateDadosPotencial("ticket_medio", e.target.value)} className={numStyle} />
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3 pt-2">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Prazo Duplicatas</label>
+                        <input type="text" placeholder="Ex: 45 dias" value={formComercial.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateDadosPotencial("prazo_medio_dpls", e.target.value)} className={cellStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Prazo Comissária</label>
+                        <input type="text" placeholder="Ex: 15 dias" value={formComercial.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateDadosPotencial("prazo_medio_comissaria", e.target.value)} className={cellStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Prazo Intercompany</label>
+                        <input type="text" placeholder="Ex: 90 dias" value={formComercial.dados_potencial.prazo_medio_intercompany} onChange={(e)=>updateDadosPotencial("prazo_medio_intercompany", e.target.value)} className={cellStyle} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Coluna 2: Percentuais e Mix */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-3 border-b border-slate-200 pb-1">Composição da Venda (Atenção para fechar 100%)</p>
+                    
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-semibold text-slate-600">À Vista (%)</label>
+                        <input type="number" placeholder="0" value={formComercial.dados_potencial.forma_recebimento_vista} onChange={(e)=>updateDadosPotencial("forma_recebimento_vista", e.target.value)} className={numStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-indigo-700">A Prazo (%)</label>
+                        <input type="number" placeholder="100" value={formComercial.dados_potencial.forma_recebimento_prazo} onChange={(e)=>updateDadosPotencial("forma_recebimento_prazo", e.target.value)} className={`${numStyle} bg-indigo-50/50`} />
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 mt-4 border-b border-slate-200 pb-1">Natureza da Operação a Prazo</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-semibold text-slate-600 text-center">Duplicata %</label>
+                        <input type="number" placeholder="100" value={formComercial.dados_potencial.composicao_dpls} onChange={(e)=>updateDadosPotencial("composicao_dpls", e.target.value)} className={numStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-semibold text-slate-600 text-center">Comissária %</label>
+                        <input type="number" placeholder="0" value={formComercial.dados_potencial.composicao_comissaria} onChange={(e)=>updateDadosPotencial("composicao_comissaria", e.target.value)} className={numStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-semibold text-slate-600 text-center">Inter %</label>
+                        <input type="number" placeholder="0" value={formComercial.dados_potencial.composicao_intercompany} onChange={(e)=>updateDadosPotencial("composicao_intercompany", e.target.value)} className={numStyle} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-semibold text-slate-600 text-center">Outros %</label>
+                        <input type="number" placeholder="0" value={formComercial.dados_potencial.composicao_outros} onChange={(e)=>updateDadosPotencial("composicao_outros", e.target.value)} className={numStyle} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 🎯 BLOCO 3: SÚMULA / RELATÓRIO DE VISITAS */}
+              <div className="border border-slate-200/80 rounded-2xl p-5 bg-white shadow-sm space-y-3">
+                <div className="border-b border-slate-100 pb-3">
+                  <span className="font-black text-indigo-900 uppercase text-[12px] tracking-widest flex items-center gap-2">
+                    📝 3. Súmula Comercial (Relatório de Visitas)
+                  </span>
+                </div>
                 <textarea
-                  value={relatorioVisita}
-                  onChange={(e) => setRelatorioVisita(e.target.value)}
-                  placeholder="Descreva as impressões da visita presencial, porte do maquinário, tempo de casa, relacionamento, garantias, etc."
-                  className="w-full p-4 border border-indigo-200 rounded-xl text-[13px] text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all h-28 resize-none bg-white shadow-inner"
+                  value={formComercial.relatorio_visita}
+                  onChange={(e) => setFormComercial({...formComercial, relatorio_visita: e.target.value})}
+                  placeholder="Descreva as impressões da visita presencial, porte da matriz, tempo de casa dos sócios, relacionamento construído, garantias oferecidas e motivos do crédito..."
+                  className="w-full p-4 border border-slate-300 rounded-xl text-[13px] text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all h-36 resize-none bg-slate-50/50 hover:bg-white shadow-inner"
                 />
               </div>
 
-              <div className="border border-slate-200/80 rounded-2xl p-5 bg-white shadow-sm space-y-4">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-100 pb-3 gap-3">
-                  <span className="font-black text-slate-600 uppercase text-[12px] tracking-widest flex items-center gap-2">
-                    📄 Painel de Documentação R2
+              {/* 🎯 BLOCO 4: DOCUMENTAÇÃO FÍSICA E LARGADA */}
+              <div className="border border-indigo-200/80 rounded-2xl p-6 bg-indigo-50/20 shadow-md space-y-4">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-indigo-100 pb-3 gap-3">
+                  <span className="font-black text-indigo-900 uppercase text-[13px] tracking-widest flex items-center gap-2">
+                    📤 4. Submeter Pacote para a Mesa de Risco (Motor V8)
                   </span>
+                  <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full">Etapa Final de Largada</span>
                 </div>
+                <p className="text-xs text-slate-600 font-medium pb-2">
+                  Arraste os arquivos físicos coletados (Balanço Auditado, Extrato de Faturamento, Contrato Social, SCR, etc). Ao finalizar o Upload, o Motor de Inteligência Artificial irá assumir o controle do dossiê automaticamente!
+                </p>
                 <UploadDocs empresa={empresaSelecionada as any} onSucesso={registrarAnaliseNoSupabase} />
               </div>
             </div>
@@ -512,7 +725,7 @@ export default function MotorCreditoPage() {
         <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-slate-200 bg-slate-50/80 flex justify-between items-center">
             <span className="font-black text-slate-600 uppercase tracking-widest text-[12px]">
-              📊 Retorno da Mesa de Risco <span className="bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-lg ml-2 border border-indigo-200">{filaReal.length}</span>
+              📊 Status das Operações Submetidas <span className="bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-lg ml-2 border border-indigo-200">{filaReal.length}</span>
             </span>
           </div>
 
