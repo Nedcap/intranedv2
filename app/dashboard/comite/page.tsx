@@ -4,7 +4,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
-import GerarKappiViewer from "@/components/gerar-kappi"; // 🔥 IMPORT NOVO AQUI
+import GerarKappiViewer from "@/components/gerar-kappi";
 import JSZip from "jszip";
 
 // ============================================================================
@@ -90,8 +90,8 @@ export default function ComitePage() {
   const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
-  // 🔥 NOVO ESTADO: Controle de Abas na Coluna Direita (Modo Foco)
-  const [abaDireitaFoco, setAbaDireitaFoco] = useState<"debate" | "kappi">("debate");
+  // 🔥 NOVO ESTADO: Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
+  const [abaEsquerdaFoco, setAbaEsquerdaFoco] = useState<"dossie" | "kappi">("dossie");
 
   const carregarDiretores = async () => {
     try {
@@ -113,7 +113,6 @@ export default function ComitePage() {
     }
   }, []);
 
-  // 🔥 VASCULHADOR R2 PARA O COMITÊ (Roda transparente no fundo)
   const vasculharImagensR2 = async (analiseItem: any) => {
     let prefixoPasta = `clientes/${analiseItem.id}/`; 
     
@@ -413,7 +412,7 @@ export default function ComitePage() {
     try {
       setEmpresaFocoAtivo(empresa);
       setIdEmpresaExpandida(empresa.id); 
-      setAbaDireitaFoco("debate"); // Sempre começa na aba de debate
+      setAbaEsquerdaFoco("dossie"); // Reset pra aba Dossie principal
       setModoFocoComite(true);
       
       const htmlMontado = await gerarHtmlDossie(empresa);
@@ -482,136 +481,141 @@ export default function ComitePage() {
         {/* CORPO PRINCIPAL */}
         <div className="flex-1 flex overflow-hidden w-full bg-slate-50/50">
           
-          {/* DOSSIÊ HTML (ESQUERDA) */}
-          <div className="w-[60%] h-full p-5 pr-2.5 flex flex-col">
-            <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 relative">
-              <iframe 
-                srcDoc={htmlDossieRenderizado} 
-                className="w-full h-full border-0 bg-white" 
-                sandbox="allow-scripts allow-same-origin" 
-              />
+          {/* LADO ESQUERDO: DOSSIÊ E KAPPI */}
+          <div className="w-[70%] h-full p-5 pr-2.5 flex flex-col space-y-3">
+            
+            {/* 🔥 CONTROLE DE ABAS (ESQUERDA) */}
+            <div className="flex gap-2">
+               <button 
+                  onClick={() => setAbaEsquerdaFoco("dossie")}
+                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm ${abaEsquerdaFoco === "dossie" ? "bg-blue-600 text-white border-blue-700" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
+               >
+                  📄 Dossiê Comercial / Crédito
+               </button>
+               <button 
+                  onClick={() => setAbaEsquerdaFoco("kappi")}
+                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm ${abaEsquerdaFoco === "kappi" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
+               >
+                  🕵️‍♂️ Auditoria Kappi
+               </button>
+            </div>
+
+            <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 relative flex flex-col">
+              {abaEsquerdaFoco === "dossie" ? (
+                htmlDossieRenderizado ? (
+                  <iframe 
+                    srcDoc={htmlDossieRenderizado} 
+                    className="w-full h-full border-0 bg-white" 
+                    sandbox="allow-scripts allow-same-origin" 
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-500 italic text-xs gap-3 font-mono">
+                    <span className="animate-spin text-2xl">⏳</span>
+                    Renderizando HTML estruturado...
+                  </div>
+                )
+              ) : (
+                <div className="flex-1 overflow-y-auto p-2 bg-slate-50 custom-scrollbar">
+                   {/* Injeção do Gerador Kappi */}
+                   <GerarKappiViewer />
+                </div>
+              )}
             </div>
           </div>
 
-          {/* PAINEL DE CONTROLE (DIREITA) */}
-          <div className="w-[40%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4">
+          {/* LADO DIREITO: CHAT E VOTOS (FIXO) */}
+          <div className="w-[30%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4 overflow-hidden">
             
-            {/* 🔥 CONTROLE DE ABAS DIREITAS */}
-            <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-xl border border-slate-200">
-               <button 
-                  onClick={() => setAbaDireitaFoco("debate")}
-                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${abaDireitaFoco === "debate" ? "bg-white text-blue-700 shadow-sm border border-slate-200" : "text-slate-500 hover:bg-slate-200"}`}
-               >
-                  💬 Chat & Votos
-               </button>
-               <button 
-                  onClick={() => setAbaDireitaFoco("kappi")}
-                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${abaDireitaFoco === "kappi" ? "bg-slate-900 text-white shadow-sm border border-slate-800" : "text-slate-500 hover:bg-slate-200"}`}
-               >
-                  🕵️‍♂️ Kappi Viewer
-               </button>
-            </div>
-
-            <div className="flex-1 flex flex-col overflow-hidden relative">
+            <div className="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200 p-5 rounded-2xl shadow-sm relative">
               
-              {/* === ABA 1: DEBATES E VOTOS === */}
-              {abaDireitaFoco === "debate" && (
-                <div className="flex-1 flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex-1 flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                
+                {/* PAINEL DE VOTAÇÃO */}
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
+                    <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                      🗳️ Painel de Voto
+                    </span>
+                    <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                      👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
+                    </span>
+                  </div>
                   
-                  {/* PAINEL DE VOTAÇÃO */}
-                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
-                      <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                        🗳️ Painel de Voto
-                      </span>
-                      <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
-                        👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
-                      </span>
+                  {(!isMaster && !isDiretor) ? (
+                    <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
+                      🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
                     </div>
-                    
-                    {(!isMaster && !isDiretor) ? (
-                      <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
-                        🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
-                      </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
+                        <option value="">Selecione o seu Veredito...</option>
+                        <option value="Aprovado">🟢 Aprovado</option>
+                        <option value="Reprovado">🔴 Reprovado</option>
+                      </select>
+
+                      {isMaster && (
+                        <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
+                          <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
+                          Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
+                        </label>
+                      )}
+
+                      <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
+                      
+                      <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
+                        {enviandoVoto ? "Computando..." : "Confirmar Voto"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* HISTÓRICO DE PARECERES */}
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex flex-col overflow-hidden text-left h-[25%] shrink-0">
+                  <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                    {listaDeVotos.length === 0 ? (
+                      <p className="text-slate-400 italic text-xs py-4 text-center font-medium">A mesa ainda não possui votos computados.</p>
                     ) : (
-                      <div className="grid grid-cols-1 gap-3">
-                        <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
-                          <option value="">Selecione o seu Veredito...</option>
-                          <option value="Aprovado">🟢 Aprovado</option>
-                          <option value="Reprovado">🔴 Reprovado</option>
-                        </select>
-
-                        {isMaster && (
-                          <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
-                            <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
-                            Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
-                          </label>
-                        )}
-
-                        <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
-                        
-                        <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
-                          {enviandoVoto ? "Computando..." : "Confirmar Voto"}
-                        </button>
-                      </div>
+                      listaDeVotos.map((v: any, idx: number) => (
+                        <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
+                          <div className="flex justify-between items-center font-bold">
+                            <span className="text-slate-800">{v.membro_nome}</span>
+                            <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
+                          </div>
+                          <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
+                        </div>
+                      ))
                     )}
                   </div>
+                </div>
 
-                  {/* HISTÓRICO DE PARECERES */}
-                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex flex-col overflow-hidden text-left h-[25%] shrink-0">
-                    <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
-                    <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                      {listaDeVotos.length === 0 ? (
-                        <p className="text-slate-400 italic text-xs py-4 text-center font-medium">A mesa ainda não possui votos computados.</p>
-                      ) : (
-                        listaDeVotos.map((v: any, idx: number) => (
-                          <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
-                            <div className="flex justify-between items-center font-bold">
-                              <span className="text-slate-800">{v.membro_nome}</span>
-                              <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
+                {/* CHAT / MESA DE DEBATES */}
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+                  <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
+                  <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
+                    {chatMsgs.length === 0 ? (
+                      <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
+                    ) : (
+                      chatMsgs.map((m: any) => {
+                        const ehMeu = m.usuario === nomeUsuarioLogado;
+                        return (
+                          <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
+                            <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
+                            <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
+                              <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
                             </div>
-                            <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
                           </div>
-                        ))
-                      )}
-                    </div>
+                        )
+                      })
+                    )}
                   </div>
-
-                  {/* CHAT / MESA DE DEBATES */}
-                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-                    <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
-                    <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
-                      {chatMsgs.length === 0 ? (
-                        <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
-                      ) : (
-                        chatMsgs.map((m: any) => {
-                          const ehMeu = m.usuario === nomeUsuarioLogado;
-                          return (
-                            <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
-                              <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
-                              <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
-                                <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
-                              </div>
-                            </div>
-                          )
-                        })
-                      )}
-                    </div>
-                    <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
-                      <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
-                      <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
-                    </div>
+                  <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
+                    <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
+                    <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
                   </div>
                 </div>
-              )}
 
-              {/* === ABA 2: KAPPI VIEWER === */}
-              {abaDireitaFoco === "kappi" && (
-                <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                  <GerarKappiViewer />
-                </div>
-              )}
-
+              </div>
             </div>
 
           </div>
