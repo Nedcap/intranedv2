@@ -5,6 +5,14 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { MAPA_DE_ROTAS } from "@/lib/rotas";
 
+// 🔥 DEFINIÇÃO DOS CANAIS DE NOTIFICAÇÃO DISPONÍVEIS NO SISTEMA
+const OPCOES_NOTIFICACAO = [
+  { key: "analises", label: "Motor V8 (Mudanças de Status na Esteira)", icone: "🚀" },
+  { key: "votos", label: "Comitê (Votos dos Diretores)", icone: "🗳️" },
+  { key: "chat_comite", label: "Comitê (Mensagens na Mesa)", icone: "💬" },
+  { key: "cadastro_cedentes", label: "Cadastro (Entrada de Novos Cedentes)", icone: "🏢" }
+];
+
 export default function GerenciarUsuariosPage() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -17,6 +25,9 @@ export default function GerenciarUsuariosPage() {
   const [senha, setSenha] = useState("");
   const [cargo, setCargo] = useState("Comercial");
   const [permissoes, setPermissoes] = useState<Record<string, boolean>>({});
+  
+  // 🔥 NOVO ESTADO: Configurações do Sininho
+  const [notificacoesConfig, setNotificacoesConfig] = useState<Record<string, boolean>>({});
 
   const carregarUsuarios = async () => {
     try {
@@ -42,9 +53,8 @@ export default function GerenciarUsuariosPage() {
     setSelecionado(user);
     setNome(user.nome || "");
     setEmail(user.email || "");
-    setSenha(""); // Mantido em branco por segurança
+    setSenha(""); 
     
-    // 🎯 SDR ADICIONADO AQUI
     const cargoSalvo = user.cargo || "Comercial";
     if (cargoSalvo.toLowerCase() === "comercial") {
       setCargo("Comercial");
@@ -58,8 +68,6 @@ export default function GerenciarUsuariosPage() {
       setCargo(cargoSalvo);
     }
 
-    // Mapeia permissões salvas restaurando o estado dos checkboxes.
-    // Preparado para ler Array antigo ou o JSONB novo sem quebrar.
     const novasPerms: Record<string, boolean> = {};
     const permsBanco = user.permissoes || {};
     const isArray = Array.isArray(permsBanco);
@@ -72,6 +80,10 @@ export default function GerenciarUsuariosPage() {
       }
     });
     setPermissoes(novasPerms);
+
+    // 🔥 Restaura as preferências de notificação do banco
+    const notifBanco = user.notificacoes_config || {};
+    setNotificacoesConfig(notifBanco);
   };
 
   const limparFormulario = () => {
@@ -81,6 +93,7 @@ export default function GerenciarUsuariosPage() {
     setSenha("");
     setCargo("Comercial");
     setPermissoes({});
+    setNotificacoesConfig({}); // 🔥 Limpa os alertas
   };
 
   const salvarUsuario = async (e: React.FormEvent) => {
@@ -91,7 +104,6 @@ export default function GerenciarUsuariosPage() {
     setSalvando(true);
     const emailTratado = email.trim().toLowerCase();
 
-    // No modo de edição, mantemos a lógica antiga se o ID já existir no Auth
     if (selecionado) {
       const payloadPermissoes = (selecionado?.permissoes && !Array.isArray(selecionado.permissoes)) 
         ? { ...selecionado.permissoes } 
@@ -109,26 +121,24 @@ export default function GerenciarUsuariosPage() {
         nome: nome.trim(),
         email: emailTratado,
         cargo: cargo,
-        permissoes: payloadPermissoes
+        permissoes: payloadPermissoes,
+        notificacoes_config: notificacoesConfig // 🔥 Injeta as configurações do sininho
       };
 
       const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
       if (error) throw error;
       alert("🎉 Permissões e dados atualizados com sucesso!");
     } else {
-      // 🚀 MODO CADASTRO NOVO: Chama a nossa API Route automática!
       if (!senha.trim()) {
         alert("A senha de acesso inicial é obrigatória.");
         return;
       }
 
-      // Prepara as permissões iniciais baseadas no checklist
       const payloadPermissoes: Record<string, boolean> = {};
       MAPA_DE_ROTAS.forEach(r => {
         if (permissoes[r.path]) payloadPermissoes[r.path] = true;
       });
 
-      // Dispara para a API Route que criamos no Passo 2
       const response = await fetch("/api/usuarios", {
         method: "POST",
         headers: {
@@ -140,6 +150,7 @@ export default function GerenciarUsuariosPage() {
           senha: senha.trim(),
           cargo: cargo,
           permissoes: payloadPermissoes,
+          notificacoes_config: notificacoesConfig, // 🔥 Envia para a API Route
         }),
       });
 
@@ -166,11 +177,21 @@ export default function GerenciarUsuariosPage() {
     setPermissoes(prev => ({ ...prev, [path]: !prev[path] }));
   };
 
-  // Calcula visualmente quantos módulos a pessoa tem, ignorando as chaves internas do sistema (ex: lider_id)
+  // 🔥 Função para alternar o toggle dos Alertas
+  const alternarNotificacao = (key: string) => {
+    setNotificacoesConfig(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const contarModulos = (perms: any) => {
     if (!perms) return 0;
     if (Array.isArray(perms)) return perms.length;
     return Object.keys(perms).filter(k => k.startsWith("/")).length;
+  };
+
+  // Conta os alertas ativados
+  const contarAlertas = (notifs: any) => {
+    if (!notifs) return 0;
+    return Object.values(notifs).filter(v => v === true).length;
   };
 
   if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Carregando painel de acessos...</div>;
@@ -248,8 +269,8 @@ export default function GerenciarUsuariosPage() {
 
             {/* CHECKLIST DE MODULOS */}
             <div className="pt-3 border-t border-slate-100">
-              <label className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider mb-2">Módulos Habilitados:</label>
-              <div className="space-y-1.5 bg-slate-50 p-3 rounded-lg border border-slate-200 max-h-56 overflow-y-auto pr-2 shadow-inner">
+              <label className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider mb-2">Módulos Habilitados (Acesso de Tela):</label>
+              <div className="space-y-1.5 bg-slate-50 p-3 rounded-lg border border-slate-200 max-h-48 overflow-y-auto pr-2 shadow-inner">
                 {MAPA_DE_ROTAS?.map(r => (
                   <label key={r.path} className="flex items-center gap-3 p-1.5 rounded hover:bg-white transition-colors cursor-pointer text-xs font-bold text-slate-700 border border-transparent hover:border-slate-200">
                     <input 
@@ -259,6 +280,24 @@ export default function GerenciarUsuariosPage() {
                       className="w-4 h-4 text-blue-600 rounded border-slate-300 cursor-pointer focus:ring-blue-500" 
                     />
                     <span>{r.icone} {r.nome}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* 🔥 CHECKLIST DE NOTIFICAÇÕES (NOVO) */}
+            <div className="pt-3 border-t border-slate-100">
+              <label className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider mb-2">Alertas e Notificações (Sininho Global):</label>
+              <div className="space-y-1.5 bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-inner">
+                {OPCOES_NOTIFICACAO.map(n => (
+                  <label key={n.key} className="flex items-center gap-3 p-1.5 rounded hover:bg-white transition-colors cursor-pointer text-xs font-bold text-slate-700 border border-transparent hover:border-slate-200">
+                    <input 
+                      type="checkbox" 
+                      checked={!!notificacoesConfig[n.key]} 
+                      onChange={() => alternarNotificacao(n.key)} 
+                      className="w-4 h-4 text-amber-500 rounded border-slate-300 cursor-pointer focus:ring-amber-500" 
+                    />
+                    <span>{n.icone} {n.label}</span>
                   </label>
                 ))}
               </div>
@@ -294,7 +333,7 @@ export default function GerenciarUsuariosPage() {
                   <th className="p-4 w-56">Nome / Operador</th>
                   <th className="p-4 w-64">E-mail Corporativo</th>
                   <th className="p-4 w-32">Perfil Alçada</th>
-                  <th className="p-4 text-center w-36">Módulos Ativos</th>
+                  <th className="p-4 text-center w-36">Módulos/Alertas</th>
                   <th className="p-4 text-right w-24">Ação</th>
                 </tr>
               </thead>
@@ -317,8 +356,13 @@ export default function GerenciarUsuariosPage() {
                         {u.cargo || "Comercial"}
                       </span>
                     </td>
-                    <td className="p-4 text-center text-slate-500 font-bold text-xs">
-                      {u.cargo === 'Master' ? "Acesso Total" : `🔓 ${contarModulos(u.permissoes)} módulos`}
+                    <td className="p-4 text-center text-slate-500 font-bold text-[11px] leading-tight">
+                      <div className="flex flex-col items-center gap-1">
+                        <span>{u.cargo === 'Master' ? "Acesso Total" : `🔓 ${contarModulos(u.permissoes)} módulos`}</span>
+                        <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 px-1.5 rounded uppercase">
+                          🔔 {contarAlertas(u.notificacoes_config)} ativos
+                        </span>
+                      </div>
                     </td>
                     <td className="p-4 text-right">
                       <button 

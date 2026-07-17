@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation"; 
 import { useEffect, useState } from "react";
 import { MAPA_DE_ROTAS } from "@/lib/rotas"; 
-import NotificadorComite from "@/app/notificador-comite"; // 🔔 Importa o componente de tempo real
+import NotificadorGlobal from "@/components/NotificadorGlobal"; // 🔔 O novo notificador universal!
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -18,7 +18,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Geral": true,
     "Comercial": false,
     "Crédito": false,
-    "Consultas": false, // <-- Categoria NOVA adicionada aqui!
+    "Consultas": false,
     "Financeiro": false,
     "Cadastro": false,
     "Configurações": false,
@@ -74,7 +74,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Geral": linksPermitidos.filter(l => l.categoria === "Geral"),
     "Comercial": linksPermitidos.filter(l => l.categoria === "Comercial"),
     "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
-    "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"), // <-- Agrupador NOVO adicionado aqui!
+    "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"),
     "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
     "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
     "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
@@ -152,7 +152,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 switch(cat) {
                   case "Geral": return "🏠";
                   case "Comercial": return "🎯";
-                  case "Consultas": return "🔎"; // Ícone para o menu pai
+                  case "Consultas": return "🔎"; 
                   case "Crédito": return "⚖️";
                   case "Financeiro": return "💰";
                   case "Cadastro": return "📝";
@@ -247,7 +247,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <main className="flex-1 p-6 md:p-8 overflow-y-auto relative">
           {children}
-          <NotificadorComite />
+          
+          {/* 🔥 Componente Global de Notificações Ativo na Raiz da Dashboard */}
+          <NotificadorGlobal />
         </main>
       </div>
 
