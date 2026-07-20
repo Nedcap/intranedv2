@@ -53,8 +53,9 @@ export default function GerenciarUsuariosPage() {
   const [cargo, setCargo] = useState("Comercial");
   const [permissoes, setPermissoes] = useState<Record<string, boolean>>({});
   
-  // 🔥 Estado das Configurações do Sininho
+  // 🔥 Estados Novos (Sininho e RH)
   const [notificacoesConfig, setNotificacoesConfig] = useState<Record<string, boolean>>({});
+  const [batePonto, setBatePonto] = useState(false);
 
   const carregarUsuarios = async () => {
     try {
@@ -81,6 +82,7 @@ export default function GerenciarUsuariosPage() {
     setNome(user.nome || "");
     setEmail(user.email || "");
     setSenha(""); 
+    setBatePonto(!!user.bate_ponto); // Carrega a flag de ponto
     
     const cargoSalvo = user.cargo || "Comercial";
     if (cargoSalvo.toLowerCase() === "comercial") {
@@ -108,7 +110,6 @@ export default function GerenciarUsuariosPage() {
     });
     setPermissoes(novasPerms);
 
-    // Restaura as preferências de notificação do banco
     const notifBanco = user.notificacoes_config || {};
     setNotificacoesConfig(notifBanco);
   };
@@ -121,6 +122,7 @@ export default function GerenciarUsuariosPage() {
     setCargo("Comercial");
     setPermissoes({});
     setNotificacoesConfig({}); 
+    setBatePonto(false);
   };
 
   const salvarUsuario = async (e: React.FormEvent) => {
@@ -149,7 +151,8 @@ export default function GerenciarUsuariosPage() {
           email: emailTratado,
           cargo: cargo,
           permissoes: payloadPermissoes,
-          notificacoes_config: notificacoesConfig // Injeta as configurações do sininho
+          notificacoes_config: notificacoesConfig,
+          bate_ponto: batePonto // 🎯 SALVA A FLAG AQUI
         };
 
         const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
@@ -158,6 +161,7 @@ export default function GerenciarUsuariosPage() {
       } else {
         if (!senha.trim()) {
           alert("A senha de acesso inicial é obrigatória.");
+          setSalvando(false);
           return;
         }
 
@@ -166,11 +170,11 @@ export default function GerenciarUsuariosPage() {
           if (permissoes[r.path]) payloadPermissoes[r.path] = true;
         });
 
+        // ⚠️ NOTA: Se a sua /api/usuarios não aceitar o campo bate_ponto, 
+        // adicione ele no backend dela para fazer o insert completo.
         const response = await fetch("/api/usuarios", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             nome: nome.trim(),
             email: emailTratado,
@@ -178,6 +182,7 @@ export default function GerenciarUsuariosPage() {
             cargo: cargo,
             permissoes: payloadPermissoes,
             notificacoes_config: notificacoesConfig, 
+            bate_ponto: batePonto // 🎯 MANDA PRO BACKEND AQUI
           }),
         });
 
@@ -185,6 +190,11 @@ export default function GerenciarUsuariosPage() {
 
         if (!response.ok) {
           throw new Error(resultado.error || "Erro desconhecido na API");
+        }
+
+        // Caso a API não tenha gravado o bate_ponto, garantimos o update aqui
+        if (resultado.user?.id) {
+           await supabase.from("usuarios").update({ bate_ponto }).eq("id", resultado.user.id);
         }
 
         alert("🎉 Novo colaborador registrado AUTOMATICAMENTE no Auth e no Banco!");
@@ -219,7 +229,6 @@ export default function GerenciarUsuariosPage() {
     return Object.values(notifs).filter(v => v === true).length;
   };
 
-  // Botão rápido para marcar todos de uma categoria
   const toggleCategoriaNotificacao = (grupo: any) => {
     const todasAtivas = grupo.opcoes.every((op: any) => notificacoesConfig[op.key]);
     const novoEstado = { ...notificacoesConfig };
@@ -302,6 +311,24 @@ export default function GerenciarUsuariosPage() {
                 <option value="Operacional">Operacional (Acesso Geral)</option>
                 <option value="Master">Master (Acesso Completo + Configurações)</option>
               </select>
+            </div>
+
+            {/* 🔥 CONTROLE DE PONTO (NOVO) */}
+            <div className="flex flex-col space-y-1.5 pt-3 border-t border-slate-100">
+              <label className="font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-1">
+                Controle de Jornada (RH):
+              </label>
+              <label className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer hover:bg-white transition-all shadow-inner">
+                <input
+                  type="checkbox"
+                  checked={batePonto}
+                  onChange={(e) => setBatePonto(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                />
+                <span className="text-[11px] font-black text-slate-700 uppercase">
+                  Exigir Bate-Ponto Eletrônico
+                </span>
+              </label>
             </div>
 
             {/* CHECKLIST DE MODULOS */}
@@ -403,7 +430,11 @@ export default function GerenciarUsuariosPage() {
                 {usuarios.map(u => (
                   <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="p-4 font-black text-slate-900 uppercase truncate" title={u.nome}>
-                      {u.nome}
+                      {/* 🔥 ÍCONE DO RELÓGIO MOSTRA QUEM BATE PONTO */}
+                      <span className="flex items-center gap-2">
+                        {u.nome}
+                        {u.bate_ponto && <span title="Registra Ponto Eletrônico">🕒</span>}
+                      </span>
                     </td>
                     <td className="p-4 text-slate-500 font-mono text-xs truncate" title={u.email}>
                       {u.email}

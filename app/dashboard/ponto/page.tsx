@@ -21,6 +21,7 @@ const traduzirEvento = (tipo: string) => {
 export default function PontoEletronicoPage() {
   const [carregando, setCarregando] = useState(true);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [acessoNegado, setAcessoNegado] = useState(false); // 🚨 Flag Nova!
   const [localizacao, setLocalizacao] = useState<{ lat: number; lng: number } | null>(null);
   const [ultimoStatus, setUltimoStatus] = useState<string>("NENHUM");
   const [horaAtual, setHoraAtual] = useState<string>("");
@@ -29,13 +30,20 @@ export default function PontoEletronicoPage() {
   const carregarDados = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
+      // 🔒 VERIFICAÇÃO SE O CARA DEVE BATER PONTO
+      const { data: userData } = await supabase.from('usuarios').select('bate_ponto').eq('id', user.id).single();
+      
+      if (!userData?.bate_ponto) {
+         setAcessoNegado(true);
+         setCarregando(false);
+         return;
+      }
+
       setUsuarioId(user.id);
       
-      // Busca status do botão hoje
       const status = await buscarUltimoStatusPonto(user.id);
       setUltimoStatus(status);
 
-      // Busca o extrato do funcionário (últimos 15 pontos)
       const { data: hist } = await supabase
         .from("registro_ponto")
         .select("*")
@@ -49,12 +57,10 @@ export default function PontoEletronicoPage() {
   };
 
   useEffect(() => {
-    // Relógio em tempo real visual
     const timer = setInterval(() => {
       setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     }, 1000);
 
-    // Pede permissão de GPS
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => setLocalizacao({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -72,7 +78,6 @@ export default function PontoEletronicoPage() {
     
     try {
       setCarregando(true);
-      // 🎯 CORREÇÃO: Agora lidamos com o objeto retornado (sucesso/erro) e não o catch nativo
       const res = await registrarPonto(usuarioId, localizacao?.lat || null, localizacao?.lng || null, tipo);
       
       if (res.erro) {
@@ -82,18 +87,31 @@ export default function PontoEletronicoPage() {
       }
 
       alert("✅ Ponto registrado e validado pelo Servidor!");
-      await carregarDados(); // Recarrega a tela e o histórico automaticamente
+      await carregarDados(); 
     } catch (e: any) {
       alert(`❌ Erro inexperado: ${e.message}`);
       setCarregando(false);
     }
   };
 
-  if (carregando && ultimoStatus === "NENHUM" && historico.length === 0) {
+  if (carregando && ultimoStatus === "NENHUM" && historico.length === 0 && !acessoNegado) {
     return <div className="flex h-screen items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando com o servidor...</div>;
   }
 
-  // Máquina de Estado do Botão
+  // 🚨 TELA DE BLOQUEIO PARA QUEM NÃO É CLT/NÃO BATE PONTO
+  if (acessoNegado) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 font-sans">
+        <div className="bg-white p-12 rounded-3xl shadow-xl border border-slate-200 flex flex-col items-center text-center max-w-md w-full relative overflow-hidden">
+          <div className="absolute top-0 w-full h-2 bg-slate-300"></div>
+          <span className="text-6xl mb-4">🔓</span>
+          <h2 className="text-2xl font-black text-slate-800 mb-2">Acesso Livre</h2>
+          <p className="text-slate-500 font-medium">Seu perfil não exige registro de ponto eletrônico. Você está livre para navegar pela esteira!</p>
+        </div>
+      </div>
+    );
+  }
+
   let proximoPasso = "";
   let corBotao = "";
   let icone = "";
