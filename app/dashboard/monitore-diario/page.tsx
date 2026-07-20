@@ -28,10 +28,11 @@ export default function MonitoreDiarioPage() {
     try {
       setCarregando(true);
 
-      // 🎯 CORREÇÃO: Busca APENAS a última data disponível primeiro
+      // 🎯 CORREÇÃO 2: Cache Buster - neq numa coluna de texto impede o cache fantasma do Next.js
       const { data: maxDateList } = await supabase
         .from("historico_consolidado")
         .select("data_processamento")
+        .neq("cedente", `CACHE_BUSTER_${Date.now()}`)
         .order("data_processamento", { ascending: false })
         .limit(1);
 
@@ -42,15 +43,17 @@ export default function MonitoreDiarioPage() {
 
       const ultimaData = maxDateList[0].data_processamento;
 
-      // 🎯 CORREÇÃO: Faz a busca restrita à última data, driblando o limite de 1000 linhas
+      // 🎯 CORREÇÃO 3: Adicionado .limit(10000) para evitar o corte padrão de 1000 linhas
       const [resHist, resCadastro] = await Promise.all([
         supabase
           .from("historico_consolidado")
           .select("*")
-          .eq("data_processamento", ultimaData),
+          .eq("data_processamento", ultimaData)
+          .limit(10000),
         supabase
           .from("cadastro_cedentes")
           .select("cedente, risco_sec, risco_fidc")
+          .limit(10000)
       ]);
 
       if (resHist.data && resHist.data.length > 0) {
@@ -95,17 +98,19 @@ export default function MonitoreDiarioPage() {
       const texto = await file.text();
       const linhas = texto.split(/\r?\n/);
 
-      // 🎯 CORREÇÃO: Descobre a data corretamente no padrão DDMMAA -> YYYY-MM-DD
+      // 🎯 CORREÇÃO 1: Regex para aceitar anos com 2 ou 4 dígitos (DDMMAA ou DDMMAAAA)
       let dataArquivo = new Date().toISOString().split("T")[0];
-      if (file.name.includes("RET.D")) {
-        const posData = file.name.indexOf("RET.D") + 5;
-        const dataStr = file.name.substring(posData, posData + 6);
-        if (dataStr.length === 6) {
-          const dia = dataStr.substring(0, 2);
-          const mes = dataStr.substring(2, 4);
-          const ano = dataStr.substring(4, 6);
-          dataArquivo = `20${ano}-${mes}-${dia}`;
-        }
+      const matchData = file.name.match(/RET\.D(\d{6}|\d{8})/i);
+      
+      if (matchData) {
+        const digits = matchData[1];
+        const dia = digits.substring(0, 2);
+        const mes = digits.substring(2, 4);
+        const ano = digits.length === 8 
+          ? digits.substring(4, 8) 
+          : `20${digits.substring(4, 6)}`;
+        
+        dataArquivo = `${ano}-${mes}-${dia}`;
       }
 
       setStatusProcessamento("Minerando CNPJs e Sócios...");
@@ -202,9 +207,18 @@ export default function MonitoreDiarioPage() {
 
       const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
       
+      // 🎯 CORREÇÃO 3: Adicionado .limit(10000) para evitar corte no cruzamento
       const [histDBResponse, cedentesDBResponse] = await Promise.all([
-        supabase.from("historico_consolidado").select("*").in("cnpj_cliente", cnpjsCompletos).order("data_processamento", { ascending: false }),
-        supabase.from("cadastro_cedentes").select("cedente, responsavel_id")
+        supabase
+          .from("historico_consolidado")
+          .select("*")
+          .in("cnpj_cliente", cnpjsCompletos)
+          .order("data_processamento", { ascending: false })
+          .limit(10000),
+        supabase
+          .from("cadastro_cedentes")
+          .select("cedente, responsavel_id")
+          .limit(10000)
       ]);
       
       const histDB = histDBResponse.data;
