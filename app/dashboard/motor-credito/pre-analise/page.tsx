@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -14,6 +14,28 @@ export default function PreAnalisePage() {
   const [dadosEmpresa, setDadosEmpresa] = useState<any>(null);
   const [processosEncontrados, setProcessosEncontrados] = useState<any[]>([]);
   const [dadosFinanceiros, setDadosFinanceiros] = useState<any>(null);
+  
+  // 🗂️ Novo Estado para o Histórico
+  const [historico, setHistorico] = useState<any[]>([]);
+
+  // Carrega o histórico ao abrir a página
+  useEffect(() => {
+    carregarHistorico();
+  }, []);
+
+  const carregarHistorico = async () => {
+    const { data, error } = await supabase
+      .from("pre_analises")
+      .select("*")
+      .order("criado_em", { ascending: false })
+      .limit(10); // Traz as 10 últimas consultas
+
+    if (error) {
+      console.error("Erro ao buscar histórico:", error);
+    } else if (data) {
+      setHistorico(data);
+    }
+  };
 
   // Função auxiliar movida para fora do try/catch para ser usada no cálculo pré-salvamento
   const avaliarRiscoProcesso = (classe: string) => {
@@ -49,14 +71,14 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO (Rota ajustada)
+      // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO 
       const reqProcessos = fetch("/api/processos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      // 3. 💳 BATE NO CREDITHUB EM PARALELO (Rota ajustada)
+      // 3. 💳 BATE NO CREDITHUB EM PARALELO 
       const reqFinanceiro = fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,7 +98,6 @@ export default function PreAnalisePage() {
       if (resFinanceiro.ok) {
         financeiro = await resFinanceiro.json();
       } else {
-        // 🔥 AQUI ESTÁ O PULO DO GATO: Tenta ler o erro formatado pelo nosso backend
         const errData = await resFinanceiro.json().catch(() => ({}));
         financeiro = { 
           erro: true, 
@@ -85,10 +106,9 @@ export default function PreAnalisePage() {
       }
 
       // =========================================================================
-      // 🔥 SALVAMENTO AUTOMÁTICO (GRAVA O LOG DE AUDITORIA E RISCO NO SUPABASE)
+      // 🔥 SALVAMENTO AUTOMÁTICO E ATUALIZAÇÃO DO HISTÓRICO
       // =========================================================================
       
-      // Calcula o risco instantaneamente
       let nivelRiscoGeral = "BAIXO";
       let pesoTotal = 0;
       processos.forEach(p => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
@@ -106,7 +126,7 @@ export default function PreAnalisePage() {
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
 
-      // Dispara o insert silenciosamente
+      // Dispara o insert
       const { error: insertError } = await supabase.from("pre_analises").insert({
         documento_alvo: dataBq.empresa.cnpj,
         nome_empresa_lead: dataBq.empresa.razao_social,
@@ -118,11 +138,12 @@ export default function PreAnalisePage() {
 
       if (insertError) {
         console.error("⚠️ Erro ao registrar log de consulta no banco:", insertError);
+      } else {
+        // Atualiza a tabela de histórico silenciosamente na tela após salvar
+        carregarHistorico();
       }
 
-      // =========================================================================
-      // ATUALIZA A TELA COM OS DADOS QUE FORAM SALVOS
-      // =========================================================================
+      // Atualiza os painéis principais
       setDadosEmpresa({
         razao_social: dataBq.empresa.razao_social,
         cnpj: dataBq.empresa.cnpj,
@@ -144,7 +165,18 @@ export default function PreAnalisePage() {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
   };
 
-  // Botão apenas faz o redirecionamento (o filtro pesado entrará aqui depois)
+  const formatarData = (dataIso: string) => {
+    return new Date(dataIso).toLocaleString("pt-BR", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+  };
+
+  const getCorRiscoGeral = (risco: string) => {
+    if (risco === "ALTO") return "bg-red-100 text-red-700 border-red-200";
+    if (risco === "MEDIO") return "bg-amber-100 text-amber-700 border-amber-200";
+    return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  };
+
   const enviarParaMesa = () => {
     if (dadosEmpresa) {
       router.push(`/dashboard/motor-credito/envio-analise?cnpj=${dadosEmpresa.cnpj.replace(/\D/g, "")}`);
@@ -192,7 +224,7 @@ export default function PreAnalisePage() {
           </form>
         </div>
 
-        {/* CONTEÚDO DA PRÉ-ANÁLISE */}
+        {/* CONTEÚDO DA PRÉ-ANÁLISE ATUAL */}
         {dadosEmpresa && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start animate-in fade-in slide-in-from-bottom-2">
             
@@ -322,6 +354,71 @@ export default function PreAnalisePage() {
 
           </div>
         )}
+
+        {/* ========================================================= */}
+        {/* 📚 TABELA DE HISTÓRICO DE CONSULTAS */}
+        {/* ========================================================= */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
+            <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">📚 Histórico de Consultas (Últimas 10)</h3>
+            <button 
+              onClick={carregarHistorico} 
+              className="text-indigo-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1"
+            >
+              🔄 Atualizar
+            </button>
+          </div>
+          
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse text-[12px] min-w-[800px]">
+              <thead className="bg-slate-100 border-b border-slate-200">
+                <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
+                  <th className="p-4">Data / Hora</th>
+                  <th className="p-4">CNPJ</th>
+                  <th className="p-4">Empresa (Lead)</th>
+                  <th className="p-4 text-center">Processos</th>
+                  <th className="p-4 text-center">Risco Apurado</th>
+                  <th className="p-4">Comercial</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                {historico.length > 0 ? (
+                  historico.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 text-[11px] text-slate-500 font-mono">
+                        {formatarData(item.criado_em)}
+                      </td>
+                      <td className="p-4 font-mono font-bold text-slate-900">
+                        {item.documento_alvo}
+                      </td>
+                      <td className="p-4 text-[11px] font-bold text-slate-700 truncate max-w-[250px]" title={item.nome_empresa_lead}>
+                        {item.nome_empresa_lead}
+                      </td>
+                      <td className="p-4 text-center font-bold text-slate-600">
+                        {item.total_processos_encontrados}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`inline-block px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider border ${getCorRiscoGeral(item.nivel_risco)}`}>
+                          {item.nivel_risco || "N/D"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-[11px] text-slate-600">
+                        {item.comercial_responsavel}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic">
+                      Nenhuma consulta registrada no banco de dados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
