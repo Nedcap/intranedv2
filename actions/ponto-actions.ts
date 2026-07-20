@@ -5,26 +5,32 @@ import { supabase } from "@/lib/supabase";
 
 // 🛡️ Função blindada para gravar o ponto (Data e IP são definidos pelo Servidor)
 export async function registrarPonto(usuarioId: string, latitude: number | null, longitude: number | null, tipo: string) {
-  if (!usuarioId) throw new Error("Acesso Negado: Usuário não identificado.");
+  if (!usuarioId) return { erro: "Acesso Negado: Usuário não identificado." };
 
-  const headersList = headers();
-  // Captura o IP real, furando proxies da Vercel
-  const ip = headersList.get("x-forwarded-for")?.split(',')[0] || headersList.get("x-real-ip") || "IP_DESCONHECIDO";
-  const userAgent = headersList.get("user-agent") || "Navegador Desconhecido";
+  try {
+    // 🎯 CORREÇÃO: No Next.js mais novo, o headers() precisa do await!
+    const headersList = await headers();
+    
+    // Captura o IP real, furando proxies da Vercel
+    const ip = headersList.get("x-forwarded-for")?.split(',')[0] || headersList.get("x-real-ip") || "IP_DESCONHECIDO";
+    const userAgent = headersList.get("user-agent") || "Navegador Desconhecido";
 
-  const { error } = await supabase.from("registro_ponto").insert({
-    usuario_id: usuarioId,
-    tipo: tipo,
-    latitude,
-    longitude,
-    ip_origem: ip,
-    user_agent: userAgent
-    // A data/hora NÃO vai no insert. O Supabase cuida disso com "now()"
-  });
+    const { error } = await supabase.from("registro_ponto").insert({
+      usuario_id: usuarioId,
+      tipo: tipo,
+      latitude,
+      longitude,
+      ip_origem: ip,
+      user_agent: userAgent
+      // A data/hora NÃO vai no insert. O Supabase cuida disso com "now()"
+    });
 
-  if (error) throw new Error(`Falha no banco de dados: ${error.message}`);
+    if (error) return { erro: `Falha no banco de dados: ${error.message}` };
 
-  return { sucesso: true };
+    return { sucesso: true };
+  } catch (err: any) {
+    return { erro: `Erro interno no servidor: ${err.message}` };
+  }
 }
 
 // 🔍 Função para a tela saber em qual estado o botão deve estar hoje
