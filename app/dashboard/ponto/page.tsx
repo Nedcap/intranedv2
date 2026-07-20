@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { registrarPonto } from "@/actions/ponto-actions";
+import { registrarPonto, buscarUltimoStatusPonto } from "@/actions/ponto-actions";
 
 const formatarData = (isoString: string) => new Date(isoString).toLocaleDateString("pt-BR");
 const formatarHora = (isoString: string) => new Date(isoString).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -21,19 +21,21 @@ const traduzirEvento = (tipo: string) => {
 export default function PontoEletronicoPage() {
   const [carregando, setCarregando] = useState(true);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
-  const [tokenSessao, setTokenSessao] = useState<string | null>(null); // 🔥 Guarda o crachá
+  const [tokenSessao, setTokenSessao] = useState<string | null>(null); 
   const [acessoNegado, setAcessoNegado] = useState(false);
+  
+  // 🔥 Status do GPS para não travar a tela
   const [localizacao, setLocalizacao] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<"buscando" | "ok" | "erro">("buscando");
+  
   const [ultimoStatus, setUltimoStatus] = useState<string>("NENHUM");
   const [horaAtual, setHoraAtual] = useState<string>("");
   const [historico, setHistorico] = useState<any[]>([]);
 
   const carregarDados = async () => {
-    // 🎯 Traz a Session completa para pegarmos o token JWT
     const { data: { session } } = await supabase.auth.getSession();
     
     if (session?.user) {
-      // 🔒 VERIFICAÇÃO SE O CARA DEVE BATER PONTO
       const { data: userData } = await supabase.from('usuarios').select('bate_ponto').eq('id', session.user.id).single();
       
       if (!userData?.bate_ponto) {
@@ -43,9 +45,8 @@ export default function PontoEletronicoPage() {
       }
 
       setUsuarioId(session.user.id);
-      setTokenSessao(session.access_token); // Salva o token para a Action
+      setTokenSessao(session.access_token);
 
-      // 🔍 Busca status de HOJE direto pelo Client
       const dataAtual = new Date();
       dataAtual.setHours(0, 0, 0, 0);
 
@@ -60,7 +61,6 @@ export default function PontoEletronicoPage() {
 
       setUltimoStatus(statusData?.tipo || "NENHUM");
 
-      // 📜 Busca o histórico do funcionário
       const { data: hist } = await supabase
         .from("registro_ponto")
         .select("*")
@@ -78,12 +78,21 @@ export default function PontoEletronicoPage() {
       setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     }, 1000);
 
+    // 🎯 Correção: Busca GPS com timeout de 5 segundos, se falhar ou recusar, não trava a tela!
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setLocalizacao({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        (err) => console.warn("GPS ignorado/bloqueado:", err.message),
-        { enableHighAccuracy: true, timeout: 5000 }
+        (pos) => {
+          setLocalizacao({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setGpsStatus("ok");
+        },
+        (err) => {
+          console.warn("GPS falhou ou foi negado:", err.message);
+          setGpsStatus("erro");
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
+    } else {
+      setGpsStatus("erro");
     }
 
     carregarDados();
@@ -95,7 +104,6 @@ export default function PontoEletronicoPage() {
     
     try {
       setCarregando(true);
-      // 🚀 Passa o token como primeiro parâmetro!
       const res = await registrarPonto(tokenSessao, usuarioId, localizacao?.lat || null, localizacao?.lng || null, tipo);
       
       if (res.erro) {
@@ -105,7 +113,7 @@ export default function PontoEletronicoPage() {
       }
 
       alert("✅ Ponto registrado e validado pelo Servidor!");
-      await carregarDados(); // Recarrega tela e histórico
+      await carregarDados(); 
     } catch (e: any) {
       alert(`❌ Erro inesperado: ${e.message}`);
       setCarregando(false);
@@ -116,7 +124,6 @@ export default function PontoEletronicoPage() {
     return <div className="flex h-screen items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando com o servidor...</div>;
   }
 
-  // 🚨 TELA DE BLOQUEIO PARA QUEM NÃO BATE PONTO
   if (acessoNegado) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 font-sans">
@@ -155,7 +162,6 @@ export default function PontoEletronicoPage() {
   return (
     <div className="flex flex-col lg:flex-row items-start justify-center gap-8 min-h-[70vh] p-6 font-sans max-w-[1400px] mx-auto">
       
-      {/* COLUNA ESQUERDA: RELÓGIO E BOTÃO */}
       <div className="bg-white p-10 rounded-3xl shadow-xl border border-slate-200 flex flex-col items-center w-full lg:w-[450px] shrink-0 relative overflow-hidden">
         <div className="absolute top-0 w-full h-2 bg-gradient-to-r from-indigo-500 to-cyan-500"></div>
 
@@ -195,15 +201,12 @@ export default function PontoEletronicoPage() {
             <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
             IP e Horário validados pelo Servidor
           </span>
-          {localizacao ? (
-            <span>📍 Lat: {localizacao.lat.toFixed(4)} | Lng: {localizacao.lng.toFixed(4)}</span>
-          ) : (
-            <span className="text-amber-500">⏳ Buscando sinal de GPS...</span>
-          )}
+          {gpsStatus === "buscando" && <span className="text-amber-500 animate-pulse">⏳ Buscando sinal de GPS...</span>}
+          {gpsStatus === "ok" && localizacao && <span className="text-slate-500">📍 Lat: {localizacao.lat.toFixed(4)} | Lng: {localizacao.lng.toFixed(4)}</span>}
+          {gpsStatus === "erro" && <span className="text-rose-400">⚠️ GPS Desativado/Sem Sinal</span>}
         </div>
       </div>
 
-      {/* COLUNA DIREITA: MEU EXTRATO */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 w-full flex-1 min-h-[400px]">
         <div className="flex items-center gap-2 mb-6">
           <span className="text-xl">🧾</span>

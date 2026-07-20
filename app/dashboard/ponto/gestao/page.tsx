@@ -1,41 +1,67 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
-const formatarData = (isoString: string) => {
-  const d = new Date(isoString);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+const formatarHora = (data?: Date | null) => {
+  if (!data) return "--:--";
+  return data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 };
 
-const formatarHora = (isoString: string) => {
+// Converte a string do banco YYYY-MM-DD local
+const extrairDataLocal = (isoString: string) => {
   const d = new Date(isoString);
-  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const traduzirEvento = (tipo: string) => {
-  const mapa: Record<string, string> = {
-    "ENTRADA": "📥 Entrada",
-    "SAIDA_ALMOCO": "🍔 Saída Almoço",
-    "RETORNO_ALMOCO": "🔙 Retorno Almoço",
-    "SAIDA": "🏠 Saída (Fim)"
-  };
-  return mapa[tipo] || tipo;
+const formatarDataBr = (dataLocal: string) => {
+  const [y, m, d] = dataLocal.split("-");
+  return `${d}/${m}/${y}`;
+};
+
+type DiaPonto = {
+  data: string;
+  registros: {
+    ENTRADA?: any;
+    SAIDA_ALMOCO?: any;
+    RETORNO_ALMOCO?: any;
+    SAIDA?: any;
+  }
+};
+
+type FuncionarioAgrupado = {
+  id: string;
+  nome: string;
+  dias: DiaPonto[];
 };
 
 export default function GestaoPontoPage() {
-  const [registros, setRegistros] = useState<any[]>([]);
+  const [funcionarios, setFuncionarios] = useState<FuncionarioAgrupado[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [mesFiltro, setMesFiltro] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
 
-  const [registroEmEdicao, setRegistroEmEdicao] = useState<any>(null);
-  const [novaHora, setNovaHora] = useState("");
+  const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
+
+  // Estados do Modal de Edição (Por Dia Inteiro)
+  const [diaEmEdicao, setDiaEmEdicao] = useState<{ funcId: string; nome: string; dataLocal: string; registros: any } | null>(null);
+  const [formEdicao, setFormEdicao] = useState({ ENTRADA: "", SAIDA_ALMOCO: "", RETORNO_ALMOCO: "", SAIDA: "" });
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
   const carregarRegistros = async () => {
     try {
       setCarregando(true);
 
+      // 1. Pega apenas os funcionários que batem ponto
+      const { data: usersData, error: errUsers } = await supabase
+        .from("usuarios")
+        .select("id, nome")
+        .eq("bate_ponto", true);
+
+      if (errUsers) throw errUsers;
+      if (!usersData) return;
+
+      // 2. Pega todos os registros brutos da tabela
       const { data: pontosData, error: errPonto } = await supabase
         .from("registro_ponto")
         .select("*")
@@ -43,25 +69,35 @@ export default function GestaoPontoPage() {
 
       if (errPonto) throw errPonto;
 
-      // 🔥 BUSCA SÓ QUEM É CLT (bate_ponto = true)
-      const { data: usersData, error: errUsers } = await supabase
-        .from("usuarios")
-        .select("id, nome")
-        .eq("bate_ponto", true);
+      // 3. Filtra e Agrupa pelo Mês atual em JavaScript
+      const agrupados: FuncionarioAgrupado[] = usersData.map(u => {
+        // Pega os pontos do usuario no mês selecionado
+        const pontosUsuario = (pontosData || []).filter(p => {
+          if (p.usuario_id !== u.id) return false;
+          const dataLocal = extrairDataLocal(p.data_hora);
+          return dataLocal.startsWith(mesFiltro);
+        });
 
-      if (errUsers) throw errUsers;
+        // Agrupa por Dia
+        const mapDias: Record<string, DiaPonto> = {};
+        pontosUsuario.forEach(p => {
+          const dl = extrairDataLocal(p.data_hora);
+          if (!mapDias[dl]) mapDias[dl] = { data: dl, registros: {} };
+          mapDias[dl].registros[p.tipo as keyof typeof mapDias[string]["registros"]] = p;
+        });
 
-      const mapUsuarios = new Map(usersData?.map(u => [u.id, u.nome]));
-      
-      // Filtra o histórico para mostrar apenas registros dos usuários habilitados no RH
-      const mesclados = pontosData
-        ?.filter(p => mapUsuarios.has(p.usuario_id))
-        .map(p => ({
-          ...p,
-          nome_funcionario: mapUsuarios.get(p.usuario_id)
-        })) || [];
+        // Converte em array e ordena do dia mais recente pro mais antigo
+        const diasArray = Object.values(mapDias).sort((a, b) => b.data.localeCompare(a.data));
 
-      setRegistros(mesclados);
+        return {
+          id: u.id,
+          nome: u.nome,
+          dias: diasArray
+        };
+      });
+
+      // Filtra pra mostrar só quem tem registro no mês (opcional, mas deixa a tela mais limpa)
+      setFuncionarios(agrupados.filter(f => f.dias.length > 0));
     } catch (error: any) {
       alert(`❌ Erro ao carregar gestão: ${error.message}`);
     } finally {
@@ -71,143 +107,134 @@ export default function GestaoPontoPage() {
 
   useEffect(() => {
     carregarRegistros();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mesFiltro]);
 
-  const registrosFiltrados = useMemo(() => {
-    return registros.filter(r => r.data_hora.startsWith(mesFiltro));
-  }, [registros, mesFiltro]);
-
-  const abrirModalEdicao = (reg: any) => {
-    const d = new Date(reg.data_hora);
-    const horaLocal = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-    setNovaHora(horaLocal);
-    setRegistroEmEdicao(reg);
+  const toggleExpandirLinha = (id: string) => {
+    setLinhasExpandidas(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const salvarNovaHora = async () => {
-    if (!registroEmEdicao || !novaHora) return;
+  // ==========================================================================
+  // ✏️ LÓGICA DO MODAL DE EDIÇÃO DE DIA INTEIRO
+  // ==========================================================================
+  const abrirModalEdicaoDia = (funcId: string, nome: string, dia: DiaPonto) => {
+    const fH = (reg: any) => reg ? new Date(reg.data_hora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+    
+    setFormEdicao({
+      ENTRADA: fH(dia.registros.ENTRADA),
+      SAIDA_ALMOCO: fH(dia.registros.SAIDA_ALMOCO),
+      RETORNO_ALMOCO: fH(dia.registros.RETORNO_ALMOCO),
+      SAIDA: fH(dia.registros.SAIDA)
+    });
+
+    setDiaEmEdicao({
+      funcId,
+      nome,
+      dataLocal: dia.data,
+      registros: dia.registros
+    });
+  };
+
+  const salvarEdicaoDia = async () => {
+    if (!diaEmEdicao) return;
     try {
       setSalvandoEdicao(true);
-      
-      const d = new Date(registroEmEdicao.data_hora);
-      const [horas, minutos] = novaHora.split(":");
-      d.setHours(parseInt(horas, 10), parseInt(minutos, 10), 0, 0);
+      const { funcId, dataLocal, registros } = diaEmEdicao;
 
-      const { error } = await supabase
-        .from("registro_ponto")
-        .update({ data_hora: d.toISOString() })
-        .eq("id", registroEmEdicao.id);
+      // Pega data base: YYYY-MM-DD
+      const [ano, mes, diaStr] = dataLocal.split("-").map(Number);
 
-      if (error) throw error;
+      const tipos = ["ENTRADA", "SAIDA_ALMOCO", "RETORNO_ALMOCO", "SAIDA"];
 
-      alert("✅ Horário corrigido com sucesso!");
-      setRegistroEmEdicao(null);
-      carregarRegistros();
+      for (const tipo of tipos) {
+        const novaHoraStr = formEdicao[tipo as keyof typeof formEdicao];
+        const registroExistente = registros[tipo as keyof typeof registros];
+
+        // Se limpou o input e tinha registro -> DELETE
+        if (!novaHoraStr && registroExistente) {
+          await supabase.from("registro_ponto").delete().eq("id", registroExistente.id);
+        } 
+        // Se preencheu o input
+        else if (novaHoraStr) {
+          const [h, m] = novaHoraStr.split(":").map(Number);
+          // Cria a data mesclando o dia local e a hora nova inserida
+          const novaDataObj = new Date(ano, mes - 1, diaStr, h, m, 0);
+          const isoAtualizado = novaDataObj.toISOString();
+
+          // Se já existia, atualiza
+          if (registroExistente) {
+            await supabase.from("registro_ponto").update({ data_hora: isoAtualizado }).eq("id", registroExistente.id);
+          } 
+          // Se não existia, insere como ajuste manual
+          else {
+            await supabase.from("registro_ponto").insert({
+              usuario_id: funcId,
+              tipo: tipo,
+              data_hora: isoAtualizado,
+              ip_origem: "AJUSTE_MANUAL",
+              user_agent: "Ajuste via Painel Gestão"
+            });
+          }
+        }
+      }
+
+      alert("✅ Folha do dia atualizada com sucesso!");
+      setDiaEmEdicao(null);
+      await carregarRegistros();
     } catch (err: any) {
-      alert(`❌ Erro ao atualizar hora: ${err.message}`);
+      alert(`❌ Erro ao salvar dia: ${err.message}`);
     } finally {
       setSalvandoEdicao(false);
     }
   };
 
-  const exportarCSVConsolidado = () => {
-    if (registrosFiltrados.length === 0) return alert("Nenhum registro para exportar nesse mês.");
+  // ==========================================================================
+  // 📊 CALCULADORA DE HORAS
+  // ==========================================================================
+  const calcularMetricasDia = (regs: DiaPonto["registros"]) => {
+    const e = regs.ENTRADA ? new Date(regs.ENTRADA.data_hora) : null;
+    const sa = regs.SAIDA_ALMOCO ? new Date(regs.SAIDA_ALMOCO.data_hora) : null;
+    const ra = regs.RETORNO_ALMOCO ? new Date(regs.RETORNO_ALMOCO.data_hora) : null;
+    const s = regs.SAIDA ? new Date(regs.SAIDA.data_hora) : null;
 
-    const diasAgrupados: Record<string, any> = {};
-
-    const arrayOrdenado = [...registrosFiltrados].sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
-
-    arrayOrdenado.forEach(r => {
-      const dataStr = formatarData(r.data_hora);
-      const key = `${r.usuario_id}_${dataStr}`;
-
-      if (!diasAgrupados[key]) {
-        diasAgrupados[key] = {
-          funcionario: r.nome_funcionario,
-          data: dataStr,
-          ENTRADA: null,
-          SAIDA_ALMOCO: null,
-          RETORNO_ALMOCO: null,
-          SAIDA: null
-        };
+    let atrasoMinutos = 0;
+    if (e) {
+      const horasEntrada = e.getHours();
+      const minEntrada = e.getMinutes();
+      if (horasEntrada > 8 || (horasEntrada === 8 && minEntrada > 5)) { 
+        atrasoMinutos = (horasEntrada - 8) * 60 + minEntrada;
       }
-      diasAgrupados[key][r.tipo] = new Date(r.data_hora);
-    });
+    }
 
-    const cabecalho = ["Data", "Funcionário", "Entrada", "Saída Almoço", "Volta Almoço", "Saída Final", "Atraso Entrada (Min)", "Horas Trabalhadas", "Bonificação"];
-    
-    const linhas = Object.values(diasAgrupados).map(dia => {
-      const e = dia.ENTRADA;
-      const sa = dia.SAIDA_ALMOCO;
-      const ra = dia.RETORNO_ALMOCO;
-      const s = dia.SAIDA;
-
-      const fH = (data: Date | null) => data ? data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "-";
-
-      let atrasoMinutos = 0;
-      if (e) {
-        const horasEntrada = e.getHours();
-        const minEntrada = e.getMinutes();
-        if (horasEntrada > 8 || (horasEntrada === 8 && minEntrada > 5)) { 
-          atrasoMinutos = (horasEntrada - 8) * 60 + minEntrada;
-        }
+    let horasTrabalhadas = "--:--";
+    if (e && s) {
+      let totalMs = s.getTime() - e.getTime();
+      if (sa && ra) {
+        const almocoMs = Math.max(0, ra.getTime() - sa.getTime());
+        totalMs -= almocoMs;
+      } else {
+        totalMs -= (60 * 60 * 1000); // 1h padrão
       }
+      
+      const ht = Math.floor(totalMs / (1000 * 60 * 60));
+      const mt = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
+      horasTrabalhadas = `${String(ht).padStart(2, '0')}:${String(mt).padStart(2, '0')}`;
+    }
 
-      let horasTrabalhadas = "-";
-      if (e && s) {
-        let totalMs = s.getTime() - e.getTime();
-        if (sa && ra) {
-          const almocoMs = Math.max(0, ra.getTime() - sa.getTime());
-          totalMs -= almocoMs;
-        } else {
-          totalMs -= (60 * 60 * 1000); 
-        }
-        
-        const horasTotais = Math.floor(totalMs / (1000 * 60 * 60));
-        const minutosTotais = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
-        horasTrabalhadas = `${String(horasTotais).padStart(2, '0')}:${String(minutosTotais).padStart(2, '0')}`;
-      }
-
-      const bonificacao = "1 Hora (Saída antecipada 17h)";
-
-      return [
-        dia.data,
-        dia.funcionario,
-        fH(e),
-        fH(sa),
-        fH(ra),
-        fH(s),
-        atrasoMinutos > 0 ? `${atrasoMinutos} min` : "0 min",
-        horasTrabalhadas,
-        bonificacao
-      ];
-    });
-
-    const csvContent = [
-      cabecalho.join(";"),
-      ...linhas.map(linha => linha.join(";"))
-    ].join("\n");
-
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" }); 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Folha_Ponto_Consolidada_${mesFiltro}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { atrasoMinutos, horasTrabalhadas };
   };
 
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 sm:p-8 font-sans text-slate-800">
-      <div className="max-w-[1200px] mx-auto space-y-6">
+      <div className="max-w-[1400px] mx-auto space-y-6">
         
+        {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
           <div>
             <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
-              <span className="text-3xl">📋</span> Gestão de Ponto
+              <span className="text-3xl">📋</span> Gestão de Folha de Ponto
             </h2>
-            <span className="text-sm text-slate-500 font-medium mt-1 block">Acompanhamento e auditoria de jornada.</span>
+            <span className="text-sm text-slate-500 font-medium mt-1 block">Acompanhamento e edição da jornada dos colaboradores CLT.</span>
           </div>
 
           <div className="flex items-center gap-4 w-full md:w-auto">
@@ -218,108 +245,164 @@ export default function GestaoPontoPage() {
               className="p-2 border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all flex-1 md:flex-none"
             />
             <button 
-              onClick={exportarCSVConsolidado}
+              onClick={() => window.print()}
               className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Folha Consolidada (.CSV)
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+              Imprimir Relatório
             </button>
           </div>
         </div>
 
+        {/* TABELÃO EXPANSÍVEL */}
         <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pb-4">
             <table className="w-full text-left border-collapse text-sm">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-12">
-                  <th className="px-6 py-3 w-32">Data</th>
-                  <th className="px-6 py-3 w-40">Hora</th>
-                  <th className="px-6 py-3">Funcionário</th>
-                  <th className="px-6 py-3">Evento</th>
-                  <th className="px-6 py-3 text-center">Status GPS</th>
-                  <th className="px-6 py-3 text-center">Ações</th>
+                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-14">
+                  <th className="w-16 px-4 text-center"></th>
+                  <th className="px-6">Funcionário</th>
+                  <th className="px-6 text-center">Dias Trabalhados</th>
+                  <th className="px-6 text-center">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {carregando ? (
                   <tr>
-                    <td colSpan={6} className="text-center p-10 text-slate-400 font-bold animate-pulse">Buscando auditoria de ponto...</td>
+                    <td colSpan={4} className="text-center p-10 text-slate-400 font-bold animate-pulse">Calculando folhas de ponto...</td>
                   </tr>
-                ) : registrosFiltrados.length === 0 ? (
+                ) : funcionarios.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center p-10 text-slate-400 italic">Nenhum ponto registrado no mês de {mesFiltro}.</td>
+                    <td colSpan={4} className="text-center p-10 text-slate-400 italic">Nenhum funcionário registrou ponto neste mês.</td>
                   </tr>
                 ) : (
-                  registrosFiltrados.map((reg) => (
-                    <tr key={reg.id} className="hover:bg-slate-50 transition-colors font-medium">
-                      <td className="px-6 py-4 text-slate-600">{formatarData(reg.data_hora)}</td>
-                      <td className="px-6 py-4 font-mono font-bold text-slate-800">{formatarHora(reg.data_hora)}</td>
-                      <td className="px-6 py-4 font-bold text-indigo-700">{reg.nome_funcionario}</td>
-                      <td className="px-6 py-4 text-slate-600">
-                        <span className="bg-slate-100 px-2.5 py-1 rounded-md text-xs font-bold border border-slate-200">
-                          {traduzirEvento(reg.tipo)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        {reg.latitude && reg.longitude ? (
-                          <a 
-                            href={`https://www.google.com/maps/search/?api=1&query=${reg.latitude},${reg.longitude}`} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-[10px] font-bold transition-colors bg-emerald-50 px-2 py-1 rounded border border-emerald-200"
-                          >
-                            📍 VER MAPA
-                          </a>
-                        ) : (
-                          <span className="text-slate-400 text-[10px] font-bold bg-slate-100 px-2 py-1 rounded border border-slate-200">SEM SINAL</span>
+                  funcionarios.map((func) => {
+                    const isOpen = !!linhasExpandidas[func.id];
+
+                    return (
+                      <tr key={func.id} style={{ display: "contents" }}>
+                        
+                        <tr className={`group transition-all duration-200 cursor-pointer ${isOpen ? "bg-indigo-50/40" : "hover:bg-slate-50"}`} onClick={() => toggleExpandirLinha(func.id)}>
+                          <td className="px-4 py-4 text-center">
+                            <button className={`w-8 h-8 rounded-full flex items-center justify-center font-bold transition-all border ${isOpen ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/30" : "bg-white text-slate-400 border-slate-300 group-hover:border-indigo-400 group-hover:text-indigo-600 shadow-sm"}`}>
+                              <svg className={`w-4 h-4 transform transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                          </td>
+                          <td className="px-6 py-4 font-black text-indigo-800 text-base">{func.nome}</td>
+                          <td className="px-6 py-4 text-center font-bold text-slate-600">{func.dias.length} dias no mês</td>
+                          <td className="px-6 py-4 text-center">
+                            <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider border border-emerald-200">Em Conformidade</span>
+                          </td>
+                        </tr>
+
+                        {isOpen && (
+                          <tr>
+                            <td colSpan={4} className="bg-slate-50/50 border-b-2 border-indigo-100 p-0 shadow-inner">
+                              <div className="p-6">
+                                <table className="w-full text-left bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden text-xs">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-500 uppercase tracking-widest font-extrabold h-10 border-b border-slate-200 text-[10px]">
+                                      <th className="px-4 text-center w-28">Data</th>
+                                      <th className="px-4 text-center w-24">Entrada</th>
+                                      <th className="px-4 text-center w-24">Saída Almoço</th>
+                                      <th className="px-4 text-center w-24">Volta Almoço</th>
+                                      <th className="px-4 text-center w-24">Saída Final</th>
+                                      <th className="px-4 text-center w-28">Horas Liq.</th>
+                                      <th className="px-4 text-center w-28">Atraso</th>
+                                      <th className="px-4 text-right w-20">Ações</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {func.dias.map((dia, idx) => {
+                                      const { atrasoMinutos, horasTrabalhadas } = calcularMetricasDia(dia.registros);
+                                      const e = dia.registros.ENTRADA ? new Date(dia.registros.ENTRADA.data_hora) : null;
+                                      const sa = dia.registros.SAIDA_ALMOCO ? new Date(dia.registros.SAIDA_ALMOCO.data_hora) : null;
+                                      const ra = dia.registros.RETORNO_ALMOCO ? new Date(dia.registros.RETORNO_ALMOCO.data_hora) : null;
+                                      const s = dia.registros.SAIDA ? new Date(dia.registros.SAIDA.data_hora) : null;
+
+                                      return (
+                                        <tr key={idx} className="hover:bg-indigo-50/30 transition-colors font-semibold text-slate-700">
+                                          <td className="px-4 py-3 text-center text-slate-500">{formatarDataBr(dia.data)}</td>
+                                          <td className="px-4 py-3 text-center font-mono text-emerald-600">{formatarHora(e)}</td>
+                                          <td className="px-4 py-3 text-center font-mono text-amber-600">{formatarHora(sa)}</td>
+                                          <td className="px-4 py-3 text-center font-mono text-emerald-600">{formatarHora(ra)}</td>
+                                          <td className="px-4 py-3 text-center font-mono text-rose-600">{formatarHora(s)}</td>
+                                          <td className="px-4 py-3 text-center font-black text-indigo-700">{horasTrabalhadas}</td>
+                                          <td className="px-4 py-3 text-center">
+                                            {atrasoMinutos > 0 ? (
+                                              <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold border border-rose-200">{atrasoMinutos} min</span>
+                                            ) : <span className="text-slate-300">-</span>}
+                                          </td>
+                                          <td className="px-4 py-3 text-right">
+                                            <button 
+                                              onClick={() => abrirModalEdicaoDia(func.id, func.nome, dia)}
+                                              className="bg-slate-100 hover:bg-indigo-100 text-slate-500 hover:text-indigo-600 p-1.5 rounded transition-colors border border-slate-200"
+                                              title="Editar Horários do Dia"
+                                            >
+                                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <button 
-                          onClick={() => abrirModalEdicao(reg)}
-                          className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
-                          title="Ajustar Horário"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* MODAL DE EDIÇÃO MANUAL */}
-        {registroEmEdicao && (
+        {/* MODAL DE EDIÇÃO DO DIA INTEIRO */}
+        {diaEmEdicao && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl">
-              <h3 className="text-xl font-black text-slate-800 mb-2">Ajuste Manual</h3>
+            <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl">
+              <h3 className="text-xl font-black text-slate-800 mb-2">Editar Folha de Ponto</h3>
               <p className="text-sm text-slate-500 mb-6">
-                Corrigindo o evento <strong className="text-indigo-600">{traduzirEvento(registroEmEdicao.tipo)}</strong> de <strong>{registroEmEdicao.nome_funcionario}</strong> no dia {formatarData(registroEmEdicao.data_hora)}.
+                Colaborador: <strong className="text-indigo-600">{diaEmEdicao.nome}</strong> <br/>
+                Dia: <strong>{formatarDataBr(diaEmEdicao.dataLocal)}</strong>
               </p>
 
-              <div className="mb-6">
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Novo Horário</label>
-                <input 
-                  type="time" 
-                  value={novaHora}
-                  onChange={(e) => setNovaHora(e.target.value)}
-                  className="w-full text-center text-3xl font-black font-mono p-4 border-2 border-slate-200 rounded-2xl outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition-all text-slate-800"
-                />
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">📥 Entrada</label>
+                  <input type="time" value={formEdicao.ENTRADA} onChange={(e) => setFormEdicao(prev => ({...prev, ENTRADA: e.target.value}))} className="w-full p-3 border-2 border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-mono font-bold text-slate-700" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">🍔 Saída Almoço</label>
+                  <input type="time" value={formEdicao.SAIDA_ALMOCO} onChange={(e) => setFormEdicao(prev => ({...prev, SAIDA_ALMOCO: e.target.value}))} className="w-full p-3 border-2 border-slate-200 rounded-xl outline-none focus:border-amber-500 font-mono font-bold text-slate-700" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">🔙 Retorno Almoço</label>
+                  <input type="time" value={formEdicao.RETORNO_ALMOCO} onChange={(e) => setFormEdicao(prev => ({...prev, RETORNO_ALMOCO: e.target.value}))} className="w-full p-3 border-2 border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-mono font-bold text-slate-700" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">🏠 Saída Final</label>
+                  <input type="time" value={formEdicao.SAIDA} onChange={(e) => setFormEdicao(prev => ({...prev, SAIDA: e.target.value}))} className="w-full p-3 border-2 border-slate-200 rounded-xl outline-none focus:border-rose-500 font-mono font-bold text-slate-700" />
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl mb-6 text-xs text-amber-800 font-medium">
+                💡 <strong>Dica:</strong> Para remover uma marcação que foi feita por engano, basta apagar o horário (deixar vazio) e salvar.
               </div>
 
               <div className="flex gap-3">
                 <button 
-                  onClick={() => setRegistroEmEdicao(null)}
+                  onClick={() => setDiaEmEdicao(null)}
                   disabled={salvandoEdicao}
                   className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors"
                 >
                   Cancelar
                 </button>
                 <button 
-                  onClick={salvarNovaHora}
+                  onClick={salvarEdicaoDia}
                   disabled={salvandoEdicao}
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-colors flex justify-center items-center gap-2"
                 >
