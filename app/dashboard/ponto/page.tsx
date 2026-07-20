@@ -24,7 +24,7 @@ export default function PontoEletronicoPage() {
   const [tokenSessao, setTokenSessao] = useState<string | null>(null); 
   const [acessoNegado, setAcessoNegado] = useState(false);
   
-  // 🔥 Status do GPS para não travar a tela
+  // 🔥 Status do GPS
   const [localizacao, setLocalizacao] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"buscando" | "ok" | "erro">("buscando");
   
@@ -73,12 +73,9 @@ export default function PontoEletronicoPage() {
     setCarregando(false);
   };
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
-    }, 1000);
-
-    // 🎯 Correção: Deixamos o GPS mais amigável para Computadores de Mesa
+  // 🎯 Função separada para tentar buscar o GPS a qualquer momento
+  const solicitarGPS = () => {
+    setGpsStatus("buscando");
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -86,19 +83,30 @@ export default function PontoEletronicoPage() {
           setGpsStatus("ok");
         },
         (err) => {
-          console.warn("GPS falhou ou foi negado:", err.message);
+          console.warn("Erro GPS:", err.code, err.message);
           setGpsStatus("erro");
+          // Se code === 2, o navegador liberou mas o S.O não achou (ou o navegador bloqueou por baixo dos panos)
+          if (err.code === 2) {
+            console.warn("O navegador tem permissão, mas falhou ao localizar.");
+          }
         },
-        // enableHighAccuracy: false faz o PC usar a rede Wi-Fi/IP (muito mais rápido e funciona em Desktop)
-        // timeout aumentado para 15 segundos
         { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
       );
     } else {
       setGpsStatus("erro");
     }
+  };
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    }, 1000);
+
+    solicitarGPS();
     carregarDados();
+    
     return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleBaterPonto = async (tipo: string) => {
@@ -208,7 +216,7 @@ export default function PontoEletronicoPage() {
           {gpsStatus === "erro" && (
             <span className="text-rose-400 flex items-center justify-center gap-1">
               ⚠️ GPS Desativado/Sem Sinal
-              <button onClick={() => window.location.reload()} className="underline ml-1 cursor-pointer">🔄 Tentar Novamente</button>
+              <button onClick={solicitarGPS} className="underline ml-1 cursor-pointer hover:text-rose-600">🔄 Tentar Novamente</button>
             </span>
           )}
         </div>
