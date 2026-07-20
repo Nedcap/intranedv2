@@ -21,6 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Consultas": false,
     "Financeiro": false,
     "Cadastro": false,
+    "RH": false, // <-- Nova Categoria Adicionada
     "Configurações": false,
   });
 
@@ -77,6 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"),
     "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
     "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
+    "RH": linksPermitidos.filter(l => l.categoria === "RH"), // <-- Novo Agrupamento Adicionado
     "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
   };
 
@@ -156,6 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   case "Crédito": return "⚖️";
                   case "Financeiro": return "💰";
                   case "Cadastro": return "📝";
+                  case "RH": return "👥"; // <-- Ícone Pai Adicionado
                   case "Configurações": return "⚙️";
                   default: return "📦";
                 }
