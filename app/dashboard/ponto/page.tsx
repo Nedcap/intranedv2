@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { registrarPonto, buscarUltimoStatusPonto } from "@/actions/ponto-actions";
+import { registrarPonto } from "@/actions/ponto-actions";
 
 const formatarData = (isoString: string) => new Date(isoString).toLocaleDateString("pt-BR");
 const formatarHora = (isoString: string) => new Date(isoString).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -21,17 +21,20 @@ const traduzirEvento = (tipo: string) => {
 export default function PontoEletronicoPage() {
   const [carregando, setCarregando] = useState(true);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
-  const [acessoNegado, setAcessoNegado] = useState(false); // 🚨 Flag Nova!
+  const [tokenSessao, setTokenSessao] = useState<string | null>(null); // 🔥 Guarda o crachá
+  const [acessoNegado, setAcessoNegado] = useState(false);
   const [localizacao, setLocalizacao] = useState<{ lat: number; lng: number } | null>(null);
   const [ultimoStatus, setUltimoStatus] = useState<string>("NENHUM");
   const [horaAtual, setHoraAtual] = useState<string>("");
   const [historico, setHistorico] = useState<any[]>([]);
 
   const carregarDados = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
+    // 🎯 Traz a Session completa para pegarmos o token JWT
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session?.user) {
       // 🔒 VERIFICAÇÃO SE O CARA DEVE BATER PONTO
-      const { data: userData } = await supabase.from('usuarios').select('bate_ponto').eq('id', user.id).single();
+      const { data: userData } = await supabase.from('usuarios').select('bate_ponto').eq('id', session.user.id).single();
       
       if (!userData?.bate_ponto) {
          setAcessoNegado(true);
@@ -39,15 +42,29 @@ export default function PontoEletronicoPage() {
          return;
       }
 
-      setUsuarioId(user.id);
-      
-      const status = await buscarUltimoStatusPonto(user.id);
-      setUltimoStatus(status);
+      setUsuarioId(session.user.id);
+      setTokenSessao(session.access_token); // Salva o token para a Action
 
+      // 🔍 Busca status de HOJE direto pelo Client
+      const dataAtual = new Date();
+      dataAtual.setHours(0, 0, 0, 0);
+
+      const { data: statusData } = await supabase
+        .from("registro_ponto")
+        .select("tipo")
+        .eq("usuario_id", session.user.id)
+        .gte("data_hora", dataAtual.toISOString())
+        .order("data_hora", { ascending: false })
+        .limit(1)
+        .single();
+
+      setUltimoStatus(statusData?.tipo || "NENHUM");
+
+      // 📜 Busca o histórico do funcionário
       const { data: hist } = await supabase
         .from("registro_ponto")
         .select("*")
-        .eq("usuario_id", user.id)
+        .eq("usuario_id", session.user.id)
         .order("data_hora", { ascending: false })
         .limit(15);
         
@@ -74,11 +91,12 @@ export default function PontoEletronicoPage() {
   }, []);
 
   const handleBaterPonto = async (tipo: string) => {
-    if (!usuarioId) return alert("❌ Erro: Autenticação não encontrada.");
+    if (!usuarioId || !tokenSessao) return alert("❌ Erro: Autenticação não encontrada.");
     
     try {
       setCarregando(true);
-      const res = await registrarPonto(usuarioId, localizacao?.lat || null, localizacao?.lng || null, tipo);
+      // 🚀 Passa o token como primeiro parâmetro!
+      const res = await registrarPonto(tokenSessao, usuarioId, localizacao?.lat || null, localizacao?.lng || null, tipo);
       
       if (res.erro) {
         alert(`❌ Erro no Servidor: ${res.erro}`);
@@ -87,9 +105,9 @@ export default function PontoEletronicoPage() {
       }
 
       alert("✅ Ponto registrado e validado pelo Servidor!");
-      await carregarDados(); 
+      await carregarDados(); // Recarrega tela e histórico
     } catch (e: any) {
-      alert(`❌ Erro inexperado: ${e.message}`);
+      alert(`❌ Erro inesperado: ${e.message}`);
       setCarregando(false);
     }
   };
@@ -98,7 +116,7 @@ export default function PontoEletronicoPage() {
     return <div className="flex h-screen items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando com o servidor...</div>;
   }
 
-  // 🚨 TELA DE BLOQUEIO PARA QUEM NÃO É CLT/NÃO BATE PONTO
+  // 🚨 TELA DE BLOQUEIO PARA QUEM NÃO BATE PONTO
   if (acessoNegado) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 font-sans">
