@@ -195,6 +195,35 @@ export default function CadastroPage() {
     setLinhasExpandidas(prev => ({ ...prev, [`novo-0`]: true }));
   };
 
+  // 🗑️ ATUALIZADO: Função para excluir o cedente do banco e da tela
+  const excluirCedente = async (id: string | undefined, index: number, nome: string) => {
+    const confirmacao = window.confirm(`⚠️ TEM CERTEZA?\n\nVocê está prestes a excluir permanentemente o cadastro de:\n"${nome || "Novo Cedente"}"\n\nEssa ação não pode ser desfeita.`);
+    if (!confirmacao) return;
+
+    try {
+      setCarregando(true);
+      // Se tiver ID, apaga do banco de dados
+      if (id) {
+        const { error } = await supabase.from("cadastro_cedentes").delete().eq("id", id);
+        if (error) throw error;
+      }
+      
+      // Apaga da tela localmente para ser instantâneo
+      const novos = [...cedentes];
+      novos.splice(index, 1);
+      setCedentes(novos);
+      
+      // Limpa os estados de expansão para evitar bugs de UI
+      setCedentesEmEdicaoDeNome({});
+      setLinhasExpandidas({});
+      
+    } catch (err: any) {
+      alert(`❌ Erro ao excluir: ${err.message}`);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
   const toggleEditarNome = (idOuIndex: string) => setCedentesEmEdicaoDeNome(prev => ({ ...prev, [idOuIndex]: !prev[idOuIndex] }));
   const toggleExpandirLinha = (idOuIndex: string) => setLinhasExpandidas(prev => ({ ...prev, [idOuIndex]: !prev[idOuIndex] }));
   const handleSort = (key: string) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc" }));
@@ -599,8 +628,17 @@ export default function CadastroPage() {
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                               
                               <div className="xl:col-span-3 space-y-4">
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                  <div className="flex items-center gap-2 mb-3">
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
+                                  {/* 🗑️ BOTÃO DE EXCLUIR NO CANTO DO BLOCO INICIAL */}
+                                  <button
+                                    onClick={() => excluirCedente(item.id, index, item.cedente)}
+                                    className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"
+                                    title="Excluir Cedente"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                  </button>
+                                  
+                                  <div className="flex items-center gap-2 mb-3 pr-8">
                                     <div className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-slate-600">🏁</div>
                                     <span className="font-bold text-slate-800 text-xs uppercase tracking-wide">Início da Esteira</span>
                                   </div>
