@@ -10,62 +10,73 @@ export async function POST(request: Request) {
 
     const docLimpo = String(documento).replace(/\D/g, "");
     
-    // ⚠️ Chave da API Pública do CNJ (DataJud)
-    // Você precisa gerar essa chave no portal do CNJ e adicionar no Vercel
-    const cnjApiKey = process.env.CNJ_API_KEY; 
+    // Pega a chave limpa (remove espaços em branco acidentais do início/fim)
+    const rawApiKey = process.env.CREDITHUB_API_KEY; 
+    const apiKey = rawApiKey ? rawApiKey.trim() : null;
 
-    if (!cnjApiKey) {
-      return NextResponse.json({ error: "Chave do CNJ ausente nas variáveis de ambiente." }, { status: 500 });
+    if (!apiKey) {
+      throw new Error("Chave do CreditHub não localizada no process.env do servidor.");
     }
 
-    // 🎯 Endpoint oficial do DataJud (CNJ)
-    const urlCNJ = `https://api-publica.datajud.cnj.jus.br/api_publica_ws/v1/processos/_search`;
+    // 🔥 O PULO DO GATO PARA CHAVES GIGANTESCAS:
+    // Protege a chave contra caracteres especiais que quebram a URL do GET
+    const apiKeyTratada = encodeURIComponent(apiKey);
 
-    // O CNJ usa ElasticSearch. Aqui fazemos a busca por CPF/CNPJ
-    const bodyQuery = {
-      "query": {
-        "match": {
-          "pessoa.numeroDocumentoPrincipal": docLimpo
-        }
+    // URL oficial apenas com o Serasa (para não cobrar Boa Vista)
+    const urlCreditHub = `https://irql.credithub.com.br/simples/${apiKeyTratada}/${docLimpo}?serasa=true`;
+
+    console.log("🔗 Disparando consulta estruturada para o CreditHub...");
+
+    const response = await fetch(urlCreditHub, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json"
       },
-      "size": 50 // Limitamos a 50 processos para a pré-análise não demorar muito
+      cache: "no-store" // Garante que o Next.js não cacheie erros de credenciais
+    });
+
+    const textData = await response.text();
+
+    // 🛡️ Captura o erro em XML (<BPQL>)
+    if (textData.trim().startsWith("<")) {
+      // Tenta cuspir o erro exato que está dentro da tag <exception> no terminal do seu servidor para você ler
+      const match = textData.match(/<exception[^>]*>(.*?)<\/exception>/);
+      const erroReal = match ? match[1] : "Erro de autenticação/parâmetros no CreditHub.";
+      
+      console.error("❌ Resposta de Erro XML do CreditHub:", textData);
+      
+      return NextResponse.json({ 
+        error: "Erro de Autenticação", 
+        details: `CreditHub respondeu: "${erroReal}". Verifique se o Token no Vercel está correto.` 
+      }, { status: 400 });
+    }
+
+    const json = JSON.parse(textData);
+
+    if (!response.ok || json.status === "erro") {
+      throw new Error(json.msg || json.message || "Falha ao consultar restritivos financeiros.");
+    }
+
+    const data = json.data || {};
+    const infoSerasa = json.informacoes?.[0] || data.pefin?.[0] || {};
+
+    const qtdDividas = data.quantidade_dividas || infoSerasa.total || infoSerasa.totalPendenciasFinanceiras || 0;
+    const valorTotal = parseFloat(data.valor_total_dividas || infoSerasa.valorTotalPendencias || infoSerasa.valorTotalPendenciasFinanceiras || 0);
+    const possuiApontamento = qtdDividas > 0;
+
+    const resumoRestritivos = {
+      possui_apontamento: possuiApontamento,
+      quantidade_dividas: qtdDividas,
+      valor_total_dividas: valorTotal,
+      ccf: data.ccf || null,
+      protestos: data.protestos || null,
+      pefin_serasa: infoSerasa.bello || null,
     };
 
-    const response = await fetch(urlCNJ, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `APIKey ${cnjApiKey}` // Padrão de autenticação do CNJ
-      },
-      body: JSON.stringify(bodyQuery)
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("❌ Erro na API do CNJ:", errText);
-      throw new Error("Falha ao consultar a base pública do DataJud.");
-    }
-
-    const json = await response.json();
-
-    // 🧹 Mapeamento dos dados do CNJ para o formato exato que seu Frontend espera
-    const hits = json.hits?.hits || [];
-    
-    const processosFormatados = hits.map((hit: any) => {
-      const proc = hit._source;
-      return {
-        numero: proc.numeroProcesso || "Sem Número",
-        // A classe processual no CNJ geralmente vem dentro de um objeto
-        classe: proc.classe?.nome || proc.classeProcessual || "Classe Não Informada",
-        tribunal: proc.siglaTribunal || proc.tribunal || "N/A",
-      };
-    });
-
-    // Retorna no formato { processos: [...] } que o page.tsx está esperando
-    return NextResponse.json({ processos: processosFormatados });
+    return NextResponse.json(resumoRestritivos);
 
   } catch (err: any) {
-    console.error("💥 Erro crítico no motor de processos:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("💥 Erro crítico na rota de restritivos:", err);
+    return NextResponse.json({ error: "Erro interno no servidor", details: err.message }, { status: 500 });
   }
 }
