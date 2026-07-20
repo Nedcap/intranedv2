@@ -4,13 +4,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { MAPA_DE_ROTAS } from "@/lib/rotas"; 
 
 export default function DashboardHomePage() {
   const [user, setUser] = useState<any>(null);
   const [userName, setUserName] = useState("Membro Ned");
   const [saudacao, setSaudacao] = useState("Bem-vindo(a)");
   
-  // ⚡ Estados de Customização de Atalhos
+  // ⚡ Estados de Customização de Atalhos (agora salvando pelo PATH)
   const [favoritos, setFavoritos] = useState<string[]>([]);
   const [modoEdicao, setModoEdicao] = useState(false);
 
@@ -20,62 +21,14 @@ export default function DashboardHomePage() {
   const [confirmarNovaSenha, setConfirmarNovaSenha] = useState("");
   const [salvandoSenha, setSalvandoSenha] = useState(false);
 
-  // Definição estática de todos os caminhos dos módulos para bater com as permissões do banco
-  const modulosPrincipais = [
-    {
-      id: "powerbi",
-      path: "/dashboard/powerbi",
-      titulo: "Painel de Indicadores (BI)",
-      descricao: "Visão gerencial consolidada de Valores Operados, Receitas, Risco e SLA.",
-      icone: "📊",
-      corBadge: "bg-indigo-100 text-indigo-700 border-indigo-200",
-      corHover: "hover:border-indigo-400 hover:shadow-indigo-100",
-    },
-    {
-      id: "nedhub",
-      path: "/dashboard/nedhub",
-      titulo: "NedHub Comercial",
-      descricao: "Máquina de originação, funil de vendas (Kanban) e gestão inteligente de contatos.",
-      icone: "🚀",
-      corBadge: "bg-blue-100 text-blue-700 border-blue-200",
-      corHover: "hover:border-blue-400 hover:shadow-blue-100",
-    },
-    {
-      id: "carteira",
-      path: "/dashboard/carteira",
-      titulo: "Carteira Dinâmica",
-      descricao: "Análise granular título por título, envelhecimento e simulador de liquidez.",
-      icone: "💼",
-      corBadge: "bg-emerald-100 text-emerald-700 border-emerald-200",
-      corHover: "hover:border-emerald-400 hover:shadow-emerald-100",
-    },
-    {
-      id: "comite",
-      path: "/dashboard/comite",
-      titulo: "Análises e Comitê",
-      descricao: "Esteira de crédito, aprovações, reprovações e chat de debates executivos.",
-      icone: "📋",
-      corBadge: "bg-amber-100 text-amber-700 border-amber-200",
-      corHover: "hover:border-amber-400 hover:shadow-amber-100",
-    },
-    {
-      id: "financeiro",
-      path: "/dashboard/financeiro",
-      titulo: "Controle Financeiro",
-      descricao: "Calendário de pagamentos, contas a pagar e fluxo de caixa consolidado.",
-      icone: "💰",
-      corBadge: "bg-rose-100 text-rose-700 border-rose-200",
-      corHover: "hover:border-rose-400 hover:shadow-rose-100",
-    },
-    {
-      id: "importacao",
-      path: "/dashboard/importacao",
-      titulo: "Importação V2",
-      descricao: "Motor síncrono de upload de planilhas e cruzamento Master Data Management.",
-      icone: "📥",
-      corBadge: "bg-purple-100 text-purple-700 border-purple-200",
-      corHover: "hover:border-purple-400 hover:shadow-purple-100",
-    }
+  // 🎨 Paleta de cores dinâmica para aplicar nos cards gerados automaticamente
+  const ESTILOS_CARDS = [
+    { badge: "bg-indigo-100 text-indigo-700 border-indigo-200", hover: "hover:border-indigo-400 hover:shadow-indigo-100" },
+    { badge: "bg-blue-100 text-blue-700 border-blue-200", hover: "hover:border-blue-400 hover:shadow-blue-100" },
+    { badge: "bg-emerald-100 text-emerald-700 border-emerald-200", hover: "hover:border-emerald-400 hover:shadow-emerald-100" },
+    { badge: "bg-amber-100 text-amber-700 border-amber-200", hover: "hover:border-amber-400 hover:shadow-amber-100" },
+    { badge: "bg-rose-100 text-rose-700 border-rose-200", hover: "hover:border-rose-400 hover:shadow-rose-100" },
+    { badge: "bg-purple-100 text-purple-700 border-purple-200", hover: "hover:border-purple-400 hover:shadow-purple-100" },
   ];
 
   useEffect(() => {
@@ -102,20 +55,20 @@ export default function DashboardHomePage() {
     else setSaudacao("Boa noite");
   }, []);
 
-  // 🛡️ Filtra os módulos com base nas permissões reais guardadas na conta do usuário
-  const modulosPermitidos = modulosPrincipais.filter(mod => {
+  // 🛡️ Filtra TODAS as telas do sistema baseadas nas permissões reais do banco
+  const modulosPermitidos = MAPA_DE_ROTAS?.filter(rota => {
     if (!user) return false;
-    if (user.cargo === "Master") return true; // Master acessa tudo direto
-    return !!user.permissoes?.[mod.path];
-  });
+    if (user.cargo?.toUpperCase() === "MASTER") return true; 
+    return !!user.permissoes?.[rota.path];
+  }) || [];
 
-  // ⚡ Alterna exibição personalizada (Esconder/Mostrar telas)
-  const alternarFavorito = (id: string) => {
+  // ⚡ Alterna exibição personalizada (Agora usando o PATH como ID único)
+  const alternarFavorito = (path: string) => {
     let novosFavs = [...favoritos];
-    if (novosFavs.includes(id)) {
-      novosFavs = novosFavs.filter(f => f !== id);
+    if (novosFavs.includes(path)) {
+      novosFavs = novosFavs.filter(f => f !== path);
     } else {
-      novosFavs.push(id);
+      novosFavs.push(path);
     }
     setFavoritos(novosFavs);
     if (user?.id) {
@@ -151,13 +104,11 @@ export default function DashboardHomePage() {
     }
   };
 
-  // 🚨 FIX DA LOGICA: 
-  // Se estiver em modoEdicao, mostra TUDO que ele tem acesso para ele escolher.
-  // Se não estiver, mostra os favoritos dele (ou tudo que tem acesso se não favoritou nada).
+  // Define quais módulos vão para a tela
   const modulosExibidos = modoEdicao 
     ? modulosPermitidos 
     : favoritos.length > 0 
-      ? modulosPermitidos.filter(m => favoritos.includes(m.id)) 
+      ? modulosPermitidos.filter(m => favoritos.includes(m.path)) 
       : modulosPermitidos;
 
   return (
@@ -176,11 +127,10 @@ export default function DashboardHomePage() {
           </p>
         </div>
 
-        {/* BOTÕES DE GERENCIAMENTO DA CONTA */}
         <div className="flex gap-2 relative z-10 shrink-0">
           <button
             onClick={() => setModoEdicao(!modoEdicao)}
-            className={`px-4 py-2.5 rounded-lg border font-black uppercase text-[11px] tracking-wider transition-all shadow-sm ${
+            className={`px-4 py-2.5 rounded-lg border font-black uppercase text-[11px] tracking-wider transition-all shadow-sm cursor-pointer ${
               modoEdicao 
                 ? "bg-emerald-600 border-emerald-700 text-white hover:bg-emerald-700" 
                 : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white"
@@ -191,7 +141,7 @@ export default function DashboardHomePage() {
           
           <button
             onClick={() => setAbrirConfig(true)}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 font-bold uppercase text-[11px] tracking-wider rounded-lg transition-all shadow-md"
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 font-bold uppercase text-[11px] tracking-wider rounded-lg transition-all shadow-md cursor-pointer"
           >
             👤 Minha Conta
           </button>
@@ -216,14 +166,14 @@ export default function DashboardHomePage() {
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {modulosExibidos.map((mod, idx) => {
-            const isFav = favoritos.includes(mod.id);
+            const isFav = favoritos.includes(mod.path);
+            const estiloRotativo = ESTILOS_CARDS[idx % ESTILOS_CARDS.length]; 
             
             return (
-              <div key={idx} className="relative group h-full">
+              <div key={mod.path} className="relative group h-full">
                 {modoEdicao ? (
-                  // Visão de Customização (Mostra tudo liberado permitindo ativar/desativar)
                   <div 
-                    onClick={() => alternarFavorito(mod.id)}
+                    onClick={() => alternarFavorito(mod.path)}
                     className={`border rounded-2xl p-6 h-full flex flex-col gap-4 select-none cursor-pointer transition-all ${
                       isFav 
                         ? "bg-blue-50/60 border-blue-400 ring-2 ring-blue-100 shadow-sm" 
@@ -231,7 +181,7 @@ export default function DashboardHomePage() {
                     }`}
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-4xl">{mod.icone}</span>
+                      <span className="text-4xl">{mod.icone || "🖥️"}</span>
                       <span className={`px-2 py-1 rounded font-black text-[10px] uppercase border transition-all ${
                         isFav ? "bg-blue-600 text-white border-blue-700" : "bg-slate-100 text-slate-400 border-slate-200"
                       }`}>
@@ -239,28 +189,29 @@ export default function DashboardHomePage() {
                       </span>
                     </div>
                     <div>
-                      <h3 className="text-base font-black text-slate-800 mb-1">{mod.titulo}</h3>
-                      <p className="text-slate-500 font-medium leading-relaxed">{mod.descricao}</p>
+                      <h3 className="text-base font-black text-slate-800 mb-1">{mod.nome}</h3>
+                      <p className="text-slate-500 text-xs font-medium leading-relaxed">
+                        Módulo de {mod.nome} — Diretório: {mod.path}
+                      </p>
                     </div>
                   </div>
                 ) : (
-                  // Visão Normal - Link direto para as telas acessíveis
                   <Link href={mod.path}>
-                    <div className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm transition-all duration-300 cursor-pointer h-full flex flex-col gap-4 group ${mod.corHover}`}>
+                    <div className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm transition-all duration-300 cursor-pointer h-full flex flex-col gap-4 group ${estiloRotativo.hover}`}>
                       <div className="flex justify-between items-start">
                         <span className="text-4xl group-hover:scale-110 transition-transform duration-300">
-                          {mod.icone}
+                          {mod.icone || "🖥️"}
                         </span>
-                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${mod.corBadge}`}>
+                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${estiloRotativo.badge}`}>
                           Acessar
                         </span>
                       </div>
                       <div>
                         <h3 className="text-base font-black text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">
-                          {mod.titulo}
+                          {mod.nome}
                         </h3>
-                        <p className="text-slate-500 font-medium leading-relaxed">
-                          {mod.descricao}
+                        <p className="text-slate-500 text-xs font-medium leading-relaxed">
+                          Clique para acessar os controles operacionais e informações desta seção.
                         </p>
                       </div>
                     </div>
@@ -272,7 +223,7 @@ export default function DashboardHomePage() {
 
           {modulosExibidos.length === 0 && (
             <div className="col-span-full border border-dashed border-slate-300 bg-slate-50 rounded-2xl p-10 text-center text-slate-400 font-bold italic">
-              Nenhuma tela está configurada para exibição rápida. Clique em &quot;Customizar Visão&quot; para selecionar.
+              Nenhuma tela está configurada. {modoEdicao ? "Selecione algum módulo acima." : "Clique em 'Customizar Visão' para selecionar seus atalhos."}
             </div>
           )}
         </div>
@@ -288,7 +239,7 @@ export default function DashboardHomePage() {
           </div>
         </div>
         <div className="text-[10px] font-black uppercase text-slate-400 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-xs">
-          NedHub v2.5
+          NedHub v2.1.0
         </div>
       </div>
 
@@ -361,7 +312,6 @@ export default function DashboardHomePage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
