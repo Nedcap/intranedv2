@@ -76,8 +76,12 @@ export default function PreAnalisePage() {
       if (resFinanceiro.ok) {
         financeiro = await resFinanceiro.json();
       } else {
-        // Intercepta erro do CreditHub sem quebrar a tela inteira
-        financeiro = { erro: true, mensagem: "Falha de conexão com bureau." };
+        // 🔥 AQUI ESTÁ O PULO DO GATO: Tenta ler o erro formatado pelo nosso backend
+        const errData = await resFinanceiro.json().catch(() => ({}));
+        financeiro = { 
+          erro: true, 
+          mensagem: errData.error || "Falha de conexão com o CreditHub." 
+        };
       }
 
       // =========================================================================
@@ -229,7 +233,7 @@ export default function PreAnalisePage() {
                 {dadosFinanceiros ? (
                   dadosFinanceiros.erro ? (
                     <div className="p-4 bg-rose-50 text-center text-rose-600 font-bold italic text-xs rounded-lg border border-dashed border-rose-300">
-                      ❌ {dadosFinanceiros.mensagem || "Erro na consulta ao bureau."}
+                      ❌ Erro na API: {dadosFinanceiros.mensagem}
                     </div>
                   ) : (
                     <div className="space-y-3 relative z-10">

@@ -5,59 +5,59 @@ export async function POST(request: Request) {
     const { documento } = await request.json();
 
     if (!documento) {
-      return NextResponse.json({ error: "CPF ou CNPJ é obrigatório" }, { status: 400 });
+      return NextResponse.json({ error: "Documento é obrigatório" }, { status: 400 });
     }
 
-    // Limpa a pontuação, deixando apenas os números para a busca no CNJ
     const docLimpo = String(documento).replace(/\D/g, "");
+    const apiKey = process.env.CREDITHUB_API_KEY; 
 
-    // 🎯 Endpoint Oficial da API Pública do DataJud
-    const urlDatajud = "https://api-publica.datajud.cnj.jus.br/api_v1/busca";
+    if (!apiKey) {
+      return NextResponse.json({ error: "Chave do CreditHub ausente nas variáveis de ambiente." }, { status: 500 });
+    }
 
-    // O DataJud usa ElasticSearch por baixo dos panos, então o payload tem essa estrutura
-    const payloadQuery = {
-      query: {
-        match: {
-          "prazos.partes.documento": docLimpo
-        }
-      },
-      size: 50 // Limite de 50 processos para a pré-análise ser rápida
-    };
+    // 🎯 URL com os parâmetros exatos da doc (boavista=true e serasa=true)
+    const urlCreditHub = `https://irql.credithub.com.br/simples/${apiKey}/${docLimpo}?serasa=true&boavista=true`;
 
-    const response = await fetch(urlDatajud, {
-      method: "POST",
-      headers: {
-        // A chave pública que você conseguiu da documentação do CNJ
-        "Authorization": "APIKey cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payloadQuery)
+    const response = await fetch(urlCreditHub, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
     });
 
-    if (!response.ok) {
-      const errorLog = await response.text();
-      console.error("❌ Erro na API do DataJud:", errorLog);
-      throw new Error("Falha de comunicação com o Tribunal (CNJ)");
+    const textData = await response.text();
+
+    // 🚨 O PULO DO GATO: Lendo o erro em XML que a documentação citou
+    if (textData.trim().startsWith("<")) {
+      // Usa regex para extrair a mensagem dentro da tag <exception>
+      const match = textData.match(/<exception[^>]*>(.*?)<\/exception>/);
+      const erroReal = match ? match[1] : "Erro estrutural da API (XML Recebido)";
+      console.error("❌ Erro XML do CreditHub:", erroReal);
+      
+      // Devolvemos status 400 mandando a mensagem exata do erro!
+      return NextResponse.json({ error: erroReal }, { status: 400 });
     }
 
-    const data = await response.json();
-    
-    // O retorno do ElasticSearch é bem sujo (hits.hits._source), vamos limpar isso:
-    const processosFormatados = data.hits?.hits?.map((hit: any) => {
-      const proc = hit._source;
-      return {
-        numero: proc.numeroProcesso,
-        classe: proc.classe?.nome || "Não informada",
-        tribunal: proc.tribunal || "Tribunal Desconhecido",
-        dataPublicacao: proc.dataPublicacao || null,
-        grau: proc.grau || "1º Grau"
-      };
-    }) || [];
+    const json = JSON.parse(textData);
 
-    return NextResponse.json({ processos: processosFormatados });
+    // Se o status HTTP falhou, mas veio JSON:
+    if (!response.ok) {
+      return NextResponse.json({ error: json.message || "Falha na consulta" }, { status: 400 });
+    }
+
+    const data = json.data || {};
+
+    // 🧹 Mapeamento fiel aos campos da documentação
+    const resumoRestritivos = {
+      possui_apontamento: (data.quantidade_dividas > 0 || (data.pefin && data.pefin.length > 0) || (data.spc && data.spc.length > 0)),
+      quantidade_dividas: data.quantidade_dividas || 0,
+      valor_total_dividas: parseFloat(data.valor_total_dividas || 0),
+      ccf: data.ccf || null,
+      completed: data.completed !== false // A doc cita que se for assíncrono, pode vir false
+    };
+
+    return NextResponse.json(resumoRestritivos);
 
   } catch (err: any) {
-    console.error("💥 Erro crítico na rota de processos:", err);
-    return NextResponse.json({ error: "Erro interno no servidor", details: err.message }, { status: 500 });
+    console.error("💥 Erro crítico:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
