@@ -262,6 +262,42 @@ export default function GestaoPontoPage() {
   };
 
   // ==========================================================================
+  // 📍 COMPONENTE CELULA DE HORA COM AUDITORIA (MAPS / IP)
+  // ==========================================================================
+  const renderCellRegistro = (registro: any, colorClass: string) => {
+    if (!registro) return <span className="text-slate-300">--:--</span>;
+    
+    const horaStr = new Date(registro.data_hora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const temGps = !!(registro.latitude && registro.longitude);
+    const ip = registro.ip_origem || "IP Não Registrado";
+
+    return (
+      <div className="flex flex-col items-center justify-center gap-1.5 h-full py-1">
+        <span className={`font-mono text-sm font-bold ${colorClass}`}>{horaStr}</span>
+        {temGps ? (
+          <a 
+            href={`https://www.google.com/maps/search/?api=1&query=${registro.latitude},${registro.longitude}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="print:hidden text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded hover:bg-emerald-100 transition-colors flex items-center gap-0.5 shadow-sm"
+            title={`Ver no Google Maps\nLat: ${registro.latitude}, Lng: ${registro.longitude}`}
+          >
+            📍 Mapa
+          </a>
+        ) : (
+          <span 
+            className="print:hidden text-[9px] font-bold bg-slate-100 text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded cursor-help"
+            title={`Endereço de Rede (IP): ${ip}`}
+          >
+            Sem GPS
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  // ==========================================================================
   // 📈 EXPORTAÇÃO EXCEL (.CSV FORMATADO)
   // ==========================================================================
   const exportarCSVConsolidado = () => {
@@ -386,7 +422,7 @@ export default function GestaoPontoPage() {
                   funcionarios.map((func) => {
                     const isSelected = selecionados.has(func.id);
                     const isOpen = !!linhasExpandidas[func.id];
-                    // 🎯 O pulo do gato: A classe print:hidden oculta a linha inteira (e seus filhos) na hora da impressão se não estiver selecionada
+                    // 🎯 A classe print:hidden oculta a linha inteira na hora da impressão se não estiver selecionada
                     const printClass = !isSelected ? "print:hidden" : "";
 
                     return (
@@ -423,10 +459,10 @@ export default function GestaoPontoPage() {
                                   <thead>
                                     <tr className="bg-slate-100 text-slate-500 uppercase tracking-widest font-extrabold h-10 border-b border-slate-200 text-[10px]">
                                       <th className="px-4 text-center w-28 border-r border-slate-200">Data</th>
-                                      <th className="px-4 text-center w-24">Entrada</th>
-                                      <th className="px-4 text-center w-24">Saída Almoço</th>
-                                      <th className="px-4 text-center w-24">Volta Almoço</th>
-                                      <th className="px-4 text-center w-24 border-r border-slate-200">Saída Final</th>
+                                      <th className="px-2 text-center w-24">Entrada</th>
+                                      <th className="px-2 text-center w-24">Saída Almoço</th>
+                                      <th className="px-2 text-center w-24">Volta Almoço</th>
+                                      <th className="px-2 text-center w-24 border-r border-slate-200">Saída Final</th>
                                       <th className="px-4 text-center w-28">Horas Liq.</th>
                                       <th className="px-4 text-center w-28">Atraso</th>
                                       <th className="px-4 text-right w-20 print:hidden">Ações</th>
@@ -435,25 +471,24 @@ export default function GestaoPontoPage() {
                                   <tbody className="divide-y divide-slate-100">
                                     {func.dias.map((dia, idx) => {
                                       const { atrasoMinutos, horasTrabalhadas } = calcularMetricasDia(dia.registros);
-                                      const e = dia.registros.ENTRADA ? new Date(dia.registros.ENTRADA.data_hora) : null;
-                                      const sa = dia.registros.SAIDA_ALMOCO ? new Date(dia.registros.SAIDA_ALMOCO.data_hora) : null;
-                                      const ra = dia.registros.RETORNO_ALMOCO ? new Date(dia.registros.RETORNO_ALMOCO.data_hora) : null;
-                                      const s = dia.registros.SAIDA ? new Date(dia.registros.SAIDA.data_hora) : null;
 
                                       return (
                                         <tr key={idx} className="hover:bg-indigo-50/30 transition-colors font-semibold text-slate-700">
-                                          <td className="px-4 py-3 text-center text-slate-800 border-r border-slate-100">{formatarDataBr(dia.data)}</td>
-                                          <td className="px-4 py-3 text-center font-mono text-emerald-700">{formatarHora(e)}</td>
-                                          <td className="px-4 py-3 text-center font-mono text-amber-700">{formatarHora(sa)}</td>
-                                          <td className="px-4 py-3 text-center font-mono text-emerald-700">{formatarHora(ra)}</td>
-                                          <td className="px-4 py-3 text-center font-mono text-rose-700 border-r border-slate-100">{formatarHora(s)}</td>
-                                          <td className="px-4 py-3 text-center font-black text-indigo-700">{horasTrabalhadas}</td>
-                                          <td className="px-4 py-3 text-center">
+                                          <td className="px-4 py-3 text-center text-slate-800 border-r border-slate-100 align-middle">{formatarDataBr(dia.data)}</td>
+                                          
+                                          {/* 📍 Células Mágicas com Auditoria Visual */}
+                                          <td className="px-2 py-3 text-center align-middle">{renderCellRegistro(dia.registros.ENTRADA, "text-emerald-700")}</td>
+                                          <td className="px-2 py-3 text-center align-middle">{renderCellRegistro(dia.registros.SAIDA_ALMOCO, "text-amber-700")}</td>
+                                          <td className="px-2 py-3 text-center align-middle">{renderCellRegistro(dia.registros.RETORNO_ALMOCO, "text-emerald-700")}</td>
+                                          <td className="px-2 py-3 text-center border-r border-slate-100 align-middle">{renderCellRegistro(dia.registros.SAIDA, "text-rose-700")}</td>
+                                          
+                                          <td className="px-4 py-3 text-center font-black text-indigo-700 align-middle">{horasTrabalhadas}</td>
+                                          <td className="px-4 py-3 text-center align-middle">
                                             {atrasoMinutos > 0 ? (
                                               <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold border border-rose-200 badge-atraso">{atrasoMinutos} min</span>
                                             ) : <span className="text-slate-300">-</span>}
                                           </td>
-                                          <td className="px-4 py-3 text-right print:hidden">
+                                          <td className="px-4 py-3 text-right print:hidden align-middle">
                                             <button 
                                               onClick={(ev) => { ev.stopPropagation(); abrirModalEdicaoDia(func.id, func.nome, dia); }}
                                               className="bg-slate-100 hover:bg-indigo-100 text-slate-500 hover:text-indigo-600 p-1.5 rounded transition-colors border border-slate-200"
