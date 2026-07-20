@@ -28,7 +28,7 @@ export default function MonitoreDiarioPage() {
     try {
       setCarregando(true);
 
-      // 🎯 CORREÇÃO 2: Cache Buster - neq numa coluna de texto impede o cache fantasma do Next.js
+      // 🎯 CORREÇÃO: Cache Buster - impede o cache fantasma do Next.js
       const { data: maxDateList } = await supabase
         .from("historico_consolidado")
         .select("data_processamento")
@@ -43,7 +43,7 @@ export default function MonitoreDiarioPage() {
 
       const ultimaData = maxDateList[0].data_processamento;
 
-      // 🎯 CORREÇÃO 3: Adicionado .limit(10000) para evitar o corte padrão de 1000 linhas
+      // 🎯 CORREÇÃO: Adicionado .limit(10000) para evitar o corte padrão de 1000 linhas
       const [resHist, resCadastro] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -98,19 +98,22 @@ export default function MonitoreDiarioPage() {
       const texto = await file.text();
       const linhas = texto.split(/\r?\n/);
 
-      // 🎯 CORREÇÃO 1: Regex para aceitar anos com 2 ou 4 dígitos (DDMMAA ou DDMMAAAA)
+      if (linhas.length === 0) throw new Error("O arquivo está vazio.");
+
+      // 🎯 CORREÇÃO SUPREMA: Ignorar o nome do arquivo e ler a data oficial do cabeçalho (Linha 1)
       let dataArquivo = new Date().toISOString().split("T")[0];
-      const matchData = file.name.match(/RET\.D(\d{6}|\d{8})/i);
+      
+      // Pesca o padrão DD/MM/AAAA que SEMPRE vem cravado na primeira linha do arquivo Serasa
+      const matchData = linhas[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
       
       if (matchData) {
-        const digits = matchData[1];
-        const dia = digits.substring(0, 2);
-        const mes = digits.substring(2, 4);
-        const ano = digits.length === 8 
-          ? digits.substring(4, 8) 
-          : `20${digits.substring(4, 6)}`;
-        
+        const dia = matchData[1];
+        const mes = matchData[2];
+        const ano = matchData[3];
+        // Converte para o padrão de banco de dados (YYYY-MM-DD)
         dataArquivo = `${ano}-${mes}-${dia}`;
+      } else {
+        console.warn("Aviso: Data não encontrada no cabeçalho. Usando a data de hoje como fallback.");
       }
 
       setStatusProcessamento("Minerando CNPJs e Sócios...");
@@ -207,7 +210,7 @@ export default function MonitoreDiarioPage() {
 
       const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
       
-      // 🎯 CORREÇÃO 3: Adicionado .limit(10000) para evitar corte no cruzamento
+      // 🎯 CORREÇÃO: Adicionado .limit(10000) para evitar corte no cruzamento
       const [histDBResponse, cedentesDBResponse] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -311,11 +314,14 @@ export default function MonitoreDiarioPage() {
       await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
       await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
 
+      // 🎯 CORREÇÃO: Tratamento de erro explícito para o Supabase não falhar silenciosamente
       for (let i = 0; i < registrosHistorico.length; i += 500) {
-        await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
+        const { error: errHist } = await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
+        if (errHist) throw new Error(`Erro ao salvar histórico: ${errHist.message}`);
       }
       for (let i = 0; i < registrosSocios.length; i += 500) {
-        await supabase.from("restritivos_socios").insert(registrosSocios.slice(i, i + 500));
+        const { error: errSocio } = await supabase.from("restritivos_socios").insert(registrosSocios.slice(i, i + 500));
+        if (errSocio) throw new Error(`Erro ao salvar sócios: ${errSocio.message}`);
       }
 
       // ========================================================================
@@ -338,7 +344,7 @@ export default function MonitoreDiarioPage() {
         }
       }
 
-      alert("🎉 Sucesso! Relatório Serasa importado e banco de dados atualizado.");
+      alert(`🎉 Sucesso! Relatório Serasa do dia ${fD(dataArquivo)} importado com sucesso.`);
       carregarDiario(); 
 
     } catch (e: any) {
