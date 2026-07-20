@@ -6,7 +6,7 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ➕ MANTÉM O SEU POST ORIGINAL
+// MANTÉM O SEU POST ORIGINAL DE CRIAÇÃO
 export async function POST(request: Request) {
   try {
     const { nome, email, senha, cargo, permissoes } = await request.json();
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
 }
 
-// 🚨 LOGICA ATUALIZADA: Método PUT marcando a senha como temporária nos metadados
+// 🚨 LOGICA CORRIGIDA: Método PUT para atualizar a senha no Auth e ativar a flag no Banco Público
 export async function PUT(request: Request) {
   try {
     const { userId, senha } = await request.json();
@@ -46,22 +46,28 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "ID do usuário é obrigatório." }, { status: 400 });
     }
 
-    // Se o admin digitou uma nova senha, força a atualização e marca como temporária
     if (senha && senha.trim().length >= 6) {
+      // 1. Força a alteração de senha no Auth Nativo
       const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-        password: senha.trim(),
-        // 🎯 O PULO DO GATO: Injeta a flag oculta de segurança que o front consegue ler ao logar
-        app_metadata: {
-          senha_temporaria: true
-        }
+        password: senha.trim()
       });
 
       if (authError) {
         return NextResponse.json({ error: `Erro no Auth: ${authError.message}` }, { status: 400 });
       }
+
+      // 2. Ativa o bloqueio de primeiro_acesso no banco público para forçar a troca na tela de login
+      const { error: dbError } = await supabaseAdmin
+        .from("usuarios")
+        .update({ primeiro_acesso: true })
+        .eq("id", userId);
+
+      if (dbError) {
+        return NextResponse.json({ error: `Erro no Banco: ${dbError.message}` }, { status: 400 });
+      }
     }
 
-    return NextResponse.json({ success: true, message: "Senha temporária gravada com sucesso!" });
+    return NextResponse.json({ success: true, message: "Senha redefinida com sucesso!" });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
