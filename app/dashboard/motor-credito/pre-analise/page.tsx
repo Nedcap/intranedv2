@@ -9,12 +9,19 @@ export default function PreAnalisePage() {
   const router = useRouter();
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(false);
-  const [salvando, setSalvando] = useState(false);
   
   // 🗂️ Estados de Dados (A Tríade)
   const [dadosEmpresa, setDadosEmpresa] = useState<any>(null);
   const [processosEncontrados, setProcessosEncontrados] = useState<any[]>([]);
   const [dadosFinanceiros, setDadosFinanceiros] = useState<any>(null);
+
+  // Função auxiliar movida para fora do try/catch para ser usada no cálculo pré-salvamento
+  const avaliarRiscoProcesso = (classe: string) => {
+    const c = classe.toLowerCase();
+    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal")) return { cor: "bg-red-500 text-white", label: "🚨 Alto Risco", peso: 3 };
+    if (c.includes("trabalhista") || c.includes("execução")) return { cor: "bg-amber-500 text-white", label: "⚠️ Médio", peso: 2 };
+    return { cor: "bg-emerald-500 text-white", label: "🟢 Baixo", peso: 1 };
+  };
 
   const executarPreAnalise = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,13 +49,6 @@ export default function PreAnalisePage() {
         return;
       }
 
-      setDadosEmpresa({
-        razao_social: dataBq.empresa.razao_social,
-        cnpj: dataBq.empresa.cnpj,
-        capital_social: dataBq.empresa.capital_social,
-        situacao: dataBq.empresa.situacao_cadastral,
-      });
-
       // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO
       const reqProcessos = fetch("/api/credito/processos", {
         method: "POST",
@@ -63,18 +63,70 @@ export default function PreAnalisePage() {
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      // Aguarda as duas requisições pesadas terminarem juntas
+      // Aguarda as duas requisições terminarem juntas
       const [resProcessos, resFinanceiro] = await Promise.all([reqProcessos, reqFinanceiro]);
 
+      let processos = [];
       if (resProcessos.ok) {
         const dataProc = await resProcessos.json();
-        setProcessosEncontrados(dataProc.processos || []);
+        processos = dataProc.processos || [];
       }
 
+      let financeiro = null;
       if (resFinanceiro.ok) {
-        const dataFin = await resFinanceiro.json();
-        setDadosFinanceiros(dataFin);
+        financeiro = await resFinanceiro.json();
+      } else {
+        // Intercepta erro do CreditHub sem quebrar a tela inteira
+        financeiro = { erro: true, mensagem: "Falha de conexão com bureau." };
       }
+
+      // =========================================================================
+      // 🔥 SALVAMENTO AUTOMÁTICO (GRAVA O LOG DE AUDITORIA E RISCO NO SUPABASE)
+      // =========================================================================
+      
+      // Calcula o risco instantaneamente
+      let nivelRiscoGeral = "BAIXO";
+      let pesoTotal = 0;
+      processos.forEach(p => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
+      
+      if (pesoTotal >= 10 || processos.some(p => avaliarRiscoProcesso(p.classe).peso === 3)) {
+        nivelRiscoGeral = "ALTO";
+      } else if (pesoTotal >= 4) {
+        nivelRiscoGeral = "MEDIO";
+      }
+
+      if (financeiro?.possui_apontamento) {
+        nivelRiscoGeral = "ALTO";
+      }
+
+      const userStr = localStorage.getItem("intraned_user");
+      const localUser = userStr ? JSON.parse(userStr) : null;
+
+      // Dispara o insert silenciosamente
+      const { error: insertError } = await supabase.from("pre_analises").insert({
+        documento_alvo: dataBq.empresa.cnpj,
+        nome_empresa_lead: dataBq.empresa.razao_social,
+        comercial_responsavel: localUser?.nome || "Comercial Padrão",
+        total_processos_encontrados: processos.length,
+        nivel_risco: nivelRiscoGeral,
+        dados_processos: processos
+      });
+
+      if (insertError) {
+        console.error("⚠️ Erro ao registrar log de consulta no banco:", insertError);
+      }
+
+      // =========================================================================
+      // ATUALIZA A TELA COM OS DADOS QUE FORAM SALVOS
+      // =========================================================================
+      setDadosEmpresa({
+        razao_social: dataBq.empresa.razao_social,
+        cnpj: dataBq.empresa.cnpj,
+        capital_social: dataBq.empresa.capital_social,
+        situacao: dataBq.empresa.situacao_cadastral,
+      });
+      setProcessosEncontrados(processos);
+      setDadosFinanceiros(financeiro);
 
     } catch (err) {
       console.error(err);
@@ -84,50 +136,14 @@ export default function PreAnalisePage() {
     }
   };
 
-  const avaliarRiscoProcesso = (classe: string) => {
-    const c = classe.toLowerCase();
-    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal")) return { cor: "bg-red-500 text-white", label: "🚨 Alto Risco", peso: 3 };
-    if (c.includes("trabalhista") || c.includes("execução")) return { cor: "bg-amber-500 text-white", label: "⚠️ Médio", peso: 2 };
-    return { cor: "bg-emerald-500 text-white", label: "🟢 Baixo", peso: 1 };
-  };
-
   const formatarMoeda = (valor: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
   };
 
-  const salvarEProsseguir = async () => {
-    if (!dadosEmpresa) return;
-
-    try {
-      setSalvando(true);
-      
-      let nivelRiscoGeral = "BAIXO";
-      let pesoTotal = 0;
-      processosEncontrados.forEach(p => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
-      if (pesoTotal >= 10 || processosEncontrados.some(p => avaliarRiscoProcesso(p.classe).peso === 3)) nivelRiscoGeral = "ALTO";
-      else if (pesoTotal >= 4) nivelRiscoGeral = "MEDIO";
-
-      if (dadosFinanceiros?.possui_apontamento) nivelRiscoGeral = "ALTO";
-
-      const userStr = localStorage.getItem("intraned_user");
-      const localUser = userStr ? JSON.parse(userStr) : null;
-
-      const { error } = await supabase.from("pre_analises").insert({
-        documento_alvo: dadosEmpresa.cnpj,
-        nome_empresa_lead: dadosEmpresa.razao_social,
-        comercial_responsavel: localUser?.nome || "Comercial",
-        total_processos_encontrados: processosEncontrados.length,
-        nivel_risco: nivelRiscoGeral,
-        dados_processos: processosEncontrados
-      });
-
-      if (error) throw error;
+  // Botão apenas faz o redirecionamento (o filtro pesado entrará aqui depois)
+  const enviarParaMesa = () => {
+    if (dadosEmpresa) {
       router.push(`/dashboard/motor-credito/envio-analise?cnpj=${dadosEmpresa.cnpj.replace(/\D/g, "")}`);
-
-    } catch (err: any) {
-      alert("Falha ao registrar pré-análise: " + err.message);
-    } finally {
-      setSalvando(false);
     }
   };
 
@@ -146,7 +162,7 @@ export default function PreAnalisePage() {
             <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
               🚦 Pré-Análise de Viabilidade
             </h2>
-            <span className="text-xs text-slate-500 font-medium">Valide a saúde jurídica e financeira antes de engatilhar a mesa de crédito.</span>
+            <span className="text-xs text-slate-500 font-medium">O log de pesquisa é armazenado automaticamente.</span>
           </div>
         </div>
 
@@ -167,7 +183,7 @@ export default function PreAnalisePage() {
               disabled={carregando}
               className="px-8 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-md cursor-pointer"
             >
-              {carregando ? "⏳ Consultando Motores..." : "🚦 Extrair Raio-X"}
+              {carregando ? "⏳ Extraindo e Gravando Log..." : "🚦 Extrair Raio-X"}
             </button>
           </form>
         </div>
@@ -183,7 +199,7 @@ export default function PreAnalisePage() {
               <div className="bg-white border border-slate-200 p-6 rounded-2xl space-y-4 shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10 text-4xl">🏢</div>
                 <div className="border-b border-slate-100 pb-3 relative z-10">
-                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Base Receita Federal (BigQuery)</span>
+                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Base Receita Federal</span>
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{dadosEmpresa.razao_social}</h3>
                   <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{dadosEmpresa.cnpj}</p>
                   <p className="text-slate-500 font-medium text-[11px] mt-2 uppercase flex items-center gap-1.5">
@@ -203,7 +219,7 @@ export default function PreAnalisePage() {
                     <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Bureau (CreditHub)</span>
                     <h3 className="text-base font-black text-slate-900 uppercase tracking-tight mt-1">Risco Financeiro</h3>
                   </div>
-                  {dadosFinanceiros && (
+                  {dadosFinanceiros && !dadosFinanceiros.erro && (
                     <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest shadow-sm ${dadosFinanceiros.possui_apontamento ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
                       {dadosFinanceiros.possui_apontamento ? "🔴 Apontamentos" : "🟢 Nada Consta"}
                     </span>
@@ -211,21 +227,27 @@ export default function PreAnalisePage() {
                 </div>
 
                 {dadosFinanceiros ? (
-                  <div className="space-y-3 relative z-10">
-                    <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-xs font-bold text-slate-600 uppercase">Dívidas / Pendências</span>
-                      <span className="font-mono font-black text-slate-900">{dadosFinanceiros.quantidade_dividas} ocorrências</span>
+                  dadosFinanceiros.erro ? (
+                    <div className="p-4 bg-rose-50 text-center text-rose-600 font-bold italic text-xs rounded-lg border border-dashed border-rose-300">
+                      ❌ {dadosFinanceiros.mensagem || "Erro na consulta ao bureau."}
                     </div>
-                    <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-xs font-bold text-slate-600 uppercase">Valor Total (R$)</span>
-                      <span className="font-mono font-black text-rose-600">{formatarMoeda(dadosFinanceiros.valor_total_dividas)}</span>
-                    </div>
-                    {dadosFinanceiros.ccf && (
-                      <div className="p-3 bg-rose-50 rounded-lg border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
-                        ⚠️ Alerta: Registro de Cheques sem Fundo (CCF) localizado.
+                  ) : (
+                    <div className="space-y-3 relative z-10">
+                      <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <span className="text-xs font-bold text-slate-600 uppercase">Dívidas / Pendências</span>
+                        <span className="font-mono font-black text-slate-900">{dadosFinanceiros.quantidade_dividas || 0} ocorrências</span>
                       </div>
-                    )}
-                  </div>
+                      <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <span className="text-xs font-bold text-slate-600 uppercase">Valor Total (R$)</span>
+                        <span className="font-mono font-black text-rose-600">{formatarMoeda(dadosFinanceiros.valor_total_dividas || 0)}</span>
+                      </div>
+                      {dadosFinanceiros.ccf && (
+                        <div className="p-3 bg-rose-50 rounded-lg border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                          ⚠️ Alerta: Registro de Cheques sem Fundo (CCF) localizado.
+                        </div>
+                      )}
+                    </div>
+                  )
                 ) : (
                   <div className="p-4 bg-slate-50 text-center text-slate-400 font-bold italic text-xs rounded-lg border border-dashed border-slate-300">
                     Aguardando varredura financeira...
@@ -236,11 +258,11 @@ export default function PreAnalisePage() {
               {/* BOTAO DE LARGADA */}
               <div className="pt-2">
                 <button
-                  onClick={salvarEProsseguir}
-                  disabled={salvando || (dadosEmpresa.situacao !== 'ATIVA')}
+                  onClick={enviarParaMesa}
+                  disabled={dadosEmpresa.situacao !== 'ATIVA'}
                   className="w-full px-6 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-lg cursor-pointer flex items-center justify-center gap-2"
                 >
-                  {salvando ? "Salvando Log..." : "✅ Enviar para Mesa de Crédito"}
+                  ✅ Enviar para Mesa de Crédito
                 </button>
               </div>
 
