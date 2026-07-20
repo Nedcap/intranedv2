@@ -1,16 +1,18 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { registrarPonto, buscarUltimoStatusPonto } from "@/actions/ponto-actions";
 
 export default function PontoEletronicoPage() {
   const [carregando, setCarregando] = useState(true);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
   const [localizacao, setLocalizacao] = useState<{ lat: number; lng: number } | null>(null);
   const [ultimoStatus, setUltimoStatus] = useState<string>("NENHUM");
   const [horaAtual, setHoraAtual] = useState<string>("");
 
   useEffect(() => {
-    // Relógio em tempo real só para visual
+    // Relógio em tempo real visual
     const timer = setInterval(() => {
       setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     }, 1000);
@@ -24,31 +26,28 @@ export default function PontoEletronicoPage() {
       );
     }
 
-    // Busca o status de hoje no banco
-    buscarUltimoStatusPonto().then(status => {
-      setUltimoStatus(status);
+    // Busca usuário e status no banco
+    const carregarSessao = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUsuarioId(user.id);
+        const status = await buscarUltimoStatusPonto(user.id);
+        setUltimoStatus(status);
+      }
       setCarregando(false);
-    });
+    };
+
+    carregarSessao();
 
     return () => clearInterval(timer);
   }, []);
 
   const handleBaterPonto = async (tipo: string) => {
+    if (!usuarioId) return alert("❌ Erro: Autenticação não encontrada.");
+    
     try {
       setCarregando(true);
-      
-      // TRAVA OPCIONAL DE GPS:
-      // Se você quiser obrigar que tenha GPS ativo para clicar, descomente abaixo:
-      /* 
-      if (!localizacao) {
-        alert("⚠️ Ative a localização (GPS) do navegador para bater o ponto.");
-        setCarregando(false);
-        return;
-      } 
-      */
-
-      await registrarPonto(localizacao?.lat || null, localizacao?.lng || null, tipo);
-      
+      await registrarPonto(usuarioId, localizacao?.lat || null, localizacao?.lng || null, tipo);
       setUltimoStatus(tipo);
       alert("✅ Ponto registrado com sucesso no Servidor!");
     } catch (e: any) {
@@ -59,7 +58,7 @@ export default function PontoEletronicoPage() {
   };
 
   if (carregando && ultimoStatus === "NENHUM") {
-    return <div className="flex h-screen items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando relógio...</div>;
+    return <div className="flex h-screen items-center justify-center text-slate-400 font-bold animate-pulse">Sincronizando relógio com o servidor...</div>;
   }
 
   // Máquina de Estado do Botão
@@ -87,8 +86,8 @@ export default function PontoEletronicoPage() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 font-sans">
-      
       <div className="bg-white p-10 rounded-3xl shadow-xl border border-slate-200 flex flex-col items-center w-full max-w-md relative overflow-hidden">
+        
         {/* Enfeite visual */}
         <div className="absolute top-0 w-full h-2 bg-gradient-to-r from-indigo-500 to-cyan-500"></div>
 
