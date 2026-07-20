@@ -4,7 +4,7 @@ export interface RotaSistema {
   nome: string;
   path: string;
   icone: string; // Voltamos para string (Emoji) para não quebrar sua Sidebar!
-  categoria: "Geral" | "Comercial" | "Crédito" | "Consultas" | "Financeiro" | "Cadastro" | "Configurações";
+  categoria: "Geral" | "Comercial" | "Crédito" | "Consultas" | "Financeiro" | "Cadastro" | "Configurações" | "RH";
   defaultMaster: boolean;
 }
 
@@ -37,7 +37,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 💰 FINANCEIRO
   { nome: "Painel de Indicadores (BI)", path: "/dashboard/powerbi", icone: "📊", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Financeiro", defaultMaster: true },
-  { nome: "Cálculo de Comissões", path: "/dashboard/calculo-comissoes", icone: "💵", categoria: "Financeiro", defaultMaster: true }, // <- Nova rota adicionada!
+  { nome: "Cálculo de Comissões", path: "/dashboard/calculo-comissoes", icone: "💵", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true },
   { nome: "Simulador de Rentabilidade", path: "/dashboard/simulador", icone: "🧮", categoria: "Financeiro", defaultMaster: true },
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Financeiro", defaultMaster: true },
@@ -45,6 +45,10 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 📝 CADASTRO
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Cadastro", defaultMaster: true },
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Cadastro", defaultMaster: true },
+
+  // 👥 RH E CONTROLE (NOVO)
+  { nome: "Relógio de Ponto", path: "/dashboard/ponto", icone: "🕒", categoria: "RH", defaultMaster: true },
+  { nome: "Gestão de Ponto", path: "/dashboard/ponto/gestao", icone: "📋", categoria: "RH", defaultMaster: true },
 
   // ⚙️ CONFIGURAÇÕES
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Configurações", defaultMaster: true },
