@@ -63,9 +63,7 @@ export default function CadastroPage() {
   const [salvando, setSalvando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   
-  // 🔥 ATUALIZADO: Agora guardamos o ID do Auth do usuário
   const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string } | null>(null);
-  
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
   
@@ -79,11 +77,9 @@ export default function CadastroPage() {
     try {
       setCarregando(true);
       
-      // 🎯 1. PEGA O USUÁRIO DO AUTH (Adeus localStorage!)
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        // Busca o perfil do cara no banco para saber se ele é master, etc.
         const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo').eq('id', user.id).single();
         if (perfilData) {
           setUsuarioAtual({ 
@@ -94,7 +90,6 @@ export default function CadastroPage() {
         }
       }
 
-      // 🎯 2. PUXA OS DADOS COM SEGURANÇA (O RLS faz o filtro automático)
       const { data } = await supabase.from("cadastro_cedentes").select("*");
       
       if (data) {
@@ -115,7 +110,6 @@ export default function CadastroPage() {
     try {
       setSincronizando(true);
       
-      // 🎯 ATUALIZADO: Trazendo o responsavel_id lá da tabela análises para manter a autoria
       const { data: analises, error: errAnalises } = await supabase
         .from("analises")
         .select("empresa_nome, comercial, status, criado_em, responsavel_id");
@@ -143,7 +137,6 @@ export default function CadastroPage() {
              comercial: analise.comercial,
              dt_aprovacao_comite: dtComiteFormatada,
              atualizado_em: new Date().toISOString(),
-             // 👇 Herda o dono da análise (ou o usuário logado caso não exista)
              responsavel_id: analise.responsavel_id || usuarioAtual?.id 
            });
            nomesNaEsteira.add(nomeLimpo);
@@ -192,6 +185,7 @@ export default function CadastroPage() {
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
+      nao_opera_sec: false, nao_opera_fidc: false,
       comercial: usuarioAtual?.perfil === "comercial" || usuarioAtual?.perfil === "sdr" ? usuarioAtual.nome : "",
       _isNovo: true, _isEditado: true
     };
@@ -241,10 +235,10 @@ export default function CadastroPage() {
           dt_assinatura_contrato_fidc: item.dt_assinatura_contrato_fidc || null, dt_envio_gestora_fidc: item.dt_envio_gestora_fidc || null,
           dt_aprovacao_gestora_fidc: item.dt_aprovacao_gestora_fidc || null, dt_envio_admin_fidc: item.dt_envio_admin_fidc || null,
           dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
+          nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
           comercial: item.comercial, atualizado_em: new Date().toISOString()
         };
 
-        // 👇 GARANTE QUE O RESPONSÁVEL SEJA GRAVADO NAS NOVAS LINHAS
         if (item._isNovo) {
           payload.responsavel_id = usuarioAtual?.id;
         }
@@ -272,8 +266,11 @@ export default function CadastroPage() {
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (isApto) aptos++;
       else {
-        if (!c.dt_aprovacao_comite) pendenteEnvio++;
-        else if ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)) aguardandoAssinatura++;
+        if (!c.dt_aprovacao_comite && (!c.nao_opera_sec || !c.nao_opera_fidc)) pendenteEnvio++;
+        else if (
+          (c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec && !c.nao_opera_sec) || 
+          (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc && !c.nao_opera_fidc)
+        ) aguardandoAssinatura++;
       }
       if (c.dt_aprovacao_comite && (c.dt_assinatura_contrato_sec || c.dt_assinatura_contrato_fidc)) {
         const d1 = new Date(c.dt_aprovacao_comite);
@@ -292,7 +289,7 @@ export default function CadastroPage() {
       if (filtroStatus === "TODOS") return true;
       if (filtroStatus === "APTO") return !!isApto;
       if (filtroStatus === "PENDENTE_ENVIO") return !isApto && !c.dt_aprovacao_comite;
-      if (filtroStatus === "AGUARDANDO_ASSINATURA") return !isApto && ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc));
+      if (filtroStatus === "AGUARDANDO_ASSINATURA") return !isApto && ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec && !c.nao_opera_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc && !c.nao_opera_fidc));
       return true;
     });
 
@@ -314,6 +311,9 @@ export default function CadastroPage() {
   const renderTimelineUI = (visualSteps: any[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
     
+    // 👇 Flag para saber se a esteira toda está desativada para este tipo
+    const naoOpera = isFidc ? item.nao_opera_fidc : item.nao_opera_sec;
+    
     const doneLineClass = isFidc ? "bg-purple-200" : "bg-blue-200";
     const doneDotClass = isFidc ? "bg-purple-500 border-purple-500" : "bg-blue-500 border-blue-500";
     
@@ -333,16 +333,20 @@ export default function CadastroPage() {
       }
     }
 
-    const currentValidStepIndex = lastFilledValidIndex === validSteps.length - 1 ? -1 : lastFilledValidIndex + 1;
+    // Se naoOpera for true, congelamos o index atual para -1 (nada pisca)
+    const currentValidStepIndex = (lastFilledValidIndex === validSteps.length - 1 || naoOpera) ? -1 : lastFilledValidIndex + 1;
     const currentValidStepKey = currentValidStepIndex !== -1 ? validSteps[currentValidStepIndex].key : null;
     
     const currentVisualIndex = currentValidStepKey ? visualSteps.findIndex(s => s.key === currentValidStepKey) : -1;
 
     return (
-      <div className="flex w-full relative pt-2 pb-1">
+      <div className={`flex w-full relative pt-2 pb-1 ${naoOpera ? "grayscale opacity-80" : ""}`}>
         {visualSteps.map((step, idx) => {
-          const isNA = !!step.isNA; 
-          const isDone = !isNA && !!item[step.key];
+          const isNAOrig = !!step.isNA; 
+          const isDone = !isNAOrig && !!item[step.key];
+          
+          // Se não vai operar, e ainda não foi preenchido, forçamos a ser N/A (mata o pisca-pisca e a cor)
+          const isNA = isNAOrig || (naoOpera && !isDone);
           const isCurrent = !isNA && idx === currentVisualIndex;
           const isLast = idx === visualSteps.length - 1;
           
@@ -365,10 +369,10 @@ export default function CadastroPage() {
           return (
             <div key={step.key} className={`relative flex flex-col items-center group ${isLast ? "flex-none w-12" : "flex-1"}`}>
               {!isLast && (
-                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isLineActive ? doneLineClass : "bg-slate-200/60 rounded-full"}`} />
+                <div className={`absolute top-2.5 left-1/2 w-full h-1 -z-10 transition-all duration-500 ${isLineActive && !naoOpera ? doneLineClass : "bg-slate-200/60 rounded-full"}`} />
               )}
               <div className="relative flex items-center justify-center">
-                {isCurrent && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
+                {isCurrent && !naoOpera && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
                 <div className={circleClasses}>
                   
                   {isNA ? (
@@ -380,7 +384,7 @@ export default function CadastroPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   ) : isCurrent ? (
-                    <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${currentPulseBg}`} />
+                    <div className={`w-2.5 h-2.5 rounded-full ${naoOpera ? "bg-slate-300" : `animate-pulse ${currentPulseBg}`}`} />
                   ) : null}
 
                 </div>
@@ -394,7 +398,7 @@ export default function CadastroPage() {
               `}>
                 {step.label}
               </span>
-              {isDone && !isNA && (
+              {isDone && !isNAOrig && (
                 <div className="absolute -top-8 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] py-1 px-2.5 rounded-md shadow-lg pointer-events-none z-50 whitespace-nowrap">
                   {formatarDataBr(item[step.key])}
                   <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
@@ -578,11 +582,11 @@ export default function CadastroPage() {
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-6">
                             <div className="flex items-center gap-4">
-                              <span className="text-[10px] font-black w-8 text-blue-600 bg-blue-50 py-1 rounded-md text-center">SEC</span>
+                              <span className={`text-[10px] font-black w-8 py-1 rounded-md text-center transition-colors ${item.nao_opera_sec ? "bg-slate-100 text-slate-400" : "text-blue-600 bg-blue-50"}`}>SEC</span>
                               <div className="flex-1">{renderTimelineUI(VISUAL_STEPS_SEC, item, "SEC")}</div>
                             </div>
                             <div className="flex items-center gap-4 mt-2">
-                              <span className="text-[10px] font-black w-8 text-purple-600 bg-purple-50 py-1 rounded-md text-center">FIDC</span>
+                              <span className={`text-[10px] font-black w-8 py-1 rounded-md text-center transition-colors ${item.nao_opera_fidc ? "bg-slate-100 text-slate-400" : "text-purple-600 bg-purple-50"}`}>FIDC</span>
                               <div className="flex-1">{renderTimelineUI(VISUAL_STEPS_FIDC, item, "FIDC")}</div>
                             </div>
                           </div>
@@ -618,11 +622,17 @@ export default function CadastroPage() {
 
                               <div className="xl:col-span-9 space-y-4">
                                 <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden">
-                                  <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500"></div>
-                                  <div className="flex items-center gap-2 mb-4 ml-2">
-                                    <span className="font-black text-blue-800 text-xs uppercase tracking-wider">🏦 Fluxo Securitizadora</span>
+                                  <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_sec ? "bg-slate-300" : "bg-blue-500"}`}></div>
+                                  <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
+                                    <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_sec ? "text-slate-400 line-through" : "text-blue-800"}`}>🏦 Fluxo Securitizadora</span>
+                                    <button 
+                                      onClick={() => handleInputChange(index, "nao_opera_sec", !item.nao_opera_sec)} 
+                                      className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_sec ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}
+                                    >
+                                      {item.nao_opera_sec ? "🚫 NÃO OPERA (INATIVO)" : "Desativar Securitizadora"}
+                                    </button>
                                   </div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 ml-2">
+                                  <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ml-2 transition-opacity duration-300 ${item.nao_opera_sec ? "opacity-40 pointer-events-none" : ""}`}>
                                     {STEPS_SEC.slice(1).map(step => (
                                       <div key={step.key} className="flex flex-col gap-1.5">
                                         <label className="text-[10px] text-blue-600/80 font-bold uppercase truncate" title={step.label}>{step.label}</label>
@@ -634,11 +644,17 @@ export default function CadastroPage() {
                                 </div>
 
                                 <div className="bg-purple-50/50 p-5 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
-                                  <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500"></div>
-                                  <div className="flex items-center gap-2 mb-4 ml-2">
-                                    <span className="font-black text-purple-800 text-xs uppercase tracking-wider">🔮 Fluxo FIDC</span>
+                                  <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_fidc ? "bg-slate-300" : "bg-purple-500"}`}></div>
+                                  <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
+                                    <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_fidc ? "text-slate-400 line-through" : "text-purple-800"}`}>🔮 Fluxo FIDC</span>
+                                    <button 
+                                      onClick={() => handleInputChange(index, "nao_opera_fidc", !item.nao_opera_fidc)} 
+                                      className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_fidc ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}
+                                    >
+                                      {item.nao_opera_fidc ? "🚫 NÃO OPERA (INATIVO)" : "Desativar FIDC"}
+                                    </button>
                                   </div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-4 ml-2">
+                                  <div className={`grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-4 ml-2 transition-opacity duration-300 ${item.nao_opera_fidc ? "opacity-40 pointer-events-none" : ""}`}>
                                     {STEPS_FIDC.slice(1).map(step => (
                                       <div key={step.key} className="flex flex-col gap-1.5">
                                         <label className="text-[10px] text-purple-600/80 font-bold uppercase truncate" title={step.label}>{step.label}</label>
