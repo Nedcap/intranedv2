@@ -58,15 +58,17 @@ export default function LoginPage() {
         throw new Error("Perfil de usuário não localizado no banco.");
       }
 
-      // 3. 🚨 Verifica se é o primeiro acesso dele
-      if (perfil.primeiro_acesso === true) {
+      // 🚨 3. CORREÇÃO: Verifica se é o primeiro acesso OU se o Admin setou uma senha temporária
+      const senhaTemporariaAuth = authData.user?.app_metadata?.senha_temporaria === true;
+
+      if (perfil.primeiro_acesso === true || senhaTemporariaAuth) {
         setUsuarioTemporario(perfil);
         setExigirNovaSenha(true); // Abre o modal de nova senha e barra o redirecionamento
         setCarregando(false);
         return;
       }
 
-      // 4. 🚀 Login normal caso não seja o primeiro acesso
+      // 4. 🚀 Login normal caso não precise redefinir nada
       localStorage.setItem("intraned_user", JSON.stringify({
         id: perfil.id,
         nome: perfil.nome,
@@ -84,7 +86,7 @@ export default function LoginPage() {
     }
   };
 
-  // 🛠️ Função que atualiza a senha de forma criptografada e desliga o primeiro acesso
+  // 🛠️ Função que atualiza a senha de forma definitiva e desliga as flags de bloqueio
   const salvarNovaSenhaPrimeiroAcesso = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novaSenha.trim() || !confirmarNovaSenha.trim()) return;
@@ -102,14 +104,17 @@ export default function LoginPage() {
     try {
       setTrocandoSenha(true);
 
-      // 1. 🔐 Atualiza a senha no cofre de autenticação (criptografia nativa em hash)
+      // 1. 🔐 Atualiza a senha no cofre nativo do Supabase E remove a flag 'senha_temporaria'
       const { error: authUpdateError } = await supabase.auth.updateUser({
-        password: novaSenha.trim()
+        password: novaSenha.trim(),
+        app_metadata: {
+          senha_temporaria: false // 🎯 Desliga a flag no motor do Supabase
+        }
       });
 
       if (authUpdateError) throw authUpdateError;
 
-      // 2. 🏳️ Desmarca o 'primeiro_acesso' para false na tabela pública
+      // 2. 🏳️ Garante também que a flag 'primeiro_acesso' fique false na tabela pública
       const { error: tabelaError } = await supabase
         .from("usuarios")
         .update({ primeiro_acesso: false })
@@ -126,7 +131,7 @@ export default function LoginPage() {
         permissoes: usuarioTemporario.permissoes || {}
       }));
 
-      alert("🎉 Senha corporativa redefinida com sucesso! Bem-vindo.");
+      alert("🎉 Senha corporativa definida com sucesso! Acesso liberado.");
       router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
@@ -187,7 +192,7 @@ export default function LoginPage() {
               placeholder="seu.nome@nedcapital.com.br"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="p-2.5 border border-slate-200 bg-blue-50/30 rounded-lg outline-none focus:border-blue-500 font-semibold text-slate-800"
+              className="p-2.5 border border-slate-200 bg-blue-50/30 rounded-lg outline-none focus:border-blue-500 font-semibold text-slate-880"
             />
           </div>
 
@@ -223,13 +228,13 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* 🚨 MODAL IMPEDING: PRIMEIRO ACESSO - CADASTRO DE NOVA SENHA */}
+      {/* 🚨 MODAL IMPEDING: ACESSO TEMPORÁRIO / PRIMEIRO ACESSO - CADASTRO DE NOVA SENHA */}
       {exigirNovaSenha && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div className="text-center">
-              <h3 className="font-black text-slate-950 text-base uppercase tracking-tight">🔒 Primeiro Acesso Detectado</h3>
-              <p className="text-slate-500 text-[11px] mt-1">Por questões de conformidade e segurança da Ned Capital, altere a senha provisória inicial para continuar.</p>
+              <h3 className="font-black text-slate-950 text-base uppercase tracking-tight">🔒 Senha Provisória Detectada</h3>
+              <p className="text-slate-500 text-[11px] mt-1">Por questões de conformidade e segurança da Ned Capital, defina uma nova senha definitiva para continuar.</p>
             </div>
             
             <form onSubmit={salvarNovaSenhaPrimeiroAcesso} className="space-y-4">

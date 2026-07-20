@@ -152,12 +152,32 @@ export default function GerenciarUsuariosPage() {
           cargo: cargo,
           permissoes: payloadPermissoes,
           notificacoes_config: notificacoesConfig,
-          bate_ponto: batePonto // 🎯 SALVA A FLAG AQUI
+          bate_ponto: batePonto 
         };
 
+        // 1. Atualiza dados complementares na tabela pública
         const { error } = await supabase.from("usuarios").update(payloadUpdate).eq("id", selecionado.id);
         if (error) throw error;
-        alert("🎉 Permissões e dados atualizados com sucesso!");
+
+        // 🚨 CORREÇÃO: Se uma nova senha foi digitada, envia via PUT para atualizar o Auth Nativo
+        if (senha.trim()) {
+          const responseAuth = await fetch("/api/usuarios", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: selecionado.id,
+              senha: senha.trim()
+            }),
+          });
+
+          const resultadoAuth = await responseAuth.json();
+
+          if (!responseAuth.ok) {
+            throw new Error(resultadoAuth.error || "Falha ao sincronizar a nova senha com o sistema de autenticação.");
+          }
+        }
+
+        alert("🎉 Permissões, dados e senha atualizados com sucesso!");
       } else {
         if (!senha.trim()) {
           alert("A senha de acesso inicial é obrigatória.");
@@ -170,8 +190,6 @@ export default function GerenciarUsuariosPage() {
           if (permissoes[r.path]) payloadPermissoes[r.path] = true;
         });
 
-        // ⚠️ NOTA: Se a sua /api/usuarios não aceitar o campo bate_ponto, 
-        // adicione ele no backend dela para fazer o insert completo.
         const response = await fetch("/api/usuarios", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -182,7 +200,7 @@ export default function GerenciarUsuariosPage() {
             cargo: cargo,
             permissoes: payloadPermissoes,
             notificacoes_config: notificacoesConfig, 
-            bate_ponto: batePonto // 🎯 MANDA PRO BACKEND AQUI
+            bate_ponto: batePonto 
           }),
         });
 
@@ -192,7 +210,6 @@ export default function GerenciarUsuariosPage() {
           throw new Error(resultado.error || "Erro desconhecido na API");
         }
 
-        // Caso a API não tenha gravado o bate_ponto, garantimos o update aqui
         if (resultado.user?.id) {
            await supabase.from("usuarios").update({ bate_ponto }).eq("id", resultado.user.id);
         }
@@ -313,7 +330,7 @@ export default function GerenciarUsuariosPage() {
               </select>
             </div>
 
-            {/* 🔥 CONTROLE DE PONTO (NOVO) */}
+            {/* 🔥 CONTROLE DE PONTO (RH) */}
             <div className="flex flex-col space-y-1.5 pt-3 border-t border-slate-100">
               <label className="font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-1">
                 Controle de Jornada (RH):
@@ -430,7 +447,6 @@ export default function GerenciarUsuariosPage() {
                 {usuarios.map(u => (
                   <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="p-4 font-black text-slate-900 uppercase truncate" title={u.nome}>
-                      {/* 🔥 ÍCONE DO RELÓGIO MOSTRA QUEM BATE PONTO */}
                       <span className="flex items-center gap-2">
                         {u.nome}
                         {u.bate_ponto && <span title="Registra Ponto Eletrônico">🕒</span>}
