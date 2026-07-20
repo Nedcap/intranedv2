@@ -78,7 +78,7 @@ export default function PontoEletronicoPage() {
       setHoraAtual(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     }, 1000);
 
-    // 🎯 Correção: Busca GPS com timeout de 5 segundos, se falhar ou recusar, não trava a tela!
+    // 🎯 Correção: Deixamos o GPS mais amigável para Computadores de Mesa
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -89,7 +89,9 @@ export default function PontoEletronicoPage() {
           console.warn("GPS falhou ou foi negado:", err.message);
           setGpsStatus("erro");
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        // enableHighAccuracy: false faz o PC usar a rede Wi-Fi/IP (muito mais rápido e funciona em Desktop)
+        // timeout aumentado para 15 segundos
+        { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
       );
     } else {
       setGpsStatus("erro");
@@ -203,7 +205,12 @@ export default function PontoEletronicoPage() {
           </span>
           {gpsStatus === "buscando" && <span className="text-amber-500 animate-pulse">⏳ Buscando sinal de GPS...</span>}
           {gpsStatus === "ok" && localizacao && <span className="text-slate-500">📍 Lat: {localizacao.lat.toFixed(4)} | Lng: {localizacao.lng.toFixed(4)}</span>}
-          {gpsStatus === "erro" && <span className="text-rose-400">⚠️ GPS Desativado/Sem Sinal</span>}
+          {gpsStatus === "erro" && (
+            <span className="text-rose-400 flex items-center justify-center gap-1">
+              ⚠️ GPS Desativado/Sem Sinal
+              <button onClick={() => window.location.reload()} className="underline ml-1 cursor-pointer">🔄 Tentar Novamente</button>
+            </span>
+          )}
         </div>
       </div>
 
