@@ -49,15 +49,15 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO
-      const reqProcessos = fetch("/api/credito/processos", {
+      // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO (Rota ajustada)
+      const reqProcessos = fetch("/api/processos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      // 3. 💳 BATE NO CREDITHUB (iCheques) EM PARALELO
-      const reqFinanceiro = fetch("/api/credito/restritivos", {
+      // 3. 💳 BATE NO CREDITHUB EM PARALELO (Rota ajustada)
+      const reqFinanceiro = fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
@@ -80,7 +80,7 @@ export default function PreAnalisePage() {
         const errData = await resFinanceiro.json().catch(() => ({}));
         financeiro = { 
           erro: true, 
-          mensagem: errData.error || "Falha de conexão com o CreditHub." 
+          mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." 
         };
       }
 
