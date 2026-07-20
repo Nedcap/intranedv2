@@ -20,6 +20,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Naveg.A.I", path: "/dashboard/planejador", icone: "🧭", categoria: "Comercial", defaultMaster: true },
 
   // 🛡️ CRÉDITO E RISCO
+  { nome: "Pré Análise", path: "/dashboard/motor-credito/pre-analise", icone: "🚦", categoria: "Crédito", defaultMaster: true },
   { nome: "Solicitar Análise", path: "/dashboard/motor-credito/envio-analise", icone: "🚀", categoria: "Crédito", defaultMaster: true },
   { nome: "Mesa de Crédito V8", path: "/dashboard/motor-credito/analise", icone: "🕵️", categoria: "Crédito", defaultMaster: true },
   { nome: "Busca Grupo", path: "/dashboard/busca-grupo", icone: "🕸️", categoria: "Crédito", defaultMaster: true },
