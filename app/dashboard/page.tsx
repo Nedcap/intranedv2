@@ -88,7 +88,7 @@ export default function DashboardHomePage() {
           setUserName(parsedUser.nome.split(" ")[0]);
         }
         
-        // Carrega a ordenação/atalhos personalizados salvos localmente para o dispositivo
+        // Carrega a ordenação/atalhos personalizados salvos localmente
         const favsSalvos = localStorage.getItem(`favs_${parsedUser.id}`);
         if (favsSalvos) setFavoritos(JSON.parse(favsSalvos));
       } catch (e) {
@@ -151,7 +151,9 @@ export default function DashboardHomePage() {
     }
   };
 
-  // Define a lista de módulos finais que serão renderizados
+  // 🚨 FIX DA LOGICA: 
+  // Se estiver em modoEdicao, mostra TUDO que ele tem acesso para ele escolher.
+  // Se não estiver, mostra os favoritos dele (ou tudo que tem acesso se não favoritou nada).
   const modulosExibidos = modoEdicao 
     ? modulosPermitidos 
     : favoritos.length > 0 
@@ -178,13 +180,13 @@ export default function DashboardHomePage() {
         <div className="flex gap-2 relative z-10 shrink-0">
           <button
             onClick={() => setModoEdicao(!modoEdicao)}
-            className={`px-4 py-2.5 rounded-lg border font-bold uppercase text-[11px] tracking-wider transition-all shadow-sm ${
+            className={`px-4 py-2.5 rounded-lg border font-black uppercase text-[11px] tracking-wider transition-all shadow-sm ${
               modoEdicao 
-                ? "bg-amber-500 border-amber-600 text-white hover:bg-amber-600" 
+                ? "bg-emerald-600 border-emerald-700 text-white hover:bg-emerald-700" 
                 : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white"
             }`}
           >
-            {modoEdicao ? "💾 Salvar Telas" : "⚙️ Customizar Visão"}
+            {modoEdicao ? "💾 Salvar Preferências" : "⚙️ Customizar Visão"}
           </button>
           
           <button
@@ -200,12 +202,12 @@ export default function DashboardHomePage() {
       <div className="space-y-4">
         <div className="flex justify-between items-center border-b border-slate-200 pb-2">
           <h2 className="text-lg font-black text-slate-800 tracking-tight uppercase">
-            {modoEdicao ? "🛠️ Selecionar Telas Visíveis" : favoritos.length > 0 ? "🌟 Seus Atalhos Fixados" : "💻 Módulos Disponíveis"}
+            {modoEdicao ? "🛠️ Marcar telas para fixar na Home" : favoritos.length > 0 ? "🌟 Seus Atalhos Fixados" : "💻 Módulos Disponíveis"}
           </h2>
           {favoritos.length > 0 && !modoEdicao && (
             <button 
               onClick={() => { setFavoritos([]); localStorage.removeItem(`favs_${user?.id}`); }} 
-              className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase"
+              className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase cursor-pointer"
             >
               Limpar Filtros ✕
             </button>
@@ -219,21 +221,21 @@ export default function DashboardHomePage() {
             return (
               <div key={idx} className="relative group h-full">
                 {modoEdicao ? (
-                  // Visão de Customização (Checkbox lateral)
+                  // Visão de Customização (Mostra tudo liberado permitindo ativar/desativar)
                   <div 
                     onClick={() => alternarFavorito(mod.id)}
                     className={`border rounded-2xl p-6 h-full flex flex-col gap-4 select-none cursor-pointer transition-all ${
                       isFav 
-                        ? "bg-blue-50/50 border-blue-400 ring-2 ring-blue-100 shadow-sm" 
-                        : "bg-white border-slate-200 opacity-60 hover:opacity-90"
+                        ? "bg-blue-50/60 border-blue-400 ring-2 ring-blue-100 shadow-sm" 
+                        : "bg-white border-slate-200 opacity-60 hover:opacity-100 hover:border-slate-300"
                     }`}
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-4xl">{mod.icone}</span>
-                      <span className={`px-2 py-1 rounded font-black text-[10px] uppercase border ${
+                      <span className={`px-2 py-1 rounded font-black text-[10px] uppercase border transition-all ${
                         isFav ? "bg-blue-600 text-white border-blue-700" : "bg-slate-100 text-slate-400 border-slate-200"
                       }`}>
-                        {isFav ? "★ Ativado" : "☆ Oculto"}
+                        {isFav ? "★ Exibir na Home" : "☆ Oculto na Home"}
                       </span>
                     </div>
                     <div>
@@ -242,7 +244,7 @@ export default function DashboardHomePage() {
                     </div>
                   </div>
                 ) : (
-                  // Visão Normal - Link clicável direto para as telas
+                  // Visão Normal - Link direto para as telas acessíveis
                   <Link href={mod.path}>
                     <div className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm transition-all duration-300 cursor-pointer h-full flex flex-col gap-4 group ${mod.corHover}`}>
                       <div className="flex justify-between items-start">
@@ -270,7 +272,7 @@ export default function DashboardHomePage() {
 
           {modulosExibidos.length === 0 && (
             <div className="col-span-full border border-dashed border-slate-300 bg-slate-50 rounded-2xl p-10 text-center text-slate-400 font-bold italic">
-              Nenhuma tela foi selecionada para visualização rápida. Clique em &quot;Customizar Visão&quot; acima para redefinir.
+              Nenhuma tela está configurada para exibição rápida. Clique em &quot;Customizar Visão&quot; para selecionar.
             </div>
           )}
         </div>
@@ -302,7 +304,7 @@ export default function DashboardHomePage() {
                 </div>
                 <button 
                   onClick={() => setAbrirConfig(false)}
-                  className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 font-bold text-xs"
+                  className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 font-bold text-xs cursor-pointer"
                 >
                   ✕
                 </button>
@@ -327,7 +329,7 @@ export default function DashboardHomePage() {
                     placeholder="Mínimo de 6 caracteres"
                     value={novaSenha}
                     onChange={(e) => setNovaSenha(e.target.value)}
-                    className="p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-semibold"
+                    className="p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-semibold text-slate-800"
                   />
                 </div>
 
@@ -339,14 +341,14 @@ export default function DashboardHomePage() {
                     placeholder="Repita a senha digitada"
                     value={confirmarNovaSenha}
                     onChange={(e) => setConfirmarNovaSenha(e.target.value)}
-                    className="p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-semibold"
+                    className="p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-semibold text-slate-800"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={salvandoSenha}
-                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase tracking-wider transition-all shadow-md disabled:opacity-50"
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase tracking-wider transition-all shadow-md disabled:opacity-50 cursor-pointer"
                 >
                   {salvandoSenha ? "⏳ Atualizando..." : "Confirmar Nova Senha"}
                 </button>
