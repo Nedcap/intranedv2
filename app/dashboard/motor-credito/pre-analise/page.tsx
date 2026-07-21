@@ -33,10 +33,11 @@ export default function PreAnalisePage() {
   };
 
   const avaliarRiscoProcesso = (classe: string) => {
-    if (!classe) return { cor: "bg-slate-100 text-slate-600", label: "N/D", peso: 0 };
+    if (!classe) return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "N/D", peso: 0 };
     const c = classe.toLowerCase();
-    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal")) return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 ALTO RISCO", peso: 3 };
-    if (c.includes("trabalhista") || c.includes("execução")) return { cor: "bg-amber-50 text-amber-700 border-amber-200", label: "⚠️ MÉDIO", peso: 2 };
+    // Ajuste de palavras-chave baseado no DataJud
+    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal") || c.includes("tributário")) return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 ALTO RISCO", peso: 3 };
+    if (c.includes("trabalhista") || c.includes("execução") || c.includes("indenização")) return { cor: "bg-amber-50 text-amber-700 border-amber-200", label: "⚠️ MÉDIO", peso: 2 };
     return { cor: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "🟢 BAIXO", peso: 1 };
   };
 
@@ -52,7 +53,7 @@ export default function PreAnalisePage() {
 
       const documentoLimpo = cnpjAlvo.replace(/\D/g, "");
 
-      // 1. BIGQUERY
+      // 1. BIGQUERY (Receita Básica)
       const resBq = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,35 +67,21 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. DATAJUD E CREDITHUB EM PARALELO
-      const reqProcessos = fetch("/api/processos", {
+      // 2. CREDITHUB (SERASA + DATAJUD + QSA TUDO JUNTO)
+      const resCreditHub = await fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
-
-      const reqFinanceiro = fetch("/api/restritivos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documento: documentoLimpo })
-      });
-
-      const [resProcessos, resFinanceiro] = await Promise.all([reqProcessos, reqFinanceiro]);
-
-      // 🔥 FIX DO DATAJUD (REDE DE SEGURANÇA)
-      let processos = [];
-      if (resProcessos.ok) {
-        const dataProc = await resProcessos.json();
-        console.log("🕵️ Dados Brutos do DataJud:", dataProc); // <-- Pra vc olhar no F12 se der BO
-        // Tenta achar o array em qualquer formato padrão de API jurídica
-        processos = dataProc.processos || dataProc.content || dataProc.data || (Array.isArray(dataProc) ? dataProc : []);
-      }
 
       let financeiro = null;
-      if (resFinanceiro.ok) {
-        financeiro = await resFinanceiro.json();
+      let processos = [];
+
+      if (resCreditHub.ok) {
+        financeiro = await resCreditHub.json();
+        processos = financeiro.processos || []; // Puxa do backend otimizado
       } else {
-        const errData = await resFinanceiro.json().catch(() => ({}));
+        const errData = await resCreditHub.json().catch(() => ({}));
         financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." };
       }
 
@@ -181,9 +168,9 @@ export default function PreAnalisePage() {
   };
 
   const getCorRiscoGeral = (risco: string) => {
-    if (risco === "ALTO") return "bg-red-100 text-red-700 border-red-200";
-    if (risco === "MEDIO") return "bg-amber-100 text-amber-700 border-amber-200";
-    return "bg-emerald-100 text-emerald-700 border-emerald-200";
+    if (risco === "ALTO") return "bg-red-50 text-red-700 border-red-200";
+    if (risco === "MEDIO") return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
   };
 
   const enviarParaMesa = () => {
@@ -197,7 +184,7 @@ export default function PreAnalisePage() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
-      <div className="max-w-[1200px] mx-auto space-y-6"> {/* Container centralizado estilo Dossiê */}
+      <div className="max-w-[1200px] mx-auto space-y-6">
         
         {/* BARRA DE BUSCA EXTERNA AO RELATÓRIO */}
         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm relative overflow-hidden">
@@ -333,7 +320,7 @@ export default function PreAnalisePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-center">
                         <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Status Bureau</span>
-                        <span className={`inline-block self-start px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${resumo.possui_apontamento ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                        <span className={`inline-block self-start px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border shadow-sm ${resumo.possui_apontamento ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
                           {resumo.possui_apontamento ? "🔴 Pendências Localizadas" : "🟢 Nada Consta"}
                         </span>
                       </div>
@@ -354,6 +341,7 @@ export default function PreAnalisePage() {
                           <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
                               <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Agente Credor Original</th>
+                              <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Data Ref.</th>
                               <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-right">Valor Atrasado</th>
                             </tr>
                           </thead>
@@ -361,6 +349,7 @@ export default function PreAnalisePage() {
                             {resumo.pefin_serasa.map((div: any, i: number) => (
                               <tr key={i} className="bg-rose-50/20 hover:bg-rose-50/50 transition-colors">
                                 <td className="p-3 text-xs font-bold text-slate-800 uppercase">{div.credor}</td>
+                                <td className="p-3 text-[11px] font-mono text-slate-500 text-center">{div.vencimento || '-'}</td>
                                 <td className="p-3 text-sm font-mono font-black text-rose-600 text-right">{formatarMoeda(div.valor)}</td>
                               </tr>
                             ))}
@@ -376,10 +365,15 @@ export default function PreAnalisePage() {
 
               {/* 4. DATAJUD */}
               <section>
-                <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3 border-b-2 border-slate-100 pb-2 mb-6">
-                  <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
-                  4. Base Jurídica Nacional (DataJud / CNJ)
-                </h2>
+                <div className="flex justify-between items-end border-b-2 border-slate-100 pb-2 mb-6">
+                  <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3">
+                    <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
+                    4. Base Jurídica Nacional (DataJud / CNJ)
+                  </h2>
+                  <span className="text-[10px] bg-slate-100 text-slate-600 font-black px-2.5 py-1 rounded-md border border-slate-200 uppercase tracking-wider mb-1">
+                    {processosEncontrados.length} Registros
+                  </span>
+                </div>
 
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
                   <table className="w-full text-left border-collapse">
@@ -396,8 +390,8 @@ export default function PreAnalisePage() {
                         const avaliacao = avaliarRiscoProcesso(proc.classe);
                         return (
                           <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 text-[11px] font-mono font-bold text-slate-900">{proc.numero}</td>
-                            <td className="p-3 text-[11px] font-bold text-slate-600 uppercase truncate max-w-[200px]" title={proc.classe}>{proc.classe}</td>
+                            <td className="p-3 text-[11px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>
+                            <td className="p-3 text-[11px] font-bold text-slate-600 uppercase max-w-[250px] truncate" title={proc.classe}>{proc.classe}</td>
                             <td className="p-3 text-[10px] font-black text-slate-400 uppercase">{proc.tribunal}</td>
                             <td className="p-3 text-center">
                               <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm ${avaliacao.cor}`}>

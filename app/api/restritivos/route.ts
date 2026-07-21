@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const data = json.data || {};
     
     // =========================================================================
-    // 1. EXTRAÇÃO DE RESTRIÇÕES (Mapeando o nó REFIN/SPC real do JSON)
+    // 1. EXTRAÇÃO DE RESTRIÇÕES (SERASA)
     // =========================================================================
     const refin = data.refin || {};
     const spc = refin.spc?.[0] || []; 
@@ -58,10 +58,8 @@ export async function POST(request: Request) {
     let qtdDividas = 0;
     let valorTotal = 0;
 
-    // Varre o array de dívidas para somar os valores corretamente
     const credores = spc.map((divida: any) => {
       qtdDividas++;
-      // Transforma "57298,94" em float numérico
       const valorNumerico = parseFloat(String(divida.Valor).replace(/\./g, "").replace(",", "."));
       valorTotal += isNaN(valorNumerico) ? 0 : valorNumerico;
 
@@ -77,15 +75,37 @@ export async function POST(request: Request) {
       quantidade_dividas: qtdDividas,
       valor_total_dividas: valorTotal,
       ccf: data.ccf || null,
-      pefin_serasa: credores, // Repassa a lista de credores
+      pefin_serasa: credores,
     };
 
     // =========================================================================
-    // 2. DEVOLVE TUDO
+    // 2. EXTRAÇÃO DE PROCESSOS JURÍDICOS (DATAJUD)
+    // =========================================================================
+    const dadosProcessos = data.processos || [];
+    
+    const processosLimpos = dadosProcessos.map((proc: any) => {
+      const tramitacao = proc.tramitacoes?.[0] || {};
+      
+      let classeDesc = tramitacao.classe?.[0]?.descricao;
+      // Se a classe vier inválida (como no TJSP às vezes), pega o Assunto
+      if (!classeDesc || classeDesc.includes("inválido")) {
+        classeDesc = tramitacao.assunto?.[0]?.descricao || "Não Informada";
+      }
+
+      return {
+        numero: proc.numeroProcesso || "S/N",
+        classe: classeDesc,
+        tribunal: proc.siglaTribunal || tramitacao.tribunal?.sigla || "N/D"
+      };
+    });
+
+    // =========================================================================
+    // 3. DEVOLVE TUDO (ECONOMIA: 1 CHAMADA RESOLVE TUDO)
     // =========================================================================
     return NextResponse.json({ 
       resumo: resumoRestritivos,
-      ficha_cadastral: data.rfb || {}, // Passa os dados da Receita (Socios, Enderecos) isolados
+      processos: processosLimpos,
+      ficha_cadastral: data.rfb || {}, 
       raw_completo: json
     });
 
