@@ -67,7 +67,7 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. CREDITHUB (SERASA + DATAJUD + QSA TUDO JUNTO)
+      // 2. CREDITHUB (SERASA + DATAJUD + QSA TUDO JUNTO - EMPRESA E SÓCIOS)
       const resCreditHub = await fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -79,7 +79,7 @@ export default function PreAnalisePage() {
 
       if (resCreditHub.ok) {
         financeiro = await resCreditHub.json();
-        processos = financeiro.processos || []; // Puxa do backend otimizado
+        processos = financeiro.processos || []; // Puxa do backend otimizado (Empresa + Sócios)
       } else {
         const errData = await resCreditHub.json().catch(() => ({}));
         financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." };
@@ -94,7 +94,10 @@ export default function PreAnalisePage() {
       } else if (pesoTotal >= 4) {
         nivelRiscoGeral = "MEDIO";
       }
-      if (financeiro?.resumo?.possui_apontamento) {
+      
+      // Verifica apontamentos da empresa OU de algum sócio
+      const socioComApontamento = financeiro?.resumo_socios?.some((s: any) => s.restritivos?.possui_apontamento);
+      if (financeiro?.resumo?.possui_apontamento || socioComApontamento) {
         nivelRiscoGeral = "ALTO";
       }
 
@@ -162,6 +165,7 @@ export default function PreAnalisePage() {
   };
 
   const formatarData = (dataIso: string) => {
+    if (!dataIso) return '-';
     return new Date(dataIso).toLocaleString("pt-BR", {
       day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
     });
@@ -180,6 +184,7 @@ export default function PreAnalisePage() {
   };
 
   const resumo = dadosFinanceiros?.resumo;
+  const resumoSocios = dadosFinanceiros?.resumo_socios || [];
   const ficha = dadosFinanceiros?.ficha_cadastral || {};
 
   return (
@@ -192,7 +197,7 @@ export default function PreAnalisePage() {
             <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
               🚦 Pré-Análise Executiva
             </h2>
-            <p className="text-xs text-slate-500 font-medium mt-1">Insira o CNPJ para gerar o dossiê de viabilidade preliminar.</p>
+            <p className="text-xs text-slate-500 font-medium mt-1">Insira o CNPJ para gerar o dossiê de viabilidade preliminar do Grupo Econômico.</p>
           </div>
           <form onSubmit={executarPreAnalise} className="flex flex-col sm:flex-row gap-3">
             <input 
@@ -200,7 +205,7 @@ export default function PreAnalisePage() {
               className="flex-1 p-3.5 border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none rounded-xl font-bold text-slate-800 text-sm shadow-inner max-w-md font-mono"
             />
             <button type="submit" disabled={carregando} className="px-8 py-3.5 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md">
-              {carregando ? "⏳ Gerando Dossiê..." : "📊 Extrair Relatório"}
+              {carregando ? "⏳ Varrendo Base..." : "📊 Extrair Relatório"}
             </button>
           </form>
         </div>
@@ -309,52 +314,132 @@ export default function PreAnalisePage() {
               <section>
                 <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3 border-b-2 border-slate-100 pb-2 mb-6">
                   <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
-                  3. Restritivos Financeiros (Serasa / Boa Vista)
+                  3. Restritivos Financeiros (Serasa / Boa Vista / Bacen)
                 </h2>
 
                 {dadosFinanceiros?.erro ? (
                   <div className="p-4 bg-rose-50 text-rose-700 font-bold text-xs rounded-xl border border-rose-200">❌ {dadosFinanceiros.mensagem}</div>
                 ) : resumo ? (
                   <div className="space-y-6">
-                    {/* Resumo Caixas */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-center">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Status Bureau</span>
-                        <span className={`inline-block self-start px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border shadow-sm ${resumo.possui_apontamento ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                          {resumo.possui_apontamento ? "🔴 Pendências Localizadas" : "🟢 Nada Consta"}
-                        </span>
+                    
+                    {/* DADOS DA EMPRESA */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      
+                      {/* PAINEL FINANCEIRO (SERASA/BOA VISTA) */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
+                        <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
+                          <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Apontamentos Comerciais (Empresa)</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${resumo.possui_apontamento ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`}>
+                            {resumo.possui_apontamento ? "🔴 Pendências" : "🟢 Limpo"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Dívidas Vencidas</span>
+                            <span className="text-lg font-mono font-black text-slate-800">{resumo.quantidade_dividas}</span>
+                          </div>
+                          <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Montante Devedor</span>
+                            <span className="text-xl font-mono font-black text-rose-600">{formatarMoeda(resumo.valor_total_dividas)}</span>
+                          </div>
+
+                          {resumo.pefin_serasa?.length > 0 && (
+                            <div className="mt-4 border-t border-slate-100 pt-4">
+                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Agentes Credores Principais:</span>
+                              <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                                {resumo.pefin_serasa.map((div: any, i: number) => (
+                                  <div key={i} className="flex justify-between bg-rose-50/20 p-2.5 border border-rose-100 rounded-lg items-center">
+                                    <span className="text-[10px] font-bold text-slate-700 uppercase truncate pr-2" title={div.credor}>{div.credor}</span>
+                                    <span className="text-[11px] font-mono font-black text-rose-600 whitespace-nowrap">{formatarMoeda(div.valor)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-center">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Dívidas Vencidas</span>
-                        <span className="text-2xl font-mono font-black text-slate-800">{resumo.quantidade_dividas}</span>
-                      </div>
-                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-center">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Montante Devedor</span>
-                        <span className="text-xl font-mono font-black text-rose-600">{formatarMoeda(resumo.valor_total_dividas)}</span>
+
+                      {/* PAINEL CHEQUES SEM FUNDO (CCF) */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
+                        <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
+                          <span className="text-[10px] font-black uppercase text-purple-600 tracking-widest">Emissão de Cheques CCF (Empresa)</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${resumo.ccf?.qtdRegistros > 0 ? 'bg-purple-600 text-white' : 'bg-emerald-500 text-white'}`}>
+                            {resumo.ccf?.qtdRegistros > 0 ? "⚠️ Ocorrências" : "🟢 Limpo"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Cheques Devolvidos</span>
+                            <span className="text-lg font-mono font-black text-slate-900">{resumo.ccf?.qtdRegistros || 0}</span>
+                          </div>
+
+                          {resumo.ccf?.bancos?.length > 0 && (
+                            <div className="mt-4">
+                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Bancos Emissores (Devolução):</span>
+                              <div className="flex flex-wrap gap-2">
+                                {resumo.ccf.bancos.map((b: any, i: number) => (
+                                  <span key={i} className="px-2.5 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-black uppercase shadow-sm">
+                                    🏦 {b.nome || b}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {resumo.ccf?.historico?.length > 0 && (
+                             <div className="mt-4 border-t border-slate-100 pt-4">
+                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Últimas Consultas CCF no BACEN:</span>
+                              <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                                {resumo.ccf.historico.map((hist: any, i: number) => (
+                                  <div key={i} className="flex justify-between bg-slate-50 p-2.5 border border-slate-100 rounded-lg items-center">
+                                    <span className="text-[10px] font-bold text-slate-500">Data: {formatarData(hist.dataConsulta)}</span>
+                                    <span className="text-[11px] font-mono font-black text-slate-700">{hist.quantidade} devoluções</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Tabela de Credores */}
-                    {resumo.pefin_serasa?.length > 0 && (
-                      <div className="border border-slate-200 rounded-xl overflow-hidden">
-                        <table className="w-full text-left border-collapse">
-                          <thead className="bg-slate-50 border-b border-slate-200">
-                            <tr>
-                              <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Agente Credor Original</th>
-                              <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Data Ref.</th>
-                              <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-right">Valor Atrasado</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {resumo.pefin_serasa.map((div: any, i: number) => (
-                              <tr key={i} className="bg-rose-50/20 hover:bg-rose-50/50 transition-colors">
-                                <td className="p-3 text-xs font-bold text-slate-800 uppercase">{div.credor}</td>
-                                <td className="p-3 text-[11px] font-mono text-slate-500 text-center">{div.vencimento || '-'}</td>
-                                <td className="p-3 text-sm font-mono font-black text-rose-600 text-right">{formatarMoeda(div.valor)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    {/* 🔥 SÓCIOS - AVALIAÇÃO DE RISCO FINANCEIRO DO GRUPO */}
+                    {resumoSocios.length > 0 && (
+                      <div className="mt-8 border-t-2 border-slate-100 pt-6">
+                        <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                          👥 Avaliação Financeira - Sócios / Devedores Solidários
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {resumoSocios.map((socio: any, i: number) => (
+                            <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
+                              <div className="flex justify-between items-start mb-3">
+                                <div className="truncate pr-2">
+                                  <div className="text-[11px] font-black text-slate-800 uppercase truncate" title={socio.nome}>{socio.nome}</div>
+                                  <div className="text-[10px] font-mono text-slate-400 mt-0.5">Doc: {socio.documento || '***'}</div>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm ${socio.restritivos?.possui_apontamento ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                  {socio.restritivos?.possui_apontamento ? "🔴 Dívidas" : "🟢 Limpo"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 mt-3">
+                                <div className="bg-slate-50 p-2 border border-slate-100 rounded-lg text-center">
+                                  <div className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Dívidas (Serasa)</div>
+                                  <div className="text-[11px] font-mono font-black text-rose-600 truncate" title={formatarMoeda(socio.restritivos?.valor_total_dividas || 0)}>
+                                    {formatarMoeda(socio.restritivos?.valor_total_dividas || 0)}
+                                  </div>
+                                </div>
+                                <div className="bg-slate-50 p-2 border border-slate-100 rounded-lg text-center">
+                                  <div className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Cheques (CCF)</div>
+                                  <div className="text-[11px] font-mono font-black text-purple-600">
+                                    {socio.restritivos?.ccf?.qtdRegistros || 0} devoluções
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -379,10 +464,11 @@ export default function PreAnalisePage() {
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-40">Nº Processo</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-36">Nº Processo</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Alvo (Empresa/Sócio)</th>
                         <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Classe Judicial</th>
                         <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Tribunal</th>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Classificação</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Risco</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -390,8 +476,9 @@ export default function PreAnalisePage() {
                         const avaliacao = avaliarRiscoProcesso(proc.classe);
                         return (
                           <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 text-[11px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>
-                            <td className="p-3 text-[11px] font-bold text-slate-600 uppercase max-w-[250px] truncate" title={proc.classe}>{proc.classe}</td>
+                            <td className="p-3 text-[10px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>
+                            <td className="p-3 text-[10px] font-bold text-slate-500 uppercase truncate max-w-[150px]" title={proc.alvo}>{proc.alvo || 'EMPRESA PRINCIPAL'}</td>
+                            <td className="p-3 text-[11px] font-bold text-slate-600 uppercase truncate max-w-[200px]" title={proc.classe}>{proc.classe}</td>
                             <td className="p-3 text-[10px] font-black text-slate-400 uppercase">{proc.tribunal}</td>
                             <td className="p-3 text-center">
                               <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm ${avaliacao.cor}`}>
@@ -402,7 +489,7 @@ export default function PreAnalisePage() {
                         );
                       })}
                       {processosEncontrados.length === 0 && (
-                        <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-bold italic text-xs">Nenhum litígio pendente mapeado nos tribunais unificados.</td></tr>
+                        <tr><td colSpan={5} className="p-8 text-center text-slate-400 font-bold italic text-xs">Nenhum litígio pendente mapeado nos tribunais unificados.</td></tr>
                       )}
                     </tbody>
                   </table>
