@@ -27,6 +27,11 @@ export default function PreAnalisePage() {
       .select("*")
       .order("criado_em", { ascending: false })
       .limit(10);
+      
+    if (error) {
+      console.error("❌ Erro ao puxar histórico do Supabase:", error);
+    }
+    
     if (data) setHistorico(data);
   };
 
@@ -99,16 +104,21 @@ export default function PreAnalisePage() {
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
 
+      // Salvamento no histórico (Usando documentoLimpo para não estourar o varchar(20) do banco)
       const { error: insertError } = await supabase.from("pre_analises").insert({
-        documento_alvo: dataBq.empresa.cnpj,
-        nome_empresa_lead: dataBq.empresa.razao_social,
-        comercial_responsavel: localUser?.nome || "Comercial Padrão",
+        documento_alvo: documentoLimpo,
+        nome_empresa_lead: dataBq.empresa.razao_social || "Razão Social Indisponível",
+        comercial_responsavel: localUser?.nome || "Sistema",
         total_processos_encontrados: processos.length,
         nivel_risco: nivelRiscoGeral,
         dados_processos: processos
       });
 
-      if (!insertError) carregarHistorico();
+      if (insertError) {
+        console.error("❌ Erro ao registrar log de consulta no banco:", insertError);
+      } else {
+        await carregarHistorico();
+      }
 
       setDadosEmpresa({
         razao_social: dataBq.empresa.razao_social,
@@ -139,6 +149,18 @@ export default function PreAnalisePage() {
     }
   };
 
+  const formatarData = (dataIso: string) => {
+    return new Date(dataIso).toLocaleString("pt-BR", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+  };
+
+  const getCorRiscoGeral = (risco: string) => {
+    if (risco === "ALTO") return "bg-red-100 text-red-700 border-red-200";
+    if (risco === "MEDIO") return "bg-amber-100 text-amber-700 border-amber-200";
+    return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  };
+
   // Variáveis de atalho para os dados ricos da API
   const resumo = dadosFinanceiros?.resumo;
   const ficha = dadosFinanceiros?.ficha_cadastral || {};
@@ -147,10 +169,11 @@ export default function PreAnalisePage() {
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1600px] mx-auto space-y-6">
         
+        {/* HEADER */}
         <div className="border-b border-slate-200 pb-3 flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
-              🚦 Pré-Análise de Viabilidade Profunda
+              🚦 Pré-Análise
             </h2>
           </div>
         </div>
@@ -321,7 +344,7 @@ export default function PreAnalisePage() {
                 </div>
               </div>
 
-              {/* JSON DEBUG (Aparece embaixo dos dois cards se ativo) */}
+              {/* JSON DEBUG */}
               {mostrarJsonBruto && dadosFinanceiros && (
                  <div className="bg-slate-900 rounded-xl p-4 overflow-auto max-h-96 custom-scrollbar shadow-inner">
                    <pre className="text-[11px] text-emerald-400 font-mono">
@@ -375,7 +398,78 @@ export default function PreAnalisePage() {
           </div>
         )}
 
+        {/* ========================================================= */}
+        {/* 📚 TABELA DE HISTÓRICO DE CONSULTAS */}
+        {/* ========================================================= */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
+            <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">📚 Histórico de Consultas (Últimas 10)</h3>
+            <button 
+              onClick={carregarHistorico} 
+              className="text-indigo-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1"
+            >
+              🔄 Atualizar
+            </button>
+          </div>
+          
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse text-[12px] min-w-[800px]">
+              <thead className="bg-slate-100 border-b border-slate-200">
+                <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
+                  <th className="p-4">Data / Hora</th>
+                  <th className="p-4">CNPJ</th>
+                  <th className="p-4">Empresa (Lead)</th>
+                  <th className="p-4 text-center">Processos</th>
+                  <th className="p-4 text-center">Risco Apurado</th>
+                  <th className="p-4">Comercial</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                {historico.length > 0 ? (
+                  historico.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 text-[11px] text-slate-500 font-mono">
+                        {formatarData(item.criado_em)}
+                      </td>
+                      <td className="p-4 font-mono font-bold text-slate-900">
+                        {item.documento_alvo}
+                      </td>
+                      <td className="p-4 text-[11px] font-bold text-slate-700 truncate max-w-[250px]" title={item.nome_empresa_lead}>
+                        {item.nome_empresa_lead}
+                      </td>
+                      <td className="p-4 text-center font-bold text-slate-600">
+                        {item.total_processos_encontrados}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`inline-block px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider border ${getCorRiscoGeral(item.nivel_risco)}`}>
+                          {item.nivel_risco || "N/D"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-[11px] text-slate-600">
+                        {item.comercial_responsavel}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic">
+                      Nenhuma consulta registrada no banco de dados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
     </div>
   );
 }
