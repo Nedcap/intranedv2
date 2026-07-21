@@ -50,6 +50,7 @@ export default function PreAnalisePage() {
 
       const documentoLimpo = busca.replace(/\D/g, "");
 
+      // 1. 🔍 BATE NO BIGQUERY (Receita Federal)
       const resBq = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,40 +64,30 @@ export default function PreAnalisePage() {
         return;
       }
 
-      const reqProcessos = fetch("/api/processos", {
+      // 2. 💳 BATE NO CREDITHUB (UNIFICADO: Traz Serasa, QSA e Processos de uma vez só!)
+      const resCreditHub = await fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
-
-      const reqFinanceiro = fetch("/api/restritivos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documento: documentoLimpo })
-      });
-
-      const [resProcessos, resFinanceiro] = await Promise.all([reqProcessos, reqFinanceiro]);
-
-      let processos = [];
-      if (resProcessos.ok) {
-        const dataProc = await resProcessos.json();
-        processos = dataProc.processos || [];
-      }
 
       let financeiro = null;
-      if (resFinanceiro.ok) {
-        financeiro = await resFinanceiro.json();
+      let processos = [];
+
+      if (resCreditHub.ok) {
+        financeiro = await resCreditHub.json();
+        processos = financeiro.processos || []; // 🔥 Puxa os processos direto da mesma resposta!
       } else {
-        const errData = await resFinanceiro.json().catch(() => ({}));
+        const errData = await resCreditHub.json().catch(() => ({}));
         financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." };
       }
 
       // Cálculo do Risco
       let nivelRiscoGeral = "BAIXO";
       let pesoTotal = 0;
-      processos.forEach(p => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
+      processos.forEach((p: any) => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
       
-      if (pesoTotal >= 10 || processos.some(p => avaliarRiscoProcesso(p.classe).peso === 3)) {
+      if (pesoTotal >= 10 || processos.some((p: any) => avaliarRiscoProcesso(p.classe).peso === 3)) {
         nivelRiscoGeral = "ALTO";
       } else if (pesoTotal >= 4) {
         nivelRiscoGeral = "MEDIO";
@@ -156,7 +147,6 @@ export default function PreAnalisePage() {
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1600px] mx-auto space-y-6">
         
-        {/* HEADER E BARRA DE BUSCA (Omitidos para brevidade, mas são iguais aos seus originais) */}
         <div className="border-b border-slate-200 pb-3 flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
@@ -350,7 +340,6 @@ export default function PreAnalisePage() {
                 </div>
                 
                 <div className="overflow-auto custom-scrollbar flex-1">
-                  {/* ... (Mesma tabela de processos original do seu código) ... */}
                   <table className="w-full text-left border-collapse text-[12px] min-w-[600px]">
                     <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 shadow-sm z-10">
                       <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
