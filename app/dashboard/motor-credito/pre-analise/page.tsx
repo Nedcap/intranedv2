@@ -10,13 +10,11 @@ export default function PreAnalisePage() {
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(false);
   
-  // 🗂️ ESTADOS DO DOSSIÊ
   const [dadosEmpresa, setDadosEmpresa] = useState<any>(null);
   const [processosEncontrados, setProcessosEncontrados] = useState<any[]>([]);
   const [dadosFinanceiros, setDadosFinanceiros] = useState<any>(null);
   const [dadosCompliance, setDadosCompliance] = useState<any>(null);
   
-  // 🗂️ ESTADOS DO HISTÓRICO E DEBUG
   const [historico, setHistorico] = useState<any[]>([]);
   const [mostrarJsonBruto, setMostrarJsonBruto] = useState(false);
 
@@ -31,31 +29,34 @@ export default function PreAnalisePage() {
       .order("criado_em", { ascending: false })
       .limit(10);
       
-    if (error) {
-      console.error("❌ Erro ao puxar histórico:", error);
-    }
-    
-    if (data) {
-      setHistorico(data);
-    }
+    if (error) console.error("❌ Erro ao puxar histórico:", error);
+    if (data) setHistorico(data);
   };
 
   const avaliarRiscoProcesso = (classe: string) => {
-    if (!classe) {
-      return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "N/D", peso: 0 };
-    }
-    
+    if (!classe) return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "N/D", peso: 0 };
     const c = classe.toLowerCase();
     
-    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal") || c.includes("tributário")) {
+    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal") || c.includes("tributário") || c.includes("dívida ativa")) {
       return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 ALTO RISCO", peso: 3 };
     }
-    
     if (c.includes("trabalhista") || c.includes("execução") || c.includes("indenização")) {
       return { cor: "bg-amber-50 text-amber-700 border-amber-200", label: "⚠️ MÉDIO", peso: 2 };
     }
     
     return { cor: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "🟢 BAIXO", peso: 1 };
+  };
+
+  // 🔥 Gera as estatísticas consolidando o volume massivo de processos
+  const gerarEstatisticasProcessos = (processos: any[]) => {
+    const stats = { alto: 0, medio: 0, baixo: 0 };
+    processos.forEach(p => {
+      const avaliacao = avaliarRiscoProcesso(p.classe);
+      if (avaliacao.peso === 3) stats.alto++;
+      else if (avaliacao.peso === 2) stats.medio++;
+      else stats.baixo++;
+    });
+    return stats;
   };
 
   const rodarVarredura = async (cnpjAlvo: string) => {
@@ -71,9 +72,7 @@ export default function PreAnalisePage() {
 
       const documentoLimpo = cnpjAlvo.replace(/\D/g, "");
 
-      // =====================================================================
-      // 1. MOTOR: BIGQUERY (Receita Federal)
-      // =====================================================================
+      // 1. BIGQUERY
       const resBq = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,104 +81,49 @@ export default function PreAnalisePage() {
       const dataBq = await resBq.json();
 
       if (!dataBq.found || !dataBq.empresa) {
-        alert("Empresa não localizada na base da Receita Federal.");
+        alert("Empresa não localizada na Base da Receita.");
         setCarregando(false);
         return;
       }
 
-      // =====================================================================
-      // 2. MOTORES PARALELOS: DATAJUD + CREDITHUB + COMPLIANCE CGU
-      // =====================================================================
-      const reqProcessos = fetch("/api/processos", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ documento: documentoLimpo }) 
-      });
-      
-      const reqFinanceiro = fetch("/api/restritivos", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ documento: documentoLimpo }) 
-      });
-      
-      const reqCompliance = fetch("/api/compliance", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ documento: documentoLimpo }) 
-      });
+      // 2. PARALELO (DataJud + CreditHub + CGU)
+      const reqProcessos = fetch("/api/processos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documento: documentoLimpo }) });
+      const reqFinanceiro = fetch("/api/restritivos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documento: documentoLimpo }) });
+      const reqCompliance = fetch("/api/compliance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documento: documentoLimpo }) });
 
-      const [resProcessos, resFinanceiro, resCompliance] = await Promise.all([
-        reqProcessos, 
-        reqFinanceiro, 
-        reqCompliance
-      ]);
+      const [resProcessos, resFinanceiro, resCompliance] = await Promise.all([reqProcessos, reqFinanceiro, reqCompliance]);
 
-      // ---------------------------------------------------
-      // Tratamento: Processos (DataJud)
-      // ---------------------------------------------------
       let processos = [];
       if (resProcessos.ok) {
         const dataProc = await resProcessos.json();
         processos = dataProc.processos || dataProc.content || dataProc.data || (Array.isArray(dataProc) ? dataProc : []);
       }
 
-      // ---------------------------------------------------
-      // Tratamento: Financeiro (CreditHub - Empresa + Sócios)
-      // ---------------------------------------------------
       let financeiro = null;
       if (resFinanceiro.ok) {
         financeiro = await resFinanceiro.json();
-        // Fallback: Se o DataJud falhar, tenta extrair os processos que o CreditHub trouxe de brinde
-        if (financeiro.processos && processos.length === 0) {
-          processos = financeiro.processos;
-        }
+        if (financeiro.processos && processos.length === 0) processos = financeiro.processos;
       } else {
         const errData = await resFinanceiro.json().catch(() => ({}));
-        financeiro = { 
-          erro: true, 
-          mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." 
-        };
+        financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com os Bureaus." };
       }
 
-      // ---------------------------------------------------
-      // Tratamento: Compliance (CGU / Portal Transparência)
-      // ---------------------------------------------------
       let compliance = null;
-      if (resCompliance.ok) {
-        compliance = await resCompliance.json();
-      }
+      if (resCompliance.ok) compliance = await resCompliance.json();
 
-      // =====================================================================
-      // 3. INTELIGÊNCIA: CÁLCULO DE RISCO GERAL DA OPERAÇÃO
-      // =====================================================================
+      // Cálculo de Risco Geral
       let nivelRiscoGeral = "BAIXO";
       let pesoTotal = 0;
+      processos.forEach((p: any) => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
       
-      processos.forEach((p: any) => {
-        pesoTotal += avaliarRiscoProcesso(p.classe).peso;
-      });
+      if (pesoTotal >= 10 || processos.some((p: any) => avaliarRiscoProcesso(p.classe).peso === 3)) nivelRiscoGeral = "ALTO";
+      else if (pesoTotal >= 4) nivelRiscoGeral = "MEDIO";
       
-      // Risco Judicial
-      if (pesoTotal >= 10 || processos.some((p: any) => avaliarRiscoProcesso(p.classe).peso === 3)) {
-        nivelRiscoGeral = "ALTO";
-      } else if (pesoTotal >= 4) {
-        nivelRiscoGeral = "MEDIO";
-      }
-      
-      // Risco Financeiro (Empresa + Sócios)
       const socioComApontamento = financeiro?.resumo_socios?.some((s: any) => s.restritivos?.possui_apontamento);
-      if (financeiro?.resumo?.possui_apontamento || socioComApontamento) {
+      if (financeiro?.resumo?.possui_apontamento || socioComApontamento || compliance?.sancionado) {
         nivelRiscoGeral = "ALTO";
       }
 
-      // Risco de Compliance (Sanções no Governo)
-      if (compliance?.sancionado) {
-        nivelRiscoGeral = "ALTO";
-      }
-
-      // =====================================================================
-      // 4. PERSISTÊNCIA (Salvar "Foto" no Supabase)
-      // =====================================================================
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
 
@@ -199,16 +143,11 @@ export default function PreAnalisePage() {
         dados_processos: processos,
         dados_empresa: objEmpresaFoto,
         dados_financeiros: financeiro,
-        dados_compliance: compliance // A foto da sanção fica gravada aqui
+        dados_compliance: compliance
       });
 
-      if (!insertError) {
-        await carregarHistorico();
-      }
+      if (!insertError) await carregarHistorico();
 
-      // =====================================================================
-      // 5. ATUALIZAÇÃO DA TELA (Renderiza o Dossiê)
-      // =====================================================================
       setDadosEmpresa(objEmpresaFoto);
       setProcessosEncontrados(processos);
       setDadosFinanceiros(financeiro);
@@ -216,7 +155,7 @@ export default function PreAnalisePage() {
 
     } catch (err) {
       console.error(err);
-      alert("Erro crítico ao rodar motores de pré-análise.");
+      alert("Erro crítico ao processar o dossiê.");
     } finally {
       setCarregando(false);
     }
@@ -229,8 +168,6 @@ export default function PreAnalisePage() {
 
   const carregarFotoDaConsulta = (itemHistorico: any) => {
     setBusca(itemHistorico.documento_alvo);
-    
-    // Se a consulta possui os JSONs salvos, monta o dossiê sem gastar API
     if (itemHistorico.dados_empresa && itemHistorico.dados_financeiros) {
       setDadosEmpresa(itemHistorico.dados_empresa);
       setDadosFinanceiros(itemHistorico.dados_financeiros);
@@ -239,16 +176,13 @@ export default function PreAnalisePage() {
       setMostrarJsonBruto(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-      // Se for uma linha muito velha do histórico que não tinha o salvamento completo
-      const confirma = window.confirm("⚠️ Esta consulta é muito antiga e a 'foto' dos bureaus não foi salva.\n\nDeseja realizar uma NOVA PESQUISA na API? (Isto gerará custos).");
-      if (confirma) {
+      if (window.confirm("⚠️ Consulta muito antiga (sem foto salva).\nDeseja realizar nova varredura tarifada?")) {
         rodarVarredura(itemHistorico.documento_alvo);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     }
   };
 
-  // Funções Auxiliares de Formatação
   const formatarMoeda = (valor: number | string) => {
     const v = typeof valor === 'string' ? parseFloat(valor) : valor;
     if (isNaN(v)) return 'R$ 0,00';
@@ -257,13 +191,7 @@ export default function PreAnalisePage() {
 
   const formatarData = (dataIso: string) => {
     if (!dataIso) return '-';
-    return new Date(dataIso).toLocaleString("pt-BR", { 
-      day: "2-digit", 
-      month: "2-digit", 
-      year: "numeric", 
-      hour: "2-digit", 
-      minute: "2-digit" 
-    });
+    return new Date(dataIso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
   const getCorRiscoGeral = (risco: string) => {
@@ -278,74 +206,49 @@ export default function PreAnalisePage() {
     }
   };
 
-  // Variáveis de Atalho para o HTML
   const resumo = dadosFinanceiros?.resumo;
   const resumoSocios = dadosFinanceiros?.resumo_socios || [];
   const ficha = dadosFinanceiros?.ficha_cadastral || {};
+  const statsProcessos = gerarEstatisticasProcessos(processosEncontrados);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1200px] mx-auto space-y-6">
         
-        {/* ============================================================== */}
         {/* BARRA DE BUSCA EXTERNA */}
-        {/* ============================================================== */}
         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm relative overflow-hidden">
           <div className="mb-4">
             <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
               🚦 Pré-Análise Executiva
             </h2>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              Insira o CNPJ para gerar o dossiê de viabilidade preliminar do Grupo Econômico.
-            </p>
+            <p className="text-xs text-slate-500 font-medium mt-1">Insira o CNPJ para varredura de restritivos, compliance e saúde jurídica.</p>
           </div>
           <form onSubmit={executarPreAnalise} className="flex flex-col sm:flex-row gap-3">
             <input 
-              type="text" 
-              required 
-              placeholder="Digite o CNPJ..." 
-              value={busca} 
-              onChange={(e) => setBusca(e.target.value)}
+              type="text" required placeholder="Digite o CNPJ..." value={busca} onChange={(e) => setBusca(e.target.value)}
               className="flex-1 p-3.5 border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none rounded-xl font-bold text-slate-800 text-sm shadow-inner max-w-md font-mono"
             />
-            <button 
-              type="submit" 
-              disabled={carregando} 
-              className="px-8 py-3.5 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md"
-            >
+            <button type="submit" disabled={carregando} className="px-8 py-3.5 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md">
               {carregando ? "⏳ Varrendo Base..." : "📊 Extrair Relatório"}
             </button>
           </form>
         </div>
 
-        {/* ============================================================== */}
-        {/* DOSSIÊ EXECUTIVO DE RISCO (Apenas se houver dados) */}
-        {/* ============================================================== */}
         {dadosEmpresa && (
           <div className="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
             
             {/* CABEÇALHO DO DOSSIÊ */}
             <div className="bg-gradient-to-br from-blue-900 to-blue-700 p-8 text-white flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
               <div>
-                <span className="text-[10px] font-black tracking-widest uppercase opacity-80 mb-2 block">
-                  Dossiê de Viabilidade Preliminar
-                </span>
-                <h1 className="text-3xl font-black uppercase tracking-tight leading-none mb-2">
-                  {dadosEmpresa.razao_social}
-                </h1>
-                <div className="font-mono text-lg opacity-90">
-                  {dadosEmpresa.cnpj}
-                </div>
+                <span className="text-[10px] font-black tracking-widest uppercase opacity-80 mb-2 block">Dossiê de Viabilidade Preliminar</span>
+                <h1 className="text-3xl font-black uppercase tracking-tight leading-none mb-2">{dadosEmpresa.razao_social}</h1>
+                <div className="font-mono text-lg opacity-90">{dadosEmpresa.cnpj}</div>
               </div>
               <div className="flex flex-col gap-3 text-right">
                 <div className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest border border-white/20 backdrop-blur-sm shadow-inner ${dadosEmpresa.situacao === 'ATIVA' ? 'bg-emerald-500/20 text-emerald-100' : 'bg-red-500/20 text-red-100'}`}>
                   Situação RFB: {dadosEmpresa.situacao}
                 </div>
-                <button 
-                  onClick={enviarParaMesa} 
-                  disabled={dadosEmpresa.situacao !== 'ATIVA'} 
-                  className="px-5 py-2.5 bg-white text-blue-900 hover:bg-blue-50 font-black rounded-lg text-[10px] uppercase tracking-widest transition-all disabled:opacity-50 shadow-lg"
-                >
+                <button onClick={enviarParaMesa} disabled={dadosEmpresa.situacao !== 'ATIVA'} className="px-5 py-2.5 bg-white text-blue-900 hover:bg-blue-50 font-black rounded-lg text-[10px] uppercase tracking-widest transition-all disabled:opacity-50 shadow-lg">
                   ✅ Aprovar p/ Mesa de Crédito
                 </button>
               </div>
@@ -353,30 +256,17 @@ export default function PreAnalisePage() {
 
             <div className="p-8 space-y-10">
 
-              {/* 1. ESTRUTURA E LOCALIZAÇÃO */}
+              {/* 1. PERFIL CORPORATIVO */}
               <section>
                 <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3 border-b-2 border-slate-100 pb-2 mb-6">
                   <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
                   1. Perfil Corporativo & Localização
                 </h2>
-                
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Abertura</span>
-                    <span className="text-sm font-bold text-slate-800">{ficha.data_abertura || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Capital Social</span>
-                    <span className="text-sm font-mono font-black text-slate-800">{formatarMoeda(ficha.capital_social || dadosEmpresa.capital_social)}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Porte</span>
-                    <span className="text-sm font-bold text-slate-800">{ficha.porteEmpresa || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Telefone Base</span>
-                    <span className="text-sm font-mono font-bold text-slate-800">{ficha.telefones || '-'}</span>
-                  </div>
+                  <div><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Abertura</span><span className="text-sm font-bold text-slate-800">{ficha.data_abertura || '-'}</span></div>
+                  <div><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Capital Social</span><span className="text-sm font-mono font-black text-slate-800">{formatarMoeda(ficha.capital_social || dadosEmpresa.capital_social)}</span></div>
+                  <div><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Porte</span><span className="text-sm font-bold text-slate-800">{ficha.porteEmpresa || '-'}</span></div>
+                  <div><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1 block">Telefone Base</span><span className="text-sm font-mono font-bold text-slate-800">{ficha.telefones || '-'}</span></div>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col gap-2">
@@ -401,8 +291,7 @@ export default function PreAnalisePage() {
                   <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
                   2. Quadro de Administradores e Sócios (QSA)
                 </h2>
-                
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
@@ -421,11 +310,7 @@ export default function PreAnalisePage() {
                           </tr>
                         ))
                       ) : (
-                        <tr>
-                          <td colSpan={3} className="p-6 text-center text-slate-400 font-bold italic text-xs">
-                            Nenhum sócio mapeado na base da Receita Federal.
-                          </td>
-                        </tr>
+                        <tr><td colSpan={3} className="p-6 text-center text-slate-400 font-bold italic text-xs">Nenhum sócio mapeado na base.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -440,25 +325,20 @@ export default function PreAnalisePage() {
                 </h2>
 
                 {dadosFinanceiros?.erro ? (
-                  <div className="p-4 bg-rose-50 text-rose-700 font-bold text-xs rounded-xl border border-rose-200">
-                    ❌ {dadosFinanceiros.mensagem}
-                  </div>
+                  <div className="p-4 bg-rose-50 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 shadow-sm">❌ {dadosFinanceiros.mensagem}</div>
                 ) : resumo ? (
                   <div className="space-y-6">
-                    
-                    {/* LINHA 1: DADOS GERAIS DA EMPRESA */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       
-                      {/* CARD: SERASA EMPRESA */}
+                      {/* PAINEL BUREAU */}
                       <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
                         <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
-                          <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Apontamentos Comerciais (Empresa)</span>
+                          <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Bureau de Crédito (Empresa)</span>
                           <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase shadow-sm ${resumo.possui_apontamento ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`}>
-                            {resumo.possui_apontamento ? "🔴 Pendências" : "🟢 Limpo"}
+                            {resumo.possui_apontamento ? "🔴 Pendências Locais" : "🟢 Limpo"}
                           </span>
                         </div>
-
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
                             <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Dívidas Vencidas</span>
                             <span className="text-lg font-mono font-black text-slate-800">{resumo.quantidade_dividas}</span>
@@ -470,11 +350,14 @@ export default function PreAnalisePage() {
 
                           {resumo.pefin_serasa?.length > 0 && (
                             <div className="mt-4 border-t border-slate-100 pt-4">
-                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Agentes Credores Principais:</span>
-                              <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Top Credores (Maior Risco):</span>
+                              <div className="max-h-40 overflow-y-auto space-y-2 custom-scrollbar pr-1">
                                 {resumo.pefin_serasa.map((div: any, i: number) => (
                                   <div key={i} className="flex justify-between bg-rose-50/20 p-2.5 border border-rose-100 rounded-lg items-center">
-                                    <span className="text-[10px] font-bold text-slate-700 uppercase truncate pr-2" title={div.credor}>{div.credor}</span>
+                                    <div className="truncate pr-2 w-full">
+                                      <span className="text-[10px] font-bold text-slate-700 uppercase block truncate" title={div.credor}>{div.credor}</span>
+                                      <span className="text-[9px] font-mono text-slate-400">Ref: {div.vencimento || 'N/D'}</span>
+                                    </div>
                                     <span className="text-[11px] font-mono font-black text-rose-600 whitespace-nowrap">{formatarMoeda(div.valor)}</span>
                                   </div>
                                 ))}
@@ -484,44 +367,35 @@ export default function PreAnalisePage() {
                         </div>
                       </div>
 
-                      {/* CARD: CHEQUES CCF EMPRESA */}
+                      {/* PAINEL CCF */}
                       <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
                         <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
-                          <span className="text-[10px] font-black uppercase text-purple-600 tracking-widest">Emissão de Cheques CCF (Empresa)</span>
+                          <span className="text-[10px] font-black uppercase text-purple-600 tracking-widest">Cheques S/ Fundo (Bacen/CCF)</span>
                           <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase shadow-sm ${resumo.ccf?.qtdRegistros > 0 ? 'bg-purple-600 text-white' : 'bg-emerald-500 text-white'}`}>
                             {resumo.ccf?.qtdRegistros > 0 ? "⚠️ Ocorrências" : "🟢 Limpo"}
                           </span>
                         </div>
-
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
                             <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Cheques Devolvidos</span>
                             <span className="text-lg font-mono font-black text-slate-900">{resumo.ccf?.qtdRegistros || 0}</span>
                           </div>
 
-                          {resumo.ccf?.bancos?.length > 0 && (
-                            <div className="mt-4">
-                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Bancos Emissores (Devolução):</span>
-                              <div className="flex flex-wrap gap-2">
-                                {resumo.ccf.bancos.map((b: any, i: number) => (
-                                  <span key={i} className="px-2.5 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-black uppercase shadow-sm">
-                                    🏦 {b.nome || b}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
                           {resumo.ccf?.historico?.length > 0 && (
                              <div className="mt-4 border-t border-slate-100 pt-4">
-                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Últimas Consultas CCF no BACEN:</span>
-                              <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-1">
-                                {resumo.ccf.historico.map((hist: any, i: number) => (
-                                  <div key={i} className="flex justify-between bg-slate-50 p-2.5 border border-slate-100 rounded-lg items-center">
+                              <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Últimas Consultas de Monitoramento (CCF):</span>
+                              <div className="max-h-40 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                                {resumo.ccf.historico.slice(0, 5).map((hist: any, i: number) => (
+                                  <div key={i} className={`flex justify-between p-2.5 border rounded-lg items-center ${hist.quantidade > 0 ? 'bg-purple-50/50 border-purple-200' : 'bg-slate-50 border-slate-100'}`}>
                                     <span className="text-[10px] font-bold text-slate-500">Data: {formatarData(hist.dataConsulta)}</span>
-                                    <span className="text-[11px] font-mono font-black text-slate-700">{hist.quantidade} devoluções</span>
+                                    <span className={`text-[11px] font-mono font-black ${hist.quantidade > 0 ? 'text-purple-700' : 'text-slate-400'}`}>
+                                      {hist.quantidade} devolução(ões)
+                                    </span>
                                   </div>
                                 ))}
+                                {resumo.ccf.historico.length > 5 && (
+                                  <div className="text-center text-[9px] font-bold text-slate-400 mt-2">+ {resumo.ccf.historico.length - 5} consultas anteriores ocultadas.</div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -529,11 +403,11 @@ export default function PreAnalisePage() {
                       </div>
                     </div>
 
-                    {/* LINHA 2: RISCO DOS SÓCIOS (DEVEDORES SOLIDÁRIOS) */}
+                    {/* SÓCIOS - DEVEDORES SOLIDÁRIOS */}
                     {resumoSocios.length > 0 && (
                       <div className="mt-8 border-t-2 border-slate-100 pt-6">
                         <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          👥 Avaliação Financeira (Serasa/CCF) - Devedores Solidários
+                          👥 Risco de Contágio (Devedores Solidários / Sócios)
                         </h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                           {resumoSocios.map((socio: any, i: number) => (
@@ -547,17 +421,16 @@ export default function PreAnalisePage() {
                                   {socio.restritivos?.possui_apontamento ? "🔴 Dívidas" : "🟢 Limpo"}
                                 </span>
                               </div>
-                              
                               <div className="grid grid-cols-2 gap-2 mt-3">
                                 <div className="bg-slate-50 p-2 border border-slate-100 rounded-lg text-center">
-                                  <div className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Dívidas (Serasa)</div>
-                                  <div className="text-[11px] font-mono font-black text-rose-600 truncate" title={formatarMoeda(socio.restritivos?.valor_total_dividas || 0)}>
+                                  <div className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Bureau Serasa</div>
+                                  <div className={`text-[11px] font-mono font-black truncate ${socio.restritivos?.valor_total_dividas > 0 ? 'text-rose-600' : 'text-slate-400'}`} title={formatarMoeda(socio.restritivos?.valor_total_dividas || 0)}>
                                     {formatarMoeda(socio.restritivos?.valor_total_dividas || 0)}
                                   </div>
                                 </div>
                                 <div className="bg-slate-50 p-2 border border-slate-100 rounded-lg text-center">
                                   <div className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Cheques (CCF)</div>
-                                  <div className="text-[11px] font-mono font-black text-purple-600">
+                                  <div className={`text-[11px] font-mono font-black ${socio.restritivos?.ccf?.qtdRegistros > 0 ? 'text-purple-600' : 'text-slate-400'}`}>
                                     {socio.restritivos?.ccf?.qtdRegistros || 0} devs
                                   </div>
                                 </div>
@@ -623,70 +496,81 @@ export default function PreAnalisePage() {
                 )}
               </section>
 
-              {/* 5. DATAJUD */}
+              {/* 5. DATAJUD (COM DASHBOARD AGREGADO) */}
               <section>
-                <div className="flex justify-between items-end border-b-2 border-slate-100 pb-2 mb-6">
-                  <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b-2 border-slate-100 pb-2 mb-6 gap-3">
+                  <h2 className="text-lg font-black text-blue-900 uppercase tracking-wide flex items-center gap-3 m-0">
                     <span className="w-1.5 h-5 bg-blue-600 rounded-full"></span>
                     5. Base Jurídica Nacional (DataJud / CNJ)
                   </h2>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 font-black px-2.5 py-1 rounded-md border border-slate-200 uppercase tracking-wider mb-1">
-                    {processosEncontrados.length} Registros
+                  <span className="text-[10px] bg-blue-100 text-blue-800 font-black px-3 py-1.5 rounded-lg border border-blue-200 uppercase tracking-wider">
+                    Total: {processosEncontrados.length} Registros
                   </span>
                 </div>
 
+                {/* PAINEL DE RISCO AGREGADO (O Segredo para 70+ processos) */}
+                {processosEncontrados.length > 0 && (
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className={`p-4 rounded-xl border flex flex-col items-center justify-center shadow-sm ${statsProcessos.alto > 0 ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Alto Risco</span>
+                      <span className={`text-2xl font-black ${statsProcessos.alto > 0 ? 'text-red-600' : 'text-slate-300'}`}>{statsProcessos.alto}</span>
+                    </div>
+                    <div className={`p-4 rounded-xl border flex flex-col items-center justify-center shadow-sm ${statsProcessos.medio > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Médio Risco</span>
+                      <span className={`text-2xl font-black ${statsProcessos.medio > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{statsProcessos.medio}</span>
+                    </div>
+                    <div className={`p-4 rounded-xl border flex flex-col items-center justify-center shadow-sm ${statsProcessos.baixo > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Baixo Risco</span>
+                      <span className={`text-2xl font-black ${statsProcessos.baixo > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{statsProcessos.baixo}</span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-36">Nº Processo</th>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Alvo da Execução</th>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Classe Judicial</th>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Tribunal</th>
-                        <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center">Risco</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {processosEncontrados.map((proc, idx) => {
-                        const avaliacao = avaliarRiscoProcesso(proc.classe);
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 text-[10px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>
-                            <td className="p-3 text-[10px] font-bold text-slate-500 uppercase truncate max-w-[150px]" title={proc.alvo}>{proc.alvo || 'EMPRESA PRINCIPAL'}</td>
-                            <td className="p-3 text-[11px] font-bold text-slate-600 uppercase truncate max-w-[250px]">{proc.classe}</td>
-                            <td className="p-3 text-[10px] font-black text-slate-400 uppercase text-center">{proc.tribunal}</td>
-                            <td className="p-3 text-center">
-                              <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm ${avaliacao.cor}`}>
-                                {avaliacao.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      
-                      {processosEncontrados.length === 0 && (
+                  <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-left border-collapse relative">
+                      <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400 font-bold italic text-xs">
-                            Nenhum litígio pendente mapeado nas bases do Tribunal de Justiça.
-                          </td>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-36">Nº Processo</th>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-40">Alvo (Empresa/Sócio)</th>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Classe Judicial</th>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center w-24">Tribunal</th>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center w-28">Risco</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {processosEncontrados.map((proc, idx) => {
+                          const avaliacao = avaliarRiscoProcesso(proc.classe);
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3 text-[10px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>
+                              <td className="p-3 text-[10px] font-bold text-slate-500 uppercase truncate max-w-[150px]" title={proc.alvo}>{proc.alvo || 'EMPRESA PRINCIPAL'}</td>
+                              <td className="p-3 text-[10px] font-bold text-slate-700 uppercase truncate max-w-[250px]" title={proc.classe}>{proc.classe}</td>
+                              <td className="p-3 text-[10px] font-black text-slate-400 uppercase text-center">{proc.tribunal}</td>
+                              <td className="p-3 text-center">
+                                <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm w-full ${avaliacao.cor}`}>
+                                  {avaliacao.label}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {processosEncontrados.length === 0 && (
+                          <tr><td colSpan={5} className="p-10 text-center text-slate-400 font-bold italic text-xs">Nenhum litígio pendente mapeado nas bases do Tribunal de Justiça.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </section>
 
               {/* JSON DEBUG AREA */}
               <div className="pt-6 border-t border-slate-100 text-center">
-                <button 
-                  onClick={() => setMostrarJsonBruto(!mostrarJsonBruto)} 
-                  className="text-[10px] font-black text-slate-400 hover:text-blue-600 uppercase transition-colors tracking-widest"
-                >
+                <button onClick={() => setMostrarJsonBruto(!mostrarJsonBruto)} className="text-[10px] font-black text-slate-400 hover:text-blue-600 uppercase transition-colors tracking-widest px-4 py-2 border border-slate-200 rounded-lg bg-white shadow-sm">
                   {mostrarJsonBruto ? "Ocultar Estrutura JSON" : "🔍 Modo Desenvolvedor: Exibir JSON da API"}
                 </button>
-                
                 {mostrarJsonBruto && dadosFinanceiros && (
-                  <div className="mt-4 bg-slate-900 rounded-xl p-6 overflow-auto max-h-96 text-left shadow-inner">
+                  <div className="mt-4 bg-slate-900 rounded-xl p-6 overflow-auto max-h-[500px] text-left shadow-inner">
                     <pre className="text-[11px] text-emerald-400 font-mono">
                       {JSON.stringify(dadosFinanceiros.raw_completo || dadosFinanceiros, null, 2)}
                     </pre>
@@ -703,13 +587,8 @@ export default function PreAnalisePage() {
         {/* ============================================================== */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mt-8">
           <div className="bg-slate-50 border-b border-slate-200 px-6 py-5 flex justify-between items-center">
-            <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">
-              📚 Histórico de Consultas (Últimas 10)
-            </h3>
-            <button 
-              onClick={carregarHistorico} 
-              className="text-blue-600 hover:text-blue-800 text-[11px] uppercase tracking-wider font-black flex items-center gap-1 transition-colors"
-            >
+            <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">📚 Histórico de Consultas</h3>
+            <button onClick={carregarHistorico} className="text-blue-600 hover:text-blue-800 text-[10px] uppercase tracking-wider font-black flex items-center gap-1 transition-colors px-3 py-1.5 bg-blue-50 rounded-lg">
               🔄 Atualizar
             </button>
           </div>
@@ -730,18 +609,10 @@ export default function PreAnalisePage() {
                 {historico.length > 0 ? (
                   historico.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 text-[11px] text-slate-500 font-mono">
-                        {formatarData(item.criado_em)}
-                      </td>
-                      <td className="p-4 text-xs font-mono font-bold text-slate-900">
-                        {item.documento_alvo}
-                      </td>
-                      <td className="p-4 text-[11px] font-bold text-slate-700 uppercase truncate max-w-[200px]" title={item.nome_empresa_lead}>
-                        {item.nome_empresa_lead}
-                      </td>
-                      <td className="p-4 text-center font-bold text-slate-600 text-xs">
-                        {item.total_processos_encontrados}
-                      </td>
+                      <td className="p-4 text-[11px] text-slate-500 font-mono">{formatarData(item.criado_em)}</td>
+                      <td className="p-4 text-xs font-mono font-bold text-slate-900">{item.documento_alvo}</td>
+                      <td className="p-4 text-[11px] font-bold text-slate-700 uppercase truncate max-w-[200px]" title={item.nome_empresa_lead}>{item.nome_empresa_lead}</td>
+                      <td className="p-4 text-center font-bold text-slate-600 text-xs">{item.total_processos_encontrados}</td>
                       <td className="p-4 text-center">
                         <span className={`inline-block px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider border shadow-sm ${getCorRiscoGeral(item.nivel_risco)}`}>
                           {item.nivel_risco || "N/D"}
@@ -758,11 +629,7 @@ export default function PreAnalisePage() {
                     </tr>
                   ))
                 ) : (
-                  <tr>
-                    <td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic text-xs">
-                      Nenhuma consulta registrada.
-                    </td>
-                  </tr>
+                  <tr><td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic text-xs">Nenhuma consulta registrada.</td></tr>
                 )}
               </tbody>
             </table>
