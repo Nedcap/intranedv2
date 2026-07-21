@@ -9,27 +9,22 @@ export async function POST(request: Request) {
     }
 
     const docLimpo = String(documento).replace(/\D/g, "");
-    
-    // Busca a chave configurada no Vercel/Local
     const apiKey = process.env.CREDITHUB_API_KEY; 
 
     if (!apiKey) {
       throw new Error("Chave do CreditHub não configurada no servidor.");
     }
 
-    // 🎯 URL oficial extraída da documentação: apenas SERASA (boavista removido para evitar cobrança extra)
+    // Consulta apenas SERASA para evitar cobrança extra
     const urlCreditHub = `https://irql.credithub.com.br/simples/${apiKey}/${docLimpo}?serasa=true`;
 
     const response = await fetch(urlCreditHub, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json"
-      }
+      headers: { "Content-Type": "application/json" }
     });
 
     const textData = await response.text();
 
-    // 🛡️ O CreditHub retorna XML (<BPQL>) quando dá erro genérico ou de chave inválida
     if (textData.trim().startsWith("<")) {
       console.error("❌ Erro XML do CreditHub:", textData);
       throw new Error("A API parceira retornou um erro estrutural (Verifique a Chave de Acesso).");
@@ -41,25 +36,27 @@ export async function POST(request: Request) {
       throw new Error(json.msg || json.message || "Falha ao consultar restritivos financeiros.");
     }
 
-    // A estrutura pode vir dentro de 'data', ou direto na raiz com 'informacoes' dependendo do tipo da consulta
     const data = json.data || {};
     const infoSerasa = json.informacoes?.[0] || data.pefin?.[0] || {};
 
-    // 🧹 Mapeamento de fallback: tenta pegar do padrão 'data', se não achar, tenta pegar do bloco do Serasa
     const qtdDividas = data.quantidade_dividas || infoSerasa.total || infoSerasa.totalPendenciasFinanceiras || 0;
     const valorTotal = parseFloat(data.valor_total_dividas || infoSerasa.valorTotalPendencias || infoSerasa.valorTotalPendenciasFinanceiras || 0);
-    const possuiApontamento = qtdDividas > 0;
 
     const resumoRestritivos = {
-      possui_apontamento: possuiApontamento,
+      possui_apontamento: qtdDividas > 0,
       quantidade_dividas: qtdDividas,
       valor_total_dividas: valorTotal,
-      ccf: data.ccf || null, // Cheques sem Fundo
+      ccf: data.ccf || null,
       protestos: data.protestos || null,
-      pefin_serasa: infoSerasa.bello || null, // 'bello' é onde o Serasa lista os detalhes das pendências
+      pefin_serasa: infoSerasa.bello || null,
     };
 
-    return NextResponse.json(resumoRestritivos);
+    // 🔥 A MÁGICA AQUI: Retornamos o resumo mastigado E a ficha cadastral completa!
+    return NextResponse.json({
+      resumo: resumoRestritivos,
+      ficha_cadastral: data, // Todos os dados de CNPJ, sócios, telefones, capital social, etc.
+      raw_completo: json // O JSON 100% bruto para debug
+    });
 
   } catch (err: any) {
     console.error("💥 Erro crítico na rota de restritivos:", err);

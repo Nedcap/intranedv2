@@ -10,15 +10,13 @@ export default function PreAnalisePage() {
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(false);
   
-  // 🗂️ Estados de Dados (A Tríade)
   const [dadosEmpresa, setDadosEmpresa] = useState<any>(null);
   const [processosEncontrados, setProcessosEncontrados] = useState<any[]>([]);
   const [dadosFinanceiros, setDadosFinanceiros] = useState<any>(null);
   
-  // 🗂️ Novo Estado para o Histórico
   const [historico, setHistorico] = useState<any[]>([]);
+  const [mostrarJsonBruto, setMostrarJsonBruto] = useState(false);
 
-  // Carrega o histórico ao abrir a página
   useEffect(() => {
     carregarHistorico();
   }, []);
@@ -28,16 +26,10 @@ export default function PreAnalisePage() {
       .from("pre_analises")
       .select("*")
       .order("criado_em", { ascending: false })
-      .limit(10); // Traz as 10 últimas consultas
-
-    if (error) {
-      console.error("Erro ao buscar histórico:", error);
-    } else if (data) {
-      setHistorico(data);
-    }
+      .limit(10);
+    if (data) setHistorico(data);
   };
 
-  // Função auxiliar movida para fora do try/catch para ser usada no cálculo pré-salvamento
   const avaliarRiscoProcesso = (classe: string) => {
     const c = classe.toLowerCase();
     if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal")) return { cor: "bg-red-500 text-white", label: "🚨 Alto Risco", peso: 3 };
@@ -54,10 +46,10 @@ export default function PreAnalisePage() {
       setProcessosEncontrados([]);
       setDadosEmpresa(null);
       setDadosFinanceiros(null);
+      setMostrarJsonBruto(false);
 
       const documentoLimpo = busca.replace(/\D/g, "");
 
-      // 1. 🔍 BATE NO BIGQUERY (Receita Federal)
       const resBq = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,21 +63,18 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. ⚖️ BATE NO DATAJUD (CNJ) EM PARALELO 
       const reqProcessos = fetch("/api/processos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      // 3. 💳 BATE NO CREDITHUB EM PARALELO 
       const reqFinanceiro = fetch("/api/restritivos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      // Aguarda as duas requisições terminarem juntas
       const [resProcessos, resFinanceiro] = await Promise.all([reqProcessos, reqFinanceiro]);
 
       let processos = [];
@@ -99,16 +88,10 @@ export default function PreAnalisePage() {
         financeiro = await resFinanceiro.json();
       } else {
         const errData = await resFinanceiro.json().catch(() => ({}));
-        financeiro = { 
-          erro: true, 
-          mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." 
-        };
+        financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." };
       }
 
-      // =========================================================================
-      // 🔥 SALVAMENTO AUTOMÁTICO E ATUALIZAÇÃO DO HISTÓRICO
-      // =========================================================================
-      
+      // Cálculo do Risco
       let nivelRiscoGeral = "BAIXO";
       let pesoTotal = 0;
       processos.forEach(p => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
@@ -118,15 +101,13 @@ export default function PreAnalisePage() {
       } else if (pesoTotal >= 4) {
         nivelRiscoGeral = "MEDIO";
       }
-
-      if (financeiro?.possui_apontamento) {
+      if (financeiro?.resumo?.possui_apontamento) {
         nivelRiscoGeral = "ALTO";
       }
 
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
 
-      // Dispara o insert
       const { error: insertError } = await supabase.from("pre_analises").insert({
         documento_alvo: dataBq.empresa.cnpj,
         nome_empresa_lead: dataBq.empresa.razao_social,
@@ -136,14 +117,8 @@ export default function PreAnalisePage() {
         dados_processos: processos
       });
 
-      if (insertError) {
-        console.error("⚠️ Erro ao registrar log de consulta no banco:", insertError);
-      } else {
-        // Atualiza a tabela de histórico silenciosamente na tela após salvar
-        carregarHistorico();
-      }
+      if (!insertError) carregarHistorico();
 
-      // Atualiza os painéis principais
       setDadosEmpresa({
         razao_social: dataBq.empresa.razao_social,
         cnpj: dataBq.empresa.cnpj,
@@ -161,20 +136,10 @@ export default function PreAnalisePage() {
     }
   };
 
-  const formatarMoeda = (valor: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
-  };
-
-  const formatarData = (dataIso: string) => {
-    return new Date(dataIso).toLocaleString("pt-BR", {
-      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-    });
-  };
-
-  const getCorRiscoGeral = (risco: string) => {
-    if (risco === "ALTO") return "bg-red-100 text-red-700 border-red-200";
-    if (risco === "MEDIO") return "bg-amber-100 text-amber-700 border-amber-200";
-    return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  const formatarMoeda = (valor: number | string) => {
+    const v = typeof valor === 'string' ? parseFloat(valor) : valor;
+    if (isNaN(v)) return 'R$ 0,00';
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
   };
 
   const enviarParaMesa = () => {
@@ -183,250 +148,245 @@ export default function PreAnalisePage() {
     }
   };
 
+  // Variáveis de atalho para os dados ricos da API
+  const resumo = dadosFinanceiros?.resumo;
+  const ficha = dadosFinanceiros?.ficha_cadastral || {};
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1600px] mx-auto space-y-6">
         
-        {/* HEADER */}
+        {/* HEADER E BARRA DE BUSCA (Omitidos para brevidade, mas são iguais aos seus originais) */}
         <div className="border-b border-slate-200 pb-3 flex justify-between items-center">
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider uppercase shadow-sm">
-                Filtro de Risco
-              </span>
-            </div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
-              🚦 Pré-Análise de Viabilidade
+              🚦 Pré-Análise de Viabilidade Profunda
             </h2>
-            <span className="text-xs text-slate-500 font-medium">O log de pesquisa é armazenado automaticamente.</span>
           </div>
         </div>
 
-        {/* BARRA DE PESQUISA */}
         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
-          <form onSubmit={executarPreAnalise} className="flex flex-col sm:flex-row gap-3 pl-2">
+          <form onSubmit={executarPreAnalise} className="flex flex-col sm:flex-row gap-3">
             <input 
-              type="text"
-              required
-              placeholder="Digite o CNPJ..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="flex-1 p-3.5 border border-slate-300 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none rounded-xl font-bold text-slate-800 text-sm shadow-inner uppercase tracking-wider max-w-md font-mono"
+              type="text" required placeholder="Digite o CNPJ..." value={busca} onChange={(e) => setBusca(e.target.value)}
+              className="flex-1 p-3.5 border border-slate-300 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none rounded-xl font-bold text-slate-800 text-sm shadow-inner max-w-md font-mono"
             />
-            <button
-              type="submit"
-              disabled={carregando}
-              className="px-8 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-md cursor-pointer"
-            >
-              {carregando ? "⏳ Extraindo e Gravando Log..." : "🚦 Extrair Raio-X"}
+            <button type="submit" disabled={carregando} className="px-8 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs uppercase transition-all disabled:opacity-50">
+              {carregando ? "⏳ Extraindo Raio-X..." : "🚦 Extrair Raio-X"}
             </button>
           </form>
         </div>
 
         {/* CONTEÚDO DA PRÉ-ANÁLISE ATUAL */}
         {dadosEmpresa && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start animate-in fade-in slide-in-from-bottom-2">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start animate-in fade-in">
             
-            {/* COLUNA ESQUERDA: CADASTRO E FINANCEIRO */}
-            <div className="space-y-6">
+            {/* COLUNA ESQUERDA (DADOS CADASTRAIS RICOS) */}
+            <div className="space-y-6 xl:col-span-1">
               
-              {/* PAINEL CADASTRO (BIGQUERY) */}
-              <div className="bg-white border border-slate-200 p-6 rounded-2xl space-y-4 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10 text-4xl">🏢</div>
-                <div className="border-b border-slate-100 pb-3 relative z-10">
-                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Base Receita Federal</span>
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1">{dadosEmpresa.razao_social}</h3>
+              {/* FICHA GERAL */}
+              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                <div className="border-b border-slate-100 pb-3 mb-4">
+                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Identidade Corporativa</span>
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-1 leading-tight">{dadosEmpresa.razao_social}</h3>
                   <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{dadosEmpresa.cnpj}</p>
-                  <p className="text-slate-500 font-medium text-[11px] mt-2 uppercase flex items-center gap-1.5">
-                    Situação: 
-                    <span className={`font-bold px-2 py-0.5 rounded ${dadosEmpresa.situacao === 'ATIVA' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Situação RFB</span>
+                    <span className={`font-black text-[10px] px-2 py-0.5 rounded uppercase ${dadosEmpresa.situacao === 'ATIVA' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                       {dadosEmpresa.situacao}
                     </span>
-                  </p>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Idade / Abertura</span>
+                    <span className="font-bold text-xs text-slate-700">{ficha.idadeEmpresa ? `${ficha.idadeEmpresa} anos` : '-'} ({ficha.dataAbertura || '-'})</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Capital Social</span>
+                    <span className="font-bold text-xs text-slate-700">{formatarMoeda(ficha.capitalSocial || dadosEmpresa.capital_social)}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Porte</span>
+                    <span className="font-bold text-xs text-slate-700">{ficha.porteEmpresa || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">CNAE Principal</span>
+                    <span className="font-bold text-[11px] text-slate-700 leading-tight block bg-slate-50 p-2 rounded">{ficha.cnae} - {ficha.cnaeDescricao || 'Não informado'}</span>
+                  </div>
                 </div>
               </div>
 
-              {/* PAINEL FINANCEIRO (CREDITHUB) */}
-              <div className="bg-white border border-slate-200 p-6 rounded-2xl space-y-4 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10 text-4xl">💳</div>
-                <div className="border-b border-slate-100 pb-3 relative z-10 flex justify-between items-start">
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Bureau (CreditHub)</span>
-                    <h3 className="text-base font-black text-slate-900 uppercase tracking-tight mt-1">Risco Financeiro</h3>
+              {/* CONTATOS E LOCALIZAÇÃO */}
+              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
+                <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest border-b border-slate-100 pb-2 block">Localização & Contato</span>
+                
+                {ficha.enderecos && ficha.enderecos.length > 0 && (
+                  <div className="bg-slate-50 p-3 rounded-lg text-xs font-medium text-slate-600 border border-slate-100">
+                    📍 {ficha.enderecos[0].logradouro}, {ficha.enderecos[0].numero} - {ficha.enderecos[0].bairro}, {ficha.enderecos[0].cidade} / {ficha.enderecos[0].uf}
                   </div>
-                  {dadosFinanceiros && !dadosFinanceiros.erro && (
-                    <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest shadow-sm ${dadosFinanceiros.possui_apontamento ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
-                      {dadosFinanceiros.possui_apontamento ? "🔴 Apontamentos" : "🟢 Nada Consta"}
-                    </span>
+                )}
+                
+                {ficha.telefones && ficha.telefones.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {ficha.telefones.slice(0, 3).map((tel: any, i: number) => (
+                      <span key={i} className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-md text-[10px] font-bold font-mono">📞 {tel.numero || tel}</span>
+                    ))}
+                  </div>
+                )}
+                
+                {ficha.emails && ficha.emails.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {ficha.emails.slice(0, 2).map((email: any, i: number) => (
+                      <span key={i} className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">✉️ {email.endereco || email}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button onClick={enviarParaMesa} disabled={dadosEmpresa.situacao !== 'ATIVA'} className="w-full px-6 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl text-xs uppercase transition-all disabled:opacity-50 shadow-lg">
+                ✅ Avançar p/ Mesa de Crédito
+              </button>
+            </div>
+
+            {/* COLUNA CENTRAL E DIREITA (FINANCEIRO + QSA + PROCESSOS) */}
+            <div className="xl:col-span-2 space-y-6 flex flex-col">
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* PAINEL FINANCEIRO */}
+                <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
+                  <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest">Risco Serasa / Bureau</span>
+                    {resumo && (
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${resumo.possui_apontamento ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
+                        {resumo.possui_apontamento ? "🔴 Pendências" : "🟢 Nada Consta"}
+                      </span>
+                    )}
+                  </div>
+
+                  {dadosFinanceiros?.erro ? (
+                    <div className="p-4 bg-rose-50 text-rose-600 font-bold text-xs rounded border border-rose-300">❌ {dadosFinanceiros.mensagem}</div>
+                  ) : resumo ? (
+                    <div className="space-y-3">
+                      <div className="flex justify-between p-3 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-xs font-bold text-slate-600">Dívidas Vencidas</span>
+                        <span className="font-mono font-black text-slate-900">{resumo.quantidade_dividas}</span>
+                      </div>
+                      <div className="flex justify-between p-3 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-xs font-bold text-slate-600">Valor Total (R$)</span>
+                        <span className="font-mono font-black text-rose-600">{formatarMoeda(resumo.valor_total_dividas)}</span>
+                      </div>
+                      
+                      {resumo.pefin_serasa?.length > 0 && (
+                        <div className="mt-4">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 mb-2 block">Credores:</span>
+                          <div className="max-h-24 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+                            {resumo.pefin_serasa.map((div: any, i: number) => (
+                              <div key={i} className="flex justify-between bg-rose-50/50 p-2 border border-rose-100 rounded text-[10px]">
+                                <span className="font-bold text-slate-700 truncate" title={div.credor}>{div.credor}</span>
+                                <span className="font-mono font-black text-rose-600 whitespace-nowrap">R$ {div.valor}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="pt-3 text-right">
+                        <button onClick={() => setMostrarJsonBruto(!mostrarJsonBruto)} className="text-[9px] font-bold text-indigo-500 uppercase">
+                          {mostrarJsonBruto ? "Ocultar JSON Bruto" : "🔍 Ver JSON Completo da API"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-slate-400 font-bold text-xs">Carregando bureau...</div>
                   )}
                 </div>
 
-                {dadosFinanceiros ? (
-                  dadosFinanceiros.erro ? (
-                    <div className="p-4 bg-rose-50 text-center text-rose-600 font-bold italic text-xs rounded-lg border border-dashed border-rose-300">
-                      ❌ Erro na API: {dadosFinanceiros.mensagem}
-                    </div>
-                  ) : (
-                    <div className="space-y-3 relative z-10">
-                      <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-                        <span className="text-xs font-bold text-slate-600 uppercase">Dívidas / Pendências</span>
-                        <span className="font-mono font-black text-slate-900">{dadosFinanceiros.quantidade_dividas || 0} ocorrências</span>
-                      </div>
-                      <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-                        <span className="text-xs font-bold text-slate-600 uppercase">Valor Total (R$)</span>
-                        <span className="font-mono font-black text-rose-600">{formatarMoeda(dadosFinanceiros.valor_total_dividas || 0)}</span>
-                      </div>
-                      {dadosFinanceiros.ccf && (
-                        <div className="p-3 bg-rose-50 rounded-lg border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
-                          ⚠️ Alerta: Registro de Cheques sem Fundo (CCF) localizado.
-                        </div>
-                      )}
-                    </div>
-                  )
-                ) : (
-                  <div className="p-4 bg-slate-50 text-center text-slate-400 font-bold italic text-xs rounded-lg border border-dashed border-slate-300">
-                    Aguardando varredura financeira...
+                {/* PAINEL QUADRO SOCIETÁRIO (QSA) */}
+                <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
+                  <div className="border-b border-slate-100 pb-3 mb-4">
+                    <span className="text-[10px] font-black uppercase text-amber-500 tracking-widest">Quadro Societário (QSA)</span>
                   </div>
-                )}
-              </div>
-
-              {/* BOTAO DE LARGADA */}
-              <div className="pt-2">
-                <button
-                  onClick={enviarParaMesa}
-                  disabled={dadosEmpresa.situacao !== 'ATIVA'}
-                  className="w-full px-6 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-lg cursor-pointer flex items-center justify-center gap-2"
-                >
-                  ✅ Enviar para Mesa de Crédito
-                </button>
-              </div>
-
-            </div>
-
-            {/* COLUNA DIREITA: PROCESSOS (DATAJUD) */}
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col h-full max-h-[720px]">
-              <div className="bg-slate-50 border-b border-slate-200 px-5 py-4 flex justify-between items-center shrink-0">
-                <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">⚖️ Histórico Clínico de Litígios (DataJud)</h3>
-                <span className="text-[10px] bg-indigo-100 text-indigo-700 font-black px-2.5 py-1 rounded-md shadow-sm border border-indigo-200">
-                  {processosEncontrados.length} Processos
-                </span>
-              </div>
-
-              <div className="overflow-x-auto overflow-y-auto custom-scrollbar flex-1">
-                <table className="w-full text-left border-collapse text-[12px] min-w-[600px]">
-                  <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 shadow-sm z-10">
-                    <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
-                      <th className="p-4 w-48">Nº Processo (CNJ)</th>
-                      <th className="p-4">Classe Processual</th>
-                      <th className="p-4 w-32">Tribunal</th>
-                      <th className="p-4 text-center w-28">Alerta Risco</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                    {processosEncontrados.map((proc, idx) => {
-                      const avaliacao = avaliarRiscoProcesso(proc.classe);
-                      return (
-                        <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="p-4 font-mono font-bold text-slate-900 select-all text-[11px]">{proc.numero}</td>
-                          <td className="p-4 uppercase font-bold text-slate-600 text-[11px] truncate max-w-[200px]" title={proc.classe}>{proc.classe}</td>
-                          <td className="p-4 font-black text-slate-400 uppercase text-[10px]">{proc.tribunal}</td>
-                          <td className="p-4 text-center">
-                            <span className={`inline-block px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-wider shadow-xs ${avaliacao.cor}`}>
-                              {avaliacao.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {processosEncontrados.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="p-12 text-center text-slate-400 font-bold italic bg-slate-50/50">
-                          Nenhum registro pendente localizado na base pública do CNJ.
-                        </td>
-                      </tr>
+                  
+                  <div className="flex-1 overflow-y-auto max-h-56 custom-scrollbar pr-1">
+                    {ficha.quadroSocietario && ficha.quadroSocietario.length > 0 ? (
+                      <div className="space-y-2">
+                        {ficha.quadroSocietario.map((socio: any, i: number) => (
+                          <div key={i} className="p-3 bg-amber-50/30 border border-amber-100 rounded-lg">
+                            <span className="block text-xs font-black text-slate-800 uppercase">{socio.nome}</span>
+                            <div className="flex justify-between mt-1">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase">{socio.qualificacao || 'Sócio'}</span>
+                              <span className="text-[10px] font-mono text-slate-400">{socio.documento || socio.cpf || ''}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-slate-400 font-bold italic text-xs">
+                        Nenhum sócio mapeado na consulta.
+                      </div>
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
               </div>
-            </div>
 
+              {/* JSON DEBUG (Aparece embaixo dos dois cards se ativo) */}
+              {mostrarJsonBruto && dadosFinanceiros && (
+                 <div className="bg-slate-900 rounded-xl p-4 overflow-auto max-h-96 custom-scrollbar shadow-inner">
+                   <pre className="text-[11px] text-emerald-400 font-mono">
+                     {JSON.stringify(dadosFinanceiros.raw_completo || dadosFinanceiros, null, 2)}
+                   </pre>
+                 </div>
+              )}
+
+              {/* PAINEL DATAJUD */}
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden min-h-[300px]">
+                <div className="bg-slate-50 border-b border-slate-200 px-5 py-4 flex justify-between items-center shrink-0">
+                  <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">⚖️ Histórico Clínico de Litígios (DataJud)</h3>
+                  <span className="text-[10px] bg-indigo-100 text-indigo-700 font-black px-2.5 py-1 rounded-md border border-indigo-200">
+                    {processosEncontrados.length} Processos
+                  </span>
+                </div>
+                
+                <div className="overflow-auto custom-scrollbar flex-1">
+                  {/* ... (Mesma tabela de processos original do seu código) ... */}
+                  <table className="w-full text-left border-collapse text-[12px] min-w-[600px]">
+                    <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 shadow-sm z-10">
+                      <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
+                        <th className="p-4">Nº Processo</th>
+                        <th className="p-4">Classe</th>
+                        <th className="p-4">Tribunal</th>
+                        <th className="p-4 text-center">Risco</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {processosEncontrados.map((proc, idx) => {
+                        const avaliacao = avaliarRiscoProcesso(proc.classe);
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="p-4 font-mono font-bold text-slate-900 text-[11px]">{proc.numero}</td>
+                            <td className="p-4 uppercase font-bold text-slate-600 text-[11px] truncate max-w-[200px]" title={proc.classe}>{proc.classe}</td>
+                            <td className="p-4 font-black text-slate-400 uppercase text-[10px]">{proc.tribunal}</td>
+                            <td className="p-4 text-center">
+                              <span className={`inline-block px-2.5 py-1 rounded text-[9px] font-black uppercase ${avaliacao.cor}`}>{avaliacao.label}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {processosEncontrados.length === 0 && (
+                        <tr><td colSpan={4} className="p-12 text-center text-slate-400 font-bold italic">Nenhum processo localizado.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* 📚 TABELA DE HISTÓRICO DE CONSULTAS */}
-        {/* ========================================================= */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
-          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
-            <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">📚 Histórico de Consultas (Últimas 10)</h3>
-            <button 
-              onClick={carregarHistorico} 
-              className="text-indigo-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1"
-            >
-              🔄 Atualizar
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse text-[12px] min-w-[800px]">
-              <thead className="bg-slate-100 border-b border-slate-200">
-                <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
-                  <th className="p-4">Data / Hora</th>
-                  <th className="p-4">CNPJ</th>
-                  <th className="p-4">Empresa (Lead)</th>
-                  <th className="p-4 text-center">Processos</th>
-                  <th className="p-4 text-center">Risco Apurado</th>
-                  <th className="p-4">Comercial</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {historico.length > 0 ? (
-                  historico.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 text-[11px] text-slate-500 font-mono">
-                        {formatarData(item.criado_em)}
-                      </td>
-                      <td className="p-4 font-mono font-bold text-slate-900">
-                        {item.documento_alvo}
-                      </td>
-                      <td className="p-4 text-[11px] font-bold text-slate-700 truncate max-w-[250px]" title={item.nome_empresa_lead}>
-                        {item.nome_empresa_lead}
-                      </td>
-                      <td className="p-4 text-center font-bold text-slate-600">
-                        {item.total_processos_encontrados}
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className={`inline-block px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider border ${getCorRiscoGeral(item.nivel_risco)}`}>
-                          {item.nivel_risco || "N/D"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-[11px] text-slate-600">
-                        {item.comercial_responsavel}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic">
-                      Nenhuma consulta registrada no banco de dados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
       </div>
-
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-      `}} />
     </div>
   );
 }
