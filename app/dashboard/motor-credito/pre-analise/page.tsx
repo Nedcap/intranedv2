@@ -33,25 +33,48 @@ export default function PreAnalisePage() {
     if (data) setHistorico(data);
   };
 
-  const avaliarRiscoProcesso = (classe: string) => {
-    if (!classe) return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "N/D", peso: 0 };
-    const c = classe.toLowerCase();
+  // 🔥 O NOVO CÉREBRO JURÍDICO: Analisa a Classe e o Polo de Atuação
+  const avaliarRiscoProcesso = (proc: any) => {
+    if (!proc || !proc.classe) return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "N/D", peso: 0 };
     
-    if (c.includes("falência") || c.includes("recuperação") || c.includes("execução fiscal") || c.includes("tributário") || c.includes("dívida ativa")) {
-      return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 ALTO RISCO", peso: 3 };
+    const c = proc.classe.toLowerCase();
+    const p = (proc.polo || "PASSIVO").toUpperCase(); // Assume PASSIVO por segurança se não vier
+
+    // 1. Falência e Recuperação Judicial
+    if (c.includes("falência") || c.includes("recuperação judicial") || c.includes("recuperação extrajudicial")) {
+      // Se for apenas Terceiro/Credor, não é um risco direto de falência da SUA empresa
+      if (p === "TERCEIRO" || p === "ATIVO") {
+        return { cor: "bg-slate-100 text-slate-600 border-slate-200", label: "⚪ CREDOR (RJ)", peso: 0 };
+      }
+      return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 ALTO RISCO (RJ)", peso: 3 };
     }
-    if (c.includes("trabalhista") || c.includes("execução") || c.includes("indenização")) {
-      return { cor: "bg-amber-50 text-amber-700 border-amber-200", label: "⚠️ MÉDIO", peso: 2 };
+
+    // 2. Se a empresa é quem está processando (Polo Ativo / Exequente / Autor)
+    if (p === "ATIVO") {
+      return { cor: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "🟢 AUTOR", peso: 0 };
+    }
+
+    // 3. Se for apenas Terceiro Interessado em outras ações
+    if (p === "TERCEIRO") {
+      return { cor: "bg-slate-50 text-slate-600 border-slate-200", label: "⚪ TERCEIRO", peso: 0 };
+    }
+
+    // 4. Polo Passivo (Sendo Processado / Executado / Réu)
+    if (c.includes("execução fiscal") || c.includes("tributário") || c.includes("dívida ativa")) {
+      return { cor: "bg-red-50 text-red-700 border-red-200", label: "🚨 EXECUÇÃO FISCAL", peso: 3 };
     }
     
+    if (c.includes("trabalhista") || c.includes("execução") || c.includes("indenização") || c.includes("monitória") || c.includes("desconsideração")) {
+      return { cor: "bg-amber-50 text-amber-700 border-amber-200", label: "⚠️ RÉU/PASSIVO", peso: 2 };
+    }
+
     return { cor: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "🟢 BAIXO", peso: 1 };
   };
 
-  // 🔥 Gera as estatísticas consolidando o volume massivo de processos
   const gerarEstatisticasProcessos = (processos: any[]) => {
     const stats = { alto: 0, medio: 0, baixo: 0 };
-    processos.forEach(p => {
-      const avaliacao = avaliarRiscoProcesso(p.classe);
+    processos.forEach(proc => {
+      const avaliacao = avaliarRiscoProcesso(proc);
       if (avaliacao.peso === 3) stats.alto++;
       else if (avaliacao.peso === 2) stats.medio++;
       else stats.baixo++;
@@ -108,15 +131,47 @@ export default function PreAnalisePage() {
         financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com os Bureaus." };
       }
 
+      // 🔥 INTERCEPTADOR DE POLOS JURÍDICOS (Ativo vs Passivo)
+      if (financeiro && financeiro.raw_completo) {
+        // Coleta todos os documentos do Grupo (Empresa + Sócios) para identificar quando a empresa é a protagonista
+        const documentosDoGrupo = [documentoLimpo];
+        if (financeiro.ficha_cadastral?.socios) {
+          financeiro.ficha_cadastral.socios.forEach((s: any) => {
+            const doc = String(s.documento || s.cpf || "").replace(/\D/g, "");
+            if (doc.length === 11 || doc.length === 14) documentosDoGrupo.push(doc);
+          });
+        }
+
+        processos = processos.map((p: any) => {
+          let poloIdentificado = "PASSIVO"; // O padrão mais conservador para análise de risco
+          
+          // Busca o processo original cru que contém as partes
+          const pRaw = financeiro.raw_completo.data?.processos?.find((rp: any) => rp.numeroProcesso === p.numero);
+          
+          if (pRaw && pRaw.tramitacoes && pRaw.tramitacoes[0]?.partes) {
+            // Varre as partes do processo para ver de qual lado o nosso CNPJ/CPF está
+            const parteAlvo = pRaw.tramitacoes[0].partes.find((pt: any) => 
+              pt.documentosPrincipais?.some((d: any) => documentosDoGrupo.includes(d.numero))
+            );
+
+            if (parteAlvo && parteAlvo.polo) {
+              poloIdentificado = parteAlvo.polo.toUpperCase();
+            }
+          }
+          
+          return { ...p, polo: poloIdentificado };
+        });
+      }
+
       let compliance = null;
       if (resCompliance.ok) compliance = await resCompliance.json();
 
-      // Cálculo de Risco Geral
+      // Cálculo de Risco Geral baseado na nova função inteligente
       let nivelRiscoGeral = "BAIXO";
       let pesoTotal = 0;
-      processos.forEach((p: any) => pesoTotal += avaliarRiscoProcesso(p.classe).peso);
+      processos.forEach((p: any) => pesoTotal += avaliarRiscoProcesso(p).peso);
       
-      if (pesoTotal >= 10 || processos.some((p: any) => avaliarRiscoProcesso(p.classe).peso === 3)) nivelRiscoGeral = "ALTO";
+      if (pesoTotal >= 10 || processos.some((p: any) => avaliarRiscoProcesso(p).peso === 3)) nivelRiscoGeral = "ALTO";
       else if (pesoTotal >= 4) nivelRiscoGeral = "MEDIO";
       
       const socioComApontamento = financeiro?.resumo_socios?.some((s: any) => s.restritivos?.possui_apontamento);
@@ -535,12 +590,12 @@ export default function PreAnalisePage() {
                           <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider w-40">Alvo (Empresa/Sócio)</th>
                           <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider">Classe Judicial</th>
                           <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center w-24">Tribunal</th>
-                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center w-28">Risco</th>
+                          <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-center w-28">Polo / Risco</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
                         {processosEncontrados.map((proc, idx) => {
-                          const avaliacao = avaliarRiscoProcesso(proc.classe);
+                          const avaliacao = avaliarRiscoProcesso(proc);
                           return (
                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
                               <td className="p-3 text-[10px] font-mono font-bold text-slate-900 select-all">{proc.numero}</td>

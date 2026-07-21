@@ -151,17 +151,30 @@ export default function FinalizadosPage() {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-        if (cargoUser !== "master" && cargoUser !== "diretor") {
+        // 1. Alta Gestão e perfis explicitamente operacionais (se houver escrito no banco) veem a esteira geral
+        if (cargoUser === "master" || cargoUser === "diretor" || cargoUser.includes("opera") || cargoUser.includes("analist")) {
+          // Mantém query.select("*") sem filtros adicionais de visualização
+        } else {
+          // 2. Se o usuário estiver como Comercial (Padrão do banco) 
+          // Ajustado para buscar se ele é o Comercial da conta OU o Operador (responsavel_id)
           const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+          
+          let nomesPermitidos: string[] = [user.nome];
+          
           if (todosUsuarios) {
             const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
-            const nomesPermitidos = todosUsuarios
+            const subordinados = todosUsuarios
               .filter(u => idsPermitidos.includes(u.id))
               .map(u => u.nome);
-            query = query.in("comercial", nomesPermitidos);
-          } else {
-            query = query.eq("comercial", user.nome);
+              
+            if (subordinados.length > 0) nomesPermitidos = subordinados;
           }
+
+          // Formata a string do filtro IN para o Supabase (.or exige formatação específica)
+          const arrayNomesFormatados = nomesPermitidos.map(n => `"${n}"`).join(",");
+          
+          // 🔥 AQUI ESTÁ O SEGREDO: O usuário verá a análise se ele captou (comercial) OU se ele analisou (responsavel_id)
+          query = query.or(`comercial.in.(${arrayNomesFormatados}),responsavel_id.eq.${user.id}`);
         }
       }
       
@@ -175,7 +188,6 @@ export default function FinalizadosPage() {
           
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
           
-          // Entra na lista SE o status da análise OU o status do comitê contiver alguma das palavras de finalização
           return statusFinaisConfirmados.some(s => stAnalise.includes(s) || stComite.includes(s));
         });
 
@@ -382,13 +394,6 @@ export default function FinalizadosPage() {
   function modoConsultaFocoAtivarModo(item: any) {
     ativarModoConsultaFoco(item);
   }
-
-  const formatarCnpj = (cnpj: string) => {
-    if (!cnpj) return "";
-    const limpo = cnpj.replace(/\D/g, "");
-    if (limpo.length !== 14) return cnpj;
-    return `${limpo.substring(0, 2)}.${limpo.substring(2, 5)}.${limpo.substring(5, 8)}/${limpo.substring(8, 12)}-${limpo.substring(12, 14)}`;
-  };
 
   const abrirPainelDocumentos = (item: any) => {
     setEmpresaParaDocs(item);
