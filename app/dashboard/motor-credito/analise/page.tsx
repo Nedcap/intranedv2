@@ -9,7 +9,7 @@ import GerarKappiViewer from "@/components/gerar-kappi"; // 🔥 IMPORT DO KAPPI
 import JSZip from "jszip"; 
 
 // =========================================================================
-// INTERFACES
+// INTERFACES (ATUALIZADAS PARA SUPORTAR GRUPOS ECONÔMICOS)
 // =========================================================================
 interface FilaItem {
   id: string;
@@ -43,7 +43,7 @@ interface SocioItem {
   nome: string;
   perc: number;
   funcao: string;
-  figure_contrato: string;
+  figura_contrato: string;
 }
 
 interface PatrimonioItem {
@@ -87,12 +87,50 @@ interface ReferenciaItem {
 }
 
 interface RestritivoItem {
-  empresa_socio: string; 
-  restritivo: string;
-  qtd: number;
-  valor: number;
-  data: string;
-  observacao: string;
+  tipo_restritivo?: string; // Novo padrão
+  restritivo?: string; // Padrão antigo de fallback
+  quantidade_somada?: number;
+  qtd?: number;
+  valor_somado?: number;
+  valor?: number;
+  data_mais_recente?: string;
+  data?: string;
+  credores_resumo?: string;
+  observacao?: string;
+  empresa_socio?: string;
+}
+
+// 🔥 NOVAS INTERFACES DE GRUPO ECONÔMICO
+interface EmpresaSocietario {
+  papel_no_grupo?: string;
+  razao_social: string;
+  cnpj: string;
+  fundacao?: string;
+  capital_social?: number;
+  localizacao?: string;
+  ramo?: string;
+  regra_assinatura?: string;
+  socios: SocioItem[];
+}
+
+interface EmpresaFaturamento {
+  razao_social: string;
+  cnpj: string;
+  faturamento: Record<string, FaturamentoMes>;
+}
+
+interface EmpresaEndividamento {
+  razao_social: string;
+  cnpj: string;
+  saldo_total_empresa: number;
+  endividamento: EndividamentoItem[];
+}
+
+interface EmpresaSerasa {
+  nome_entidade: string;
+  documento: string;
+  valor_total_entidade: number;
+  restritivos: RestritivoItem[];
 }
 
 interface AnaliseData {
@@ -102,6 +140,7 @@ interface AnaliseData {
   status?: string;
   comercial?: string; 
   dados_documentos?: string[]; // 🔥 Adicionado para sabermos quais docs tem na análise
+  is_grupo_economico?: boolean; // 🔥 Flag de Grupo
 
   empresas_principais: EmpresaPrincipal[];
   data_analise: string;
@@ -122,12 +161,18 @@ interface AnaliseData {
   propostas: PropostaItem[];
   empresas_grupo: EmpresaItem[];
   
-  socios: SocioItem[];
+  // 🔥 ARRAYS DO GRUPO ECONÔMICO (Substituem os antigos que não eram array)
+  empresas_societario: EmpresaSocietario[];
+  empresas_faturamento: EmpresaFaturamento[];
+  empresas_endividamento: EmpresaEndividamento[];
+  empresas_serasa: EmpresaSerasa[];
+
+  socios: SocioItem[]; // Mantido para retrocompatibilidade
   regra_assinatura: string;
   aval_societario: string;
   patrimonios: PatrimonioItem[];
   
-  dados_faturamento: Record<string, FaturamentoMes>;
+  dados_faturamento: Record<string, FaturamentoMes>; // Mantido para retrocompatibilidade
   dados_potencial: { 
     ticket_medio: number; 
     prazo_medio_dpls: string; 
@@ -143,11 +188,11 @@ interface AnaliseData {
   };
   
   endividamento_resumo: { renegociando: string };
-  endividamento_detalhado: EndividamentoItem[];
+  endividamento_detalhado: EndividamentoItem[]; // Mantido para retrocompatibilidade
   referencias: ReferenciaItem[];
   
   restritivos_quadro: { pefin: number; refin: number; protesto: number; div_vencida: number; acao_judicial: number; cheque_sem_fundo: number };
-  restritivos: RestritivoItem[];
+  restritivos: RestritivoItem[]; // Mantido para retrocompatibilidade
   
   resumo_visita: string;
   noticias_midia: string;
@@ -156,7 +201,7 @@ interface AnaliseData {
   recomendacao_analista?: string;
   anexos: { organograma_url: string; fachada_url: string; satelite_url: string; fotos_visita_url: string };
 
-  dados_juridico: { relatorio_completo: string };
+  dados_juridico: { relatorio_completo: string; entidades?: any[] };
   parecer_executivo: string;
   organograma_json?: { nodes: any[], edges: any[] } | null;
 
@@ -164,7 +209,7 @@ interface AnaliseData {
 }
 
 const DADOS_MODELO: AnaliseData = {
-  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA", comercial: "", dados_documentos: [],
+  id: null, cnpj: "00.000.000/0001-00", razao_social: "EMPRESA MODELO LTDA", comercial: "", dados_documentos: [], is_grupo_economico: false,
   empresas_principais: [{ razao_social: "EMPRESA MODELO LTDA", cnpj: "00.000.000/0001-00" }],
   data_analise: new Date().toISOString().split("T")[0], 
   relacionamento: "Prospect", analista: "Alyson", gerente: "Luiz", rating: "B - Risco médio", 
@@ -174,7 +219,12 @@ const DADOS_MODELO: AnaliseData = {
   propostas: [{ modalidade: "Desconto", limite: 0, prazo: "", tranche: 0, taxa: "", garantia: "" }],
   empresas_grupo: [],
   
-  socios: [{ nome: "", perc: 100, funcao: "Sócio", figure_contrato: "Sim" }],
+  empresas_societario: [],
+  empresas_faturamento: [],
+  empresas_endividamento: [],
+  empresas_serasa: [],
+
+  socios: [{ nome: "", perc: 100, funcao: "Sócio", figura_contrato: "Sim" }],
   regra_assinatura: "( ) em conjunto (x) isolada", aval_societario: "", patrimonios: [],
   
   dados_faturamento: { "2024": {}, "2025": {}, "2026": {} }, 
@@ -189,7 +239,7 @@ const DADOS_MODELO: AnaliseData = {
   resumo_visita: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
   
-  dados_juridico: { relatorio_completo: "" },
+  dados_juridico: { relatorio_completo: "", entidades: [] },
   parecer_executivo: "",
   organograma_json: null
 };
@@ -310,20 +360,26 @@ function MesaAnaliseConteudo() {
       if (error) throw error;
       if (data) {
         const dc = data.dados_consolidados || {};
-        const listaSocios = dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || []);
-        const listaEndividamento = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
-        const listaRestritivos = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
         const razao_social = data.empresa_nome || dc.razao_social || "";
         const cnpj = data.cnpj || dc.cnpj || "";
         const empresas_principais = dc.empresas_principais?.length ? dc.empresas_principais : [{ razao_social, cnpj }];
         
+        // 🔥 Retrocompatibilidade: Se for análise antiga, jogamos os dados na nova estrutura de Array
+        const empSocietario = dc.empresas_societario?.length ? dc.empresas_societario : [{ papel_no_grupo: "Principal", razao_social, cnpj, socios: (dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || [])) }];
+        const empFaturamento = dc.empresas_faturamento?.length ? dc.empresas_faturamento : (dc.dados_faturamento ? [{ razao_social, cnpj, faturamento: dc.dados_faturamento }] : []);
+        const endivTemp = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
+        const empEndividamento = dc.empresas_endividamento?.length ? dc.empresas_endividamento : (endivTemp.length > 0 ? [{ razao_social, cnpj, saldo_total_empresa: 0, endividamento: endivTemp }] : []);
+        const restTemp = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
+        const empSerasa = dc.empresas_serasa?.length ? dc.empresas_serasa : (restTemp.length > 0 ? [{ nome_entidade: razao_social, documento: cnpj, valor_total_entidade: 0, restritivos: restTemp }] : []);
+
         setAnalise({ 
           ...DADOS_MODELO, 
           ...dc,  
           empresas_principais,
-          socios: listaSocios,
-          endividamento_detalhado: listaEndividamento,
-          restritivos: listaRestritivos,
+          empresas_societario: empSocietario,
+          empresas_faturamento: empFaturamento,
+          empresas_endividamento: empEndividamento,
+          empresas_serasa: empSerasa,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
           dados_juridico: { ...DADOS_MODELO.dados_juridico, ...(dc.dados_juridico || {}) }, 
@@ -332,7 +388,8 @@ function MesaAnaliseConteudo() {
           razao_social: razao_social, 
           status: data.status,
           comercial: data.comercial || "",
-          dados_documentos: data.dados_documentos || [] // 🔥 Garante que os links R2 venham para a tela
+          dados_documentos: data.dados_documentos || [], 
+          is_grupo_economico: data.is_grupo_economico || dc.is_grupo_economico || false
         });
       }
     } catch (err) { 
@@ -349,12 +406,13 @@ function MesaAnaliseConteudo() {
     }
     try {
       setProcessandoDecisao(true);
-      const { id, cnpj, razao_social, status, comercial, dados_documentos, ...dadosParaCompactar } = analise;
+      const { id, cnpj, razao_social, status, comercial, dados_documentos, is_grupo_economico, ...dadosParaCompactar } = analise;
       dadosParaCompactar.dados_potencial.potencial_estimado = potencialRealCalculado;
       
       const { error } = await supabase.from("analises").update({ 
         dados_consolidados: dadosParaCompactar,
-        empresa_nome: analise.razao_social
+        empresa_nome: analise.razao_social,
+        is_grupo_economico: analise.is_grupo_economico
       }).eq("id", analise.id);
       
       if (error) throw error;
@@ -488,11 +546,14 @@ function MesaAnaliseConteudo() {
 
         if (analiseDB?.dados_ia_brutos) {
             const iaOriginal = analiseDB.dados_ia_brutos;
-            if (JSON.stringify(iaOriginal.endividamento_detalhado) !== JSON.stringify(analise.endividamento_detalhado)) {
-                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "endividamento", erro_ia: iaOriginal.endividamento_detalhado, correcao_humana: analise.endividamento_detalhado });
+            if (JSON.stringify(iaOriginal.empresas_endividamento) !== JSON.stringify(analise.empresas_endividamento)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "endividamento", erro_ia: iaOriginal.empresas_endividamento, correcao_humana: analise.empresas_endividamento });
             }
-            if (JSON.stringify(iaOriginal.dados_faturamento) !== JSON.stringify(analise.dados_faturamento)) {
-                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "faturamento", erro_ia: iaOriginal.dados_faturamento, correcao_humana: analise.dados_faturamento });
+            if (JSON.stringify(iaOriginal.empresas_faturamento) !== JSON.stringify(analise.empresas_faturamento)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "faturamento", erro_ia: iaOriginal.empresas_faturamento, correcao_humana: analise.empresas_faturamento });
+            }
+            if (JSON.stringify(iaOriginal.empresas_serasa) !== JSON.stringify(analise.empresas_serasa)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "serasa", erro_ia: iaOriginal.empresas_serasa, correcao_humana: analise.empresas_serasa });
             }
         }
       } catch (memError) {
@@ -532,6 +593,7 @@ function MesaAnaliseConteudo() {
     }
   };
 
+  // Funções de Update Genéricas (Para arrays simples)
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
     const novoArray = [...(analise[campo] as any[])];
     novoArray[index][subCampo] = valor;
@@ -545,21 +607,52 @@ function MesaAnaliseConteudo() {
   const rmArray = (campo: keyof AnaliseData, index: number) => setAnalise({ ...analise, [campo]: (analise[campo] as any[]).filter((_, i) => i !== index) });
   const updateNested = (campoPai: keyof AnaliseData, campoFilho: string, valor: any) => setAnalise({ ...analise, [campoPai]: { ...(analise[campoPai] as any), [campoFilho]: valor } });
 
-  const handleFat = (ano: string, mes: string, val: string) => {
-    const fatAtual = { ...analise.dados_faturamento };
-    if (!fatAtual[ano]) fatAtual[ano] = {};
-    fatAtual[ano][mes] = val; 
-    setAnalise({ ...analise, dados_faturamento: fatAtual });
+  // 🔥 Funções de Update Específicas para Arrays Aninhados (Modo Grupo)
+  const handleFatGrupo = (empIndex: number, ano: string, mes: string, val: string) => {
+    const novasEmpresas = [...analise.empresas_faturamento];
+    if (!novasEmpresas[empIndex].faturamento) novasEmpresas[empIndex].faturamento = {};
+    if (!novasEmpresas[empIndex].faturamento[ano]) novasEmpresas[empIndex].faturamento[ano] = {};
+    novasEmpresas[empIndex].faturamento[ano][mes] = val;
+    setAnalise({ ...analise, empresas_faturamento: novasEmpresas });
+  };
+
+  const updateArrayNested = (campoPaiArray: keyof AnaliseData, paiIndex: number, campoFilhoArray: string, filhoIndex: number, prop: string, valor: any) => {
+    const novaListaPai = [...(analise[campoPaiArray] as any[])];
+    const novaListaFilho = [...novaListaPai[paiIndex][campoFilhoArray]];
+    novaListaFilho[filhoIndex][prop] = valor;
+    novaListaPai[paiIndex][campoFilhoArray] = novaListaFilho;
+    setAnalise({ ...analise, [campoPaiArray]: novaListaPai });
+  };
+
+  const rmArrayNested = (campoPaiArray: keyof AnaliseData, paiIndex: number, campoFilhoArray: string, filhoIndex: number) => {
+    const novaListaPai = [...(analise[campoPaiArray] as any[])];
+    novaListaPai[paiIndex][campoFilhoArray] = novaListaPai[paiIndex][campoFilhoArray].filter((_: any, i: number) => i !== filhoIndex);
+    setAnalise({ ...analise, [campoPaiArray]: novaListaPai });
   };
 
   // =========================================================================
-  // FÓRMULAS DE FATURAMENTO E POTENCIAL YTD E GERAL
+  // FÓRMULAS E MATEMÁTICA CONSOLIDADA (AGRUPANDO TODAS AS EMPRESAS DO GRUPO)
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
+  // 1. ACHATA O FATURAMENTO DO GRUPO INTEIRO PARA UM ÚNICO OBJETO (Para os cálculos gerais)
+  const faturamentoConsolidado = analise.empresas_faturamento.reduce((acc, emp) => {
+    Object.entries(emp.faturamento || {}).forEach(([ano, m]) => {
+      if (!acc[ano]) acc[ano] = {};
+      Object.entries(m).forEach(([mes, valor]) => {
+        acc[ano][mes] = (Number(acc[ano][mes]) || 0) + Number(valor);
+      });
+    });
+    return acc;
+  }, {} as Record<string, FaturamentoMes>);
+
+  // 2. ACHATA DÍVIDAS E RESTRITIVOS (Para os cálculos gerais)
+  const endividamentoFlat = analise.empresas_endividamento.flatMap(e => e.endividamento || []);
+  const restritivosFlat = analise.empresas_serasa.flatMap(e => e.restritivos || []);
+
   let lastFilledIndex26 = -1;
   for (let i = 11; i >= 0; i--) {
-      if (Number(analise.dados_faturamento["2026"]?.[meses[i]] || 0) > 0) { lastFilledIndex26 = i; break; }
+      if (Number(faturamentoConsolidado["2026"]?.[meses[i]] || 0) > 0) { lastFilledIndex26 = i; break; }
   }
   
   const has26Data = lastFilledIndex26 >= 0;
@@ -569,7 +662,7 @@ function MesaAnaliseConteudo() {
 
   const calcMediaYTD = (ano: string) => {
       if (mesesYTD.length === 0) return 0;
-      const soma = mesesYTD.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
+      const soma = mesesYTD.reduce((acc, m) => acc + Number(faturamentoConsolidado[ano]?.[m] || 0), 0);
       return soma / mesesYTD.length;
   };
 
@@ -577,8 +670,8 @@ function MesaAnaliseConteudo() {
   const mediaYTD25 = calcMediaYTD("2025");
   const mediaYTD24 = calcMediaYTD("2024");
   
-  const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(analise.dados_faturamento[ano]?.[m] || 0), 0);
-  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(analise.dados_faturamento[ano]?.[m] || 0) > 0).length;
+  const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(faturamentoConsolidado[ano]?.[m] || 0), 0);
+  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(faturamentoConsolidado[ano]?.[m] || 0) > 0).length;
   
   const calcMediaGeralAno = (ano: string) => { 
       const pre = mesesPreenchidosGeral(ano); 
@@ -586,7 +679,7 @@ function MesaAnaliseConteudo() {
       return calcTotAno(ano) / (ano === "2026" ? pre : 12); 
   }; 
   
-  const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(analise.dados_faturamento[aAt]?.[m] || 0); const ant = Number(analise.dados_faturamento[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
+  const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(faturamentoConsolidado[aAt]?.[m] || 0); const ant = Number(faturamentoConsolidado[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
   const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
   const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
@@ -618,23 +711,26 @@ function MesaAnaliseConteudo() {
 
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
-  const totRestritivos = analise.restritivos.reduce((acc, r) => acc + Number(r.valor), 0);
 
-  const totEndivGeral = analise.endividamento_detalhado.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const endivCurtoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const endivLongoPrazo = analise.endividamento_detalhado.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  // Usando array flat de dívidas do grupo todo
+  const totEndivGeral = endividamentoFlat.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  const endivCurtoPrazo = endividamentoFlat.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  const endivLongoPrazo = endividamentoFlat.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   
-  const totalBancos = analise.endividamento_detalhado.filter(d => d.tipo === "Banco").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const totalFundos = analise.endividamento_detalhado.filter(d => d.tipo === "Fundo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  const totalBancos = endividamentoFlat.filter(d => d.tipo === "Banco").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  const totalFundos = endividamentoFlat.filter(d => d.tipo === "Fundo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   
   const percBancos = totEndivGeral > 0 ? (totalBancos / totEndivGeral) * 100 : 0;
   const percFundos = totEndivGeral > 0 ? (totalFundos / totEndivGeral) * 100 : 0;
   
-  const totalDplsCP = analise.endividamento_detalhado.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  const totalDplsCP = endividamentoFlat.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
 
+  // Usando array flat de restritivos
+  const totRestritivos = restritivosFlat.reduce((acc, r) => acc + Number(r.valor_somado || r.valor || 0), 0);
+
   // =========================================================================
-  // NOVOS ESTILOS REFINADOS (UI/UX)
+  // ESTILOS REFINADOS (UI/UX)
   // =========================================================================
   const cellStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-500 font-sans text-[11px] text-slate-700 transition-all placeholder-slate-400";
   const numStyle = "w-full h-full py-1.5 px-2 bg-transparent outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-500 font-mono text-[11px] text-right text-slate-800 transition-all placeholder-slate-400";
@@ -707,6 +803,8 @@ function MesaAnaliseConteudo() {
                   <div className="flex gap-4 mt-0.5">
                     <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-xs text-slate-500 bg-transparent outline-none w-36" placeholder="00.000.000/0001-00" />
                     {analise.comercial && <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 rounded-full border border-indigo-100">🤝 Resp: {analise.comercial}</span>}
+                    {/* 🔥 INDICADOR VISUAL DE GRUPO */}
+                    {analise.is_grupo_economico && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 rounded-full border border-amber-300">🏢 GRUPO ECONÔMICO</span>}
                   </div>
                 </div>
               </div>
@@ -733,7 +831,7 @@ function MesaAnaliseConteudo() {
                     </button>
                     <GerarAnalise analise={analise} />
                     
-                    {/* 🔥 NOVO BOTÃO: ABRIR O KAPPI MODAL AQUI */}
+                    {/* 🔥 BOTÃO: ABRIR O KAPPI MODAL AQUI */}
                     <button 
                        onClick={() => setIsKappiModalOpen(true)}
                        className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
@@ -979,58 +1077,44 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
+              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO (AGORA BASEADO NO ARRAY DE GRUPOS) */}
               {abaAtiva === "societario" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>
-                      <span>Background do Grupo Econômico</span>
-                      <button onClick={() => addArray('empresas_grupo', {empresa:"", cnpj:"", fundacao:"", idade:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Nova Empresa</button>
+                  {analise.empresas_societario.map((empresaSoc, empIndex) => (
+                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 p-1 mb-6">
+                      <div className="rounded border border-slate-200 overflow-hidden mb-2">
+                          <div className={sectionHeaderStyle}>
+                            <span>📋 {empresaSoc.papel_no_grupo || "Sócio PJ / Controlada"} - {empresaSoc.razao_social} ({empresaSoc.cnpj})</span>
+                            <button onClick={() => {
+                              const novasEmp = [...analise.empresas_societario];
+                              novasEmp[empIndex].socios.push({nome:"", perc:0, funcao:"Sócio", figura_contrato:"Sim"});
+                              setAnalise({...analise, empresas_societario: novasEmp});
+                            }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Sócio</button>
+                          </div>
+                          <table className="w-full border-collapse">
+                          <thead>
+                              <tr><th className={thStyle}>Nome Civil / PJ Associada</th><th className={`${thStyle} w-24`}>Cotas (%)</th><th className={`${thStyle} w-64`}>Papel / Cargo</th><th className={`${thStyle} w-36`}>Assina Contrato?</th><th className={`${thStyle} w-8`}>-</th></tr>
+                          </thead>
+                          <tbody>
+                              {empresaSoc.socios.map((s, i) => (
+                              <tr key={i}>
+                                  <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
+                                  <td className={tdStyle}><input type="number" value={s.perc} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'perc', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/20`} /></td>
+                                  <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
+                                  <td className={tdStyle}>
+                                  <select value={s.figura_contrato} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'figura_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                                  </td>
+                                  <td className={`${tdStyle} text-center`}><button onClick={()=>rmArrayNested('empresas_societario', empIndex, 'socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                              </tr>
+                              ))}
+                          </tbody>
+                          </table>
+                      </div>
                     </div>
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr><th className={thStyle}>Razão Social</th><th className={`${thStyle} w-44`}>CNPJ</th><th className={`${thStyle} w-32`}>Data Fundação</th><th className={`${thStyle} w-24`}>Idade Aprox.</th><th className={`${thStyle} w-8`}>-</th></tr>
-                      </thead>
-                      <tbody>
-                        {analise.empresas_grupo.map((e, i) => (
-                          <tr key={i}>
-                            <td className={tdStyle}><input value={e.empresa} onChange={(e)=>updateArray('empresas_grupo', i, 'empresa', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input value={e.cnpj} onChange={(e)=>updateArray('empresas_grupo', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono`} /></td>
-                            <td className={tdStyle}><input value={e.fundacao} onChange={(e)=>updateArray('empresas_grupo', i, 'fundacao', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                            <td className={tdStyle}><input value={e.idade} onChange={(e)=>updateArray('empresas_grupo', i, 'idade', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('empresas_grupo', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  ))}
 
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 p-1">
-                    <div className="rounded border border-slate-200 overflow-hidden mb-2">
-                        <div className={sectionHeaderStyle}>
-                        <span>Quadro Societário Atual</span>
-                        <button onClick={() => addArray('socios', {nome:"", perc:0, funcao:"Sócio", figure_contrato:"Sim"})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Sócio</button>
-                        </div>
-                        <table className="w-full border-collapse">
-                        <thead>
-                            <tr><th className={thStyle}>Nome Civil / PJ Associada</th><th className={`${thStyle} w-24`}>Cotas (%)</th><th className={`${thStyle} w-64`}>Papel / Cargo</th><th className={`${thStyle} w-36`}>Figura no Contrato?</th><th className={`${thStyle} w-8`}>-</th></tr>
-                        </thead>
-                        <tbody>
-                            {analise.socios.map((s, i) => (
-                            <tr key={i}>
-                                <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArray('socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                                <td className={tdStyle}><input type="number" value={s.perc} onChange={(e)=>updateArray('socios', i, 'perc', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/20`} /></td>
-                                <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArray('socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
-                                <td className={tdStyle}>
-                                <select value={s.figure_contrato} onChange={(e)=>updateArray('socios', i, 'figure_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                                </td>
-                                <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
-                            </tr>
-                            ))}
-                        </tbody>
-                        </table>
-                    </div>
-                    <table className="w-full border-collapse rounded border border-slate-200 overflow-hidden">
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <table className="w-full border-collapse">
                       <tbody>
                         <tr>
                           <td className={`${thStyle} w-1/4 text-right`}>Regra de Assinatura Consolidada</td>
@@ -1073,11 +1157,23 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 4: FATURAMENTO E POTENCIAL */}
+              {/* ABA 4: FATURAMENTO E POTENCIAL (MODO GRUPO ECONÔMICO) */}
               {abaAtiva === "fat" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>Matriz de Faturamento Histórico Consolidado</div>
+                  
+                  {/* CARD DE POTENCIAL RECALCULADO BASEADO NO GRUPO */}
+                  <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700 max-w-4xl mx-auto">
+                      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
+                      <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Grupo Consolidado)</span>
+                      <span className="font-mono text-4xl font-black drop-shadow-md z-10 my-3">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <div className="text-[10px] text-indigo-200 mt-6 space-y-1.5 z-10 bg-black/10 p-3 rounded backdrop-blur-sm w-full max-w-sm text-left">
+                          <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
+                          <p className="border-t border-indigo-400/30 pt-1.5"><strong>Modelo:</strong> (Fat.Base ÷ 30) × Prazo × Compos(%) × APrazo(%)</p>
+                      </div>
+                  </div>
+
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
+                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900`}>📈 Soma Global de Faturamento (Todas as Filiais/Empresas)</div>
                     <div className="overflow-x-auto">
                       <table className="w-full border-collapse text-left min-w-[800px]">
                         <thead>
@@ -1095,65 +1191,68 @@ function MesaAnaliseConteudo() {
                             return (
                               <tr key={mes}>
                                 <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
-                                <td className={tdStyle}>
-                                  <MathInput value={analise.dados_faturamento["2026"]?.[mes]} onChange={(val) => handleFat("2026", mes, val)} className={numStyle} />
-                                </td>
+                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2026"]?.[mes]||0).toLocaleString("pt-BR")}</td>
                                 <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d26 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
-                                <td className={tdStyle}>
-                                  <MathInput value={analise.dados_faturamento["2025"]?.[mes]} onChange={(val) => handleFat("2025", mes, val)} className={numStyle} />
-                                </td>
+                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2025"]?.[mes]||0).toLocaleString("pt-BR")}</td>
                                 <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
-                                <td className={tdStyle}>
-                                  <MathInput value={analise.dados_faturamento["2024"]?.[mes]} onChange={(val) => handleFat("2024", mes, val)} className={numStyle} />
-                                </td>
+                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2024"]?.[mes]||0).toLocaleString("pt-BR")}</td>
                               </tr>
                             );
                           })}
-
                           <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
                             <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
                             <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
-                                {varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}
-                            </td>
+                            <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}</td>
                             <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
-                                {varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}
-                            </td>
+                            <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}</td>
                             <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR")}</td>
                           </tr>
-                          
-                          <tr className="bg-slate-200/50 border-t border-slate-300 font-bold text-[11px]">
-                            <td className="p-2 border border-slate-200 text-slate-700 text-right">MÉDIA GERAL (Mês)</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-800">{medGeral26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varMedGeral26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varMedGeral26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
-                                {varMedGeral26_25 === 0 ? "-" : `${varMedGeral26_25.toFixed(1)}%`}
-                            </td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{medGeral25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varMedGeral25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varMedGeral25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>
-                                {varMedGeral25_24 === 0 ? "-" : `${varMedGeral25_24.toFixed(1)}%`}
-                            </td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{medGeral24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                          </tr>
-
                           <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
-                            <td className="p-2 border border-indigo-100 text-indigo-900 text-right" title="Média pareada apenas dos meses preenchidos no ano corrente">
-                                {labelMascaraYTD}
-                            </td>
+                            <td className="p-2 border border-indigo-100 text-indigo-900 text-right">{labelMascaraYTD}</td>
                             <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>
-                              {varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}
-                            </td>
+                            <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}</td>
                             <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>
-                              {varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}
-                            </td>
+                            <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}</td>
                             <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
+
+                  {analise.empresas_faturamento.map((empFat, empIndex) => (
+                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
+                      <div className={sectionHeaderStyle}>Faturamento Analítico (Apenas {empFat.razao_social} - {empFat.cnpj})</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-left min-w-[800px]">
+                          <thead>
+                            <tr>
+                              <th className={`${thStyle} w-28 text-left`}>Mês Referência</th>
+                              <th className={thStyle}>Realizado 2026 (R$)</th>
+                              <th className={thStyle}>Realizado 2025 (R$)</th>
+                              <th className={thStyle}>Realizado 2024 (R$)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {meses.map((mes) => (
+                              <tr key={mes}>
+                                <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
+                                <td className={tdStyle}>
+                                  <MathInput value={empFat.faturamento["2026"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2026", mes, val)} className={numStyle} />
+                                </td>
+                                <td className={tdStyle}>
+                                  <MathInput value={empFat.faturamento["2025"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2025", mes, val)} className={numStyle} />
+                                </td>
+                                <td className={tdStyle}>
+                                  <MathInput value={empFat.faturamento["2024"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2024", mes, val)} className={numStyle} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
@@ -1192,17 +1291,6 @@ function MesaAnaliseConteudo() {
                         </tbody>
                       </table>
                     </div>
-                    
-                    <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700">
-                      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
-                      <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Mensal)</span>
-                      <span className="font-mono text-4xl font-black drop-shadow-md z-10 my-3">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      
-                      <div className="text-[10px] text-indigo-200 mt-6 space-y-1.5 z-10 bg-black/10 p-3 rounded backdrop-blur-sm w-full max-w-sm text-left">
-                          <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
-                          <p className="border-t border-indigo-400/30 pt-1.5"><strong>Modelo:</strong> (Fat.Base ÷ 30) × Prazo × Compos(%) × APrazo(%)</p>
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
@@ -1211,12 +1299,12 @@ function MesaAnaliseConteudo() {
               {abaAtiva === "endividamento" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900`}>Radar de Alavancagem Global (Visão Cedente)</div>
+                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900`}>Radar de Alavancagem Global do Grupo (Consolidado)</div>
                     <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>Passivo Curto Prazo</th>
-                          <th className={thStyle}>Passivo Longo Prazo</th>
+                          <th className={thStyle}>Passivo CP</th>
+                          <th className={thStyle}>Passivo LP</th>
                           <th className={`${thStyle} bg-rose-50 text-rose-800 border-rose-200`}>ENDIVIDAMENTO TOTAL</th>
                           <th className={thStyle}>Pressão Antecipação DPLS (CP)</th>
                           <th className={thStyle}>Concentração Fundos</th>
@@ -1238,56 +1326,57 @@ function MesaAnaliseConteudo() {
                         </tr>
                         <tr>
                           <td colSpan={7} className="p-3 text-center text-[11px] text-slate-600 bg-slate-100/50 font-sans border-t border-slate-200">
-                            Multiplicador de Alavancagem base faturamento: <strong className="text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-300 ml-1 shadow-sm">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento médio.
+                            Multiplicador de Alavancagem do Grupo: <strong className="text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-300 ml-1 shadow-sm">{faturamentoMedioReferencia > 0 ? (totEndivGeral / faturamentoMedioReferencia).toFixed(2) : "0.00"} x</strong> o faturamento consolidado.
                           </td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>
-                      <span>Mapa de Dívidas Declaradas (Balancete/Documentos)</span>
-                      <button onClick={() => addArray('endividamento_detalhado', {instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Nova Instituição</button>
-                    </div>
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr>
-                          <th className={thStyle}>Credor Oficial</th>
-                          <th className={thStyle}>Linha / Modalidade</th>
-                          <th className={`${thStyle} w-48 text-right`}>Saldo Aberto Estimado (R$)</th>
-                          <th className={`${thStyle} w-32`}>Categoria Mercado</th>
-                          <th className={`${thStyle} w-32`}>Vencimento Original</th>
-                          <th className={`${thStyle} w-8`}>-</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {analise.endividamento_detalhado.map((div, i) => (
-                          <tr key={i}>
-                            <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArray('endividamento_detalhado', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} placeholder="Nome do Banco/FIDC..." /></td>
-                            <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArray('endividamento_detalhado', i, 'modalidade', e.target.value)} className={cellStyle} placeholder="Ex: Capital de Giro, Antecipação..." /></td>
-                            <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-rose-600 bg-rose-50/10`} /></td>
-                            <td className={tdStyle}>
-                              <select value={div.tipo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'tipo', e.target.value)} className={cellStyle}>
-                                <option value="Banco">Banco</option><option value="Fundo">FIDC/SEC</option>
-                              </select>
-                            </td>
-                            <td className={tdStyle}>
-                              <select value={div.prazo} onChange={(e)=>updateArray('endividamento_detalhado', i, 'prazo', e.target.value)} className={cellStyle}>
-                                <option value="Curto Prazo">Curto Prazo (CP)</option><option value="Longo Prazo">Longo Prazo (LP)</option>
-                              </select>
-                            </td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('endividamento_detalhado', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                  {analise.empresas_endividamento.map((empEndiv, empIndex) => (
+                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
+                      <div className={sectionHeaderStyle}>
+                        <span>🏦 Dívidas Mapeadas (Apenas {empEndiv.razao_social} - {empEndiv.cnpj})</span>
+                        <button onClick={() => {
+                          const novasEmp = [...analise.empresas_endividamento];
+                          novasEmp[empIndex].endividamento.push({instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"});
+                          setAnalise({...analise, empresas_endividamento: novasEmp});
+                        }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Linha Crédito</button>
+                      </div>
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr>
+                            <th className={thStyle}>Credor Oficial</th>
+                            <th className={thStyle}>Linha / Modalidade</th>
+                            <th className={`${thStyle} w-48 text-right`}>Saldo Aberto Estimado (R$)</th>
+                            <th className={`${thStyle} w-32`}>Categoria Mercado</th>
+                            <th className={`${thStyle} w-32`}>Vencimento Original</th>
+                            <th className={`${thStyle} w-8`}>-</th>
                           </tr>
-                        ))}
-                        <tr className="bg-slate-100 border-t-2 border-slate-300">
-                          <td colSpan={2} className="p-2 text-right font-bold text-[11px] text-slate-700 tracking-wide">SOMA TOTAL MAPEADA ACIMA</td>
-                          <td className="p-2 text-right font-mono font-bold text-rose-700 text-[12px]">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
-                          <td colSpan={3}></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {empEndiv.endividamento.map((div, i) => (
+                            <tr key={i}>
+                              <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} placeholder="Nome do Banco/FIDC..." /></td>
+                              <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'modalidade', e.target.value)} className={cellStyle} placeholder="Ex: Capital de Giro..." /></td>
+                              <td className={tdStyle}><input type="number" value={div.saldo} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-rose-600 bg-rose-50/10`} /></td>
+                              <td className={tdStyle}>
+                                <select value={div.tipo} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'tipo', e.target.value)} className={cellStyle}>
+                                  <option value="Banco">Banco</option><option value="Fundo">FIDC/SEC</option>
+                                </select>
+                              </td>
+                              <td className={tdStyle}>
+                                <select value={div.prazo} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'prazo', e.target.value)} className={cellStyle}>
+                                  <option value="Curto Prazo">Curto Prazo (CP)</option><option value="Longo Prazo">Longo Prazo (LP)</option>
+                                </select>
+                              </td>
+                              <td className={`${tdStyle} text-center`}><button onClick={()=>rmArrayNested('empresas_endividamento', empIndex, 'endividamento', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
 
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>
@@ -1299,51 +1388,38 @@ function MesaAnaliseConteudo() {
                         <thead>
                           <tr>
                             <th className={thStyle}>Agente Financeiro</th><th className={thStyle}>Rating/RNX</th><th className={`${thStyle} w-24`}>Início Relac.</th><th className={`${thStyle} w-24`}>Última Operação</th>
-                            <th className={`${thStyle} w-28 text-right`}>VOP (R$)</th> {/* NOVO CAMPO */}
+                            <th className={`${thStyle} w-28 text-right`}>VOP (R$)</th>
                             <th className={`${thStyle} w-28 text-right`}>Limite Aprovado</th><th className={`${thStyle} w-28 text-right`}>Carteira Total</th>
                             <th className={`${thStyle} w-24 text-right bg-indigo-50 border-indigo-200`}>Risco 1 (R$)</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Tipo Op 1</th><th className={`${thStyle} bg-indigo-50 border-indigo-200`}>Vcto Final 1</th>
                             <th className={`${thStyle} w-24 text-right bg-amber-50 border-amber-200`}>Risco 2 (R$)</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Tipo Op 2</th><th className={`${thStyle} bg-amber-50 border-amber-200`}>Vcto Final 2</th>
-                            
-                            {/* COLUNAS DE LIQUIDEZ REORDENADAS */}
                             <th className={thStyle}>Liq. Pontual (%)</th><th className={thStyle}>Atrasos (Até 5D) (%)</th><th className={`${thStyle} bg-slate-200`}>Liq. 5 Dias (Total)</th><th className={thStyle}>Atrasos (15D+)</th>
-                            
                             <th className={thStyle}>Freq. Recompra</th><th className={thStyle}>Concentração Máx</th><th className={`${thStyle} w-8`}>-</th>
                           </tr>
                         </thead>
                         <tbody>
                           {analise.referencias.map((ref, i) => {
                              const calcLiq5 = (Number(ref.liquidez_pontual) || 0) + (Number(ref.atraso_5_dias) || 0);
-
                              return (
                             <tr key={i}>
                               <td className={tdStyle}><input value={ref.instituicao} onChange={(e)=>updateArray('referencias', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} /></td>
                               <td className={tdStyle}><input value={ref.rnx} onChange={(e)=>updateArray('referencias', i, 'rnx', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="date" value={ref.cliente_desde} onChange={(e)=>updateArray('referencias', i, 'cliente_desde', e.target.value)} className={`${cellStyle} text-center`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.ultima_operacao} onChange={(e)=>updateArray('referencias', i, 'ultima_operacao', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                              
-                              {/* NOVO CAMPO VOP */}
                               <td className={tdStyle}><input type="number" value={ref.vop || ""} onChange={(e)=>updateArray('referencias', i, 'vop', Number(e.target.value))} className={`${numStyle} font-bold text-slate-700`} /></td>
-                              
                               <td className={tdStyle}><input type="number" value={ref.limite_global} onChange={(e)=>updateArray('referencias', i, 'limite_global', Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold bg-indigo-50/20`} /></td>
                               <td className={tdStyle}><input type="number" value={ref.risco_total} onChange={(e)=>updateArray('referencias', i, 'risco_total', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
-                              
                               <td className={tdStyle}><input type="number" value={ref.risco_1} onChange={(e)=>updateArray('referencias', i, 'risco_1', Number(e.target.value))} className={`${numStyle} bg-indigo-50/50`} /></td>
                               <td className={tdStyle}><input value={ref.operacao_1} onChange={(e)=>updateArray('referencias', i, 'operacao_1', e.target.value)} className={`${cellStyle} bg-indigo-50/50`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.vcto_1} onChange={(e)=>updateArray('referencias', i, 'vcto_1', e.target.value)} className={`${cellStyle} bg-indigo-50/50 text-center`} /></td>
-                              
                               <td className={tdStyle}><input type="number" value={ref.risco_2} onChange={(e)=>updateArray('referencias', i, 'risco_2', Number(e.target.value))} className={`${numStyle} bg-amber-50/50`} /></td>
                               <td className={tdStyle}><input value={ref.operacao_2} onChange={(e)=>updateArray('referencias', i, 'operacao_2', e.target.value)} className={`${cellStyle} bg-amber-50/50`} /></td>
                               <td className={tdStyle}><input type="date" value={ref.vcto_2} onChange={(e)=>updateArray('referencias', i, 'vcto_2', e.target.value)} className={`${cellStyle} bg-amber-50/50 text-center`} /></td>
-                              
-                              {/* LIQUIDEZ CALCULADA */}
                               <td className={tdStyle}><input type="number" value={ref.liquidez_pontual || ""} onChange={(e)=>updateArray('referencias', i, 'liquidez_pontual', Number(e.target.value))} className={numStyle} /></td>
                               <td className={tdStyle}><input type="number" value={ref.atraso_5_dias || ""} onChange={(e)=>updateArray('referencias', i, 'atraso_5_dias', Number(e.target.value))} className={numStyle} /></td>
                               <td className={`${tdStyle} bg-slate-100`}><input type="number" value={calcLiq5} disabled className={`${numStyle} bg-slate-100 font-bold text-indigo-700`} /></td>
                               <td className={tdStyle}><input type="number" value={ref.atraso_15_dias || ""} onChange={(e)=>updateArray('referencias', i, 'atraso_15_dias', Number(e.target.value))} className={numStyle} /></td>
-                              
                               <td className={tdStyle}><input value={ref.recompra} onChange={(e)=>updateArray('referencias', i, 'recompra', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="number" value={ref.concentracao} onChange={(e)=>updateArray('referencias', i, 'concentracao', Number(e.target.value))} className={`${numStyle} text-center`} placeholder="%" /></td>
-                              
                               <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('referencias', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
                             </tr>
                           )})}
@@ -1357,82 +1433,61 @@ function MesaAnaliseConteudo() {
               {/* ABA 6: RESTRITIVOS E JURÍDICO */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>Painel de Apontamentos do Bureau (Serasa/Boa Vista)</div>
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr><th className={thStyle}>Pefin</th><th className={thStyle}>Refin</th><th className={thStyle}>Protestos</th><th className={thStyle}>Dívidas Vencidas</th><th className={thStyle}>Ações Judiciais (Cíveis/Trab)</th><th className={thStyle}>Cheques Devolvidos</th></tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.pefin} onChange={(e)=>updateNested("restritivos_quadro", "pefin", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.refin} onChange={(e)=>updateNested("restritivos_quadro", "refin", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.protesto} onChange={(e)=>updateNested("restritivos_quadro", "protesto", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.div_vencida} onChange={(e)=>updateNested("restritivos_quadro", "div_vencida", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.acao_judicial} onChange={(e)=>updateNested("restritivos_quadro", "acao_judicial", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                          <td className={tdStyle}><input type="number" value={analise.restritivos_quadro.cheque_sem_fundo} onChange={(e)=>updateNested("restritivos_quadro", "cheque_sem_fundo", Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>
-                      <span>Extrato Restritivo Detalhado</span>
-                      <button onClick={() => addArray('restritivos', {empresa_socio:"", restritivo:"", qtd:1, valor:0, data:"", observacao:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Incluir Apontamento</button>
-                    </div>
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr>
-                          <th className={thStyle}>Requerido (CNPJ / Sócio)</th><th className={thStyle}>Natureza do Apontamento</th>
-                          <th className={`${thStyle} w-16`}>Vol.</th><th className={`${thStyle} w-40 text-right`}>Valor Acumulado (R$)</th>
-                          <th className={`${thStyle} w-28`}>Data Ocorrência</th><th className={`${thStyle} w-64`}>Observações Relevantes</th>
-                          <th className={`${thStyle} w-8`}>-</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {analise.restritivos.map((r, i) => (
-                          <tr key={i}>
-                            <td className={tdStyle}><input value={r.empresa_socio} onChange={(e)=>updateArray('restritivos', i, 'empresa_socio', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                            <td className={tdStyle}><input value={r.restritivo} onChange={(e)=>updateArray('restritivos', i, 'restritivo', e.target.value)} className={cellStyle} placeholder="Ex: Ação Trabalhista, Protesto Cartório..." /></td>
-                            <td className={tdStyle}><input type="number" value={r.qtd} onChange={(e)=>updateArray('restritivos', i, 'qtd', Number(e.target.value))} className={`${numStyle} text-center`} /></td>
-                            <td className={tdStyle}><input type="number" value={r.valor} onChange={(e)=>updateArray('restritivos', i, 'valor', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
-                            <td className={tdStyle}><input type="date" value={r.data} onChange={(e)=>updateArray('restritivos', i, 'data', e.target.value)} className={`${cellStyle} text-center`} /></td>
-                            <td className={tdStyle}><input value={r.observacao} onChange={(e)=>updateArray('restritivos', i, 'observacao', e.target.value)} className={cellStyle} /></td>
-                            <td className={`${tdStyle} text-center`}><button onClick={()=>rmArray('restritivos', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
-                          </tr>
-                        ))}
-                        <tr className="bg-slate-100 border-t-2 border-slate-300">
-                          <td colSpan={3} className="p-2 text-right font-bold tracking-wide uppercase text-[10px] text-slate-700">Risco Restritivo Total Calculado</td>
-                          <td className="p-2 text-right font-mono font-bold text-rose-700 text-[12px]">R$ {totRestritivos.toLocaleString("pt-BR")}</td>
-                          <td colSpan={3}></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-8">
-                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                      <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex gap-3 items-center`}>
-                         <span>⚖️ Dossier Jurídico Textual (Crawler Jusbrasil / Kappi)</span>
-                         {analise.status === "em_processamento_ia" && <span className="bg-purple-500 text-white font-bold text-[9px] px-2 py-0.5 rounded animate-pulse">EXTRAINDO PROCESSOS...</span>}
+                  
+                  {analise.empresas_serasa.map((empSerasa, empIndex) => (
+                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
+                      <div className={sectionHeaderStyle}>
+                        <span>⚠️ Serasa/BoaVista - {empSerasa.nome_entidade} ({empSerasa.documento})</span>
+                        <button onClick={() => {
+                          const novasEmp = [...analise.empresas_serasa];
+                          novasEmp[empIndex].restritivos.push({tipo_restritivo:"Protesto", quantidade_somada:1, valor_somado:0, data_mais_recente:"", credores_resumo:""});
+                          setAnalise({...analise, empresas_serasa: novasEmp});
+                        }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Restritivo</button>
                       </div>
-                      <textarea 
-                         value={analise.dados_juridico?.relatorio_completo || ""} 
-                         onChange={(e)=>updateNested("dados_juridico", "relatorio_completo", e.target.value)} 
-                         className="w-full h-72 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 leading-relaxed focus:bg-white transition-colors" 
-                         placeholder="Aguardando consolidação inteligente ou digite a síntese dos principais litígios trabalhistas, cíveis e tributários..."
-                      />
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr>
+                            <th className={thStyle}>Natureza do Apontamento</th><th className={`${thStyle} w-16`}>Vol.</th>
+                            <th className={`${thStyle} w-40 text-right`}>Valor Acumulado (R$)</th><th className={`${thStyle} w-28`}>Data Ocorrência</th>
+                            <th className={`${thStyle} w-64`}>Credores ou Cartórios</th><th className={`${thStyle} w-8`}>-</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {empSerasa.restritivos.map((r, i) => (
+                            <tr key={i}>
+                              <td className={tdStyle}><input value={r.tipo_restritivo || r.restritivo} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'tipo_restritivo', e.target.value)} className={`${cellStyle} font-bold text-rose-700`} /></td>
+                              <td className={tdStyle}><input type="number" value={r.quantidade_somada || r.qtd} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'quantidade_somada', Number(e.target.value))} className={`${numStyle} text-center`} /></td>
+                              <td className={tdStyle}><input type="number" value={r.valor_somado || r.valor} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'valor_somado', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
+                              <td className={tdStyle}><input type="date" value={r.data_mais_recente || r.data} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'data_mais_recente', e.target.value)} className={`${cellStyle} text-center`} /></td>
+                              <td className={tdStyle}><input value={r.credores_resumo || r.observacao} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'credores_resumo', e.target.value)} className={cellStyle} /></td>
+                              <td className={`${tdStyle} text-center`}><button onClick={()=>rmArrayNested('empresas_serasa', empIndex, 'restritivos', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                      <div className={sectionHeaderStyle}>Clipping, Pesquisas Reputacionais e Mídia</div>
-                      <textarea 
-                        value={analise.noticias_midia} 
-                        onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
-                        className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
-                        placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
-                      />
+                  ))}
+
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex gap-3 items-center`}>
+                        <span>⚖️ Dossier Jurídico Textual Consolidado do Grupo (Kappi / Jusbrasil)</span>
+                        {analise.status === "em_processamento_ia" && <span className="bg-purple-500 text-white font-bold text-[9px] px-2 py-0.5 rounded animate-pulse">EXTRAINDO PROCESSOS...</span>}
                     </div>
+                    <textarea 
+                        value={analise.dados_juridico?.relatorio_completo || ""} 
+                        onChange={(e)=>updateNested("dados_juridico", "relatorio_completo", e.target.value)} 
+                        className="w-full h-72 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 leading-relaxed focus:bg-white transition-colors" 
+                        placeholder="Aguardando consolidação inteligente ou digite a síntese dos principais litígios trabalhistas, cíveis e tributários..."
+                    />
+                  </div>
+                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={sectionHeaderStyle}>Clipping, Pesquisas Reputacionais e Mídia</div>
+                    <textarea 
+                      value={analise.noticias_midia} 
+                      onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
+                      className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
+                      placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
+                    />
                   </div>
                 </div>
               )}
@@ -1440,7 +1495,6 @@ function MesaAnaliseConteudo() {
               {/* ABA 7: PARECER FINAL */}
               {abaAtiva === "parecer" && (
                 <div className="space-y-8 max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-300">
-                
                   <div className="bg-white rounded-md shadow-md border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-indigo-900 border-indigo-900 pb-3 pt-3`}>
                       <span className="text-sm">Voto e Justificativa Técnica da Mesa de Crédito (Analista)</span>
