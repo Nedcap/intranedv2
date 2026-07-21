@@ -10,7 +10,6 @@ export async function POST(request: Request) {
 
     const docLimpo = String(documento).replace(/\D/g, "");
     
-    // Pega a chave limpa (remove espaços em branco acidentais do início/fim)
     const rawApiKey = process.env.CREDITHUB_API_KEY; 
     const apiKey = rawApiKey ? rawApiKey.trim() : null;
 
@@ -18,25 +17,19 @@ export async function POST(request: Request) {
       throw new Error("Chave do CreditHub não localizada no process.env do servidor.");
     }
 
-    // Protege a chave contra caracteres especiais que quebram a URL do GET
     const apiKeyTratada = encodeURIComponent(apiKey);
-
-    // URL oficial com o Serasa
     const urlCreditHub = `https://irql.credithub.com.br/simples/${apiKeyTratada}/${docLimpo}?serasa=true`;
 
     console.log("🔗 Disparando consulta estruturada para o CreditHub...");
 
     const response = await fetch(urlCreditHub, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       cache: "no-store" 
     });
 
     const textData = await response.text();
 
-    // 🛡️ Captura o erro em XML (<BPQL>)
     if (textData.trim().startsWith("<")) {
       const match = textData.match(/<exception[^>]*>(.*?)<\/exception>/);
       const erroReal = match ? match[1] : "Erro de autenticação/parâmetros no CreditHub.";
@@ -44,7 +37,7 @@ export async function POST(request: Request) {
       
       return NextResponse.json({ 
         error: "Erro de Autenticação", 
-        details: `CreditHub respondeu: "${erroReal}". Verifique se o Token no Vercel está correto.` 
+        details: `CreditHub respondeu: "${erroReal}"` 
       }, { status: 400 });
     }
 
@@ -57,42 +50,42 @@ export async function POST(request: Request) {
     const data = json.data || {};
     
     // =========================================================================
-    // 1. EXTRAÇÃO DE RESTRIÇÕES (SERASA)
+    // 1. EXTRAÇÃO DE RESTRIÇÕES (Mapeando o nó REFIN/SPC real do JSON)
     // =========================================================================
-    const infoSerasa = json.informacoes?.[0] || data.pefin?.[0] || {};
-    const qtdDividas = data.quantidade_dividas || infoSerasa.total || infoSerasa.totalPendenciasFinanceiras || 0;
-    const valorTotal = parseFloat(data.valor_total_dividas || infoSerasa.valorTotalPendencias || infoSerasa.valorTotalPendenciasFinanceiras || 0);
+    const refin = data.refin || {};
+    const spc = refin.spc?.[0] || []; 
     
+    let qtdDividas = 0;
+    let valorTotal = 0;
+
+    // Varre o array de dívidas para somar os valores corretamente
+    const credores = spc.map((divida: any) => {
+      qtdDividas++;
+      // Transforma "57298,94" em float numérico
+      const valorNumerico = parseFloat(String(divida.Valor).replace(/\./g, "").replace(",", "."));
+      valorTotal += isNaN(valorNumerico) ? 0 : valorNumerico;
+
+      return {
+        credor: divida.NomeAssociado,
+        valor: divida.Valor,
+        vencimento: divida.DataDoVencimento
+      };
+    });
+
     const resumoRestritivos = {
       possui_apontamento: qtdDividas > 0,
       quantidade_dividas: qtdDividas,
       valor_total_dividas: valorTotal,
       ccf: data.ccf || null,
-      protestos: data.protestos || null,
-      pefin_serasa: infoSerasa.bello || null,
+      pefin_serasa: credores, // Repassa a lista de credores
     };
 
     // =========================================================================
-    // 2. EXTRAÇÃO DOS PROCESSOS (DATAJUD/CNJ)
-    // A documentação diz que vem num formato: { total: X, content: [...] }
-    // =========================================================================
-    const dadosProcessos = data.processos || {};
-    const processosArray = dadosProcessos.content || [];
-    
-    // Mapeamento simples para garantir que o front-end receba sempre o mesmo formato
-    const processosLimpos = processosArray.map((proc: any) => ({
-      numero: proc.numero_processo || proc.numero || "S/N",
-      classe: proc.classe_judicial || proc.classe || "Não Informada",
-      tribunal: proc.tribunal || proc.orgao || "N/D",
-    }));
-
-    // =========================================================================
-    // 3. DEVOLVE TUDO DE UMA SÓ VEZ
+    // 2. DEVOLVE TUDO
     // =========================================================================
     return NextResponse.json({ 
       resumo: resumoRestritivos,
-      processos: processosLimpos,
-      ficha_cadastral: data, // Manda o resto (CNAE, Endereço, etc)
+      ficha_cadastral: data.rfb || {}, // Passa os dados da Receita (Socios, Enderecos) isolados
       raw_completo: json
     });
 

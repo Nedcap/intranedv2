@@ -28,10 +28,7 @@ export default function PreAnalisePage() {
       .order("criado_em", { ascending: false })
       .limit(10);
       
-    if (error) {
-      console.error("❌ Erro ao puxar histórico do Supabase:", error);
-    }
-    
+    if (error) console.error("❌ Erro ao puxar histórico:", error);
     if (data) setHistorico(data);
   };
 
@@ -42,9 +39,9 @@ export default function PreAnalisePage() {
     return { cor: "bg-emerald-500 text-white", label: "🟢 Baixo", peso: 1 };
   };
 
-  const executarPreAnalise = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!busca.trim()) return;
+  // 🔥 LÓGICA SEPARADA PARA PODER SER CHAMADA PELO HISTÓRICO OU PELO FORM
+  const rodarVarredura = async (cnpjAlvo: string) => {
+    if (!cnpjAlvo.trim()) return;
 
     try {
       setCarregando(true);
@@ -53,9 +50,8 @@ export default function PreAnalisePage() {
       setDadosFinanceiros(null);
       setMostrarJsonBruto(false);
 
-      const documentoLimpo = busca.replace(/\D/g, "");
+      const documentoLimpo = cnpjAlvo.replace(/\D/g, "");
 
-      // 1. 🔍 BATE NO BIGQUERY (Receita Federal)
       const resBq = await fetch("/api/buscar-cnpj", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -69,21 +65,32 @@ export default function PreAnalisePage() {
         return;
       }
 
-      // 2. 💳 BATE NO CREDITHUB (UNIFICADO: Traz Serasa, QSA e Processos de uma vez só!)
-      const resCreditHub = await fetch("/api/restritivos", {
+      // DISPARA AS DUAS REQUISIÇÕES EM PARALELO
+      const reqProcessos = fetch("/api/processos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documento: documentoLimpo })
       });
 
-      let financeiro = null;
-      let processos = [];
+      const reqFinanceiro = fetch("/api/restritivos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documento: documentoLimpo })
+      });
 
-      if (resCreditHub.ok) {
-        financeiro = await resCreditHub.json();
-        processos = financeiro.processos || []; // 🔥 Puxa os processos direto da mesma resposta!
+      const [resProcessos, resFinanceiro] = await Promise.all([reqProcessos, reqFinanceiro]);
+
+      let processos = [];
+      if (resProcessos.ok) {
+        const dataProc = await resProcessos.json();
+        processos = dataProc.processos || [];
+      }
+
+      let financeiro = null;
+      if (resFinanceiro.ok) {
+        financeiro = await resFinanceiro.json();
       } else {
-        const errData = await resCreditHub.json().catch(() => ({}));
+        const errData = await resFinanceiro.json().catch(() => ({}));
         financeiro = { erro: true, mensagem: errData.details || errData.error || "Falha de conexão com o CreditHub." };
       }
 
@@ -104,7 +111,6 @@ export default function PreAnalisePage() {
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
 
-      // Salvamento no histórico (Usando documentoLimpo para não estourar o varchar(20) do banco)
       const { error: insertError } = await supabase.from("pre_analises").insert({
         documento_alvo: documentoLimpo,
         nome_empresa_lead: dataBq.empresa.razao_social || "Razão Social Indisponível",
@@ -114,11 +120,7 @@ export default function PreAnalisePage() {
         dados_processos: processos
       });
 
-      if (insertError) {
-        console.error("❌ Erro ao registrar log de consulta no banco:", insertError);
-      } else {
-        await carregarHistorico();
-      }
+      if (!insertError) await carregarHistorico();
 
       setDadosEmpresa({
         razao_social: dataBq.empresa.razao_social,
@@ -137,16 +139,15 @@ export default function PreAnalisePage() {
     }
   };
 
+  const executarPreAnalise = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await rodarVarredura(busca);
+  };
+
   const formatarMoeda = (valor: number | string) => {
     const v = typeof valor === 'string' ? parseFloat(valor) : valor;
     if (isNaN(v)) return 'R$ 0,00';
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-  };
-
-  const enviarParaMesa = () => {
-    if (dadosEmpresa) {
-      router.push(`/dashboard/motor-credito/envio-analise?cnpj=${dadosEmpresa.cnpj.replace(/\D/g, "")}`);
-    }
   };
 
   const formatarData = (dataIso: string) => {
@@ -161,7 +162,13 @@ export default function PreAnalisePage() {
     return "bg-emerald-100 text-emerald-700 border-emerald-200";
   };
 
-  // Variáveis de atalho para os dados ricos da API
+  const enviarParaMesa = () => {
+    if (dadosEmpresa) {
+      router.push(`/dashboard/motor-credito/envio-analise?cnpj=${dadosEmpresa.cnpj.replace(/\D/g, "")}`);
+    }
+  };
+
+  // Variáveis de atalho
   const resumo = dadosFinanceiros?.resumo;
   const ficha = dadosFinanceiros?.ficha_cadastral || {};
 
@@ -169,7 +176,6 @@ export default function PreAnalisePage() {
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans antialiased text-[13px]">
       <div className="max-w-[1600px] mx-auto space-y-6">
         
-        {/* HEADER */}
         <div className="border-b border-slate-200 pb-3 flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
@@ -190,14 +196,12 @@ export default function PreAnalisePage() {
           </form>
         </div>
 
-        {/* CONTEÚDO DA PRÉ-ANÁLISE ATUAL */}
         {dadosEmpresa && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start animate-in fade-in">
             
             {/* COLUNA ESQUERDA (DADOS CADASTRAIS RICOS) */}
             <div className="space-y-6 xl:col-span-1">
               
-              {/* FICHA GERAL */}
               <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
                 <div className="border-b border-slate-100 pb-3 mb-4">
                   <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Identidade Corporativa</span>
@@ -213,47 +217,38 @@ export default function PreAnalisePage() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center border-b border-slate-50 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Idade / Abertura</span>
-                    <span className="font-bold text-xs text-slate-700">{ficha.idadeEmpresa ? `${ficha.idadeEmpresa} anos` : '-'} ({ficha.dataAbertura || '-'})</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Abertura</span>
+                    <span className="font-bold text-xs text-slate-700">{ficha.data_abertura || '-'}</span>
                   </div>
                   <div className="flex justify-between items-center border-b border-slate-50 pb-2">
                     <span className="text-[10px] font-bold text-slate-400 uppercase">Capital Social</span>
-                    <span className="font-bold text-xs text-slate-700">{formatarMoeda(ficha.capitalSocial || dadosEmpresa.capital_social)}</span>
-                  </div>
-                  <div className="flex justify-between items-center border-b border-slate-50 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Porte</span>
-                    <span className="font-bold text-xs text-slate-700">{ficha.porteEmpresa || '-'}</span>
+                    <span className="font-bold text-xs text-slate-700">{formatarMoeda(ficha.capital_social || dadosEmpresa.capital_social)}</span>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">CNAE Principal</span>
-                    <span className="font-bold text-[11px] text-slate-700 leading-tight block bg-slate-50 p-2 rounded">{ficha.cnae} - {ficha.cnaeDescricao || 'Não informado'}</span>
+                    <span className="font-bold text-[11px] text-slate-700 leading-tight block bg-slate-50 p-2 rounded">{ficha.atividade_economica || 'Não informado'}</span>
                   </div>
                 </div>
               </div>
 
-              {/* CONTATOS E LOCALIZAÇÃO */}
               <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
                 <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest border-b border-slate-100 pb-2 block">Localização & Contato</span>
                 
                 {ficha.enderecos && ficha.enderecos.length > 0 && (
                   <div className="bg-slate-50 p-3 rounded-lg text-xs font-medium text-slate-600 border border-slate-100">
-                    📍 {ficha.enderecos[0].logradouro}, {ficha.enderecos[0].numero} - {ficha.enderecos[0].bairro}, {ficha.enderecos[0].cidade} / {ficha.enderecos[0].uf}
+                    📍 {ficha.enderecos[0].logradouro}, {ficha.enderecos[0].numero} {ficha.enderecos[0].complemento ? `- ${ficha.enderecos[0].complemento}` : ''} - {ficha.enderecos[0].bairro}, {ficha.enderecos[0].municipio} / {ficha.enderecos[0].uf}
                   </div>
                 )}
                 
-                {ficha.telefones && ficha.telefones.length > 0 && (
+                {ficha.telefones && (
                   <div className="flex flex-wrap gap-2">
-                    {ficha.telefones.slice(0, 3).map((tel: any, i: number) => (
-                      <span key={i} className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-md text-[10px] font-bold font-mono">📞 {tel.numero || tel}</span>
-                    ))}
+                    <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-md text-[10px] font-bold font-mono">📞 {ficha.telefones}</span>
                   </div>
                 )}
                 
-                {ficha.emails && ficha.emails.length > 0 && (
+                {ficha.email && (
                   <div className="flex flex-wrap gap-2">
-                    {ficha.emails.slice(0, 2).map((email: any, i: number) => (
-                      <span key={i} className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">✉️ {email.endereco || email}</span>
-                    ))}
+                    <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">✉️ {ficha.email.toLowerCase()}</span>
                   </div>
                 )}
               </div>
@@ -263,10 +258,11 @@ export default function PreAnalisePage() {
               </button>
             </div>
 
-            {/* COLUNA CENTRAL E DIREITA (FINANCEIRO + QSA + PROCESSOS) */}
+            {/* COLUNA CENTRAL E DIREITA */}
             <div className="xl:col-span-2 space-y-6 flex flex-col">
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
                 {/* PAINEL FINANCEIRO */}
                 <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col">
                   <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
@@ -323,14 +319,13 @@ export default function PreAnalisePage() {
                   </div>
                   
                   <div className="flex-1 overflow-y-auto max-h-56 custom-scrollbar pr-1">
-                    {ficha.quadroSocietario && ficha.quadroSocietario.length > 0 ? (
+                    {ficha.socios && ficha.socios.length > 0 ? (
                       <div className="space-y-2">
-                        {ficha.quadroSocietario.map((socio: any, i: number) => (
+                        {ficha.socios.map((socio: any, i: number) => (
                           <div key={i} className="p-3 bg-amber-50/30 border border-amber-100 rounded-lg">
                             <span className="block text-xs font-black text-slate-800 uppercase">{socio.nome}</span>
                             <div className="flex justify-between mt-1">
                               <span className="text-[10px] text-slate-500 font-bold uppercase">{socio.qualificacao || 'Sócio'}</span>
-                              <span className="text-[10px] font-mono text-slate-400">{socio.documento || socio.cpf || ''}</span>
                             </div>
                           </div>
                         ))}
@@ -398,9 +393,6 @@ export default function PreAnalisePage() {
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* 📚 TABELA DE HISTÓRICO DE CONSULTAS */}
-        {/* ========================================================= */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
           <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
             <h3 className="font-black text-slate-800 text-sm uppercase tracking-wider">📚 Histórico de Consultas (Últimas 10)</h3>
@@ -413,7 +405,7 @@ export default function PreAnalisePage() {
           </div>
           
           <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse text-[12px] min-w-[800px]">
+            <table className="w-full text-left border-collapse text-[12px] min-w-[900px]">
               <thead className="bg-slate-100 border-b border-slate-200">
                 <tr className="text-slate-500 font-black uppercase text-[10px] tracking-wider h-11">
                   <th className="p-4">Data / Hora</th>
@@ -422,6 +414,7 @@ export default function PreAnalisePage() {
                   <th className="p-4 text-center">Processos</th>
                   <th className="p-4 text-center">Risco Apurado</th>
                   <th className="p-4">Comercial</th>
+                  <th className="p-4 text-center">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -434,7 +427,7 @@ export default function PreAnalisePage() {
                       <td className="p-4 font-mono font-bold text-slate-900">
                         {item.documento_alvo}
                       </td>
-                      <td className="p-4 text-[11px] font-bold text-slate-700 truncate max-w-[250px]" title={item.nome_empresa_lead}>
+                      <td className="p-4 text-[11px] font-bold text-slate-700 truncate max-w-[200px]" title={item.nome_empresa_lead}>
                         {item.nome_empresa_lead}
                       </td>
                       <td className="p-4 text-center font-bold text-slate-600">
@@ -445,14 +438,28 @@ export default function PreAnalisePage() {
                           {item.nivel_risco || "N/D"}
                         </span>
                       </td>
-                      <td className="p-4 text-[11px] text-slate-600">
+                      <td className="p-4 text-[11px] text-slate-600 truncate max-w-[150px]">
                         {item.comercial_responsavel}
+                      </td>
+                      <td className="p-4 text-center">
+                        {/* 🔥 O BOTÃO QUE RECARREGA A CONSULTA */}
+                        <button
+                          onClick={() => {
+                            setBusca(item.documento_alvo);
+                            rodarVarredura(item.documento_alvo);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white font-black rounded-lg text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center justify-center mx-auto"
+                          title="Refazer a consulta para buscar os dados completos"
+                        >
+                          🔄 Recarregar
+                        </button>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="p-12 text-center text-slate-400 font-bold italic">
+                    <td colSpan={7} className="p-12 text-center text-slate-400 font-bold italic">
                       Nenhuma consulta registrada no banco de dados.
                     </td>
                   </tr>
