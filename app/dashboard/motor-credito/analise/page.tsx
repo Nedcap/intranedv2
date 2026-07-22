@@ -244,7 +244,20 @@ const DADOS_MODELO: AnaliseData = {
   restritivos_quadro: { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 },
   restritivos: [],
   
-  resumo_visita: "", noticias_midia: "", parecer_analista: "", parecer_comite: "", recomendacao_analista: "",
+  resumo_visita: "", 
+  noticias_midia: "", 
+  
+  // 🔥 NOVO BLOCO ADICIONADO AQUI:
+  noticias_mercado: {
+    risco_midia_nivel: "baixo",
+    alertas_graves: [],
+    panorama_setor: "Aguardando processamento da IA...",
+    parecer_analista: "Análise de mídia pendente."
+  },
+
+  parecer_analista: "", 
+  parecer_comite: "", 
+  recomendacao_analista: "",
   anexos: { organograma_url: "", fachada_url: "", satelite_url: "", fotos_visita_url: "" },
   
   dados_juridico: { relatorio_completo: "", entidades: [] },
