@@ -62,6 +62,7 @@ export default function CadastroPage() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
+  const [busca, setBusca] = useState("");
   
   const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string } | null>(null);
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
@@ -71,7 +72,8 @@ export default function CadastroPage() {
     key: "cedente",
     direction: "asc"
   });
-  const [filtroStatus, setFiltroStatus] = useState<"TODOS" | "PENDENTE_ENVIO" | "AGUARDANDO_ASSINATURA" | "APTO">("TODOS");
+  
+  const [filtroStatus, setFiltroStatus] = useState<"TODOS" | "PENDENTE_ENVIO" | "AGUARDANDO_ASSINATURA" | "EM_ANDAMENTO" | "APTO">("TODOS");
 
   const carregarCadastro = useCallback(async () => {
     try {
@@ -191,29 +193,25 @@ export default function CadastroPage() {
     };
     
     setFiltroStatus("TODOS"); 
+    setBusca("");
     setCedentes([novaLinha, ...cedentes]);
     setLinhasExpandidas(prev => ({ ...prev, [`novo-0`]: true }));
   };
 
-  // 🗑️ ATUALIZADO: Função para excluir o cedente do banco e da tela
   const excluirCedente = async (id: string | undefined, index: number, nome: string) => {
     const confirmacao = window.confirm(`⚠️ TEM CERTEZA?\n\nVocê está prestes a excluir permanentemente o cadastro de:\n"${nome || "Novo Cedente"}"\n\nEssa ação não pode ser desfeita.`);
     if (!confirmacao) return;
 
     try {
       setCarregando(true);
-      // Se tiver ID, apaga do banco de dados
       if (id) {
         const { error } = await supabase.from("cadastro_cedentes").delete().eq("id", id);
         if (error) throw error;
       }
       
-      // Apaga da tela localmente para ser instantâneo
       const novos = [...cedentes];
       novos.splice(index, 1);
       setCedentes(novos);
-      
-      // Limpa os estados de expansão para evitar bugs de UI
       setCedentesEmEdicaoDeNome({});
       setLinhasExpandidas({});
       
@@ -235,6 +233,48 @@ export default function CadastroPage() {
       cedentesProcessados.forEach((c, idx) => novoEstado[c.id || `novo-${idx}`] = true);
     }
     setLinhasExpandidas(novoEstado);
+  };
+
+  // 🔥 NOVO: Função para salvar apenas a linha atual (inline)
+  const salvarLinha = async (item: any) => {
+    try {
+      setSalvando(true);
+      if (item._isNovo && (!item.cedente || item.cedente.trim() === "")) {
+        alert("⚠️ Preencha o nome do Cedente antes de salvar!");
+        setSalvando(false);
+        return;
+      }
+
+      const payload: any = {
+        cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
+        dt_aprovacao_comite: item.dt_aprovacao_comite || null,
+        dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
+        dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
+        dt_documentos_fidc: item.dt_documentos_fidc || null, dt_geracao_contrato_fidc: item.dt_geracao_contrato_fidc || null,
+        dt_assinatura_contrato_fidc: item.dt_assinatura_contrato_fidc || null, dt_envio_gestora_fidc: item.dt_envio_gestora_fidc || null,
+        dt_aprovacao_gestora_fidc: item.dt_aprovacao_gestora_fidc || null, dt_envio_admin_fidc: item.dt_envio_admin_fidc || null,
+        dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
+        nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
+        comercial: item.comercial, atualizado_em: new Date().toISOString()
+      };
+
+      if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
+      if (item.id) payload.id = item.id;
+
+      const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
+      if (error) throw error;
+      
+      // Recarrega os dados para pegar os IDs novos, mas NÃO fecha as linhas!
+      await carregarCadastro();
+      
+      // Feedback super discreto (opcional, pode tirar o alert e usar toast se preferir)
+      alert(`✅ Cadastro de ${payload.cedente} salvo com sucesso!`);
+      
+    } catch (err: any) { 
+      alert(`❌ Erro ao salvar a linha: ${err.message}`); 
+    } finally { 
+      setSalvando(false); 
+    }
   };
 
   const salvarAlteracoes = async () => {
@@ -268,10 +308,7 @@ export default function CadastroPage() {
           comercial: item.comercial, atualizado_em: new Date().toISOString()
         };
 
-        if (item._isNovo) {
-          payload.responsavel_id = usuarioAtual?.id;
-        }
-
+        if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
         if (item.id) payload.id = item.id;
         const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
         if (error) throw error;
@@ -289,18 +326,29 @@ export default function CadastroPage() {
   };
 
   const analiseEsteira = useMemo(() => {
-    let pendenteEnvio = 0, aguardandoAssinatura = 0, aptos = 0, somaDiasSla = 0, totalContratosAssinados = 0;
+    let pendenteEnvio = 0, aguardandoAssinatura = 0, emAndamento = 0, aptos = 0, somaDiasSla = 0, totalContratosAssinados = 0;
 
     cedentes.forEach(c => {
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (isApto) aptos++;
       else {
-        if (!c.dt_aprovacao_comite && (!c.nao_opera_sec || !c.nao_opera_fidc)) pendenteEnvio++;
-        else if (
-          (c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec && !c.nao_opera_sec) || 
-          (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc && !c.nao_opera_fidc)
-        ) aguardandoAssinatura++;
+        // Regra do Em Andamento: Assinou, mas não tá Apto
+        const isEmAndamento = 
+          (!c.nao_opera_sec && c.dt_assinatura_contrato_sec && !c.dt_apto_sec) || 
+          (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc && !c.dt_apto_fidc);
+
+        if (isEmAndamento) {
+          emAndamento++;
+        } else if (
+          (!c.nao_opera_sec && c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || 
+          (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)
+        ) {
+          aguardandoAssinatura++;
+        } else if (!c.dt_aprovacao_comite && (!c.nao_opera_sec || !c.nao_opera_fidc)) {
+          pendenteEnvio++;
+        }
       }
+
       if (c.dt_aprovacao_comite && (c.dt_assinatura_contrato_sec || c.dt_assinatura_contrato_fidc)) {
         const d1 = new Date(c.dt_aprovacao_comite);
         const d2 = new Date(c.dt_assinatura_contrato_sec || c.dt_assinatura_contrato_fidc);
@@ -309,20 +357,47 @@ export default function CadastroPage() {
       }
     });
 
-    return { pendenteEnvio, aguardandoAssinatura, aptos, slaMedio: totalContratosAssinados > 0 ? (somaDiasSla / totalContratosAssinados).toFixed(0) : "0" };
+    return { pendenteEnvio, aguardandoAssinatura, emAndamento, aptos, slaMedio: totalContratosAssinados > 0 ? (somaDiasSla / totalContratosAssinados).toFixed(0) : "0" };
   }, [cedentes]);
+
+  // Função auxiliar para peso do status (Usado na ordenação)
+  const getStatusWeight = (c: any) => {
+    const isApto = c.dt_apto_sec || c.dt_apto_fidc;
+    if (isApto) return 4;
+    const isEmAndamento = (!c.nao_opera_sec && c.dt_assinatura_contrato_sec) || (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc);
+    if (isEmAndamento) return 3;
+    const isAguardandoAssinatura = (!c.nao_opera_sec && c.dt_geracao_contrato_sec) || (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc);
+    if (isAguardandoAssinatura) return 2;
+    return 1; // Pendente
+  };
 
   const cedentesProcessados = useMemo(() => {
     let resultado = cedentes.filter(c => {
+      // 1. Filtro de Busca
+      if (busca && !c.cedente.toLowerCase().includes(busca.toLowerCase())) return false;
+
+      // 2. Filtro de Status
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (filtroStatus === "TODOS") return true;
       if (filtroStatus === "APTO") return !!isApto;
-      if (filtroStatus === "PENDENTE_ENVIO") return !isApto && !c.dt_aprovacao_comite;
-      if (filtroStatus === "AGUARDANDO_ASSINATURA") return !isApto && ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec && !c.nao_opera_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc && !c.nao_opera_fidc));
+      
+      const isEmAndamento = (!c.nao_opera_sec && c.dt_assinatura_contrato_sec && !c.dt_apto_sec) || (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc && !c.dt_apto_fidc);
+      if (filtroStatus === "EM_ANDAMENTO") return !isApto && isEmAndamento;
+      
+      const isAguardando = (!c.nao_opera_sec && c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc);
+      if (filtroStatus === "AGUARDANDO_ASSINATURA") return !isApto && !isEmAndamento && isAguardando;
+      
+      if (filtroStatus === "PENDENTE_ENVIO") return !isApto && !isEmAndamento && !isAguardando && !c.dt_aprovacao_comite;
+
       return true;
     });
 
+    // 3. Ordenação
     resultado.sort((a: any, b: any) => {
+      if (sortConfig.key === "status") {
+        return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
+      }
+      
       let valA = a[sortConfig.key], valB = b[sortConfig.key];
       if (sortConfig.key === "limite") {
         valA = parseFloat(String(valA || "").replace(/\D/g, "")) || 0;
@@ -334,22 +409,17 @@ export default function CadastroPage() {
     });
 
     return resultado;
-  }, [cedentes, filtroStatus, sortConfig]);
+  }, [cedentes, filtroStatus, sortConfig, busca]);
 
-  // =============== COMPONENTE DE TIMELINE MODERNA =========================
   const renderTimelineUI = (visualSteps: any[], item: any, type: "SEC" | "FIDC") => {
     const isFidc = type === "FIDC";
-    
-    // 👇 Flag para saber se a esteira toda está desativada para este tipo
     const naoOpera = isFidc ? item.nao_opera_fidc : item.nao_opera_sec;
     
     const doneLineClass = isFidc ? "bg-purple-200" : "bg-blue-200";
     const doneDotClass = isFidc ? "bg-purple-500 border-purple-500" : "bg-blue-500 border-blue-500";
-    
     const currentBorderClass = isFidc ? "border-purple-600" : "border-blue-600";
     const currentPulseBg = isFidc ? "bg-purple-600" : "bg-blue-600";
     const currentTextClass = isFidc ? "text-purple-700" : "text-blue-700";
-
     const passedEmptyDotClass = isFidc ? "border-purple-300 bg-purple-50" : "border-blue-300 bg-blue-50";
 
     const validSteps = visualSteps.filter(s => !s.isNA);
@@ -362,10 +432,8 @@ export default function CadastroPage() {
       }
     }
 
-    // Se naoOpera for true, congelamos o index atual para -1 (nada pisca)
     const currentValidStepIndex = (lastFilledValidIndex === validSteps.length - 1 || naoOpera) ? -1 : lastFilledValidIndex + 1;
     const currentValidStepKey = currentValidStepIndex !== -1 ? validSteps[currentValidStepIndex].key : null;
-    
     const currentVisualIndex = currentValidStepKey ? visualSteps.findIndex(s => s.key === currentValidStepKey) : -1;
 
     return (
@@ -373,27 +441,18 @@ export default function CadastroPage() {
         {visualSteps.map((step, idx) => {
           const isNAOrig = !!step.isNA; 
           const isDone = !isNAOrig && !!item[step.key];
-          
-          // Se não vai operar, e ainda não foi preenchido, forçamos a ser N/A (mata o pisca-pisca e a cor)
           const isNA = isNAOrig || (naoOpera && !isDone);
           const isCurrent = !isNA && idx === currentVisualIndex;
           const isLast = idx === visualSteps.length - 1;
-          
           const isPassedAndEmpty = !isNA && !isDone && (currentVisualIndex === -1 || idx < currentVisualIndex);
           const isLineActive = currentVisualIndex === -1 ? true : idx < currentVisualIndex;
 
           let circleClasses = "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all duration-300 border-2 ";
-          if (isNA) {
-            circleClasses += "bg-slate-200 border-slate-300 text-slate-400 opacity-60";
-          } else if (isDone) {
-            circleClasses += `${doneDotClass} text-white opacity-50`;
-          } else if (isCurrent) {
-            circleClasses += `bg-white border-[3px] ${currentBorderClass} shadow-md`;
-          } else if (isPassedAndEmpty) {
-            circleClasses += passedEmptyDotClass;
-          } else {
-            circleClasses += "bg-white border-slate-200";
-          }
+          if (isNA) circleClasses += "bg-slate-200 border-slate-300 text-slate-400 opacity-60";
+          else if (isDone) circleClasses += `${doneDotClass} text-white opacity-50`;
+          else if (isCurrent) circleClasses += `bg-white border-[3px] ${currentBorderClass} shadow-md`;
+          else if (isPassedAndEmpty) circleClasses += passedEmptyDotClass;
+          else circleClasses += "bg-white border-slate-200";
 
           return (
             <div key={step.key} className={`relative flex flex-col items-center group ${isLast ? "flex-none w-12" : "flex-1"}`}>
@@ -403,7 +462,6 @@ export default function CadastroPage() {
               <div className="relative flex items-center justify-center">
                 {isCurrent && !naoOpera && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
                 <div className={circleClasses}>
-                  
                   {isNA ? (
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -415,7 +473,6 @@ export default function CadastroPage() {
                   ) : isCurrent ? (
                     <div className={`w-2.5 h-2.5 rounded-full ${naoOpera ? "bg-slate-300" : `animate-pulse ${currentPulseBg}`}`} />
                   ) : null}
-
                 </div>
               </div>
               <span className={`text-[9px] mt-1.5 text-center leading-tight transition-colors absolute top-7 w-20 
@@ -475,19 +532,21 @@ export default function CadastroPage() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
               Novo Manual
             </button>
+            
+            {/* Botão Salvar Tudo no Topo */}
             <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto">
               {salvando ? (
                  <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
               ) : (
                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
               )}
-              {salvando ? "Gravando..." : "Salvar"}
+              Salvar Tudo
             </button>
           </div>
         </div>
 
         {/* PAINEL DE KPIs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
           <button onClick={() => setFiltroStatus("TODOS")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md text-slate-800"}`}>
             <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Total em Esteira</span>
             <span className="text-4xl font-black">{cedentes.length}</span>
@@ -505,6 +564,13 @@ export default function CadastroPage() {
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.aguardandoAssinatura}</span>
           </button>
 
+          {/* NOVO: EM ANDAMENTO */}
+          <button onClick={() => setFiltroStatus("EM_ANDAMENTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-50 border-fuchsia-200 shadow-md shadow-fuchsia-100" : "bg-white border-slate-200 hover:border-fuchsia-200 hover:shadow-md"}`}>
+            <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-500" : "bg-fuchsia-400/50"}`}></div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fuchsia-500"></div> Em Andamento</span>
+            <span className="text-4xl font-black text-slate-800">{analiseEsteira.emAndamento}</span>
+          </button>
+
           <button onClick={() => setFiltroStatus("APTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "APTO" ? "bg-emerald-50 border-emerald-200 shadow-md shadow-emerald-100" : "bg-white border-slate-200 hover:border-emerald-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "APTO" ? "bg-emerald-500" : "bg-emerald-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Aptos a Operar</span>
@@ -519,6 +585,25 @@ export default function CadastroPage() {
                <span className="text-sm font-bold text-indigo-200">dias</span>
              </div>
           </div>
+        </div>
+
+        {/* BARRA DE BUSCA (NOVA) */}
+        <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-sm flex items-center gap-3">
+          <svg className="w-5 h-5 text-slate-400 ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input 
+            type="text" 
+            placeholder="Buscar por nome do Cedente..." 
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="flex-1 bg-transparent border-none outline-none text-slate-700 font-medium p-2"
+          />
+          {busca && (
+            <button onClick={() => setBusca("")} className="mr-3 text-slate-400 hover:text-slate-600">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
         </div>
 
         {/* ÁREA DA TABELA */}
@@ -546,12 +631,20 @@ export default function CadastroPage() {
                   <th onClick={() => handleSort("taxa")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-24">
                     <div className="flex items-center gap-1">Taxa % {sortConfig.key === "taxa" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                   </th>
-                  <th className="px-6 min-w-[600px]">Status Operacional (Sec / FIDC)</th>
+                  
+                  {/* ORDENAÇÃO POR STATUS ADICIONADA */}
+                  <th onClick={() => handleSort("status")} className="px-6 min-w-[600px] cursor-pointer hover:text-indigo-600 transition-colors">
+                    <div className="flex items-center gap-1">Status Operacional (Sec / FIDC) {sortConfig.key === "status" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                  </th>
                 </tr>
               </thead>
               
               <tbody className="divide-y divide-slate-100 text-sm">
-                {cedentesProcessados.map((item) => {
+                {cedentesProcessados.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-slate-500 font-medium">Nenhum cedente encontrado para esse filtro.</td>
+                  </tr>
+                ) : cedentesProcessados.map((item) => {
                   const index = cedentes.findIndex(c => c === item);
                   const identificadorUnico = item.id || `novo-${index}`;
                   const isEditandoNome = !!cedentesEmEdicaoDeNome[identificadorUnico] || item._isNovo;
@@ -559,7 +652,6 @@ export default function CadastroPage() {
 
                   return (
                     <tr key={identificadorUnico} style={{ display: "contents" }}>
-                      
                       <tr className={`group transition-all duration-200 ${isOpen ? "bg-indigo-50/30" : "hover:bg-slate-50"} ${item._isNovo ? "bg-amber-50/30" : ""}`}>
                         <td className="px-4 py-3 text-center">
                           <button 
@@ -629,7 +721,6 @@ export default function CadastroPage() {
                               
                               <div className="xl:col-span-3 space-y-4">
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
-                                  {/* 🗑️ BOTÃO DE EXCLUIR NO CANTO DO BLOCO INICIAL */}
                                   <button
                                     onClick={() => excluirCedente(item.id, index, item.cedente)}
                                     className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"
@@ -702,6 +793,26 @@ export default function CadastroPage() {
                                     ))}
                                   </div>
                                 </div>
+                              </div>
+
+                              {/* BOTAO INLINE DE SALVAR */}
+                              <div className="xl:col-span-12 flex justify-end mt-2 pt-4 border-t border-slate-200/60">
+                                <button 
+                                  onClick={() => salvarLinha(item)} 
+                                  disabled={salvando || (!item._isEditado && !item._isNovo)} 
+                                  className={`px-5 py-2.5 font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2
+                                    ${salvando || (!item._isEditado && !item._isNovo) 
+                                      ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none" 
+                                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30"
+                                    }`}
+                                >
+                                  {salvando ? (
+                                    <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                  ) : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                                  )}
+                                  {item._isEditado || item._isNovo ? "Salvar Cadastro" : "Salvo"}
+                                </button>
                               </div>
 
                             </div>
