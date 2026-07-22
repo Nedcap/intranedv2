@@ -151,12 +151,9 @@ export default function FinalizadosPage() {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
 
-        // 1. Alta Gestão e perfis explicitamente operacionais (se houver escrito no banco) veem a esteira geral
         if (cargoUser === "master" || cargoUser === "diretor" || cargoUser.includes("opera") || cargoUser.includes("analist")) {
-          // Mantém query.select("*") sem filtros adicionais de visualização
+          // Mantém query.select("*")
         } else {
-          // 2. Se o usuário estiver como Comercial (Padrão do banco) 
-          // Ajustado para buscar se ele é o Comercial da conta OU o Operador (responsavel_id)
           const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
           
           let nomesPermitidos: string[] = [user.nome];
@@ -170,10 +167,7 @@ export default function FinalizadosPage() {
             if (subordinados.length > 0) nomesPermitidos = subordinados;
           }
 
-          // Formata a string do filtro IN para o Supabase (.or exige formatação específica)
           const arrayNomesFormatados = nomesPermitidos.map(n => `"${n}"`).join(",");
-          
-          // 🔥 AQUI ESTÁ O SEGREDO: O usuário verá a análise se ele captou (comercial) OU se ele analisou (responsavel_id)
           query = query.or(`comercial.in.(${arrayNomesFormatados}),responsavel_id.eq.${user.id}`);
         }
       }
@@ -181,13 +175,10 @@ export default function FinalizadosPage() {
       const { data } = await query.order("criado_em", { ascending: false });
       
       if (data) {
-        // 🔥 FILTRO RIGOROSO DE FINALIZADOS
         const filtrado = data.filter(a => {
           const stAnalise = (a.status || "").toLowerCase().trim();
           const stComite = (a.status_comite || "").toLowerCase().trim();
-          
           const statusFinaisConfirmados = ["aprovado", "reprovado", "recusado", "rejeitado", "com restritivo", "finalizado"];
-          
           return statusFinaisConfirmados.some(s => stAnalise.includes(s) || stComite.includes(s));
         });
 
@@ -280,27 +271,17 @@ export default function FinalizadosPage() {
     setChatMsgs([]);
   };
 
+  // 🔥 NOVA FUNÇÃO DE IMPRESSÃO (PÁGINA DE ROSTO + QUEBRA DE PÁGINA)
   const baixarPdfAnalise = async (item: any) => {
     setGerandoPdfId(item.id);
     try {
+      // 1. Busca os dados reais de Votos e Chat (garantindo que estão atualizados)
       const { data: chat } = await supabase.from("chat_comite").select("*").eq("empresa_nome", item.empresa_nome).order("id", { ascending: true });
+      const { data: votos } = await supabase.from("votos").select("*").eq("empresa_nome", item.empresa_nome);
       
-      let chatHtml = `<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px; width: 100%; max-height: 450px; overflow-y: hidden;">`;
-      if (!chat || chat.length === 0) {
-        chatHtml += `<p style="color: #94a3b8; font-style: italic; font-size: 14px;">Nenhum voto/discussão registrado no comitê.</p>`;
-      } else {
-        chat.forEach((m: any) => {
-          chatHtml += `
-            <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 10px; border-radius: 4px; color: #0f172a; text-align: left; line-height: 1.4;">
-              <strong style="font-size: 14px; font-family: 'Segoe UI', Arial, sans-serif;">${m.usuario}</strong><br/>
-              <span style="font-size: 13px; font-family: 'Segoe UI', Arial, sans-serif; white-space: pre-wrap;">${m.mensagem}</span>
-            </div>
-          `;
-        });
-      }
-      chatHtml += `</div>`;
-
       let analiseHtmlText = "";
+      
+      // 2. Extrai o HTML da análise
       if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
         analiseHtmlText = await gerarHtmlDossie(item);
       } else if (item.caminho_local) {
@@ -320,26 +301,101 @@ export default function FinalizadosPage() {
 
       const parser = new DOMParser();
       const doc = parser.parseFromString(analiseHtmlText, "text/html");
-      
-      const targetWrapper = doc.querySelector(".parecer-body");
-      if (targetWrapper) {
-        targetWrapper.insertAdjacentHTML('beforeend', `<br><strong style="color: var(--blue-dark); font-size: 0.95rem; text-transform: uppercase;">Histórico de Debates (Comitê):</strong><br>` + chatHtml);
+
+      // 3. Constrói o visual dos Votos no padrão estético da ferramenta
+      let votosHtml = '';
+      if (!votos || votos.length === 0) {
+         votosHtml = `<div class="card" style="grid-column: span 2; text-align: center; color: var(--muted); font-style: italic; font-weight: 500;">Nenhum voto registrado no comitê para esta análise.</div>`;
+      } else {
+         votosHtml = votos.map((v: any) => {
+           const isAprovado = (v.voto || "").toLowerCase().includes("aprov");
+           const color = isAprovado ? "var(--green)" : "var(--red)";
+           const bg = isAprovado ? "#f0fdf4" : "#fef2f2";
+           const border = isAprovado ? "#86efac" : "#fca5a5";
+           
+           return `
+             <div class="card" style="border-left: 6px solid ${color}; background: #fff;">
+               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                 <strong style="font-size: 1.1rem; color: var(--text);">${v.membro_nome}</strong>
+                 <span style="background: ${bg}; color: ${color}; border: 1px solid ${border}; padding: 5px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; text-transform: uppercase;">${v.voto}</span>
+               </div>
+               <div style="font-size: 0.95rem; color: var(--muted); line-height: 1.6; font-style: italic;">"${v.justificativa}"</div>
+             </div>
+           `;
+         }).join("");
       }
 
+      // 4. Constrói o visual das Atas e Chat
+      let chatHtml = '';
+      if (!chat || chat.length === 0) {
+        chatHtml = `<p style="color: var(--muted); font-style: italic; font-size: 0.95rem; text-align: center; padding: 1rem;">Nenhuma discussão ou ata registrada.</p>`;
+      } else {
+        chatHtml = chat.map((m: any) => `
+          <div style="background: #f8fafc; border-left: 4px solid var(--blue); padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+            <strong style="font-size: 0.85rem; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 0.5px;">${m.usuario}</strong>
+            <div style="font-size: 0.95rem; color: var(--text); margin-top: 6px; white-space: pre-wrap; line-height: 1.6;">${m.mensagem}</div>
+          </div>
+        `).join("");
+      }
+
+      const dataEmissao = new Date().toLocaleDateString('pt-BR');
+      const statusAnalise = item.status || item.status_comite || 'FINALIZADO';
+      
+      // 5. Monta a Estrutura da Página de Rosto (Capa)
+      const coverPageHtml = `
+        <div class="cover-page" style="page-break-after: always; margin-bottom: 4rem; display: flex; flex-direction: column;">
+          
+          <div class="header" style="background: linear-gradient(135deg, var(--text), var(--blue-dark)); border: none !important; margin-bottom: 3rem;">
+            <div style="flex-grow: 1;">
+              <h1 style="font-size: 2.2rem; margin-bottom: 0.5rem; color: #fff;">DELIBERAÇÃO OFICIAL DO COMITÊ</h1>
+              <div class="meta" style="font-size: 1.2rem; color: rgba(255,255,255,0.9); text-transform: uppercase; font-weight: 700;">${item.empresa_nome}</div>
+            </div>
+            <div style="text-align: right; min-width: 250px;">
+              <div class="badge-top" style="background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); color: #fff; margin-bottom: 12px;">
+                 Status: ${statusAnalise}
+              </div>
+              <div class="meta" style="color: rgba(255,255,255,0.7); font-size: 0.9rem;">Impresso em: ${dataEmissao}</div>
+            </div>
+          </div>
+
+          <h2 style="margin-top: 0;">📋 Votos Registrados (Súmula)</h2>
+          <div class="grid-2" style="margin-bottom: 3rem;">
+            ${votosHtml}
+          </div>
+
+          <h2>💬 Fórum de Discussões & Alinhamentos Finais</h2>
+          <div class="card" style="padding: 1.5rem; border: 1px solid var(--border); background: #fff;">
+            ${chatHtml}
+          </div>
+
+        </div>
+      `;
+
+      // 6. Injeta a capa logo no começo do container principal do Dossie
+      const container = doc.querySelector(".container");
+      if (container) {
+        container.insertAdjacentHTML('afterbegin', coverPageHtml);
+      }
+
+      // 7. Garante a quebra de página (A capa vai terminar e forçar o dossiê pra folha 2)
       const printCss = `
         <style>
-          @page { size: landscape; margin: 0; }
           @media print {
             body { 
               -webkit-print-color-adjust: exact !important; 
               print-color-adjust: exact !important; 
             }
+            .cover-page { 
+              page-break-after: always !important; 
+            }
+            /* Esconder links nas impressões (opcional para estética limpa) */
+            a[href]:after { content: none !important; }
           }
-          ::-webkit-scrollbar { display: none; }
         </style>
       `;
       doc.head.insertAdjacentHTML("beforeend", printCss);
 
+      // 8. Gera e abre a impressão
       const blob = new Blob([doc.documentElement.outerHTML], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const printWindow = window.open(url, "_blank");
