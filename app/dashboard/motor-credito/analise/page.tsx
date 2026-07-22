@@ -169,18 +169,18 @@ interface AnaliseData {
   propostas: PropostaItem[];
   empresas_grupo: EmpresaItem[];
   
-  // 🔥 ARRAYS DO GRUPO ECONÔMICO (Substituem os antigos que não eram array)
+  // 🔥 ARRAYS DO GRUPO ECONÔMICO
   empresas_societario: EmpresaSocietario[];
   empresas_faturamento: EmpresaFaturamento[];
   empresas_endividamento: EmpresaEndividamento[];
   empresas_serasa: EmpresaSerasa[];
 
-  socios: SocioItem[]; // Mantido para retrocompatibilidade
+  socios: SocioItem[]; 
   regra_assinatura: string;
   aval_societario: string;
   patrimonios: PatrimonioItem[];
   
-  dados_faturamento: Record<string, FaturamentoMes>; // Mantido para retrocompatibilidade
+  dados_faturamento: Record<string, FaturamentoMes>; 
   dados_potencial: { 
     ticket_medio: number; 
     prazo_medio_dpls: string; 
@@ -196,15 +196,15 @@ interface AnaliseData {
   };
   
   endividamento_resumo: { renegociando: string };
-  endividamento_detalhado: EndividamentoItem[]; // Mantido para retrocompatibilidade
+  endividamento_detalhado: EndividamentoItem[]; 
   referencias: ReferenciaItem[];
   
   restritivos_quadro: { pefin: number; refin: number; protesto: number; div_vencida: number; acao_judicial: number; cheque_sem_fundo: number };
-  restritivos: RestritivoItem[]; // Mantido para retrocompatibilidade
+  restritivos: RestritivoItem[]; 
   
   resumo_visita: string;
-  noticias_midia: string; // Mantido para retrocompatibilidade
-  noticias_mercado?: NoticiasMercado; // 🔥 NOVO CAMPO RECEBENDO O JSON DA IA
+  noticias_midia: string; // Fallback textarea antigo
+  noticias_mercado?: NoticiasMercado; // 🔥 JSON DA NOVA IA DE NOTÍCIAS
   parecer_analista: string;
   parecer_comite?: string;
   recomendacao_analista?: string;
@@ -1443,6 +1443,7 @@ function MesaAnaliseConteudo() {
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
                   
+                  {/* BLOCO 1: SERASA / BOA VISTA */}
                   {analise.empresas_serasa.map((empSerasa, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
                       <div className={sectionHeaderStyle}>
@@ -1477,6 +1478,7 @@ function MesaAnaliseConteudo() {
                     </div>
                   ))}
 
+                  {/* BLOCO 2: DOSSIER JURÍDICO */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex gap-3 items-center`}>
                         <span>⚖️ Dossier Jurídico Textual Consolidado do Grupo (Kappi / Jusbrasil)</span>
@@ -1490,7 +1492,7 @@ function MesaAnaliseConteudo() {
                     />
                   </div>
                   
-                  {/* 🔥 NOVO BLOCO: RADAR DE MÍDIA E COMPLIANCE DA IA */}
+                  {/* 🔥 BLOCO 3: RADAR DE MÍDIA E COMPLIANCE DA IA */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
                     
