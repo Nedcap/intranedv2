@@ -133,6 +133,14 @@ interface EmpresaSerasa {
   restritivos: RestritivoItem[];
 }
 
+// 🔥 INTERFACE DO NOVO JSON DE MÍDIA E COMPLIANCE
+interface NoticiasMercado {
+  risco_midia_nivel?: "baixo" | "medio" | "alto";
+  alertas_graves?: string[];
+  panorama_setor?: string;
+  parecer_analista?: string;
+}
+
 interface AnaliseData {
   id: string | null;
   cnpj: string; 
@@ -195,7 +203,8 @@ interface AnaliseData {
   restritivos: RestritivoItem[]; // Mantido para retrocompatibilidade
   
   resumo_visita: string;
-  noticias_midia: string;
+  noticias_midia: string; // Mantido para retrocompatibilidade
+  noticias_mercado?: NoticiasMercado; // 🔥 NOVO CAMPO RECEBENDO O JSON DA IA
   parecer_analista: string;
   parecer_comite?: string;
   recomendacao_analista?: string;
@@ -1480,14 +1489,71 @@ function MesaAnaliseConteudo() {
                         placeholder="Aguardando consolidação inteligente ou digite a síntese dos principais litígios trabalhistas, cíveis e tributários..."
                     />
                   </div>
+                  
+                  {/* 🔥 NOVO BLOCO: RADAR DE MÍDIA E COMPLIANCE DA IA */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>Clipping, Pesquisas Reputacionais e Mídia</div>
-                    <textarea 
-                      value={analise.noticias_midia} 
-                      onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
-                      className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
-                      placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
-                    />
+                    <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
+                    
+                    {analise.noticias_mercado && analise.noticias_mercado.risco_midia_nivel ? (
+                      <div className="p-5 flex flex-col md:flex-row gap-6 bg-slate-50">
+                        
+                        {/* Coluna 1: Termômetro de Risco */}
+                        <div className="flex flex-col gap-3 w-full md:w-1/3">
+                          <div className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center text-center shadow-inner h-full ${
+                            analise.noticias_mercado.risco_midia_nivel === 'alto' ? 'bg-rose-50 border-rose-200 text-rose-800' :
+                            analise.noticias_mercado.risco_midia_nivel === 'medio' ? 'bg-amber-50 border-amber-200 text-amber-800' :
+                            'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          }`}>
+                            <span className="text-[10px] font-black uppercase tracking-widest opacity-70">Risco de Mídia</span>
+                            <span className="text-2xl font-black uppercase mt-1">
+                              {analise.noticias_mercado.risco_midia_nivel}
+                            </span>
+                            <span className="text-[11px] font-medium mt-2 leading-tight">
+                              {analise.noticias_mercado.parecer_analista}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Coluna 2: Alertas e Setor */}
+                        <div className="flex flex-col gap-4 w-full md:w-2/3">
+                          
+                          {/* Alertas Graves */}
+                          <div>
+                            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Alertas Graves Detectados</h4>
+                            {analise.noticias_mercado.alertas_graves && analise.noticias_mercado.alertas_graves.length > 0 ? (
+                              <ul className="space-y-2">
+                                {analise.noticias_mercado.alertas_graves.map((alerta: string, idx: number) => (
+                                  <li key={idx} className="bg-rose-100 border border-rose-300 text-rose-900 text-[12px] font-medium px-3 py-2 rounded-lg flex items-start gap-2 shadow-sm">
+                                    <span className="mt-0.5">🚨</span> <span>{alerta}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div className="bg-white border border-slate-200 text-slate-500 text-[12px] px-3 py-2 rounded-lg flex items-center gap-2">
+                                <span>✅ Nenhum alerta grave encontrado na mídia.</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Panorama do Setor */}
+                          <div>
+                            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Termômetro do Setor</h4>
+                            <div className="bg-white border border-slate-200 text-slate-700 text-[12px] px-4 py-3 rounded-lg leading-relaxed shadow-sm">
+                              {analise.noticias_mercado.panorama_setor}
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    ) : (
+                      // Fallback: Se não tem JSON da IA (análises antigas), mostra o textarea manual
+                      <textarea 
+                        value={analise.noticias_midia} 
+                        onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
+                        className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
+                        placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
+                      />
+                    )}
                   </div>
                 </div>
               )}
