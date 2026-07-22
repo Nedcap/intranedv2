@@ -5,6 +5,18 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
+// Função para formatar o CNPJ enquanto digita ou exibe
+const formatarCNPJ = (cnpj: string) => {
+  if (!cnpj) return "";
+  let v = cnpj.replace(/\D/g, "");
+  if (v.length > 14) v = v.substring(0, 14);
+  if (v.length <= 2) return v;
+  if (v.length <= 5) return v.replace(/(\d{2})(\d+)/, "$1.$2");
+  if (v.length <= 8) return v.replace(/(\d{2})(\d{3})(\d+)/, "$1.$2.$3");
+  if (v.length <= 12) return v.replace(/(\d{2})(\d{3})(\d{3})(\d+)/, "$1.$2.$3/$4");
+  return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
+};
+
 // Configuração ORIGINAL das Etapas (Usada para gerar o Formulário Expansível)
 const STEPS_SEC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
@@ -26,7 +38,6 @@ const STEPS_FIDC = [
   { key: "dt_apto_fidc", label: "Apto Operar" }
 ];
 
-// Configuração VISUAL (Para forçar as Timelines a terem o mesmo tamanho e alinhamento)
 const VISUAL_STEPS_SEC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
   { key: "dt_documentos_sec", label: "Documentos" },
@@ -63,6 +74,7 @@ export default function CadastroPage() {
   const [salvando, setSalvando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [busca, setBusca] = useState("");
+  const [cnpjsCopiados, setCnpjsCopiados] = useState<Record<string, boolean>>({});
   
   const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string } | null>(null);
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
@@ -114,7 +126,7 @@ export default function CadastroPage() {
       
       const { data: analises, error: errAnalises } = await supabase
         .from("analises")
-        .select("empresa_nome, comercial, status, criado_em, responsavel_id");
+        .select("empresa_nome, comercial, status, criado_em, responsavel_id, cnpj");
       
       if (errAnalises) throw errAnalises;
       if (!analises) return;
@@ -133,9 +145,13 @@ export default function CadastroPage() {
         if (!nomesNaEsteira.has(nomeLimpo)) {
            const dtComiteRaw = analise.criado_em;
            const dtComiteFormatada = dtComiteRaw ? dtComiteRaw.split('T')[0] : null;
+           
+           // Pega o CNPJ caso venha da análise, limpando a máscara
+           const cnpjLimpo = analise.cnpj ? analise.cnpj.replace(/\D/g, "") : null;
 
            novosCedentes.push({
              cedente: nomeLimpo,
+             cnpj: cnpjLimpo,
              comercial: analise.comercial,
              dt_aprovacao_comite: dtComiteFormatada,
              atualizado_em: new Date().toISOString(),
@@ -169,6 +185,12 @@ export default function CadastroPage() {
     setCedentes(novos);
   };
 
+  const handleCnpjChange = (index: number, valorRaw: string) => {
+    // Guarda apenas números no estado local, a máscara é aplicada na renderização
+    const apenasNumeros = valorRaw.replace(/\D/g, "").slice(0, 14);
+    handleInputChange(index, "cnpj", apenasNumeros);
+  };
+
   const handleLimiteInputChange = (index: number, valorRaw: string) => {
     const apenasNumeros = valorRaw.replace(/\D/g, "");
     if (!apenasNumeros) {
@@ -182,7 +204,7 @@ export default function CadastroPage() {
 
   const adicionarNovaLinha = () => {
     const novaLinha = {
-      cedente: "", limite: "", taxa: "", obs: "",
+      cedente: "", cnpj: null, limite: "", taxa: "", obs: "",
       dt_aprovacao_comite: null,
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
@@ -235,7 +257,16 @@ export default function CadastroPage() {
     setLinhasExpandidas(novoEstado);
   };
 
-  // 🔥 NOVO: Função para salvar apenas a linha atual (inline)
+  const copiarCNPJ = (cnpjRaw: string, idUnico: string) => {
+    const cnpjFormatado = formatarCNPJ(cnpjRaw);
+    navigator.clipboard.writeText(cnpjFormatado);
+    
+    setCnpjsCopiados(prev => ({ ...prev, [idUnico]: true }));
+    setTimeout(() => {
+      setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false }));
+    }, 2000);
+  };
+
   const salvarLinha = async (item: any) => {
     try {
       setSalvando(true);
@@ -244,9 +275,13 @@ export default function CadastroPage() {
         setSalvando(false);
         return;
       }
+      
+      // Limpa CNPJ para garantir que vai só números ou nulo
+      const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
 
       const payload: any = {
         cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
+        cnpj: cnpjFinal === "" ? null : cnpjFinal,
         dt_aprovacao_comite: item.dt_aprovacao_comite || null,
         dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
         dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
@@ -262,16 +297,18 @@ export default function CadastroPage() {
       if (item.id) payload.id = item.id;
 
       const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505' && error.message.includes('cnpj')) {
+           throw new Error("Este CNPJ já está cadastrado em outro cedente.");
+        }
+        throw error;
+      }
       
-      // Recarrega os dados para pegar os IDs novos, mas NÃO fecha as linhas!
       await carregarCadastro();
-      
-      // Feedback super discreto (opcional, pode tirar o alert e usar toast se preferir)
-      alert(`✅ Cadastro de ${payload.cedente} salvo com sucesso!`);
+      alert(`✅ Cadastro salvo com sucesso!`);
       
     } catch (err: any) { 
-      alert(`❌ Erro ao salvar a linha: ${err.message}`); 
+      alert(`❌ Erro ao salvar: ${err.message}`); 
     } finally { 
       setSalvando(false); 
     }
@@ -295,8 +332,11 @@ export default function CadastroPage() {
       }
 
       for (const item of alvosEnvio) {
+        const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
+        
         const payload: any = {
           cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
+          cnpj: cnpjFinal === "" ? null : cnpjFinal,
           dt_aprovacao_comite: item.dt_aprovacao_comite || null,
           dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
           dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
@@ -311,7 +351,12 @@ export default function CadastroPage() {
         if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
         if (item.id) payload.id = item.id;
         const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
-        if (error) throw error;
+        if (error) {
+          if (error.code === '23505' && error.message.includes('cnpj')) {
+            throw new Error(`O CNPJ de ${item.cedente} já está sendo usado por outro cadastro.`);
+          }
+          throw error;
+        }
       }
       
       alert("🎉 Alterações gravadas com sucesso!");
@@ -319,7 +364,7 @@ export default function CadastroPage() {
       setLinhasExpandidas({});
       await carregarCadastro();
     } catch (err: any) { 
-      alert(`❌ Erro ao salvar os dados: ${err.message}`); 
+      alert(`❌ Erro ao salvar: ${err.message}`); 
     } finally { 
       setSalvando(false); 
     }
@@ -332,7 +377,6 @@ export default function CadastroPage() {
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (isApto) aptos++;
       else {
-        // Regra do Em Andamento: Assinou, mas não tá Apto
         const isEmAndamento = 
           (!c.nao_opera_sec && c.dt_assinatura_contrato_sec && !c.dt_apto_sec) || 
           (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc && !c.dt_apto_fidc);
@@ -360,7 +404,6 @@ export default function CadastroPage() {
     return { pendenteEnvio, aguardandoAssinatura, emAndamento, aptos, slaMedio: totalContratosAssinados > 0 ? (somaDiasSla / totalContratosAssinados).toFixed(0) : "0" };
   }, [cedentes]);
 
-  // Função auxiliar para peso do status (Usado na ordenação)
   const getStatusWeight = (c: any) => {
     const isApto = c.dt_apto_sec || c.dt_apto_fidc;
     if (isApto) return 4;
@@ -368,15 +411,12 @@ export default function CadastroPage() {
     if (isEmAndamento) return 3;
     const isAguardandoAssinatura = (!c.nao_opera_sec && c.dt_geracao_contrato_sec) || (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc);
     if (isAguardandoAssinatura) return 2;
-    return 1; // Pendente
+    return 1;
   };
 
   const cedentesProcessados = useMemo(() => {
     let resultado = cedentes.filter(c => {
-      // 1. Filtro de Busca
       if (busca && !c.cedente.toLowerCase().includes(busca.toLowerCase())) return false;
-
-      // 2. Filtro de Status
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (filtroStatus === "TODOS") return true;
       if (filtroStatus === "APTO") return !!isApto;
@@ -392,7 +432,6 @@ export default function CadastroPage() {
       return true;
     });
 
-    // 3. Ordenação
     resultado.sort((a: any, b: any) => {
       if (sortConfig.key === "status") {
         return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
@@ -533,7 +572,6 @@ export default function CadastroPage() {
               Novo Manual
             </button>
             
-            {/* Botão Salvar Tudo no Topo */}
             <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto">
               {salvando ? (
                  <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -564,7 +602,6 @@ export default function CadastroPage() {
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.aguardandoAssinatura}</span>
           </button>
 
-          {/* NOVO: EM ANDAMENTO */}
           <button onClick={() => setFiltroStatus("EM_ANDAMENTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-50 border-fuchsia-200 shadow-md shadow-fuchsia-100" : "bg-white border-slate-200 hover:border-fuchsia-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-500" : "bg-fuchsia-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fuchsia-500"></div> Em Andamento</span>
@@ -587,7 +624,7 @@ export default function CadastroPage() {
           </div>
         </div>
 
-        {/* BARRA DE BUSCA (NOVA) */}
+        {/* BARRA DE BUSCA */}
         <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-sm flex items-center gap-3">
           <svg className="w-5 h-5 text-slate-400 ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -617,8 +654,8 @@ export default function CadastroPage() {
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" /></svg>
                     </button>
                   </th>
-                  <th onClick={() => handleSort("cedente")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-64">
-                    <div className="flex items-center gap-1">Cedente {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                  <th onClick={() => handleSort("cedente")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-72">
+                    <div className="flex items-center gap-1">Cedente / CNPJ {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                   </th>
                   {usuarioAtual?.perfil !== "comercial" && (
                     <th onClick={() => handleSort("comercial")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-32">
@@ -631,8 +668,6 @@ export default function CadastroPage() {
                   <th onClick={() => handleSort("taxa")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-24">
                     <div className="flex items-center gap-1">Taxa % {sortConfig.key === "taxa" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                   </th>
-                  
-                  {/* ORDENAÇÃO POR STATUS ADICIONADA */}
                   <th onClick={() => handleSort("status")} className="px-6 min-w-[600px] cursor-pointer hover:text-indigo-600 transition-colors">
                     <div className="flex items-center gap-1">Status Operacional (Sec / FIDC) {sortConfig.key === "status" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                   </th>
@@ -662,45 +697,80 @@ export default function CadastroPage() {
                           </button>
                         </td>
                         
-                        <td className="px-4 py-3">
+                        {/* COLUNA DO CEDENTE + CNPJ */}
+                        <td className="px-4 py-3 align-top">
                           {isEditandoNome ? (
-                            <input 
-                              type="text" placeholder="NOME DA EMPRESA" value={item.cedente} 
-                              onChange={(e) => handleInputChange(index, "cedente", e.target.value.toUpperCase())} 
-                              className="w-full p-2 border-2 border-indigo-300 rounded-lg font-black text-sm uppercase bg-white shadow-inner outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
-                              autoFocus={item._isNovo}
-                            />
+                            <div className="flex flex-col gap-2">
+                              <input 
+                                type="text" placeholder="NOME DA EMPRESA" value={item.cedente} 
+                                onChange={(e) => handleInputChange(index, "cedente", e.target.value.toUpperCase())} 
+                                className="w-full p-2 border-2 border-indigo-300 rounded-lg font-black text-sm uppercase bg-white shadow-inner outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+                                autoFocus={item._isNovo}
+                              />
+                              <input 
+                                type="text" placeholder="CNPJ (Apenas números)" value={formatarCNPJ(item.cnpj)} 
+                                onChange={(e) => handleCnpjChange(index, e.target.value)}
+                                maxLength={18}
+                                className="w-full p-1.5 border border-slate-300 rounded-md font-mono text-xs bg-slate-50 outline-none focus:border-indigo-400 focus:bg-white transition-all text-slate-600" 
+                              />
+                            </div>
                           ) : (
-                            <div className="flex items-center gap-3">
-                              <span className="font-extrabold text-slate-800 tracking-tight truncate max-w-[200px]" title={item.cedente}>{item.cedente}</span>
-                              <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1.5 rounded-md transition-all">
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                              </button>
+                            <div className="flex flex-col gap-1 mt-1">
+                              <div className="flex items-center gap-3">
+                                <span className="font-extrabold text-slate-800 tracking-tight truncate max-w-[200px]" title={item.cedente}>{item.cedente}</span>
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1.5 rounded-md transition-all">
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+                              </div>
+                              
+                              {/* EXIBIÇÃO DO CNPJ FORMATADO */}
+                              {item.cnpj ? (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-mono font-semibold text-slate-500 select-all cursor-text" title="Duplo clique para selecionar">
+                                    {formatarCNPJ(item.cnpj)}
+                                  </span>
+                                  <button 
+                                    onClick={() => copiarCNPJ(item.cnpj, identificadorUnico)} 
+                                    className={`p-1 rounded transition-colors ${cnpjsCopiados[identificadorUnico] ? "text-emerald-500 bg-emerald-50" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`}
+                                    title="Copiar CNPJ"
+                                  >
+                                    {cnpjsCopiados[identificadorUnico] ? (
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                    ) : (
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="text-[10px] text-slate-400 hover:text-indigo-600 hover:border-indigo-400 text-left border border-dashed border-slate-300 rounded px-1.5 py-0.5 w-max transition-colors mt-0.5">
+                                  + Add CNPJ
+                                </button>
+                              )}
                             </div>
                           )}
                         </td>
 
                         {usuarioAtual?.perfil !== "comercial" && (
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top pt-4">
                              <input type="text" value={item.comercial || ""} onChange={(e) => handleInputChange(index, "comercial", e.target.value)} 
                                className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-semibold text-indigo-700 bg-transparent transition-all outline-none" 
                                placeholder="Comercial" />
                           </td>
                         )}
 
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 align-top pt-4">
                           <input type="text" value={item.limite || ""} onChange={(e) => handleLimiteInputChange(index, e.target.value)} 
                             className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-700 bg-transparent transition-all outline-none" 
                             placeholder="R$ 0,00" />
                         </td>
                         
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 align-top pt-4">
                           <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} 
                             className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-600 bg-transparent transition-all outline-none" 
                             placeholder="0,00%" />
                         </td>
 
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4 align-top">
                           <div className="flex flex-col gap-6">
                             <div className="flex items-center gap-4">
                               <span className={`text-[10px] font-black w-8 py-1 rounded-md text-center transition-colors ${item.nao_opera_sec ? "bg-slate-100 text-slate-400" : "text-blue-600 bg-blue-50"}`}>SEC</span>
@@ -795,7 +865,6 @@ export default function CadastroPage() {
                                 </div>
                               </div>
 
-                              {/* BOTAO INLINE DE SALVAR */}
                               <div className="xl:col-span-12 flex justify-end mt-2 pt-4 border-t border-slate-200/60">
                                 <button 
                                   onClick={() => salvarLinha(item)} 
