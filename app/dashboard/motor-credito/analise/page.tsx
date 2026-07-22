@@ -100,7 +100,7 @@ interface RestritivoItem {
   empresa_socio?: string;
 }
 
-// 🔥 NOVAS INTERFACES DE GRUPO ECONÔMICO
+// 🔥 NOVAS INTERFACES DE GRUPO ECONÔMICO E NOTÍCIAS
 interface EmpresaSocietario {
   papel_no_grupo?: string;
   razao_social: string;
@@ -133,7 +133,7 @@ interface EmpresaSerasa {
   restritivos: RestritivoItem[];
 }
 
-// 🔥 INTERFACE DO NOVO JSON DE MÍDIA E COMPLIANCE
+// 🔥 INTERFACE DO JSON DE MÍDIA
 interface NoticiasMercado {
   risco_midia_nivel?: "baixo" | "medio" | "alto";
   alertas_graves?: string[];
@@ -147,8 +147,8 @@ interface AnaliseData {
   razao_social: string; 
   status?: string;
   comercial?: string; 
-  dados_documentos?: string[]; // 🔥 Adicionado para sabermos quais docs tem na análise
-  is_grupo_economico?: boolean; // 🔥 Flag de Grupo
+  dados_documentos?: string[]; 
+  is_grupo_economico?: boolean; 
 
   empresas_principais: EmpresaPrincipal[];
   data_analise: string;
@@ -169,7 +169,6 @@ interface AnaliseData {
   propostas: PropostaItem[];
   empresas_grupo: EmpresaItem[];
   
-  // 🔥 ARRAYS DO GRUPO ECONÔMICO
   empresas_societario: EmpresaSocietario[];
   empresas_faturamento: EmpresaFaturamento[];
   empresas_endividamento: EmpresaEndividamento[];
@@ -203,8 +202,8 @@ interface AnaliseData {
   restritivos: RestritivoItem[]; 
   
   resumo_visita: string;
-  noticias_midia: string; // Fallback textarea antigo
-  noticias_mercado?: NoticiasMercado; // 🔥 JSON DA NOVA IA DE NOTÍCIAS
+  noticias_midia: string; 
+  noticias_mercado?: NoticiasMercado; // 🔥 NOVO CAMPO DE NOTÍCIAS DA IA
   parecer_analista: string;
   parecer_comite?: string;
   recomendacao_analista?: string;
@@ -1086,7 +1085,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO (AGORA BASEADO NO ARRAY DE GRUPOS) */}
+              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
               {abaAtiva === "societario" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
                   {analise.empresas_societario.map((empresaSoc, empIndex) => (
@@ -1166,7 +1165,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 4: FATURAMENTO E POTENCIAL (MODO GRUPO ECONÔMICO) */}
+              {/* ABA 4: FATURAMENTO E POTENCIAL */}
               {abaAtiva === "fat" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   
@@ -1443,7 +1442,7 @@ function MesaAnaliseConteudo() {
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
                   
-                  {/* BLOCO 1: SERASA / BOA VISTA */}
+                  {/* BLOCO 1: SERASA E BOA VISTA */}
                   {analise.empresas_serasa.map((empSerasa, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
                       <div className={sectionHeaderStyle}>
@@ -1492,7 +1491,7 @@ function MesaAnaliseConteudo() {
                     />
                   </div>
                   
-                  {/* 🔥 BLOCO 3: RADAR DE MÍDIA E COMPLIANCE DA IA */}
+                  {/* 🔥 BLOCO 3: NOVO RADAR DE MÍDIA E COMPLIANCE DA IA */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
                     
