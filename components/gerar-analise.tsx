@@ -371,17 +371,20 @@ export const gerarHtmlDossie = async (item: any) => {
           .expandable-fade::after { content: "Passar o mouse para expandir ▼"; }
           .hover-card:hover .expandable-box { max-height: 2000px; }
           .hover-card:hover .expandable-fade { opacity: 0; pointer-events: none; }
+          
+          /* 🔥 AJUSTES PARA A IMPRESSÃO PRESERVAR AS CORES PERFEITAMENTE */
           @media print { 
               .print-break { page-break-before: always; } 
-              body { background: white; padding: 0; } 
+              body { 
+                background: white; 
+                padding: 0; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+              } 
               .container { box-shadow: none; border: none; padding: 0; max-width: 100%; }
               .card, .table-wrap, .parecer-wrapper { box-shadow: none !important; border: 1px solid #cbd5e1 !important; transform: none !important; } 
-              .header { padding: 1.5rem; color: black; background: white; border: 2px solid black; } 
-              .header .meta, .header .badge-top { color: black; background: transparent; border-color: black; } 
               .expandable-box { max-height: none !important; }
               .expandable-fade { display: none !important; }
-              h2 { color: black; border-bottom: 2px solid black; }
-              h2::before { background-color: black; }
           }
       </style>
   </head>
