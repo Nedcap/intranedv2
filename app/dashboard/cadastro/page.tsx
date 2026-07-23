@@ -105,23 +105,37 @@ export default function CadastroPage() {
       
       if (user) {
         const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo, email').eq('id', user.id).single();
+        
+        let emailDoUsuario = ""; // Criamos uma variável de fallback
+        
         if (perfilData) {
+          emailDoUsuario = perfilData.email?.toLowerCase().trim();
           setUsuarioAtual({ 
             id: user.id, 
             nome: perfilData.nome,
-            email: perfilData.email,
+            email: emailDoUsuario,
             perfil: (perfilData.cargo || "").toLowerCase() 
           });
         }
 
-        // NOVO: Verifica se existe integração do Gmail para este usuário
-        const { data: integracao } = await supabase
-          .from("usuarios_integracoes")
-          .select("id")
-          .eq("email_usuario", user.email)
-          .single();
-          
-        if (integracao) setGmailConectado(true);
+        // NOVO: Busca à prova de falhas!
+        if (emailDoUsuario) {
+          const { data: integracoes, error: intError } = await supabase
+            .from("usuarios_integracoes")
+            .select("id")
+            .eq("email_usuario", emailDoUsuario)
+            .limit(1); // Resolve o erro caso o usuário tenha mais de 1 e-mail conectado
+            
+          if (intError) {
+             console.error("Erro ao buscar integracao:", intError);
+          }
+            
+          if (integracoes && integracoes.length > 0) {
+            setGmailConectado(true);
+          } else {
+            console.log("⚠️ Nenhuma integração Google achada para:", emailDoUsuario);
+          }
+        }
       }
 
       const { data } = await supabase.from("cadastro_cedentes").select("*");
