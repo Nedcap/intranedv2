@@ -3,30 +3,47 @@
 
 import { useState } from "react";
 
-// Formatação segura
+// Formatação super blindada para moeda
 export const formatarMoeda = (valor: any) => {
-  const num = Number(valor);
+  if (!valor && valor !== 0) return "R$ 0,00";
+  let num = Number(valor);
+  
+  // Se for uma string suja tipo "15.000,00", ele limpa antes de tentar formatar
+  if (isNaN(num) && typeof valor === "string") {
+     const limpo = valor.replace(/\./g, "").replace(",", ".");
+     num = Number(limpo);
+  }
+  
   if (isNaN(num)) return "R$ 0,00";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num);
 };
 
 // ============================================================================
-// MOTOR CENTRAL DO DOSSIÊ HTML (TOTALMENTE BLINDADO CONTRA CRASHES)
+// MOTOR CENTRAL DO DOSSIÊ HTML (BLINDAGEM NÍVEL TITÂNIO CONTRA CRASHES)
 // ============================================================================
 export const gerarHtmlDossie = async (item: any) => {
   if (!item) return "";
   
   try {
-    const analise = item.dados_consolidados || item || {};
-    
+    // 1. Garantir que analise seja um objeto válido, mesmo se vier string do banco
+    let analise = item.dados_consolidados || item || {};
+    if (typeof analise === "string") {
+       try { analise = JSON.parse(analise); } catch { analise = {}; }
+    }
+
+    // 2. Funções Escudo (Impedem 100% de erros de Null Pointer ou Type Mismatch)
+    const safeStr = (v: any) => (v ? String(v).trim() : "");
+    const safeUpper = (v: any) => safeStr(v).toUpperCase();
+    const safeArray = (v: any) => (Array.isArray(v) ? v : []);
+
     const dataAtual = new Date().toLocaleDateString('pt-BR');
-    const empresaNome = item.empresa_nome || analise.razao_social || 'EMPRESA NÃO INFORMADA';
-    const cnpjDoc = item.cnpj || analise.cnpj || '-';
+    const empresaNome = safeStr(item.empresa_nome) || safeStr(analise.razao_social) || 'EMPRESA NÃO INFORMADA';
+    const cnpjDoc = safeStr(item.cnpj) || safeStr(analise.cnpj) || '-';
     
-    const localizacaoReal = analise.localizacao?.trim() || "Brasil";
+    const localizacaoReal = safeStr(analise.localizacao) || "Brasil";
     const enderecoQuery = encodeURIComponent(localizacaoReal);
 
-    let siteTratado = analise.site?.trim() || "";
+    let siteTratado = safeStr(analise.site);
     if (siteTratado && !siteTratado.startsWith('http')) siteTratado = 'https://' + siteTratado;
 
     // ==========================================
@@ -34,30 +51,32 @@ export const gerarHtmlDossie = async (item: any) => {
     // ==========================================
     
     // 1. SÓCIOS
+    const empSocietario = safeArray(analise.empresas_societario);
     let listaSocios: any[] = [];
-    if (Array.isArray(analise.empresas_societario) && analise.empresas_societario.length > 0) {
-      if (analise.empresas_societario[0]?.razao_social === "QUADRO SOCIETÁRIO CONSOLIDADO") {
-         listaSocios = analise.empresas_societario[0].socios || [];
+    if (empSocietario.length > 0) {
+      if (empSocietario[0]?.razao_social === "QUADRO SOCIETÁRIO CONSOLIDADO") {
+         listaSocios = safeArray(empSocietario[0].socios);
       } else {
-         listaSocios = analise.empresas_societario.flatMap((e: any) => 
-            Array.isArray(e.socios) ? e.socios.map((s:any) => ({...s, empresa: s.empresa_origem || e.razao_social})) : []
+         listaSocios = empSocietario.flatMap((e: any) => 
+            safeArray(e.socios).map((s:any) => ({...s, empresa: s.empresa_origem || e.razao_social}))
          );
       }
     } else {
-      listaSocios = Array.isArray(analise.socios) ? analise.socios : [];
+      listaSocios = safeArray(analise.socios);
     }
 
     // 2. FATURAMENTO
+    const empFaturamento = safeArray(analise.empresas_faturamento);
     let faturamentoConsolidado: Record<string, Record<string, number>> = {};
-    if (Array.isArray(analise.empresas_faturamento) && analise.empresas_faturamento.length > 0) {
-        if (analise.empresas_faturamento[0]?.razao_social === "VISÃO CONSOLIDADA") {
-            faturamentoConsolidado = analise.empresas_faturamento[0].faturamento || {};
+    if (empFaturamento.length > 0) {
+        if (empFaturamento[0]?.razao_social === "VISÃO CONSOLIDADA") {
+            faturamentoConsolidado = empFaturamento[0].faturamento || {};
         } else {
-            faturamentoConsolidado = analise.empresas_faturamento.reduce((acc: any, emp: any) => {
-                if (emp.faturamento) {
+            faturamentoConsolidado = empFaturamento.reduce((acc: any, emp: any) => {
+                if (emp && typeof emp.faturamento === "object" && emp.faturamento !== null) {
                     Object.entries(emp.faturamento).forEach(([ano, m]: [string, any]) => {
                         if (!acc[ano]) acc[ano] = {};
-                        if (m) {
+                        if (m && typeof m === "object") {
                             Object.entries(m).forEach(([mes, valor]) => {
                                 acc[ano][mes] = (Number(acc[ano][mes]) || 0) + Number(valor);
                             });
@@ -72,44 +91,47 @@ export const gerarHtmlDossie = async (item: any) => {
     }
 
     // 3. ENDIVIDAMENTO
+    const empEndividamento = safeArray(analise.empresas_endividamento);
     let endividamentoFlat: any[] = [];
-    if (Array.isArray(analise.empresas_endividamento) && analise.empresas_endividamento.length > 0) {
-       if (analise.empresas_endividamento[0]?.razao_social === "PASSIVO CONSOLIDADO") {
-           endividamentoFlat = analise.empresas_endividamento[0].endividamento || [];
+    if (empEndividamento.length > 0) {
+       if (empEndividamento[0]?.razao_social === "PASSIVO CONSOLIDADO") {
+           endividamentoFlat = safeArray(empEndividamento[0].endividamento);
        } else {
-           endividamentoFlat = analise.empresas_endividamento.flatMap((e:any) => 
-               Array.isArray(e.endividamento) ? e.endividamento.map((d:any) => ({...d, empresa: d.empresa_origem || e.razao_social})) : []
+           endividamentoFlat = empEndividamento.flatMap((e:any) => 
+               safeArray(e.endividamento).map((d:any) => ({...d, empresa: d.empresa_origem || e.razao_social}))
            );
        }
     } else {
-        endividamentoFlat = Array.isArray(analise.endividamento_detalhado) ? analise.endividamento_detalhado : [];
+        endividamentoFlat = safeArray(analise.endividamento_detalhado);
     }
 
     // 4. RESTRITIVOS SERASA
+    const empSerasa = safeArray(analise.empresas_serasa);
     let restritivosFlat: any[] = [];
-    if (Array.isArray(analise.empresas_serasa) && analise.empresas_serasa.length > 0) {
-       if (analise.empresas_serasa[0]?.nome_entidade === "APONTAMENTOS CONSOLIDADOS") {
-           restritivosFlat = analise.empresas_serasa[0].restritivos || [];
+    if (empSerasa.length > 0) {
+       if (empSerasa[0]?.nome_entidade === "APONTAMENTOS CONSOLIDADOS") {
+           restritivosFlat = safeArray(empSerasa[0].restritivos);
        } else {
-           restritivosFlat = analise.empresas_serasa.flatMap((e:any) => 
-               Array.isArray(e.restritivos) ? e.restritivos.map((r:any) => ({...r, empresa_socio: r.empresa_origem || e.nome_entidade})) : []
+           restritivosFlat = empSerasa.flatMap((e:any) => 
+               safeArray(e.restritivos).map((r:any) => ({...r, empresa_socio: r.empresa_origem || e.nome_entidade}))
            );
        }
     } else {
-        restritivosFlat = Array.isArray(analise.restritivos) ? analise.restritivos : [];
+        restritivosFlat = safeArray(analise.restritivos);
     }
 
     // ==========================================
     // RENDERIZAÇÃO CABEÇALHOS
     // ==========================================
     const renderizarCabecalhoEmpresas = () => {
-      if (Array.isArray(analise.empresas_principais) && analise.empresas_principais.length > 0) {
+      const principais = safeArray(analise.empresas_principais);
+      if (principais.length > 0) {
         return `
           <div>
             <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.9;">Proponentes Oficiais:</div>
-            ${analise.empresas_principais.map((emp: any) => `
-              <h1 style="font-size: 1.8rem; margin-bottom: 0.2rem;">${emp.razao_social || 'EMPRESA NÃO INFORMADA'}</h1>
-              <div class="meta" style="font-family: monospace; font-size: 0.95rem; margin-bottom: 1rem;">CNPJ: ${emp.cnpj || 'Não informado'}</div>
+            ${principais.map((emp: any) => `
+              <h1 style="font-size: 1.8rem; margin-bottom: 0.2rem;">${safeStr(emp.razao_social) || 'EMPRESA NÃO INFORMADA'}</h1>
+              <div class="meta" style="font-family: monospace; font-size: 0.95rem; margin-bottom: 1rem;">CNPJ: ${safeStr(emp.cnpj) || 'Não informado'}</div>
             `).join('')}
           </div>
         `;
@@ -123,27 +145,27 @@ export const gerarHtmlDossie = async (item: any) => {
     };
 
     let totalLimites = 0;
-    const arrPropostas = Array.isArray(analise.propostas) && analise.propostas.length > 0 ? analise.propostas : [{}];
+    const arrPropostas = safeArray(analise.propostas).length > 0 ? safeArray(analise.propostas) : [{}];
     const propostasRows = arrPropostas.map((p: any) => {
         totalLimites += Number(p.limite) || 0;
         return `
         <tr>
-            <td style="font-weight:700; color: var(--text);">${p.modalidade || '-'}</td>
+            <td style="font-weight:700; color: var(--text);">${safeStr(p.modalidade) || '-'}</td>
             <td class="text-right font-bold" style="color:var(--blue-dark); font-size: 1.1rem;">${formatarMoeda(p.limite)}</td>
-            <td class="text-center">${p.prazo || '-'}</td>
-            <td class="text-center">${p.tranche || '-'}</td>
-            <td class="text-center font-bold" style="background:#f8fafc;">${p.taxa || '-'}</td>
-            <td>${p.garantia || '-'}</td>
+            <td class="text-center">${safeStr(p.prazo) || '-'}</td>
+            <td class="text-center">${safeStr(p.tranche) || '-'}</td>
+            <td class="text-center font-bold" style="background:#f8fafc;">${safeStr(p.taxa) || '-'}</td>
+            <td>${safeStr(p.garantia) || '-'}</td>
         </tr>`;
       }).join("");
 
     const socioRows = listaSocios.length > 0 ? listaSocios.map((s: any) => `
         <tr style="border-bottom: 1px solid #f1f5f9;">
             <td style="padding: 12px 10px; font-weight: 700; color: var(--text);">
-              ${s.empresa_origem || s.empresa ? `<span style="font-size: 0.75rem; color: var(--muted); font-weight: bold; text-transform: uppercase;">[${s.empresa_origem || s.empresa}]</span><br>` : ''}
-              ${s.nome || '-'} 
+              ${s.empresa_origem || s.empresa ? `<span style="font-size: 0.75rem; color: var(--muted); font-weight: bold; text-transform: uppercase;">[${safeStr(s.empresa_origem || s.empresa)}]</span><br>` : ''}
+              ${safeStr(s.nome) || '-'} 
             </td>
-            <td style="padding: 12px 10px; color: var(--muted); text-align:center;">${s.funcao || 'Sócio'}</td>
+            <td style="padding: 12px 10px; color: var(--muted); text-align:center;">${safeStr(s.funcao) || 'Sócio'}</td>
             <td style="padding: 12px 10px; color: var(--muted); text-align:center;">
               ${s.figura_contrato === 'Sim' ? '<span style="color:var(--green); font-weight:bold;">✅ Assina</span>' : s.figura_contrato === 'Não' ? '❌ Não Assina' : '-'}
             </td>
@@ -151,12 +173,12 @@ export const gerarHtmlDossie = async (item: any) => {
         </tr>`).join("") : '<tr><td colspan="4" class="text-center">Sem sócios cadastrados</td></tr>';
 
     let totalPatrimonio = 0;
-    const arrPatrimonio = Array.isArray(analise.patrimonios) && analise.patrimonios.length > 0 ? analise.patrimonios : [{}];
+    const arrPatrimonio = safeArray(analise.patrimonios).length > 0 ? safeArray(analise.patrimonios) : [{}];
     const patrimonioRows = arrPatrimonio.map((p: any) => {
         totalPatrimonio += Number(p.valor) || 0;
         return `
           <tr>
-            <td style="font-weight:600;">${p.descricao || '-'} <br><span style="font-weight:normal; font-size: 0.8rem; color:var(--muted);">Titular: ${p.socio || '-'}</span></td>
+            <td style="font-weight:600;">${safeStr(p.descricao) || '-'} <br><span style="font-weight:normal; font-size: 0.8rem; color:var(--muted);">Titular: ${safeStr(p.socio) || '-'}</span></td>
             <td class="text-right font-bold font-mono text-green-700" style="font-size: 1.1rem; vertical-align: middle;">${formatarMoeda(p.valor)}</td>
           </tr>`;
       }).join("");
@@ -170,12 +192,12 @@ export const gerarHtmlDossie = async (item: any) => {
         return `
         <tr>
             <td style="font-weight:700; font-size:0.9rem;">
-              ${b.empresa_origem || b.empresa ? `<span style="color:var(--muted); font-size:10px; font-weight: bold; text-transform: uppercase;">[${b.empresa_origem || b.empresa}]</span><br>` : ''}
-              ${b.instituicao || '-'}
+              ${b.empresa_origem || b.empresa ? `<span style="color:var(--muted); font-size:10px; font-weight: bold; text-transform: uppercase;">[${safeStr(b.empresa_origem || b.empresa)}]</span><br>` : ''}
+              ${safeStr(b.instituicao) || '-'}
             </td>
             <td style="font-size:0.9rem;">
-              ${b.modalidade || '-'} <br>
-              <span style="color:var(--muted); font-size:10px; font-weight: 600; text-transform: uppercase;">${b.tipo || '-'} | ${b.prazo || '-'}</span>
+              ${safeStr(b.modalidade) || '-'} <br>
+              <span style="color:var(--muted); font-size:10px; font-weight: 600; text-transform: uppercase;">${safeStr(b.tipo) || '-'} | ${safeStr(b.prazo) || '-'}</span>
             </td>
             <td class="text-right font-bold font-mono" style="font-size:1rem; color:var(--red); vertical-align: middle;">${formatarMoeda(v)}</td>
         </tr>`;
@@ -189,19 +211,19 @@ export const gerarHtmlDossie = async (item: any) => {
         qtdRestritivos += q;
         return `
         <tr>
-            <td style="font-weight:600;">${r.empresa_origem || r.empresa_socio || '-'}</td>
-            <td style="color:var(--yellow); font-weight:bold;">${r.tipo_restritivo || r.restritivo || '-'}</td>
+            <td style="font-weight:600;">${safeStr(r.empresa_origem || r.empresa_socio) || '-'}</td>
+            <td style="color:var(--yellow); font-weight:bold;">${safeStr(r.tipo_restritivo || r.restritivo) || '-'}</td>
             <td class="text-center font-mono font-bold" style="background:#f8fafc;">${q}</td>
             <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(v)}</td>
         </tr>`;
     }).join("") : '<tr><td colspan="4" class="text-center">Nada Consta</td></tr>';
 
-    const arrRefs = Array.isArray(analise.referencias) && analise.referencias.length > 0 ? analise.referencias : [{}];
+    const arrRefs = safeArray(analise.referencias).length > 0 ? safeArray(analise.referencias) : [{}];
     const refRows = arrRefs.map((r: any) => {
         const calcLiq5 = (Number(r.liquidez_pontual) || 0) + (Number(r.atraso_5_dias) || 0);
         return `
         <tr>
-          <td style="font-weight:700;">${r.instituicao || '-'}</td>
+          <td style="font-weight:700;">${safeStr(r.instituicao) || '-'}</td>
           <td class="text-center font-mono" style="font-size: 0.8rem; color: var(--muted);">${r.ultima_operacao ? new Date(r.ultima_operacao).toLocaleDateString('pt-BR') : '-'}</td>
           <td class="text-right font-bold font-mono text-slate-700">${formatarMoeda(r.vop)}</td>
           <td class="text-right font-bold font-mono" style="color: var(--blue);">${formatarMoeda(r.limite_global)}</td>
@@ -216,11 +238,6 @@ export const gerarHtmlDossie = async (item: any) => {
           <td class="text-center font-mono font-bold">${r.concentracao || 0}%</td>
         </tr>`
       }).join("");
-
-    // Evita crash nos clientes, fornecedores e concorrentes antigos
-    const clientesRows = Array.isArray(analise.clientes) && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
-    const fornecedoresRows = Array.isArray(analise.fornecedores) && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "<li>Não informado</li>";
-    const concorrentesRows = Array.isArray(analise.concorrentes) && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
 
     // ==========================================
     // MATEMÁTICA CONSOLIDADA DE FATURAMENTO
@@ -296,14 +313,24 @@ export const gerarHtmlDossie = async (item: any) => {
     const arrayFat2025 = JSON.stringify(meses.map(m => faturamentoConsolidado?.["2025"]?.[m] || 0));
     const arrayFat2026 = JSON.stringify(meses.map(m => faturamentoConsolidado?.["2026"]?.[m] || 0));
 
-    const endividamentoValido = endividamentoFlat.filter((e:any) => e && e.saldo > 0);
+    const endividamentoValido = endividamentoFlat.filter((e:any) => e && Number(e.saldo) > 0);
     const chartEndivData = endividamentoValido.reduce((acc: any, d: any) => {
-      const mod = d.modalidade || "Outros";
+      const mod = safeStr(d.modalidade) || "Outros";
       acc[mod] = (acc[mod] || 0) + Number(d.saldo || 0);
       return acc;
     }, {});
     const arrayEndivLabels = JSON.stringify(Object.keys(chartEndivData || {}));
     const arrayEndivData = JSON.stringify(Object.values(chartEndivData || {}));
+
+    // Transformar organograma_json em string de forma segura
+    let orgaJsonString = "null";
+    try {
+        if (analise.organograma_json && typeof analise.organograma_json === "object") {
+            orgaJsonString = JSON.stringify(analise.organograma_json);
+        }
+    } catch(e) {
+        console.error("Erro no stringify do organograma", e);
+    }
 
     // Imagens seguras do R2
     let fotosUnicas: string[] = [];
@@ -315,11 +342,14 @@ export const gerarHtmlDossie = async (item: any) => {
 
       if (Array.isArray(analise.dados_documentos) && analise.dados_documentos.length > 0) {
         try {
-          const urlBase = new URL(analise.dados_documentos[0]);
-          const parts = urlBase.pathname.split('/'); 
-          const idxClientes = parts.indexOf('clientes');
-          if (idxClientes !== -1 && parts.length > idxClientes + 1) {
-            prefixoPasta = `${parts[idxClientes]}/${parts[idxClientes + 1]}/`;
+          const uStr = safeStr(analise.dados_documentos[0]);
+          if (uStr.startsWith("http")) {
+            const urlBase = new URL(uStr);
+            const parts = urlBase.pathname.split('/'); 
+            const idxClientes = parts.indexOf('clientes');
+            if (idxClientes !== -1 && parts.length > idxClientes + 1) {
+              prefixoPasta = `${parts[idxClientes]}/${parts[idxClientes + 1]}/`;
+            }
           }
         } catch(e) {}
       }
@@ -406,7 +436,6 @@ export const gerarHtmlDossie = async (item: any) => {
             .btn-maps { background: var(--blue); color: white; padding: 12px 20px; border-radius: 0.5rem; text-decoration: none; font-size: 0.85rem; font-weight: 800; display: inline-block; transition: 0.2s; box-shadow: 0 4px 6px rgba(37,99,235,0.2); border: 1px solid rgba(0,0,0,0.1); text-transform: uppercase; letter-spacing: 0.5px; }
             .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 8px 15px rgba(37,99,235,0.3); }
             .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #ffffff; border: 1px solid #e2e8f0; }
-            ul.simple-list { margin: 0; padding-left: 1.25rem; font-size: 0.9rem; line-height: 1.6; color: var(--text); font-weight: 500;}
             .hover-card { transition: box-shadow 0.3s, transform 0.3s; }
             .hover-card:hover { box-shadow: 0 15px 30px -5px rgba(0,0,0,0.1); transform: translateY(-2px); }
             .expandable-box { position: relative; max-height: 120px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
@@ -415,15 +444,9 @@ export const gerarHtmlDossie = async (item: any) => {
             .hover-card:hover .expandable-box { max-height: 2000px; }
             .hover-card:hover .expandable-fade { opacity: 0; pointer-events: none; }
             
-            /* 🔥 AJUSTES PARA A IMPRESSÃO PRESERVAR AS CORES PERFEITAMENTE */
             @media print { 
                 .print-break { page-break-before: always; } 
-                body { 
-                  background: white; 
-                  padding: 0; 
-                  -webkit-print-color-adjust: exact !important; 
-                  print-color-adjust: exact !important; 
-                } 
+                body { background: white; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } 
                 .container { box-shadow: none; border: none; padding: 0; max-width: 100%; }
                 .card, .table-wrap, .parecer-wrapper { box-shadow: none !important; border: 1px solid #cbd5e1 !important; transform: none !important; } 
                 .expandable-box { max-height: none !important; }
@@ -439,16 +462,16 @@ export const gerarHtmlDossie = async (item: any) => {
                 ${renderizarCabecalhoEmpresas()}
                 <div class="meta" style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.2); font-size: 0.95rem;">
                     <strong style="color:#fff;">Data Emissão:</strong> ${dataAtual} &nbsp;|&nbsp; 
-                    <strong style="color:#fff;">Analista:</strong> ${analise.analista || item.comercial || '-'} &nbsp;|&nbsp; 
-                    <strong style="color:#fff;">Gerente:</strong> ${analise.gerente || '-'}
+                    <strong style="color:#fff;">Analista:</strong> ${safeStr(analise.analista) || safeStr(item.comercial) || '-'} &nbsp;|&nbsp; 
+                    <strong style="color:#fff;">Gerente:</strong> ${safeStr(analise.gerente) || '-'}
                 </div>
             </div>
             <div style="display:flex; flex-direction:column; gap: 12px; align-items:flex-end; min-width: 280px;">
                 <div class="badge-top" style="background: rgba(0,0,0,0.2);">
-                    RATING: <span style="color: #fde047;">${analise.rating || 'N/A'}</span>
+                    RATING: <span style="color: #fde047;">${safeStr(analise.rating) || 'N/A'}</span>
                 </div>
                 <div class="badge-top" style="background: white; color: var(--blue-dark);">
-                    RECOMENDAÇÃO: ${analise.recomendacao_analista || 'EM ANÁLISE'}
+                    RECOMENDAÇÃO: ${safeUpper(analise.recomendacao_analista) || 'EM ANÁLISE'}
                 </div>
             </div>
         </div>
@@ -456,7 +479,7 @@ export const gerarHtmlDossie = async (item: any) => {
         <div class="grid-3" style="margin-bottom: 2rem;">
             <div class="card" style="grid-column: span 3; border-left: 4px solid var(--blue);">
                 <div class="metric-label" style="margin-bottom: 0.75rem;">Súmula Comercial (Resumo da Visita)</div>
-                <div style="font-size: 1.05rem; color: #334155; line-height: 1.7; text-align: justify; white-space: pre-wrap;">${analise.resumo_visita || 'Nenhum resumo comercial preenchido na plataforma.'}</div>
+                <div style="font-size: 1.05rem; color: #334155; line-height: 1.7; text-align: justify; white-space: pre-wrap;">${safeStr(analise.resumo_visita) || 'Nenhum resumo comercial preenchido na plataforma.'}</div>
             </div>
         </div>
 
@@ -465,7 +488,7 @@ export const gerarHtmlDossie = async (item: any) => {
             <div style="font-weight: 900; font-size: 1rem; color: var(--blue-dark); text-transform: uppercase; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                 <span>🧠</span> Súmula Executiva de Crédito (Parecer Motor IA V8)
             </div>
-            <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.7; white-space: pre-wrap; text-align: justify;">${analise.parecer_executivo}</div>
+            <div style="font-size: 0.95rem; color: #1e293b; line-height: 1.7; white-space: pre-wrap; text-align: justify;">${safeStr(analise.parecer_executivo)}</div>
         </div>
         ` : ''}
 
@@ -489,14 +512,14 @@ export const gerarHtmlDossie = async (item: any) => {
             <div class="card" style="margin-bottom:0; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                   <div class="metric-label">Localização Oficial & Atividade Principal</div>
-                  <div style="font-weight: 800; font-size: 1rem; color: var(--text); margin-bottom: 0.5rem;">${analise.localizacao || '-'}</div>
-                  <div style="font-weight: 600; font-size: 0.9rem; color: var(--muted);">${analise.ramo || '-'}</div>
+                  <div style="font-weight: 800; font-size: 1rem; color: var(--text); margin-bottom: 0.5rem;">${localizacaoReal || '-'}</div>
+                  <div style="font-weight: 600; font-size: 0.9rem; color: var(--muted);">${safeStr(analise.ramo) || '-'}</div>
                 </div>
                 <div style="font-size:0.85rem; color:var(--muted); margin-top:1.5rem; padding-top:1.5rem; border-top: 1px solid var(--border); line-height: 1.6;">
                     Capital Social Matriz: <strong class="font-mono" style="color:var(--text);">${formatarMoeda(analise.capital_social)}</strong> <br>
-                    Balanço Auditado: <strong style="color:var(--text);">${analise.balanco_auditado || '-'}</strong> <br>
-                    Consultoria de Gestão: <strong style="color:var(--text);">${analise.consultoria_gestao || '-'}</strong> <br>
-                    Licenças / Certificações: <strong style="color:var(--text);">${analise.licencas || '-'}</strong>
+                    Balanço Auditado: <strong style="color:var(--text);">${safeStr(analise.balanco_auditado) || '-'}</strong> <br>
+                    Consultoria de Gestão: <strong style="color:var(--text);">${safeStr(analise.consultoria_gestao) || '-'}</strong> <br>
+                    Licenças / Certificações: <strong style="color:var(--text);">${safeStr(analise.licencas) || '-'}</strong>
                 </div>
             </div>
             <div class="card" style="margin-bottom:0; padding: 0;">
@@ -505,8 +528,8 @@ export const gerarHtmlDossie = async (item: any) => {
                     ${socioRows}
                 </table>
                 <div style="font-size:0.85rem; color:var(--muted); padding: 1.25rem 1.5rem; background: #f8fafc; border-top: 1px solid var(--border); border-radius: 0 0 0.75rem 0.75rem;">
-                    Regra de Assinatura: <strong style="color: var(--text);">${analise.regra_assinatura || '-'}</strong> <br> 
-                    Aval Societário Coletado: <strong style="color: var(--text);">${analise.aval_societario || '-'}</strong>
+                    Regra de Assinatura: <strong style="color: var(--text);">${safeStr(analise.regra_assinatura) || '-'}</strong> <br> 
+                    Aval Societário Coletado: <strong style="color: var(--text);">${safeStr(analise.aval_societario) || '-'}</strong>
                 </div>
             </div>
         </div>
@@ -540,7 +563,7 @@ export const gerarHtmlDossie = async (item: any) => {
 
         <h2 style="margin-top: 3.5rem;">2. Organograma Estrutural / Teia</h2>
         <div style="margin-bottom: 2.5rem;">
-            ${analise.organograma_json && analise.organograma_json.nodes && analise.organograma_json.nodes.length > 0 ? `
+            ${orgaJsonString !== "null" ? `
             <div class="card hover-card" style="padding:1rem;">
                 <div id="network-container" class="org-container"></div>
             </div>
@@ -636,9 +659,9 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="font-size:0.95rem; margin-bottom:0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">
                     <div style="color: var(--muted); font-weight: bold; margin-bottom:0.25rem;">Prazos Médios de Venda:</div>
                     <div style="display:flex; justify-content:space-between; padding-left: 0.5rem; font-size:0.9rem;">
-                        <span>• DPLS: <strong>${analise.dados_potencial?.prazo_medio_dpls || '-'}</strong></span>
-                        <span>• Comissária: <strong>${analise.dados_potencial?.prazo_medio_comissaria || '-'}</strong></span>
-                        <span>• Inter: <strong>${analise.dados_potencial?.prazo_medio_intercompany || '-'}</strong></span>
+                        <span>• DPLS: <strong>${safeStr(analise.dados_potencial?.prazo_medio_dpls) || '-'}</strong></span>
+                        <span>• Comissária: <strong>${safeStr(analise.dados_potencial?.prazo_medio_comissaria) || '-'}</strong></span>
+                        <span>• Inter: <strong>${safeStr(analise.dados_potencial?.prazo_medio_intercompany) || '-'}</strong></span>
                     </div>
                 </div>
 
@@ -674,7 +697,7 @@ export const gerarHtmlDossie = async (item: any) => {
                             <strong style="color:var(--blue-dark); font-size: 1.5rem; display: block; margin-top: 0.5rem;">${alavancagem} x Fat. Médio</strong>
                         </td></tr>
                         <tr><td colspan="2" class="text-center" style="font-size:0.9rem; padding: 1rem 1.5rem; border-top: 1px solid var(--border);">
-                            Conta em Renegociação? <strong style="color:${analise.endividamento_resumo?.renegociando === 'Sim' ? 'var(--red)' : 'var(--text)'};">${analise.endividamento_resumo?.renegociando || 'Não'}</strong>
+                            Conta em Renegociação? <strong style="color:${analise.endividamento_resumo?.renegociando === 'Sim' ? 'var(--red)' : 'var(--text)'};">${safeStr(analise.endividamento_resumo?.renegociando) || 'Não'}</strong>
                         </td></tr>
                     </tbody>
                 </table>
@@ -741,7 +764,7 @@ export const gerarHtmlDossie = async (item: any) => {
             <div class="card hover-card" style="padding:2rem; border-left: 6px solid #fca5a5; cursor: pointer; background: #fff;">
                 <div style="font-weight:900; font-size:1rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Relatório Jurídico Consolidado (Processos)</div>
                 <div class="expandable-box">
-                    <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.dados_juridico?.relatorio_completo || analise.juridico_tramitacao || 'Nenhum apontamento judicial detalhado localizado.'}</div>
+                    <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${safeStr(analise.dados_juridico?.relatorio_completo) || safeStr(analise.juridico_tramitacao) || 'Nenhum apontamento judicial detalhado localizado.'}</div>
                     <div class="expandable-fade" style="height: 60px;"></div>
                 </div>
             </div>
@@ -749,7 +772,7 @@ export const gerarHtmlDossie = async (item: any) => {
             <div class="card hover-card" style="padding:2rem; border-left: 6px solid #93c5fd; cursor: pointer; background: #fff;">
                 <div style="font-weight:900; font-size:1rem; color:var(--blue-dark); margin-bottom:1rem; text-transform:uppercase;">🔍 Clipping Mídia / Reputação</div>
                 <div class="expandable-box">
-                    <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${analise.noticias_midia || analise.noticias_mercado?.panorama_setor || 'Nada consta em pesquisas reputacionais desabonadoras ativas.'}</div>
+                    <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${safeStr(analise.noticias_midia) || safeStr(analise.noticias_mercado?.panorama_setor) || 'Nada consta em pesquisas reputacionais desabonadoras ativas.'}</div>
                     <div class="expandable-fade" style="height: 60px;"></div>
                 </div>
             </div>
@@ -761,13 +784,13 @@ export const gerarHtmlDossie = async (item: any) => {
             <div class="parecer-header">Parecer Técnico Formal - Mesa de Risco</div>
             <div class="parecer-body">
                 <span style="color: var(--blue-dark); font-weight: 900; font-size: 1.15rem; display:block; margin-bottom: 1rem;">
-                    RECOMENDAÇÃO DO ANALISTA: <span style="color: var(--blue);">${analise.recomendacao_analista?.toUpperCase() || 'EM ANÁLISE'}</span>
+                    RECOMENDAÇÃO DO ANALISTA: <span style="color: var(--blue);">${safeUpper(analise.recomendacao_analista) || 'EM ANÁLISE'}</span>
                 </span>
                 
                 <div style="margin-bottom: 1rem;">
                     <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Justificativa do Analista:</strong>
                     <div style="background: #f8fafc; border: 1px solid var(--border); padding: 1rem; border-radius: 0.5rem; font-size: 0.95rem;">
-                      ${analise.parecer_analista || 'Sem parecer técnico elaborado para este dossiê.'}
+                      ${safeStr(analise.parecer_analista) || 'Sem parecer técnico elaborado para este dossiê.'}
                     </div>
                 </div>
 
@@ -775,13 +798,13 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
                     <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Deliberação Oficial do Comitê:</strong>
                     <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1rem; border-radius: 0.5rem; color: #1e3a8a; font-weight: 500; font-size: 0.95rem;">
-                      ${analise.parecer_comite}
+                      ${safeStr(analise.parecer_comite)}
                     </div>
                 </div>
                 ` : ''}
             </div>
             <div class="parecer-footer">
-              Relatório Oficial validado digitalmente por: <strong style="color: var(--blue-dark); text-transform: uppercase;">${analise.analista || item.comercial || 'ANALISTA DE CRÉDITO RESPONSÁVEL'}</strong>
+              Relatório Oficial validado digitalmente por: <strong style="color: var(--blue-dark); text-transform: uppercase;">${safeUpper(analise.analista) || safeUpper(item.comercial) || 'ANALISTA DE CRÉDITO RESPONSÁVEL'}</strong>
             </div>
         </div>
 
@@ -842,7 +865,7 @@ export const gerarHtmlDossie = async (item: any) => {
             });
         }
 
-        const orgaJson = ${JSON.stringify(analise.organograma_json || null)};
+        const orgaJson = ${orgaJsonString};
         
         if (orgaJson && orgaJson.nodes && orgaJson.edges) {
             const uniqueNodesMap = new Map();
@@ -935,7 +958,8 @@ export const gerarHtmlDossie = async (item: any) => {
     `;
   } catch (erroGlobal) {
     console.error("Erro fatal na renderização do PDF:", erroGlobal);
-    return `<html><body><h1 style="color:red; font-family:sans-serif;">Erro crítico ao gerar PDF</h1><pre>${String(erroGlobal)}</pre></body></html>`;
+    // Se, por um milagre satânico, der erro, ele vai te mostrar ONDE FOI em vez de engolir!
+    return `<html><body><h1 style="color:red; font-family:sans-serif;">Puta merda, falhou!</h1><pre style="background:#f4f4f4; padding:20px;">${String(erroGlobal)}</pre></body></html>`;
   }
 };
 
@@ -950,16 +974,14 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     try {
       const htmlContent = await gerarHtmlDossie(analise);
       
-      // Se a string de retorno indicar erro, a gente joga no catch
-      if (htmlContent.includes("Erro crítico ao gerar PDF")) {
-         throw new Error("Falha interna de null pointer identificada e isolada.");
-      }
+      // ✅ TIREI O THROW. Se rolar erro crítico, ele vai ABRIR A TELA VERMELHA no seu navegador 
+      // pra você ver o log exato, em vez de dar só um alert burro na tela.
 
       const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
     } catch (err) {
-      alert("Erro ao estruturar dados na impressão do relatório. Algum dado vital está corrompido no banco.");
+      alert("Cara, deu um erro sistêmico na hora de abrir a nova guia. Checa o console (F12).");
       console.error(err);
     } finally {
       setGerando(false);
