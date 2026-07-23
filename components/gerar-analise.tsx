@@ -30,33 +30,64 @@ export const gerarHtmlDossie = async (item: any) => {
   if (siteTratado && !siteTratado.startsWith('http')) siteTratado = 'https://' + siteTratado;
 
   // ==========================================
-  // LÓGICA DE ACHATAMENTO (GRUPO ECONÔMICO)
+  // LÓGICA DE ACHATAMENTO E CONSOLIDAÇÃO
   // ==========================================
-  // Socios (Consolidado do grupo)
-  const listaSocios = analise.empresas_societario?.length 
-      ? analise.empresas_societario.flatMap((e: any) => e.socios?.map((s:any) => ({...s, empresa: e.razao_social})) || [])
-      : (analise.socios || []);
+  
+  // Socios (Consolidado) - Verifica se a estrutura já é achatada (nossa nova tela) ou antiga
+  let listaSocios: any[] = [];
+  if (analise.empresas_societario && analise.empresas_societario.length > 0) {
+    if (analise.empresas_societario[0].razao_social === "QUADRO SOCIETÁRIO CONSOLIDADO") {
+       listaSocios = analise.empresas_societario[0].socios || [];
+    } else {
+       listaSocios = analise.empresas_societario.flatMap((e: any) => e.socios?.map((s:any) => ({...s, empresa: s.empresa_origem || e.razao_social})) || []);
+    }
+  } else {
+    listaSocios = analise.socios || [];
+  }
 
-  // Faturamento Consolidado (Soma das filiais)
-  const faturamentoConsolidado = (analise.empresas_faturamento || []).reduce((acc: any, emp: any) => {
-      Object.entries(emp.faturamento || {}).forEach(([ano, m]: [string, any]) => {
-          if (!acc[ano]) acc[ano] = {};
-          Object.entries(m).forEach(([mes, valor]) => {
-              acc[ano][mes] = (Number(acc[ano][mes]) || 0) + Number(valor);
-          });
-      });
-      return acc;
-  }, (analise.dados_faturamento || {}));
+  // Faturamento Consolidado
+  let faturamentoConsolidado: Record<string, Record<string, number>> = {};
+  if (analise.empresas_faturamento && analise.empresas_faturamento.length > 0) {
+      if (analise.empresas_faturamento[0].razao_social === "VISÃO CONSOLIDADA") {
+          faturamentoConsolidado = analise.empresas_faturamento[0].faturamento || {};
+      } else {
+          faturamentoConsolidado = analise.empresas_faturamento.reduce((acc: any, emp: any) => {
+              Object.entries(emp.faturamento || {}).forEach(([ano, m]: [string, any]) => {
+                  if (!acc[ano]) acc[ano] = {};
+                  Object.entries(m).forEach(([mes, valor]) => {
+                      acc[ano][mes] = (Number(acc[ano][mes]) || 0) + Number(valor);
+                  });
+              });
+              return acc;
+          }, {});
+      }
+  } else {
+      faturamentoConsolidado = analise.dados_faturamento || {};
+  }
 
   // Dívidas Consolidadas
-  const endividamentoFlat = analise.empresas_endividamento?.length
-      ? analise.empresas_endividamento.flatMap((e:any) => e.endividamento?.map((d:any) => ({...d, empresa: e.razao_social})) || [])
-      : (analise.endividamento_detalhado || []);
+  let endividamentoFlat: any[] = [];
+  if (analise.empresas_endividamento && analise.empresas_endividamento.length > 0) {
+     if (analise.empresas_endividamento[0].razao_social === "PASSIVO CONSOLIDADO") {
+         endividamentoFlat = analise.empresas_endividamento[0].endividamento || [];
+     } else {
+         endividamentoFlat = analise.empresas_endividamento.flatMap((e:any) => e.endividamento?.map((d:any) => ({...d, empresa: d.empresa_origem || e.razao_social})) || []);
+     }
+  } else {
+      endividamentoFlat = analise.endividamento_detalhado || [];
+  }
 
   // Restritivos Consolidados
-  const restritivosFlat = analise.empresas_serasa?.length
-      ? analise.empresas_serasa.flatMap((e:any) => e.restritivos?.map((r:any) => ({...r, empresa_socio: e.nome_entidade})) || [])
-      : (analise.restritivos || []);
+  let restritivosFlat: any[] = [];
+  if (analise.empresas_serasa && analise.empresas_serasa.length > 0) {
+     if (analise.empresas_serasa[0].nome_entidade === "APONTAMENTOS CONSOLIDADOS") {
+         restritivosFlat = analise.empresas_serasa[0].restritivos || [];
+     } else {
+         restritivosFlat = analise.empresas_serasa.flatMap((e:any) => e.restritivos?.map((r:any) => ({...r, empresa_socio: r.empresa_origem || e.nome_entidade})) || []);
+     }
+  } else {
+      restritivosFlat = analise.restritivos || [];
+  }
 
   // ==========================================
   // CABEÇALHO: PROPONENTES
@@ -65,7 +96,7 @@ export const gerarHtmlDossie = async (item: any) => {
     if (analise.empresas_principais && analise.empresas_principais.length > 0) {
       return `
         <div>
-          <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.9;">Proponentes:</div>
+          <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; opacity: 0.9;">Proponentes Oficiais:</div>
           ${analise.empresas_principais.map((emp: any) => `
             <h1 style="font-size: 1.8rem; margin-bottom: 0.2rem;">${emp.razao_social || 'EMPRESA NÃO INFORMADA'}</h1>
             <div class="meta" style="font-family: monospace; font-size: 0.95rem; margin-bottom: 1rem;">CNPJ: ${emp.cnpj || 'Não informado'}</div>
@@ -96,32 +127,11 @@ export const gerarHtmlDossie = async (item: any) => {
       </tr>`;
     }).join("");
 
-  // Se houver Grupo Societário mapeado, lista aqui.
-  let empresasRows = "";
-  if (analise.empresas_societario && analise.empresas_societario.length > 0) {
-      empresasRows = analise.empresas_societario.map((e: any) => `
-      <tr>
-          <td style="font-weight:600; font-size:0.9rem;">${e.razao_social || '-'} <br><span style="font-size: 0.75rem; color: var(--muted);">${e.papel_no_grupo || 'Controlada'}</span></td>
-          <td style="font-size:0.9rem;" class="font-mono">${e.cnpj || '-'}</td>
-          <td style="font-size:0.9rem; text-align:center;">${e.fundacao || '-'}</td>
-          <td style="font-size:0.9rem; text-align:center; font-weight: 600;">${e.ramo || '-'}</td>
-      </tr>`).join("");
-  } else {
-      const arrEmpresas = (analise.empresas_grupo && analise.empresas_grupo.length > 0) ? analise.empresas_grupo : [{}];
-      empresasRows = arrEmpresas.map((e: any) => `
-      <tr>
-          <td style="font-weight:600; font-size:0.9rem;">${e.empresa || '-'}</td>
-          <td style="font-size:0.9rem;" class="font-mono">${e.cnpj || '-'}</td>
-          <td style="font-size:0.9rem; text-align:center;">${e.fundacao || '-'}</td>
-          <td style="font-size:0.9rem; text-align:center; font-weight: 600;">${e.idade || '-'}</td>
-      </tr>`).join("");
-  }
-
   const socioRows = listaSocios.length > 0 ? listaSocios.map((s: any) => `
       <tr style="border-bottom: 1px solid #f1f5f9;">
           <td style="padding: 12px 10px; font-weight: 700; color: var(--text);">
+            ${s.empresa_origem || s.empresa ? `<span style="font-size: 0.75rem; color: var(--muted); font-weight: bold; text-transform: uppercase;">[${s.empresa_origem || s.empresa}]</span><br>` : ''}
             ${s.nome || '-'} 
-            ${s.empresa ? `<br><span style="font-size: 0.75rem; color: var(--muted); font-weight: normal;">de ${s.empresa}</span>` : ''}
           </td>
           <td style="padding: 12px 10px; color: var(--muted); text-align:center;">${s.funcao || 'Sócio'}</td>
           <td style="padding: 12px 10px; color: var(--muted); text-align:center;">
@@ -150,8 +160,8 @@ export const gerarHtmlDossie = async (item: any) => {
       return `
       <tr>
           <td style="font-weight:700; font-size:0.9rem;">
+            ${b.empresa_origem || b.empresa ? `<span style="color:var(--muted); font-size:10px; font-weight: bold; text-transform: uppercase;">[${b.empresa_origem || b.empresa}]</span><br>` : ''}
             ${b.instituicao || '-'}
-            ${b.empresa ? `<br><span style="color:var(--muted); font-size:10px; font-weight: normal;">de ${b.empresa}</span>` : ''}
           </td>
           <td style="font-size:0.9rem;">
             ${b.modalidade || '-'} <br>
@@ -169,7 +179,7 @@ export const gerarHtmlDossie = async (item: any) => {
       qtdRestritivos += q;
       return `
       <tr>
-          <td style="font-weight:600;">${r.empresa_socio || '-'}</td>
+          <td style="font-weight:600;">${r.empresa_origem || r.empresa_socio || '-'}</td>
           <td style="color:var(--yellow); font-weight:bold;">${r.tipo_restritivo || r.restritivo || '-'}</td>
           <td class="text-center font-mono font-bold" style="background:#f8fafc;">${q}</td>
           <td class="text-right font-bold font-mono text-red-600">${formatarMoeda(v)}</td>
@@ -197,16 +207,33 @@ export const gerarHtmlDossie = async (item: any) => {
       </tr>`
     }).join("");
 
-  const clientesRows = analise.clientes && analise.clientes.length > 0 ? analise.clientes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
-  const fornecedoresRows = analise.fornecedores && analise.fornecedores.length > 0 ? analise.fornecedores.map((f: any) => `<li>${f.nome || f}</li>`).join("") : "<li>Não informado</li>";
-  const concorrentesRows = analise.concorrentes && analise.concorrentes.length > 0 ? analise.concorrentes.map((c: any) => `<li>${c.nome || c}</li>`).join("") : "<li>Não informado</li>";
-
   // ==========================================
   // MATEMÁTICA CONSOLIDADA DE FATURAMENTO
   // ==========================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(faturamentoConsolidado?.[ano]?.[m] || 0), 0);
   const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(faturamentoConsolidado?.[ano]?.[m] || 0) > 0).length;
+  
+  let lastFilledIndex26 = -1;
+  for (let i = 11; i >= 0; i--) {
+      if (Number(faturamentoConsolidado["2026"]?.[meses[i]] || 0) > 0) { lastFilledIndex26 = i; break; }
+  }
+  
+  const has26Data = lastFilledIndex26 >= 0;
+  const limitIndex = has26Data ? lastFilledIndex26 : 11; 
+  const mesesYTD = meses.slice(0, limitIndex + 1);
+  const labelMascaraYTD = has26Data ? `MÉDIA ATÉ ${meses[lastFilledIndex26].toUpperCase()}` : "MÉDIA YTD";
+
+  const calcMediaYTD = (ano: string) => {
+      if (mesesYTD.length === 0) return 0;
+      const soma = mesesYTD.reduce((acc, m) => acc + Number(faturamentoConsolidado[ano]?.[m] || 0), 0);
+      return soma / mesesYTD.length;
+  };
+
+  const mediaYTD26 = has26Data ? calcMediaYTD("2026") : 0;
+  const mediaYTD25 = calcMediaYTD("2025");
+  const mediaYTD24 = calcMediaYTD("2024");
   
   const calcMediaGeralAno = (ano: string) => { 
       const pre = mesesPreenchidosGeral(ano); 
@@ -225,8 +252,8 @@ export const gerarHtmlDossie = async (item: any) => {
   const medGeral25 = calcMediaGeralAno("2025");
   const medGeral24 = calcMediaGeralAno("2024");
   
-  const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
-  const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
+  const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
+  const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
   const fatRows = meses.map(mes => {
     const val2024 = Number(faturamentoConsolidado?.["2024"]?.[mes]) || 0;
@@ -247,7 +274,7 @@ export const gerarHtmlDossie = async (item: any) => {
     </tr>`;
   }).join("");
 
-  const faturamentoReferencia = medGeral26 > 0 ? medGeral26 : (medGeral25 > 0 ? medGeral25 : medGeral24);
+  const faturamentoReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
   const alavancagem = faturamentoReferencia > 0 ? (totalBancosDet / faturamentoReferencia).toFixed(2) : "0.00";
 
   const arrayFat2024 = JSON.stringify(meses.map(m => faturamentoConsolidado?.["2024"]?.[m] || 0));
@@ -443,16 +470,6 @@ export const gerarHtmlDossie = async (item: any) => {
           </table>
       </div>
 
-      <h2>2. Panorama Societário e Background do Grupo</h2>
-      <div class="table-wrap">
-          <table>
-              <thead><tr><th>Empresa (Grupo Coligado)</th><th>CNPJ</th><th class="text-center">Data Fundação</th><th class="text-center">Atividade / Idade</th></tr></thead>
-              <tbody>
-                  ${empresasRows}
-              </tbody>
-          </table>
-      </div>
-
       <div class="grid-2">
           <div class="card" style="margin-bottom:0; display: flex; flex-direction: column; justify-content: space-between;">
               <div>
@@ -507,22 +524,7 @@ export const gerarHtmlDossie = async (item: any) => {
       </div>
       ` : ''}
 
-      <div class="grid-3" style="margin-top: 1.5rem;">
-          <div class="card">
-              <div class="metric-label">Principais Clientes</div>
-              <ul class="simple-list">${clientesRows}</ul>
-          </div>
-          <div class="card">
-              <div class="metric-label">Principais Fornecedores</div>
-              <ul class="simple-list">${fornecedoresRows}</ul>
-          </div>
-          <div class="card">
-              <div class="metric-label">Principais Concorrentes</div>
-              <ul class="simple-list">${concorrentesRows}</ul>
-          </div>
-      </div>
-
-      <h2 style="margin-top: 3.5rem;">3. Organograma Estrutural / Teia</h2>
+      <h2 style="margin-top: 3.5rem;">2. Organograma Estrutural / Teia</h2>
       <div style="margin-bottom: 2.5rem;">
           ${analise.organograma_json && analise.organograma_json.nodes && analise.organograma_json.nodes.length > 0 ? `
           <div class="card hover-card" style="padding:1rem;">
@@ -554,7 +556,7 @@ export const gerarHtmlDossie = async (item: any) => {
 
       <div class="print-break"></div>
 
-      <h2>4. Evolução do Faturamento & Performance (Grupo Consolidado)</h2>
+      <h2>3. Evolução do Faturamento & Performance (Grupo Consolidado)</h2>
       <div class="card hover-card" style="margin-bottom: 2rem; padding: 2rem;">
           <div class="metric-label" style="margin-bottom: 1.5rem;">Comparativo Histórico Anual (YoY)</div>
           <div class="chart-container"><canvas id="fatChart"></canvas></div>
@@ -590,11 +592,19 @@ export const gerarHtmlDossie = async (item: any) => {
                       <td class="text-center font-mono ${varMedGeral25_24 > 0 ? 'delta-pos' : varMedGeral25_24 < 0 ? 'delta-neg' : ''}">${varMedGeral25_24 !== 0 ? varMedGeral25_24.toFixed(1) + '%' : '-'}</td>
                       <td class="text-center font-mono">${formatarMoeda(medGeral24)}</td>
                   </tr>
+                  <tr class="row-total" style="background:#eff6ff; border-top: 1px solid var(--blue);">
+                      <td style="color: var(--blue-dark);">${labelMascaraYTD}</td>
+                      <td class="text-center font-mono" style="color: var(--blue-dark);">${formatarMoeda(mediaYTD26)}</td>
+                      <td class="text-center font-mono ${varYTD26_25 > 0 ? 'delta-pos' : varYTD26_25 < 0 ? 'delta-neg' : ''}">${varYTD26_25 !== 0 ? varYTD26_25.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center font-mono" style="color: var(--blue-dark);">${formatarMoeda(mediaYTD25)}</td>
+                      <td class="text-center font-mono ${varYTD25_24 > 0 ? 'delta-pos' : varYTD25_24 < 0 ? 'delta-neg' : ''}">${varYTD25_24 !== 0 ? varYTD25_24.toFixed(1) + '%' : '-'}</td>
+                      <td class="text-center font-mono" style="color: var(--blue-dark);">${formatarMoeda(mediaYTD24)}</td>
+                  </tr>
               </tbody>
           </table>
       </div>
 
-      <h2>5. Potencial Operacional Estimado</h2>
+      <h2>4. Potencial Operacional Estimado</h2>
       <div class="grid-2">
           <div class="card hover-card" style="margin-bottom:0; display: flex; flex-direction: column; justify-content: center;">
               <div class="metric-label" style="margin-bottom: 1.25rem;">Parâmetros da Carteira de Recebíveis</div>
@@ -624,7 +634,7 @@ export const gerarHtmlDossie = async (item: any) => {
                       <span>• DPLS: <strong>${analise.dados_potencial?.composicao_dpls || 0}%</strong></span>
                       <span>• Comis: <strong>${analise.dados_potencial?.composicao_comissaria || 0}%</strong></span>
                       <span>• Inter: <strong>${analise.dados_potencial?.composicao_intercompany || 0}%</strong></span>
-                      <span>• Outros: <strong>${analise.dados_potencial?.composicao_outros || 0}%</strong></span>
+                      <span>• Out: <strong>${analise.dados_potencial?.composicao_outros || 0}%</strong></span>
                   </div>
               </div>
           </div>
@@ -636,7 +646,7 @@ export const gerarHtmlDossie = async (item: any) => {
 
       <div class="print-break"></div>
 
-      <h2>6. Alavancagem e Endividamento Bancário Consolidado</h2>
+      <h2>5. Alavancagem e Endividamento Bancário Consolidado</h2>
       <div class="grid-3">
           <div class="table-wrap hover-card" style="grid-column: span 1; display:flex; flex-direction:column; margin-bottom:0;">
               <table style="flex-grow: 1;">
@@ -672,7 +682,7 @@ export const gerarHtmlDossie = async (item: any) => {
           </table>
       </div>
 
-      <h2>7. Market Check (Referências e Fundos)</h2>
+      <h2>6. Market Check (Referências e Fundos)</h2>
       <div class="table-wrap">
           <table>
               <thead>
@@ -692,7 +702,7 @@ export const gerarHtmlDossie = async (item: any) => {
           </table>
       </div>
 
-      <h2>8. Apontamentos Restritivos & Jurídico (Visão Global)</h2>
+      <h2>7. Apontamentos Restritivos & Jurídico (Visão Global)</h2>
       <div class="grid-2" style="margin-bottom: 2rem;">
           <div class="card hover-card" style="display:flex; flex-direction:column; justify-content:center; align-items:center; border: 2px solid ${totalRestritivos > 0 ? '#fca5a5' : '#86efac'}; background: ${totalRestritivos > 0 ? '#fef2f2' : '#f0fdf4'};">
               <div class="metric-label" style="color: ${totalRestritivos > 0 ? '#991b1b' : '#166534'}; font-size: 0.9rem;">Volume Financeiro Restritivo</div>
