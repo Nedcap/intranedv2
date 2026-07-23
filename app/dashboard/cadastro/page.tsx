@@ -68,10 +68,13 @@ const formatarDataBr = (dataString: string) => {
   return `${dia}/${mes}/${ano}`;
 };
 
-// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real
-const aplicarTagsDinamicas = (texto: string, item: any) => {
+// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e insere os documentos
+const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = []) => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
+  const listaDocsFormatada = docsSelecionados.length > 0 
+    ? docsSelecionados.map(d => `• ${d}`).join('\n') 
+    : "Nenhum documento especificado.";
 
   return texto
     .replace(/\{empresa\}/gi, item.cedente || "Empresa Não Informada")
@@ -79,7 +82,8 @@ const aplicarTagsDinamicas = (texto: string, item: any) => {
     .replace(/\{contato\}/gi, primeiroNomeComercial)
     .replace(/\{comercial\}/gi, item.comercial || "Comercial")
     .replace(/\{limite\}/gi, item.limite || "R$ 0,00")
-    .replace(/\{taxa\}/gi, item.taxa || "0,00%");
+    .replace(/\{taxa\}/gi, item.taxa || "0,00%")
+    .replace(/\{documentos\}/gi, listaDocsFormatada); // 🌟 TAG DE DOCUMENTOS AQUI!
 };
 
 export default function CadastroPage() {
@@ -91,7 +95,7 @@ export default function CadastroPage() {
   const [cnpjsCopiados, setCnpjsCopiados] = useState<Record<string, boolean>>({});
   
   const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string; email: string } | null>(null);
-  const [gmailConectado, setGmailConectado] = useState(false); // NOVO: Controle de conexão do Gmail
+  const [gmailConectado, setGmailConectado] = useState(false); 
 
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
@@ -105,15 +109,19 @@ export default function CadastroPage() {
 
   // ================= ESTADOS DO MODAL DE DISPARO =================
   const [modalDisparoAberto, setModalDisparoAberto] = useState(false);
-  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | null>(null);
+  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA" | null>(null); // NOVO TIPO
   const [cedentesDisponiveis, setCedentesDisponiveis] = useState<any[]>([]);
   const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
   const [enviandoLote, setEnviandoLote] = useState(false);
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
 
-  // 🌟 NOVO: Estado para os templates do banco
+  // 🌟 ESTADO DOS TEMPLATES E DOCUMENTOS
   const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
   const [templateSelecionadoId, setTemplateSelecionadoId] = useState<string>("");
+  const [listaDocsGerais, setListaDocsGerais] = useState<string[]>([]);
+  const [docsMarcadosParaEnvio, setDocsMarcadosParaEnvio] = useState<string[]>([]);
+  const [buscaDoc, setBuscaDoc] = useState("");
+  const [novoDocInput, setNovoDocInput] = useState("");
 
   const carregarCadastro = useCallback(async () => {
     try {
@@ -124,7 +132,7 @@ export default function CadastroPage() {
       if (user) {
         const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo, email').eq('id', user.id).single();
         
-        let emailDoUsuario = ""; // Criamos uma variável de fallback
+        let emailDoUsuario = ""; 
         
         if (perfilData) {
           emailDoUsuario = perfilData.email?.toLowerCase().trim();
@@ -136,13 +144,12 @@ export default function CadastroPage() {
           });
         }
 
-        // NOVO: Busca à prova de falhas!
         if (emailDoUsuario) {
           const { data: integracoes, error: intError } = await supabase
             .from("usuarios_integracoes")
             .select("id")
             .eq("email_usuario", emailDoUsuario)
-            .limit(1); // Resolve o erro caso o usuário tenha mais de 1 e-mail conectado
+            .limit(1); 
             
           if (intError) {
              console.error("Erro ao buscar integracao:", intError);
@@ -159,6 +166,14 @@ export default function CadastroPage() {
       // 🌟 BUSCA OS TEMPLATES DO BANCO
       const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
       if (tpls) setTemplatesEmail(tpls);
+
+      // 🌟 BUSCA A LISTA DE DOCUMENTOS DO BANCO (JSON)
+      const { data: configDocs } = await supabase.from("crm_configuracoes").select("valor").eq("chave", "docs_homologacao").single();
+      if (configDocs && configDocs.valor) {
+        setListaDocsGerais(configDocs.valor as string[]);
+      } else {
+        setListaDocsGerais(["Contrato Social", "Balanço Patrimonial / DRE", "Faturamento Fiscal 12 meses", "Documento dos Sócios"]);
+      }
 
       const { data } = await supabase.from("cadastro_cedentes").select("*");
       
@@ -178,31 +193,21 @@ export default function CadastroPage() {
 
   // ================= LÓGICA DE DISPARO EM LOTE =================
 
-  // Abre o modal filtrando quem se enquadra na regra
-  const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "APTO") => {
+  const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA") => {
     setTipoDisparoAtual(tipo);
     setSelecionadosParaDisparo([]);
     setLogsDisparo([]);
-    setTemplateSelecionadoId(""); // Reseta a seleção de template
+    setDocsMarcadosParaEnvio([]);
+    setBuscaDoc("");
+    setNovoDocInput("");
+    setTemplateSelecionadoId(""); 
 
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
-      
-      if (tipo === "APTO") {
-        return !!(c.dt_apto_sec || c.dt_apto_fidc);
-      }
-      
-      if (tipo === "GESTORA") {
-        return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
-      }
-      
-      if (tipo === "ASSINATURA") {
-        return (
-          (c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || 
-          (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)
-        ) && !c.dt_apto_sec && !c.dt_apto_fidc;
-      }
-      
+      if (tipo === "APTO") return !!(c.dt_apto_sec || c.dt_apto_fidc);
+      if (tipo === "GESTORA") return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
+      if (tipo === "ASSINATURA") return ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)) && !c.dt_apto_sec && !c.dt_apto_fidc;
+      if (tipo === "PENDENCIA") return !c.dt_apto_sec && !c.dt_apto_fidc; // Qualquer um não apto pode ter pendência
       return false;
     });
 
@@ -211,21 +216,40 @@ export default function CadastroPage() {
   };
 
   const toggleSelecaoDisparo = (id: string) => {
-    setSelecionadosParaDisparo(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
+    setSelecionadosParaDisparo(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   const selecionarTodosDisparo = () => {
-    if (selecionadosParaDisparo.length === cedentesDisponiveis.length) {
-      setSelecionadosParaDisparo([]);
-    } else {
-      setSelecionadosParaDisparo(cedentesDisponiveis.map(c => c.id));
+    if (selecionadosParaDisparo.length === cedentesDisponiveis.length) setSelecionadosParaDisparo([]);
+    else setSelecionadosParaDisparo(cedentesDisponiveis.map(c => c.id));
+  };
+
+  // 🌟 NOVO: Lógica de marcação de documentos
+  const toggleDocMarcado = (doc: string) => {
+    setDocsMarcadosParaEnvio(prev => prev.includes(doc) ? prev.filter(d => d !== doc) : [...prev, doc]);
+  };
+
+  // 🌟 NOVO: Lógica de adição de documento novo no banco
+  const salvarNovoDocumentoNoBanco = async () => {
+    if (!novoDocInput.trim()) return;
+    const docLimpo = novoDocInput.trim();
+    if (listaDocsGerais.includes(docLimpo)) return setNovoDocInput(""); // Evita duplicados
+    
+    const novaLista = [...listaDocsGerais, docLimpo];
+    setListaDocsGerais(novaLista);
+    setDocsMarcadosParaEnvio(prev => [...prev, docLimpo]); // Já deixa marcado pra envio
+    setNovoDocInput("");
+
+    try {
+      await supabase.from("crm_configuracoes").upsert({ chave: "docs_homologacao", valor: novaLista });
+    } catch (e) {
+      console.error("Erro ao salvar doc no config:", e);
     }
   };
 
   const executarDisparoEmLote = async () => {
     if (selecionadosParaDisparo.length === 0 || !usuarioAtual?.email || !tipoDisparoAtual || !templateSelecionadoId) return;
+    if (tipoDisparoAtual === "PENDENCIA" && docsMarcadosParaEnvio.length === 0) return alert("Selecione ao menos um documento pendente para enviar.");
     
     const templateAtivo = templatesEmail.find(t => t.id === templateSelecionadoId);
     if (!templateAtivo) return;
@@ -251,21 +275,20 @@ export default function CadastroPage() {
 
         if (!emailDestino) {
           setLogsDisparo(prev => [...prev, `❌ Pulando ${item.cedente}: E-mail do comercial não encontrado.`]);
-          continue; // Pula pro próximo
+          continue; 
         }
 
-        // 🌟 APLICA AS TAGS DINÂMICAS DO TEMPLATE
-        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item);
-        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item);
+        // 🌟 APLICA AS TAGS DINÂMICAS DO TEMPLATE (INCLUINDO DOCUMENTOS SE TIVER)
+        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio);
+        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio);
 
-        // Disparo Real
         const res = await fetch("/api/gmail/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userEmail: usuarioAtual.email,
             para: emailDestino,
-            cc: templateAtivo.cc || "", // 🌟 ENVIA O CC DO TEMPLATE AQUI!
+            cc: templateAtivo.cc || "", 
             assunto: assuntoFinal,
             textoResposta: textoFinal
           })
@@ -274,8 +297,6 @@ export default function CadastroPage() {
         if (!res.ok) throw new Error("Falha na API");
         
         setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente})`]);
-        
-        // Timer pra não tomar rate limit do Google (se mandar dezenas juntos)
         await new Promise(r => setTimeout(r, 1000));
 
       } catch (err: any) {
@@ -314,8 +335,6 @@ export default function CadastroPage() {
         if (!nomesNaEsteira.has(nomeLimpo)) {
            const dtComiteRaw = analise.criado_em;
            const dtComiteFormatada = dtComiteRaw ? dtComiteRaw.split('T')[0] : null;
-           
-           // Pega o CNPJ caso venha da análise, limpando a máscara
            const cnpjLimpo = analise.cnpj ? analise.cnpj.replace(/\D/g, "") : null;
 
            novosCedentes.push({
@@ -355,7 +374,6 @@ export default function CadastroPage() {
   };
 
   const handleCnpjChange = (index: number, valorRaw: string) => {
-    // Guarda apenas números no estado local, a máscara é aplicada na renderização
     const apenasNumeros = valorRaw.replace(/\D/g, "").slice(0, 14);
     handleInputChange(index, "cnpj", apenasNumeros);
   };
@@ -445,7 +463,6 @@ export default function CadastroPage() {
         return;
       }
       
-      // Limpa CNPJ para garantir que vai só números ou nulo
       const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
 
       const payload: any = {
@@ -794,7 +811,7 @@ export default function CadastroPage() {
         </div>
 
         {/* =============== NOVOS BOTÕES DE DISPARO EM LOTE =============== */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="bg-emerald-100 text-emerald-700 p-1.5 rounded-lg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
@@ -805,7 +822,7 @@ export default function CadastroPage() {
             </div>
           </div>
           
-          <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
+          <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
             {!gmailConectado ? (
               <a 
                 href={`/api/auth/google?user=${usuarioAtual?.email}&origin=/dashboard/cadastro`}
@@ -816,6 +833,13 @@ export default function CadastroPage() {
               </a>
             ) : (
               <>
+                <button 
+                  onClick={() => abrirModalDisparo("PENDENCIA")}
+                  className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                  Avisar Pendência (Docs)
+                </button>
                 <button 
                   onClick={() => abrirModalDisparo("ASSINATURA")}
                   className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
@@ -1125,19 +1149,19 @@ export default function CadastroPage() {
               <div>
                 <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
                   <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                  Disparo em Lote: {tipoDisparoAtual === "APTO" ? "Aptos a Operar" : tipoDisparoAtual === "GESTORA" ? "Em Análise Gestora" : "Em Assinatura"}
+                  Disparo: {tipoDisparoAtual === "APTO" ? "Aptos a Operar" : tipoDisparoAtual === "GESTORA" ? "Em Análise Gestora" : tipoDisparoAtual === "PENDENCIA" ? "Pendência de Documentos" : "Em Assinatura"}
                 </h3>
-                <p className="text-xs text-slate-500 mt-1">Selecione os clientes para notificar os respectivos comerciais.</p>
+                <p className="text-xs text-slate-500 mt-1">Configure o envio automático para os comerciais.</p>
               </div>
               <button onClick={() => !enviandoLote && setModalDisparoAberto(false)} disabled={enviandoLote} className="text-slate-400 hover:text-slate-600 disabled:opacity-50">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto flex-1 bg-white">
+            <div className="p-5 overflow-y-auto flex-1 bg-white space-y-6">
               
-              {/* 🌟 NOVO: SELECT DE TEMPLATES */}
-              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 mb-6">
+              {/* SELECT DE TEMPLATES */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
                 <label className="block text-xs font-bold text-indigo-900 mb-2 uppercase">1. Selecione o Roteiro (Template):</label>
                 <select 
                   value={templateSelecionadoId}
@@ -1153,14 +1177,61 @@ export default function CadastroPage() {
                 {templatesEmail.length === 0 && <p className="text-[10px] text-rose-500 mt-1">Nenhum template cadastrado no banco.</p>}
               </div>
 
+              {/* 🌟 MÓDULO EXCLUSIVO PARA PENDÊNCIAS DE DOCUMENTOS */}
+              {tipoDisparoAtual === "PENDENCIA" && (
+                <div className="bg-rose-50 p-4 rounded-xl border border-rose-200">
+                  <label className="block text-xs font-bold text-rose-900 mb-2 uppercase">2. Selecione os Documentos Pendentes:</label>
+                  
+                  {/* Busca e Adição de Documento */}
+                  <div className="flex gap-2 mb-3">
+                    <input 
+                      type="text" 
+                      placeholder="Buscar doc ou digitar novo..." 
+                      value={novoDocInput} 
+                      onChange={(e) => {
+                        setNovoDocInput(e.target.value);
+                        setBuscaDoc(e.target.value); // Filtra enquanto digita
+                      }}
+                      className="flex-1 p-2 border border-rose-300 rounded-lg text-sm outline-none focus:border-rose-500"
+                    />
+                    <button 
+                      onClick={salvarNovoDocumentoNoBanco}
+                      disabled={!novoDocInput.trim()}
+                      className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg disabled:opacity-50 transition-colors"
+                    >
+                      + Cadastrar Novo
+                    </button>
+                  </div>
+
+                  {/* Lista de Documentos em JSON */}
+                  <div className="max-h-40 overflow-y-auto border border-rose-200 rounded-lg bg-white p-2 space-y-1">
+                    {listaDocsGerais.filter(d => d.toLowerCase().includes(buscaDoc.toLowerCase())).map(doc => (
+                      <label key={doc} className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${docsMarcadosParaEnvio.includes(doc) ? "bg-rose-100" : "hover:bg-slate-50"}`}>
+                        <input 
+                          type="checkbox" 
+                          checked={docsMarcadosParaEnvio.includes(doc)} 
+                          onChange={() => toggleDocMarcado(doc)} 
+                          disabled={enviandoLote}
+                          className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500"
+                        />
+                        <span className="text-sm text-slate-700 font-medium flex-1">{doc}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SELEÇÃO DE CLIENTES */}
               {cedentesDisponiveis.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
                   Nenhum cliente está nesta fase no momento.
                 </div>
               ) : (
-                <>
+                <div>
                   <div className="flex justify-between items-center mb-3">
-                    <label className="block text-xs font-bold text-slate-700 uppercase">2. Selecione os Clientes ({cedentesDisponiveis.length}):</label>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">
+                      {tipoDisparoAtual === "PENDENCIA" ? "3." : "2."} Selecione os Clientes ({cedentesDisponiveis.length}):
+                    </label>
                     <button 
                       onClick={selecionarTodosDisparo} 
                       disabled={enviandoLote}
@@ -1170,7 +1241,7 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2">
                     {cedentesDisponiveis.map(c => (
                       <label key={c.id} className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
                         <input 
@@ -1187,12 +1258,12 @@ export default function CadastroPage() {
                       </label>
                     ))}
                   </div>
-                </>
+                </div>
               )}
 
               {/* LOGS DE ENVIO */}
               {logsDisparo.length > 0 && (
-                <div className="mt-4 p-3 bg-slate-900 rounded-xl max-h-32 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 border border-slate-700">
+                <div className="p-3 bg-slate-900 rounded-xl max-h-32 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 border border-slate-700">
                   {logsDisparo.map((log, i) => (
                     <div key={i}>{log}</div>
                   ))}
@@ -1220,7 +1291,7 @@ export default function CadastroPage() {
                   {enviandoLote ? (
                     <>
                       <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                      Processando...
+                      Processando Lote...
                     </>
                   ) : (
                     <>
