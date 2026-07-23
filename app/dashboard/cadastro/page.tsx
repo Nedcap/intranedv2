@@ -76,7 +76,9 @@ export default function CadastroPage() {
   const [busca, setBusca] = useState("");
   const [cnpjsCopiados, setCnpjsCopiados] = useState<Record<string, boolean>>({});
   
-  const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string } | null>(null);
+  const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string; email: string } | null>(null);
+  const [gmailConectado, setGmailConectado] = useState(false); // NOVO: Controle de conexão do Gmail
+
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
   
@@ -87,6 +89,14 @@ export default function CadastroPage() {
   
   const [filtroStatus, setFiltroStatus] = useState<"TODOS" | "PENDENTE_ENVIO" | "AGUARDANDO_ASSINATURA" | "EM_ANDAMENTO" | "APTO">("TODOS");
 
+  // ================= ESTADOS DO MODAL DE DISPARO =================
+  const [modalDisparoAberto, setModalDisparoAberto] = useState(false);
+  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | null>(null);
+  const [cedentesDisponiveis, setCedentesDisponiveis] = useState<any[]>([]);
+  const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
+  const [enviandoLote, setEnviandoLote] = useState(false);
+  const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
+
   const carregarCadastro = useCallback(async () => {
     try {
       setCarregando(true);
@@ -94,14 +104,24 @@ export default function CadastroPage() {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo').eq('id', user.id).single();
+        const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo, email').eq('id', user.id).single();
         if (perfilData) {
           setUsuarioAtual({ 
             id: user.id, 
-            nome: perfilData.nome, 
+            nome: perfilData.nome,
+            email: perfilData.email,
             perfil: (perfilData.cargo || "").toLowerCase() 
           });
         }
+
+        // NOVO: Verifica se existe integração do Gmail para este usuário
+        const { data: integracao } = await supabase
+          .from("usuarios_integracoes")
+          .select("id")
+          .eq("email_usuario", user.email)
+          .single();
+          
+        if (integracao) setGmailConectado(true);
       }
 
       const { data } = await supabase.from("cadastro_cedentes").select("*");
@@ -120,6 +140,130 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
+  // ================= LÓGICA DE DISPARO EM LOTE =================
+
+  // Abre o modal filtrando quem se enquadra na regra
+  const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "APTO") => {
+    setTipoDisparoAtual(tipo);
+    setSelecionadosParaDisparo([]);
+    setLogsDisparo([]);
+
+    const filtrados = cedentes.filter(c => {
+      if (c._isNovo) return false;
+      
+      if (tipo === "APTO") {
+        return !!(c.dt_apto_sec || c.dt_apto_fidc);
+      }
+      
+      if (tipo === "GESTORA") {
+        return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
+      }
+      
+      if (tipo === "ASSINATURA") {
+        return (
+          (c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || 
+          (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)
+        ) && !c.dt_apto_sec && !c.dt_apto_fidc;
+      }
+      
+      return false;
+    });
+
+    setCedentesDisponiveis(filtrados);
+    setModalDisparoAberto(true);
+  };
+
+  const toggleSelecaoDisparo = (id: string) => {
+    setSelecionadosParaDisparo(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const selecionarTodosDisparo = () => {
+    if (selecionadosParaDisparo.length === cedentesDisponiveis.length) {
+      setSelecionadosParaDisparo([]);
+    } else {
+      setSelecionadosParaDisparo(cedentesDisponiveis.map(c => c.id));
+    }
+  };
+
+  const executarDisparoEmLote = async () => {
+    if (selecionadosParaDisparo.length === 0 || !usuarioAtual?.email || !tipoDisparoAtual) return;
+    
+    setEnviandoLote(true);
+    setLogsDisparo(["🚀 Iniciando disparos..."]);
+
+    const itensParaEnviar = cedentesDisponiveis.filter(c => selecionadosParaDisparo.includes(c.id));
+
+    for (const item of itensParaEnviar) {
+      try {
+        setLogsDisparo(prev => [...prev, `⏳ Buscando comercial de ${item.cedente}...`]);
+        
+        let emailDestino = "";
+        if (item.responsavel_id) {
+          const { data: usu } = await supabase.from('usuarios').select('email').eq('id', item.responsavel_id).single();
+          if (usu) emailDestino = usu.email;
+        }
+        if (!emailDestino && item.comercial) {
+          const { data: usuNome } = await supabase.from('usuarios').select('email').eq('nome', item.comercial).single();
+          if (usuNome) emailDestino = usuNome.email;
+        }
+
+        if (!emailDestino) {
+          setLogsDisparo(prev => [...prev, `❌ Pulando ${item.cedente}: E-mail do comercial não encontrado.`]);
+          continue; // Pula pro próximo
+        }
+
+        // Monta o Corpo
+        let assunto = "";
+        let texto = `Fala ${item.comercial.split(' ')[0]},\n\nAtualização na esteira do cliente ${item.cedente}:\n\n`;
+
+        if (tipoDisparoAtual === "APTO") {
+          assunto = `✅ APTO PARA OPERAR: ${item.cedente}`;
+          texto += `Boas notícias! O cliente finalizou a esteira e está APTO PARA OPERAR.\n`;
+          if (item.dt_apto_sec) texto += `- Securitizadora: Apto desde ${formatarDataBr(item.dt_apto_sec)}\n`;
+          if (item.dt_apto_fidc) texto += `- FIDC: Apto desde ${formatarDataBr(item.dt_apto_fidc)}\n`;
+          texto += `\nJá pode meter marcha nas operações! 🚀`;
+        } else if (tipoDisparoAtual === "GESTORA") {
+          assunto = `⏳ EM ANÁLISE NA GESTORA: ${item.cedente}`;
+          texto += `A documentação do cliente foi enviada para a Gestora do FIDC em ${formatarDataBr(item.dt_envio_gestora_fidc)}.\n`;
+          texto += `Agora estamos aguardando o aval deles. Qualquer novidade ou pendência, te aviso!`;
+        } else if (tipoDisparoAtual === "ASSINATURA") {
+          assunto = `✍️ CONTRATO EM ASSINATURA: ${item.cedente}`;
+          texto += `Os contratos foram gerados e enviados para assinatura do cliente.\n`;
+          texto += `Dá aquele toque no cliente para ele assinar rápido e a gente liberar o limite.`;
+        }
+
+        // Disparo Real
+        const res = await fetch("/api/gmail/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userEmail: usuarioAtual.email,
+            para: emailDestino,
+            assunto,
+            textoResposta: texto
+          })
+        });
+
+        if (!res.ok) throw new Error("Falha na API");
+        
+        setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente})`]);
+        
+        // Timer pra não tomar rate limit do Google (se mandar dezenas juntos)
+        await new Promise(r => setTimeout(r, 1000));
+
+      } catch (err: any) {
+        setLogsDisparo(prev => [...prev, `❌ Falha ao enviar ${item.cedente}: ${err.message}`]);
+      }
+    }
+
+    setLogsDisparo(prev => [...prev, "🎉 Processo de lote finalizado!"]);
+    setEnviandoLote(false);
+  };
+
+
+  // ================= RESTANTE DAS FUNÇÕES ORIGINAIS =================
   const buscarAprovadasDoComite = async () => {
     try {
       setSincronizando(true);
@@ -624,6 +768,55 @@ export default function CadastroPage() {
           </div>
         </div>
 
+        {/* =============== NOVOS BOTÕES DE DISPARO EM LOTE =============== */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="bg-emerald-100 text-emerald-700 p-1.5 rounded-lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            </span>
+            <div>
+              <h3 className="font-bold text-sm text-slate-800">Notificações Automáticas</h3>
+              <p className="text-[10px] text-slate-500">Avisar os comerciais sobre as mudanças de fase na esteira</p>
+            </div>
+          </div>
+          
+          <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
+            {!gmailConectado ? (
+              <a 
+                href={`/api/auth/google?user=${usuarioAtual?.email}`}
+                className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-black transition-colors whitespace-nowrap flex items-center gap-2 uppercase tracking-wide shadow-sm"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.333.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+                Conectar Conta Google
+              </a>
+            ) : (
+              <>
+                <button 
+                  onClick={() => abrirModalDisparo("ASSINATURA")}
+                  className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                  Avisar Assinaturas
+                </button>
+                <button 
+                  onClick={() => abrirModalDisparo("GESTORA")}
+                  className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
+                  Avisar FIDC (Gestora)
+                </button>
+                <button 
+                  onClick={() => abrirModalDisparo("APTO")}
+                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                  Avisar Aptos a Operar
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         {/* BARRA DE BUSCA */}
         <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-sm flex items-center gap-3">
           <svg className="w-5 h-5 text-slate-400 ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -897,6 +1090,109 @@ export default function CadastroPage() {
         </div>
 
       </div>
+
+      {/* ======================= MODAL DE DISPARO EM LOTE ======================= */}
+      {modalDisparoAberto && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                  Disparo em Lote: {tipoDisparoAtual === "APTO" ? "Aptos a Operar" : tipoDisparoAtual === "GESTORA" ? "Em Análise Gestora" : "Em Assinatura"}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Selecione os clientes para notificar os respectivos comerciais.</p>
+              </div>
+              <button onClick={() => !enviandoLote && setModalDisparoAberto(false)} disabled={enviandoLote} className="text-slate-400 hover:text-slate-600 disabled:opacity-50">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 bg-white">
+              {cedentesDisponiveis.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  Nenhum cliente está nesta fase no momento.
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-xs font-bold text-slate-500 uppercase">{cedentesDisponiveis.length} Clientes Encontrados</span>
+                    <button 
+                      onClick={selecionarTodosDisparo} 
+                      disabled={enviandoLote}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                    >
+                      {selecionadosParaDisparo.length === cedentesDisponiveis.length ? "Desmarcar Todos" : "Selecionar Todos"}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {cedentesDisponiveis.map(c => (
+                      <label key={c.id} className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
+                        <input 
+                          type="checkbox" 
+                          checked={selecionadosParaDisparo.includes(c.id)} 
+                          onChange={() => toggleSelecaoDisparo(c.id)} 
+                          disabled={enviandoLote}
+                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                        />
+                        <div className="flex-1">
+                          <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* LOGS DE ENVIO */}
+              {logsDisparo.length > 0 && (
+                <div className="mt-4 p-3 bg-slate-900 rounded-xl max-h-32 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 border border-slate-700">
+                  {logsDisparo.map((log, i) => (
+                    <div key={i}>{log}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-500">
+                {selecionadosParaDisparo.length} selecionado(s)
+              </span>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setModalDisparoAberto(false)} 
+                  disabled={enviandoLote}
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Fechar
+                </button>
+                <button 
+                  onClick={executarDisparoEmLote}
+                  disabled={enviandoLote || selecionadosParaDisparo.length === 0}
+                  className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:shadow-none"
+                >
+                  {enviandoLote ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      Processando Lote...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                      Disparar E-mails
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

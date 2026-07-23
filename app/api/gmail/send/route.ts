@@ -72,16 +72,20 @@ export async function POST(request: Request) {
     // 3. Monta o e-mail bruto (RFC 2822)
     const emailRemetenteReal = integracao.gmail_conta_conectada || userEmail;
 
-    // Ajusta o assunto para garantir que tenha o "Re:" padronizado corporativo
-    const assuntoFormatado = assunto.toLowerCase().startsWith("re:") ? assunto : `Re: ${assunto}`;
+    // Ajusta o assunto para garantir que tenha o "Re:" SÓ SE for resposta (tiver mensagemId)
+    const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) 
+      ? `Re: ${assunto}` 
+      : assunto;
 
     const deString = `From: ${emailRemetenteReal}\r\n`;
     const paraString = `To: ${para}\r\n`;
     const assuntoString = `Subject: ${assuntoFormatado}\r\n`;
     
-    // Vincula a mensagem pelos headers RFC padrão (In-Reply-To e References). 
-    // Isso é o suficiente para o Gmail agrupar na mesma conversa!
-    const threadString = `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n`;
+    // Vincula a mensagem pelos headers RFC padrão SÓ SE houver mensagemId
+    const threadString = mensagemId 
+      ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n`
+      : "";
+      
     const tipoString = `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
     const corpoString = `${textoResposta}\r\n`;
 
@@ -92,15 +96,13 @@ export async function POST(request: Request) {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
 
-    // 🌟 CORREÇÃO DO PAYLOAD: Removemos o 'threadId' chumbado direto do JSON principal 
-    // se o Google falhar em achar a entidade. Deixamos os headers cuidarem do agrupamento.
     const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ raw: base64Safe }), // Headers internos resolvem a Thread!
+      body: JSON.stringify({ raw: base64Safe }), 
     });
 
     if (!res.ok) {

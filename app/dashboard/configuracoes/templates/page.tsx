@@ -112,34 +112,45 @@ export default function GerenciarTemplatesPage() {
           <div className="bg-white p-5 rounded-2xl max-w-xl w-full space-y-4 shadow-2xl border border-slate-100">
             <h3 className="font-black uppercase text-slate-900 text-[11px] border-b pb-1">{modoEdicao ? "⚙️ Editar Roteiro Comercial" : "➕ Desenhar Novo Roteiro Comercial"}</h3>
             
-            {/* COLA DE TAGS */}
-            <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 text-[10px] space-y-1 text-purple-950">
+            {/* COLA DE TAGS ATUALIZADA */}
+            <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 text-[10px] space-y-2 text-purple-950">
               <span className="font-black uppercase block">💡 Tags Dinâmicas Disponíveis para colar no texto:</span>
-              <p>Copie e cole exatamente as chaves abaixo. O robô da NedHub vai trocar os valores automaticamente na hora de enviar:</p>
-              <div className="flex gap-2 font-mono font-bold mt-1.5 bg-white p-1.5 rounded border border-purple-200 w-fit">
-                <span className="text-emerald-700">{"{contato}"}</span> ➔ Nome da Pessoa |
-                <span className="text-blue-700">{"{empresa}"}</span> ➔ Razão Social do CNPJ
+              <p className="text-purple-800/80">Copie e cole exatamente as chaves abaixo. O robô vai trocar os valores automaticamente na hora de enviar buscando direto do banco de dados:</p>
+              
+              <div className="grid grid-cols-2 gap-2 font-mono font-bold mt-2">
+                <div className="bg-white p-2 rounded border border-purple-200 flex flex-col gap-1 shadow-sm">
+                  <span className="text-indigo-700">{"{empresa}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">Nome do Cedente</span></span>
+                  <span className="text-indigo-700">{"{cnpj}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">CNPJ Formatado</span></span>
+                  <span className="text-indigo-700">{"{contato}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">Nome do Cliente</span></span>
+                </div>
+                <div className="bg-white p-2 rounded border border-purple-200 flex flex-col gap-1 shadow-sm">
+                  <span className="text-emerald-700">{"{limite}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">Limite Aprovado</span></span>
+                  <span className="text-emerald-700">{"{taxa}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">Taxa Aprovada</span></span>
+                  <span className="text-blue-700">{"{comercial}"} <span className="text-slate-400 font-sans font-normal text-[9px] ml-1">Nome do Comercial</span></span>
+                </div>
               </div>
             </div>
 
             <div className="space-y-3 text-[11px]">
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Identificação Interna do Template:</label>
-                <input type="text" value={inputNome} onChange={e => setInputNome(e.target.value)} placeholder="Ex: [SDR] Primeiro Contato - Apresentação Ned" className="w-full p-2 border rounded-lg bg-slate-50 outline-none font-bold text-slate-800" />
+                <input type="text" value={inputNome} onChange={e => setInputNome(e.target.value)} placeholder="Ex: [SDR] Primeiro Contato - Apresentação Ned" className="w-full p-2 border rounded-lg bg-slate-50 outline-none font-bold text-slate-800 focus:border-purple-400 focus:bg-white transition-all" />
               </div>
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Linha de Assunto (O que o cliente lê):</label>
-                <input type="text" value={inputAssunto} onChange={e => setInputAssunto(e.target.value)} placeholder="Ex: Oportunidade de Alavancagem - {empresa}" className="w-full p-2 border rounded-lg bg-slate-50 outline-none text-slate-800 font-medium" />
+                <input type="text" value={inputAssunto} onChange={e => setInputAssunto(e.target.value)} placeholder="Ex: Oportunidade de Alavancagem - {empresa}" className="w-full p-2 border rounded-lg bg-slate-50 outline-none text-slate-800 font-medium focus:border-purple-400 focus:bg-white transition-all" />
               </div>
               <div>
                 <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Corpo da Mensagem (E-mail):</label>
-                <textarea rows={8} value={inputCorpo} onChange={e => setInputCorpo(e.target.value)} placeholder="Olá {contato}, avaliamos a estrutura corporativa da {empresa}..." className="w-full p-3 border rounded-lg bg-slate-50 outline-none text-slate-800 font-medium font-sans whitespace-pre-wrap" />
+                <textarea rows={8} value={inputCorpo} onChange={e => setInputCorpo(e.target.value)} placeholder="Olá {contato},\n\nTemos uma aprovação de {limite} com taxa de {taxa} para a empresa {empresa}..." className="w-full p-3 border rounded-lg bg-slate-50 outline-none text-slate-800 font-medium font-sans whitespace-pre-wrap focus:border-purple-400 focus:bg-white transition-all" />
               </div>
             </div>
 
             <div className="flex justify-end gap-2 text-[10px] pt-2 border-t">
-              <button onClick={() => setModalAberto(false)} className="px-3 py-2 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase">Voltar</button>
-              <button onClick={handleSalvarTemplate} className="px-5 py-2 bg-purple-600 text-white font-black rounded-lg uppercase shadow-md">💾 Salvar Roteiro</button>
+              <button onClick={() => setModalAberto(false)} disabled={carregando} className="px-3 py-2 bg-slate-200 text-slate-700 font-bold rounded-lg uppercase disabled:opacity-50">Voltar</button>
+              <button onClick={handleSalvarTemplate} disabled={carregando} className="px-5 py-2 bg-purple-600 text-white font-black rounded-lg uppercase shadow-md flex items-center gap-2 disabled:opacity-50">
+                {carregando ? "Salvando..." : "💾 Salvar Roteiro"}
+              </button>
             </div>
           </div>
         </div>
