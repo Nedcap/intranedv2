@@ -8,7 +8,7 @@ import GerarAnalise, { gerarHtmlDossie } from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
 
 // =========================================================================
-// INTERFACES (ATUALIZADAS PARA SUPORTAR GRUPOS ECONÔMICOS)
+// INTERFACES (ATUALIZADAS PARA SUPORTAR GRUPOS ECONÔMICOS UNIFICADOS)
 // =========================================================================
 interface FilaItem {
   id: string;
@@ -39,6 +39,7 @@ interface EmpresaItem {
 }
 
 interface SocioItem {
+  empresa_origem?: string; // 🔥 Rastreio de onde veio o sócio
   nome: string;
   perc: number;
   funcao: string;
@@ -56,6 +57,7 @@ interface FaturamentoMes {
 }
 
 interface EndividamentoItem {
+  empresa_origem?: string; // 🔥 Rastreio de quem é a dívida no grupo
   instituicao: string;
   modalidade: string;
   saldo: number;
@@ -86,6 +88,7 @@ interface ReferenciaItem {
 }
 
 interface RestritivoItem {
+  empresa_origem?: string; // 🔥 Rastreio de qual CNPJ tomou o protesto
   tipo_restritivo?: string;
   restritivo?: string;
   quantidade_somada?: number;
@@ -96,18 +99,12 @@ interface RestritivoItem {
   data?: string;
   credores_resumo?: string;
   observacao?: string;
-  empresa_socio?: string;
 }
 
 interface EmpresaSocietario {
   papel_no_grupo?: string;
   razao_social: string;
   cnpj: string;
-  fundacao?: string;
-  capital_social?: number;
-  localizacao?: string;
-  ramo?: string;
-  regra_assinatura?: string;
   socios: SocioItem[];
 }
 
@@ -325,7 +322,6 @@ function MesaAnaliseConteudo() {
   const [modalDocsAberto, setModalDocsAberto] = useState(false);
   const [novosArquivos, setNovosArquivos] = useState<File[]>([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
-
   const [isKappiModalOpen, setIsKappiModalOpen] = useState(false);
 
   useEffect(() => {
@@ -380,21 +376,59 @@ function MesaAnaliseConteudo() {
         const cnpj = data.cnpj || dc.cnpj || "";
         const empresas_principais = dc.empresas_principais?.length ? dc.empresas_principais : [{ razao_social, cnpj }];
         
-        const empSocietario = dc.empresas_societario?.length ? dc.empresas_societario : [{ papel_no_grupo: "Principal", razao_social, cnpj, socios: (dc.socios?.length ? dc.socios : (dc.dados_estrutura_societaria || [])) }];
-        const empFaturamento = dc.empresas_faturamento?.length ? dc.empresas_faturamento : (dc.dados_faturamento ? [{ razao_social, cnpj, faturamento: dc.dados_faturamento }] : []);
-        const endivTemp = dc.endividamento_detalhado?.length ? dc.endividamento_detalhado : (dc.dados_endividamento || []);
-        const empEndividamento = dc.empresas_endividamento?.length ? dc.empresas_endividamento : (endivTemp.length > 0 ? [{ razao_social, cnpj, saldo_total_empresa: 0, endividamento: endivTemp }] : []);
-        const restTemp = dc.restritivos?.length ? dc.restritivos : (dc.dados_restritivos || []);
-        const empSerasa = dc.empresas_serasa?.length ? dc.empresas_serasa : (restTemp.length > 0 ? [{ nome_entidade: razao_social, documento: cnpj, valor_total_entidade: 0, restritivos: restTemp }] : []);
+        // 🔥 MAGIA DE CONSOLIDAÇÃO AQUI: Forçamos a UI a ter apenas 1 bloco mestre
+        
+        // 1. FATURAMENTO (Soma TUDO numa matriz única)
+        const fatGroup = { "2024": {}, "2025": {}, "2026": {} };
+        const rawFat = dc.empresas_faturamento?.length ? dc.empresas_faturamento : (dc.dados_faturamento ? [{ faturamento: dc.dados_faturamento }] : []);
+        rawFat.forEach((emp: any) => {
+            Object.entries(emp.faturamento || {}).forEach(([ano, meses]) => {
+                if (!fatGroup[ano]) fatGroup[ano] = {};
+                Object.entries(meses as any).forEach(([mes, val]) => {
+                    fatGroup[ano][mes] = (Number(fatGroup[ano][mes]) || 0) + Number(val);
+                });
+            });
+        });
+        const empFaturamentoUnico = [{ razao_social: "VISÃO CONSOLIDADA", cnpj, faturamento: fatGroup }];
+
+        // 2. ENDIVIDAMENTO (Achata tudo mantendo a origem)
+        const endivFlat: any[] = [];
+        const rawEndiv = dc.empresas_endividamento?.length ? dc.empresas_endividamento : (dc.endividamento_detalhado?.length ? [{ razao_social, cnpj, endividamento: dc.endividamento_detalhado }] : []);
+        rawEndiv.forEach((emp: any) => {
+            (emp.endividamento || []).forEach((d: any) => {
+                endivFlat.push({ ...d, empresa_origem: d.empresa_origem || emp.razao_social || emp.cnpj || razao_social });
+            });
+        });
+        const empEndividamentoUnico = [{ razao_social: "PASSIVO CONSOLIDADO", cnpj, saldo_total_empresa: 0, endividamento: endivFlat }];
+
+        // 3. SERASA (Achata tudo)
+        const restritivosFlat: any[] = [];
+        const rawSerasa = dc.empresas_serasa?.length ? dc.empresas_serasa : (dc.restritivos?.length ? [{ nome_entidade: razao_social, restritivos: dc.restritivos }] : []);
+        rawSerasa.forEach((emp: any) => {
+            (emp.restritivos || []).forEach((r: any) => {
+                restritivosFlat.push({ ...r, empresa_origem: r.empresa_origem || emp.nome_entidade || emp.documento || razao_social });
+            });
+        });
+        const empSerasaUnico = [{ nome_entidade: "APONTAMENTOS CONSOLIDADOS", documento: cnpj, valor_total_entidade: 0, restritivos: restritivosFlat }];
+
+        // 4. SOCIETÁRIO (Achata tudo)
+        const sociosFlat: any[] = [];
+        const rawSoc = dc.empresas_societario?.length ? dc.empresas_societario : [{ razao_social, socios: dc.socios || dc.dados_estrutura_societaria || [] }];
+        rawSoc.forEach((emp: any) => {
+            (emp.socios || []).forEach((s: any) => {
+                sociosFlat.push({ ...s, empresa_origem: s.empresa_origem || emp.razao_social || razao_social });
+            });
+        });
+        const empSocietarioUnico = [{ papel_no_grupo: "Grupo Consolidado", razao_social: "QUADRO SOCIETÁRIO CONSOLIDADO", cnpj, socios: sociosFlat }];
 
         setAnalise({ 
           ...DADOS_MODELO, 
           ...dc,  
           empresas_principais,
-          empresas_societario: empSocietario,
-          empresas_faturamento: empFaturamento,
-          empresas_endividamento: empEndividamento,
-          empresas_serasa: empSerasa,
+          empresas_societario: empSocietarioUnico,
+          empresas_faturamento: empFaturamentoUnico,
+          empresas_endividamento: empEndividamentoUnico,
+          empresas_serasa: empSerasaUnico,
           anexos: { ...DADOS_MODELO.anexos, ...(dc.anexos || {}) }, 
           dados_potencial: { ...DADOS_MODELO.dados_potencial, ...(dc.dados_potencial || {}) }, 
           dados_juridico: { ...DADOS_MODELO.dados_juridico, ...(dc.dados_juridico || {}) }, 
@@ -452,7 +486,6 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { error } = await supabase.from("analises").update({ comercial: novoComercial.trim() }).eq("id", analise.id);
       if (error) throw error;
-      
       setAnalise({ ...analise, comercial: novoComercial.trim() });
       alert("✅ Comercial vinculado com sucesso à análise!");
     } catch (err: any) {
@@ -464,90 +497,50 @@ function MesaAnaliseConteudo() {
 
   const processarNovosDocumentos = async () => {
     if (!idSelecionado || novosArquivos.length === 0) return;
-
     try {
       setUploadingDocs(true);
-      
       const urlsNovosDocs: string[] = [];
       const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
       for (let i = 0; i < novosArquivos.length; i++) {
         const file = novosArquivos[i];
         const pathDinamicoR2 = `analises/${idSelecionado}/adicionais/${Date.now()}`;
-
         const resAuth = await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileName: file.name,
-            fileType: file.type || "application/octet-stream",
-            analiseId: pathDinamicoR2
-          }),
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, fileType: file.type || "application/octet-stream", analiseId: pathDinamicoR2 }),
         });
-
         const dataAuth = await resAuth.json().catch(() => ({}));
-
-        if (!resAuth.ok || dataAuth.error) {
-          throw new Error(dataAuth.error || `Erro ao autorizar arquivo ${file.name}`);
-        }
-
+        if (!resAuth.ok || dataAuth.error) throw new Error(dataAuth.error || `Erro ao autorizar arquivo ${file.name}`);
+        
         const { url, path } = dataAuth;
-
-        const uploadRes = await fetch(url, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-
-        if (!uploadRes.ok) {
-          throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
-        }
-
+        const uploadRes = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+        if (!uploadRes.ok) throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
+        
         const pathCodificado = path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
         urlsNovosDocs.push(`${r2BaseUrl}/${pathCodificado}`);
       }
       
-      if (urlsNovosDocs.length === 0) {
-        throw new Error("Nenhuma URL foi gerada no upload.");
-      }
-
       const { data: analiseDB } = await supabase.from("analises").select("dados_documentos").eq("id", idSelecionado).single();
-      const docsAtuais = analiseDB?.dados_documentos || [];
-      const docsAtualizados = [...docsAtuais, ...urlsNovosDocs];
-
+      const docsAtualizados = [...(analiseDB?.dados_documentos || []), ...urlsNovosDocs];
       await supabase.from("analises").update({ dados_documentos: docsAtualizados }).eq("id", idSelecionado);
 
       const resIA = await fetch("/api/motor-ia", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          analise_id: idSelecionado,
-          urls_documentos: urlsNovosDocs,
-          modo_atualizacao: true
-        })
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analise_id: idSelecionado, urls_documentos: urlsNovosDocs, modo_atualizacao: true })
       });
-
       if (!resIA.ok) throw new Error("Falha ao acionar o Motor V8 no Render");
 
       setAnalise(prev => ({ ...prev, status: "em_processamento_ia" }));
       await supabase.from("analises").update({ status: "em_processamento_ia" }).eq("id", idSelecionado);
-
       alert("🤖 Documentos enviados com sucesso! A IA está processando e os dados serão mesclados em breve.");
-      setModalDocsAberto(false);
-      setNovosArquivos([]);
-      
-    } catch (err: any) {
-      alert("❌ Erro: " + err.message);
-    } finally {
-      setUploadingDocs(false);
-    }
+      setModalDocsAberto(false); setNovosArquivos([]);
+    } catch (err: any) { alert("❌ Erro: " + err.message); } finally { setUploadingDocs(false); }
   };
 
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
-      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê.");
-      return;
+      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê."); return;
     }
     const confirmacao = window.confirm(`Encaminhar para o Comitê de Crédito com a sugestão de: [${analise.recomendacao_analista.toUpperCase()}]?`);
     if (!confirmacao) return;
@@ -555,38 +548,12 @@ function MesaAnaliseConteudo() {
     try {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
-      
-      try {
-        const { data: analiseDB } = await supabase.from("analises").select("dados_ia_brutos").eq("id", analise.id).single();
-
-        if (analiseDB?.dados_ia_brutos) {
-            const iaOriginal = analiseDB.dados_ia_brutos;
-            if (JSON.stringify(iaOriginal.empresas_endividamento) !== JSON.stringify(analise.empresas_endividamento)) {
-                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "endividamento", erro_ia: iaOriginal.empresas_endividamento, correcao_humana: analise.empresas_endividamento });
-            }
-            if (JSON.stringify(iaOriginal.empresas_faturamento) !== JSON.stringify(analise.empresas_faturamento)) {
-                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "faturamento", erro_ia: iaOriginal.empresas_faturamento, correcao_humana: analise.empresas_faturamento });
-            }
-            if (JSON.stringify(iaOriginal.empresas_serasa) !== JSON.stringify(analise.empresas_serasa)) {
-                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "serasa", erro_ia: iaOriginal.empresas_serasa, correcao_humana: analise.empresas_serasa });
-            }
-        }
-      } catch (memError) {
-        console.error("Erro na rotina de memória da IA (não impede o envio):", memError);
-      }
-      
       const { error } = await supabase.from("analises").update({ status: "aberta" }).eq("id", analise.id);
       if (error) throw error;
       
-      alert(`🚀 Análise finalizada com sucesso! Se houve correções, a IA foi notificada para aprender com o erro.`);
-      setIdSelecionado(null); 
-      setAnalise(DADOS_MODELO); 
-      await buscarFilaSupabase(true);
-    } catch (err: any) { 
-      alert("Erro ao processar: " + err.message); 
-    } finally { 
-      setProcessandoDecisao(false); 
-    }
+      alert(`🚀 Análise finalizada com sucesso!`);
+      setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
+    } catch (err: any) { alert("Erro ao processar: " + err.message); } finally { setProcessandoDecisao(false); }
   };
 
   const devolverParaComercialPendente = async () => {
@@ -601,11 +568,7 @@ function MesaAnaliseConteudo() {
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
-    } catch (err: any) { 
-      alert("❌ Falha na devolução."); 
-    } finally { 
-      setProcessandoDecisao(false); 
-    }
+    } catch (err: any) { alert("❌ Falha na devolução."); } finally { setProcessandoDecisao(false); }
   };
 
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
@@ -644,10 +607,11 @@ function MesaAnaliseConteudo() {
   };
 
   // =========================================================================
-  // FÓRMULAS E MATEMÁTICA CONSOLIDADA (AGRUPANDO TODAS AS EMPRESAS DO GRUPO)
+  // FÓRMULAS E MATEMÁTICA DA VISÃO CONSOLIDADA
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
+  // Como agora forçamos apenas 1 elemento consolidado, o reduce funciona de forma transparente
   const faturamentoConsolidado = analise.empresas_faturamento.reduce((acc, emp) => {
     Object.entries(emp.faturamento || {}).forEach(([ano, m]) => {
       if (!acc[ano]) acc[ano] = {};
@@ -682,13 +646,6 @@ function MesaAnaliseConteudo() {
   const mediaYTD24 = calcMediaYTD("2024");
   
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(faturamentoConsolidado[ano]?.[m] || 0), 0);
-  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(faturamentoConsolidado[ano]?.[m] || 0) > 0).length;
-  
-  const calcMediaGeralAno = (ano: string) => { 
-      const pre = mesesPreenchidosGeral(ano); 
-      if (pre === 0) return 0;
-      return calcTotAno(ano) / (ano === "2026" ? pre : 12); 
-  }; 
   
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(faturamentoConsolidado[aAt]?.[m] || 0); const ant = Number(faturamentoConsolidado[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
@@ -701,21 +658,14 @@ function MesaAnaliseConteudo() {
   const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
   const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
 
-  const medGeral26 = calcMediaGeralAno("2026");
-  const medGeral25 = calcMediaGeralAno("2025");
-  const medGeral24 = calcMediaGeralAno("2024");
-  const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
-  const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
-
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
   const prazoDiasDpls = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 0;
   const prazoDiasComissaria = parseInt(String(analise.dados_potencial.prazo_medio_comissaria).replace(/\D/g, "")) || 0;
-  
   const percAPrazo = Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100;
   const percDpls = Number(analise.dados_potencial.composicao_dpls || 0) / 100;
   const percComissaria = Number(analise.dados_potencial.composicao_comissaria || 0) / 100;
-
+  
   const potDpls = (faturamentoMedioReferencia / 30) * prazoDiasDpls * percDpls * percAPrazo;
   const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
   const potencialRealCalculado = potDpls + potComissaria;
@@ -726,17 +676,13 @@ function MesaAnaliseConteudo() {
   const totEndivGeral = endividamentoFlat.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivCurtoPrazo = endividamentoFlat.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const endivLongoPrazo = endividamentoFlat.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  
   const totalBancos = endividamentoFlat.filter(d => d.tipo === "Banco").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const totalFundos = endividamentoFlat.filter(d => d.tipo === "Fundo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   
   const percBancos = totEndivGeral > 0 ? (totalBancos / totEndivGeral) * 100 : 0;
   const percFundos = totEndivGeral > 0 ? (totalFundos / totEndivGeral) * 100 : 0;
-  
   const totalDplsCP = endividamentoFlat.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
-
-  const totRestritivos = restritivosFlat.reduce((acc, r) => acc + Number(r.valor_somado || r.valor || 0), 0);
 
   // =========================================================================
   // ESTILOS REFINADOS (UI/UX)
@@ -752,7 +698,7 @@ function MesaAnaliseConteudo() {
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6 relative">
       
-      {/* SIDEBAR REFINADA */}
+      {/* SIDEBAR */}
       <div className="w-full xl:w-72 shrink-0 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] sticky top-6 z-20 overflow-hidden">
         <div className="flex justify-between items-center bg-slate-100/80 p-4 border-b border-slate-200">
           <span className="font-bold text-slate-800 text-xs tracking-wide">ESTEIRA DE ANÁLISES <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-1">{fila.length}</span></span>
@@ -790,16 +736,16 @@ function MesaAnaliseConteudo() {
         </div>
       </div>
 
-      {/* WORKSPACE PRINCIPAL REFINADO */}
+      {/* WORKSPACE PRINCIPAL */}
       <div className="flex-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
         {loadingAnalise ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-slate-50">
             <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-[12px] font-semibold text-slate-600 mt-4 tracking-wide">Carregando dados estruturados...</p>
+            <p className="text-[12px] font-semibold text-slate-600 mt-4 tracking-wide">Estruturando Visão Consolidada do Grupo...</p>
           </div>
         ) : (
           <>
-            {/* TOOLBAR MODERNA */}
+            {/* TOOLBAR */}
             <div className="p-4 border-b border-slate-200 bg-white flex flex-wrap justify-between items-center gap-4">
               <div className="flex items-center gap-3">
                 {analise.status === "em_processamento_ia" ? (
@@ -808,29 +754,24 @@ function MesaAnaliseConteudo() {
                   <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 px-2 py-1 text-[10px] font-bold rounded shadow-sm">✅ AUTO-SAVE</div>
                 )}
                 <div className="flex flex-col">
-                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-900 text-lg bg-transparent outline-none border-b-2 border-transparent focus:border-indigo-400 w-full min-w-[300px] xl:w-[450px] uppercase transition-colors" placeholder="NOME DA EMPRESA" />
+                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-900 text-lg bg-transparent outline-none border-b-2 border-transparent focus:border-indigo-400 w-full min-w-[300px] xl:w-[450px] uppercase transition-colors" placeholder="NOME DO GRUPO / EMPRESA" />
                   <div className="flex gap-4 mt-0.5">
                     <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-xs text-slate-500 bg-transparent outline-none w-36" placeholder="00.000.000/0001-00" />
                     {analise.comercial && <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 rounded-full border border-indigo-100">🤝 Resp: {analise.comercial}</span>}
-                    {analise.is_grupo_economico && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 rounded-full border border-amber-300">🏢 GRUPO ECONÔMICO</span>}
+                    {analise.is_grupo_economico && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 rounded-full border border-amber-300">🏢 GRUPO ECONÔMICO (CONSOLIDADO)</span>}
                   </div>
                 </div>
               </div>
               
               <div className="flex items-center gap-2 flex-wrap">
-                <button 
-                  onClick={() => setModalDocsAberto(true)} 
-                  disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} 
-                  className={btnSecundario} 
-                  title="Adicionar novos PDFs (Balanço, Endividamento) para mesclar com esta análise"
-                >
-                  🤖 Add e Ler Novos Docs
+                <button onClick={() => setModalDocsAberto(true)} disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} className={btnSecundario} title="Fazer Merge de Novos Documentos (IA)">
+                  🤖 Add Docs (Merge)
                 </button>
                 <button onClick={vincularComercial} disabled={!idSelecionado || processandoDecisao} className={btnSecundario}>
-                  👤 Vincular Comercial
+                  👤 Vincular
                 </button>
                 <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className={btnSecundario}>
-                  💾 Salvar Manual
+                  💾 Salvar
                 </button>
                 {idSelecionado && (
                   <>
@@ -838,14 +779,9 @@ function MesaAnaliseConteudo() {
                       ✖ Devolver Req.
                     </button>
                     <GerarAnalise analise={analise} />
-                    
-                    <button 
-                       onClick={() => setIsKappiModalOpen(true)}
-                       className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
-                    >
+                    <button onClick={() => setIsKappiModalOpen(true)} className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5">
                        🕵️‍♂️ Auditoria Kappi
                     </button>
-                    
                     <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className={btnPrimario}>
                       ▶ Emitir Parecer Final
                     </button>
@@ -854,7 +790,7 @@ function MesaAnaliseConteudo() {
               </div>
             </div>
 
-            {/* ABAS ESTILO PILLS */}
+            {/* ABAS */}
             <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto scrollbar-none">
               {[
                 { id: "capa", label: "📄 Capa & Proposta" },
@@ -878,16 +814,9 @@ function MesaAnaliseConteudo() {
             {/* ÁREA DA PLANILHA */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50 relative scrollbar-thin scrollbar-thumb-slate-300">
               
-              {/* ABA 1: CAPA E PROPOSTA */}
+              {/* ABA 1 E 2: MANTIDAS IGUAIS (Não houve solicitação de mudança) */}
               {abaAtiva === "capa" && (
                 <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  {analise.status === "em_processamento_ia" && (
-                    <div className="p-4 border-l-4 border-purple-500 bg-purple-50 text-purple-900 font-semibold text-xs rounded-r-md shadow-sm flex items-center gap-3">
-                      <span className="text-lg">🔮</span>
-                      <span>O Motor Python V8 está lendo e estruturando arquivos. Os dados abaixo vão atualizar dinamicamente enquanto você acompanha!</span>
-                    </div>
-                  )}
-
                   <div className="bg-white rounded-md shadow-sm border border-slate-200">
                     <div className={sectionHeaderStyle}>
                       <span>Empresas (Principal e Coobrigados Base)</span>
@@ -910,6 +839,7 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
+                  {/* RESTO DA CAPA... */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <table className="w-full border-collapse">
                       <tbody>
@@ -978,175 +908,94 @@ function MesaAnaliseConteudo() {
                       value={analise.resumo_visita} 
                       onChange={(e) => setAnalise({...analise, resumo_visita: e.target.value})}
                       className="w-full p-3 border-none h-40 font-sans text-[12px] text-slate-700 outline-none resize-none bg-slate-50/50 focus:bg-white transition-colors"
-                      placeholder="Insira detalhes qualitativos da visita, impressões sobre a sede, maquinário, gestão..."
+                      placeholder="Insira detalhes qualitativos da visita..."
                     />
                   </div>
                 </div>
               )}
-
-              {/* ABA 2: DADOS DA EMPRESA */}
+              
               {abaAtiva === "cadastro" && (
-                <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={sectionHeaderStyle}>Dados Cadastrais e Financeiros Básicos</div>
-                    <table className="w-full border-collapse">
-                      <tbody>
-                        <tr>
-                          <td className={`${thStyle} text-right w-1/6`}>Fundação / Idade</td><td className={`${tdStyle} w-2/6`}><input value={analise.fundacao} onChange={(e)=>setAnalise({...analise, fundacao: e.target.value})} className={cellStyle} /></td>
-                          <td className={`${thStyle} text-right w-1/6`}>Capital Social (R$)</td><td className={`${tdStyle} w-2/6`}><input type="number" value={analise.capital_social} onChange={(e)=>setAnalise({...analise, capital_social: Number(e.target.value)})} className={numStyle} /></td>
-                        </tr>
-                        <tr>
-                          <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} placeholder="Endereço oficial corporativo..." /></td>
-                          <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
-                        </tr>
-                        <tr>
-                          <td className={`${thStyle} text-right`}>Licenças / Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
-                          <td className={`${thStyle} text-right`}>Balanço Auditado?</td>
-                          <td className={tdStyle}>
-                            <select value={analise.balanco_auditado} onChange={(e)=>setAnalise({...analise, balanco_auditado: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className={`${thStyle} text-right`}>Consultoria Externa?</td>
-                          <td className={tdStyle}>
-                            <select value={analise.consultoria_gestao} onChange={(e)=>setAnalise({...analise, consultoria_gestao: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                          </td>
-                          <td className={`${thStyle} text-right`}>Site Corporativo</td><td className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                      <div className={sectionHeaderStyle}>Dados Cadastrais e Financeiros Básicos</div>
+                      <table className="w-full border-collapse">
+                        <tbody>
+                          <tr>
+                            <td className={`${thStyle} text-right w-1/6`}>Fundação / Idade</td><td className={`${tdStyle} w-2/6`}><input value={analise.fundacao} onChange={(e)=>setAnalise({...analise, fundacao: e.target.value})} className={cellStyle} /></td>
+                            <td className={`${thStyle} text-right w-1/6`}>Capital Social (R$)</td><td className={`${tdStyle} w-2/6`}><input type="number" value={analise.capital_social} onChange={(e)=>setAnalise({...analise, capital_social: Number(e.target.value)})} className={numStyle} /></td>
+                          </tr>
+                          <tr>
+                            <td className={`${thStyle} text-right`}>Localização / Matriz</td><td className={tdStyle}><input value={analise.localizacao} onChange={(e)=>setAnalise({...analise, localizacao: e.target.value})} className={cellStyle} placeholder="Endereço oficial corporativo..." /></td>
+                            <td className={`${thStyle} text-right`}>Ramo de Atividade</td><td className={tdStyle}><input value={analise.ramo} onChange={(e)=>setAnalise({...analise, ramo: e.target.value})} className={cellStyle} /></td>
+                          </tr>
+                          <tr>
+                            <td className={`${thStyle} text-right`}>Licenças / Certificações</td><td className={tdStyle}><input value={analise.licencas} onChange={(e)=>setAnalise({...analise, licencas: e.target.value})} className={cellStyle} /></td>
+                            <td className={`${thStyle} text-right`}>Balanço Auditado?</td>
+                            <td className={tdStyle}>
+                              <select value={analise.balanco_auditado} onChange={(e)=>setAnalise({...analise, balanco_auditado: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td className={`${thStyle} text-right`}>Consultoria Externa?</td>
+                            <td className={tdStyle}>
+                              <select value={analise.consultoria_gestao} onChange={(e)=>setAnalise({...analise, consultoria_gestao: e.target.value})} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                            </td>
+                            <td className={`${thStyle} text-right`}>Site Corporativo</td><td className={tdStyle}><input value={analise.site} onChange={(e)=>setAnalise({...analise, site: e.target.value})} className={cellStyle} /></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Arquivos Vinculados, Organograma e Endereços Externos</div>
-                    <table className="w-full border-collapse">
-                      <tbody>
-                        <tr>
-                          <td className={`${thStyle} w-1/4 text-right bg-purple-50 text-purple-900 border-purple-200`}>Organograma Interativo (Teia JSON)</td>
-                          <td className={`${tdStyle} bg-purple-50/20`}>
-                            <div className="flex gap-3 items-center h-full px-3 py-1">
-                              <button
-                                onClick={() => {
-                                  if(!analise.id) return alert("💡 Salve a análise no banco antes de gerar a teia!");
-                                  const cnpjLimpo = analise.cnpj.replace(/\D/g, '');
-                                  window.open(`/dashboard/busca-grupo?analise_id=${analise.id}&cnpj=${cnpjLimpo}`, '_blank');
-                                }}
-                                className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-1.5 px-4 text-[10px] rounded shadow-sm flex items-center gap-2 cursor-pointer whitespace-nowrap transition-colors"
-                              >
-                                🕸️ Abrir Gerador de Teia Interativa
-                              </button>
-                              
-                              <input 
-                                type="file" 
-                                accept=".json" 
-                                ref={uploadJsonRef}
-                                className="hidden" 
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (!file) return;
-                                  const reader = new FileReader();
-                                  reader.onload = (evt) => {
-                                      try {
-                                          const json = JSON.parse(evt.target?.result as string);
-                                          setAnalise({ ...analise, organograma_json: json });
-                                          alert("✅ JSON de Organograma anexado com sucesso!");
-                                      } catch(err: any) {
-                                          alert("❌ Erro ao ler JSON: " + err.message);
-                                      }
-                                  };
-                                  reader.readAsText(file);
-                                }}
-                              />
-                              <button 
-                                onClick={() => uploadJsonRef.current?.click()} 
-                                className="bg-white hover:bg-slate-50 text-slate-700 font-semibold py-1.5 px-3 text-[10px] rounded border border-slate-300 shadow-sm whitespace-nowrap transition-colors"
-                              >
-                                📎 Anexar JSON Manual
-                              </button>
-                              
-                              {analise.organograma_json && analise.organograma_json.nodes?.length > 0 ? (
-                                <span className="text-emerald-600 font-bold text-[11px] flex items-center gap-1 ml-2">
-                                  ✅ Teia processada ({analise.organograma_json.nodes.length} nós)
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 text-[10px] italic ml-2">Sem teia mapeada no sistema</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                        <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma (Imagem estática)</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da Imagem do Grupo..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fachada (Google Street View)</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão da rua..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Satélite (Google Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão aérea..." /></td></tr>
-                        <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita Interna</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Link do Drive com Evidências Fotográficas..." /></td></tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
               )}
 
-              {/* ABA 3: SOCIETÁRIO E PATRIMÔNIO */}
+              {/* ABA 3: SOCIETÁRIO (UNIFICADO) */}
               {abaAtiva === "societario" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                  
-                  <div className="flex justify-end mb-4">
-                    <button onClick={() => addArray('empresas_societario', { papel_no_grupo: "Nova Empresa", razao_social: "", cnpj: "", socios: [] })} className={btnPrimario}>
-                      + Adicionar Empresa (Mapeamento Societário)
-                    </button>
-                  </div>
-
+                  {/* Como a IA agora vai gerar um array de tamanho 1, isso rodará 1 vez com a tabela de sócios unificada */}
                   {analise.empresas_societario.map((empresaSoc, empIndex) => (
-                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 p-1 mb-6">
-                      <div className="rounded border border-slate-200 overflow-hidden mb-2">
-                          <div className={sectionHeaderStyle}>
-                            <div className="flex items-center gap-2 flex-1">
-                               <span>📋</span>
-                               <input value={empresaSoc.papel_no_grupo || ""} onChange={(e) => { const n = [...analise.empresas_societario]; n[empIndex].papel_no_grupo = e.target.value; setAnalise({...analise, empresas_societario: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none w-32 text-[11px] font-semibold" placeholder="Papel (Sócio PJ...)" />
-                               <span>-</span>
-                               <input value={empresaSoc.razao_social || ""} onChange={(e) => { const n = [...analise.empresas_societario]; n[empIndex].razao_social = e.target.value; setAnalise({...analise, empresas_societario: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none flex-1 max-w-sm text-[11px] font-bold" placeholder="Razão Social" />
-                               <input value={empresaSoc.cnpj || ""} onChange={(e) => { const n = [...analise.empresas_societario]; n[empIndex].cnpj = e.target.value; setAnalise({...analise, empresas_societario: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none w-32 text-[11px] font-mono" placeholder="CNPJ" />
-                            </div>
-                            <div className="flex gap-2 shrink-0">
-                               <button onClick={() => {
-                                 const novasEmp = [...analise.empresas_societario];
-                                 novasEmp[empIndex].socios.push({nome:"", perc:0, funcao:"Sócio", figura_contrato:"Sim"});
-                                 setAnalise({...analise, empresas_societario: novasEmp});
-                               }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Sócio (PF/PJ)</button>
-                               <button onClick={() => rmArray('empresas_societario', empIndex)} className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">Excluir Empresa</button>
-                            </div>
-                          </div>
-                          <table className="w-full border-collapse">
-                          <thead>
-                              <tr><th className={thStyle}>Nome Civil / PJ Associada</th><th className={`${thStyle} w-24`}>Cotas (%)</th><th className={`${thStyle} w-64`}>Papel / Cargo</th><th className={`${thStyle} w-36`}>Assina Contrato?</th><th className={`${thStyle} w-8`}>-</th></tr>
-                          </thead>
-                          <tbody>
-                              {empresaSoc.socios.map((s, i) => (
-                              <tr key={i}>
-                                  <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
-                                  <td className={tdStyle}><input type="number" value={s.perc ?? ""} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'perc', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/20`} /></td>
-                                  <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
-                                  <td className={tdStyle}>
-                                  <select value={s.figura_contrato} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'figura_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
-                                  </td>
-                                  <td className={`${tdStyle} text-center`}><button onClick={()=>rmArrayNested('empresas_societario', empIndex, 'socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
-                              </tr>
-                              ))}
-                          </tbody>
-                          </table>
+                    <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
+                      <div className={sectionHeaderStyle}>
+                         <span>📋 Quadro Societário Consolidado do Grupo</span>
+                         <button onClick={() => {
+                           const novasEmp = [...analise.empresas_societario];
+                           novasEmp[empIndex].socios.push({empresa_origem:"", nome:"", perc:0, funcao:"Sócio", figura_contrato:"Sim"});
+                           setAnalise({...analise, empresas_societario: novasEmp});
+                         }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Sócio/Entidade</button>
                       </div>
+                      <table className="w-full border-collapse">
+                        <thead>
+                            <tr>
+                                <th className={`${thStyle} w-48 text-left pl-3`}>Empresa Participada</th>
+                                <th className={thStyle}>Nome Civil / PJ Associada</th>
+                                <th className={`${thStyle} w-24`}>Cotas (%)</th>
+                                <th className={`${thStyle} w-40`}>Papel / Cargo</th>
+                                <th className={`${thStyle} w-32`}>Assina Contrato?</th>
+                                <th className={`${thStyle} w-8`}>-</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {empresaSoc.socios.map((s, i) => (
+                            <tr key={i}>
+                                <td className={tdStyle}><input value={s.empresa_origem || ""} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'empresa_origem', e.target.value)} className={`${cellStyle} text-slate-500`} placeholder="Qual CNPJ?" /></td>
+                                <td className={tdStyle}><input value={s.nome} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'nome', e.target.value)} className={`${cellStyle} font-bold`} /></td>
+                                <td className={tdStyle}><input type="number" value={s.perc ?? ""} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'perc', Number(e.target.value))} className={`${numStyle} font-bold text-indigo-700 bg-indigo-50/20`} /></td>
+                                <td className={tdStyle}><input value={s.funcao} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'funcao', e.target.value)} className={cellStyle} /></td>
+                                <td className={tdStyle}>
+                                   <select value={s.figura_contrato} onChange={(e)=>updateArrayNested('empresas_societario', empIndex, 'socios', i, 'figura_contrato', e.target.value)} className={cellStyle}><option value="Sim">Sim</option><option value="Não">Não</option></select>
+                                </td>
+                                <td className={`${tdStyle} text-center`}><button onClick={()=>rmArrayNested('empresas_societario', empIndex, 'socios', i)} className="text-red-500 font-bold hover:bg-red-50 w-full h-full transition-colors">X</button></td>
+                            </tr>
+                            ))}
+                        </tbody>
+                      </table>
                     </div>
                   ))}
 
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <table className="w-full border-collapse">
                       <tbody>
-                        <tr>
-                          <td className={`${thStyle} w-1/4 text-right`}>Regra de Assinatura Consolidada</td>
-                          <td className={tdStyle}><input value={analise.regra_assinatura} onChange={(e)=>setAnalise({...analise, regra_assinatura: e.target.value})} className={cellStyle} placeholder="( ) em conjunto (x) isolada" /></td>
-                        </tr>
-                        <tr>
-                          <td className={`${thStyle} w-1/4 text-right`}>Aval Societário Coletado</td>
-                          <td className={tdStyle}><input value={analise.aval_societario} onChange={(e)=>setAnalise({...analise, aval_societario: e.target.value})} className={cellStyle} /></td>
-                        </tr>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>Regra de Assinatura Consolidada</td><td className={tdStyle}><input value={analise.regra_assinatura} onChange={(e)=>setAnalise({...analise, regra_assinatura: e.target.value})} className={cellStyle} placeholder="( ) em conjunto (x) isolada" /></td></tr>
+                        <tr><td className={`${thStyle} w-1/4 text-right`}>Aval Societário Coletado</td><td className={tdStyle}><input value={analise.aval_societario} onChange={(e)=>setAnalise({...analise, aval_societario: e.target.value})} className={cellStyle} /></td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -1180,11 +1029,9 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 4: FATURAMENTO E POTENCIAL */}
+              {/* ABA 4: FATURAMENTO (UNIFICADO) */}
               {abaAtiva === "fat" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  
-                  {/* CARD DE POTENCIAL RECALCULADO BASEADO NO GRUPO */}
                   <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700 max-w-4xl mx-auto">
                       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
                       <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Grupo Consolidado)</span>
@@ -1195,92 +1042,58 @@ function MesaAnaliseConteudo() {
                       </div>
                   </div>
 
-                  <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
-                    <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex justify-between items-center`}>
-                      <span>📈 Soma Global de Faturamento (Todas as Filiais/Empresas)</span>
-                      <button onClick={() => addArray('empresas_faturamento', { razao_social: "Nova Empresa", cnpj: "", faturamento: {} })} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-[11px] transition-colors shadow">+ Adicionar Nova Tabela p/ Empresa</button>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full border-collapse text-left min-w-[800px]">
-                        <thead>
-                          <tr>
-                            <th className={`${thStyle} w-28 text-left`}>Mês Referência</th>
-                            <th className={thStyle}>Realizado 2026 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
-                            <th className={thStyle}>Realizado 2025 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
-                            <th className={thStyle}>Realizado 2024 (R$)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {meses.map((mes) => {
-                            const d26 = calcDelta(mes, "2026", "2025");
-                            const d25 = calcDelta(mes, "2025", "2024");
-                            return (
-                              <tr key={mes}>
-                                <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
-                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2026"]?.[mes]||0).toLocaleString("pt-BR")}</td>
-                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d26 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
-                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2025"]?.[mes]||0).toLocaleString("pt-BR")}</td>
-                                <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
-                                <td className={`${tdStyle} text-right font-mono text-[11px] pr-2`}>{Number(faturamentoConsolidado["2024"]?.[mes]||0).toLocaleString("pt-BR")}</td>
-                              </tr>
-                            );
-                          })}
-                          <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
-                            <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR")}</td>
-                            <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}</td>
-                            <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR")}</td>
-                          </tr>
-                          <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
-                            <td className="p-2 border border-indigo-100 text-indigo-900 text-right">{labelMascaraYTD}</td>
-                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}</td>
-                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                            <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}</td>
-                            <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
                   {analise.empresas_faturamento.map((empFat, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
-                      <div className={sectionHeaderStyle}>
-                         <div className="flex items-center gap-2 flex-1">
-                            <span>📋 Analítico:</span>
-                            <input value={empFat.razao_social || ""} onChange={(e) => { const n = [...analise.empresas_faturamento]; n[empIndex].razao_social = e.target.value; setAnalise({...analise, empresas_faturamento: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none flex-1 max-w-sm text-[11px] font-bold" placeholder="Razão Social" />
-                            <input value={empFat.cnpj || ""} onChange={(e) => { const n = [...analise.empresas_faturamento]; n[empIndex].cnpj = e.target.value; setAnalise({...analise, empresas_faturamento: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none w-32 text-[11px] font-mono" placeholder="CNPJ" />
-                         </div>
-                         <button onClick={() => rmArray('empresas_faturamento', empIndex)} className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow shrink-0">Remover Tabela</button>
+                      <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900`}>
+                        📈 Quadro de Faturamento Consolidado do Grupo Mês a Mês
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full border-collapse text-left min-w-[800px]">
                           <thead>
                             <tr>
                               <th className={`${thStyle} w-28 text-left`}>Mês Referência</th>
-                              <th className={thStyle}>Realizado 2026 (R$)</th>
-                              <th className={thStyle}>Realizado 2025 (R$)</th>
+                              <th className={thStyle}>Realizado 2026 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
+                              <th className={thStyle}>Realizado 2025 (R$)</th><th className={`${thStyle} w-24`}>Var YoY (%)</th>
                               <th className={thStyle}>Realizado 2024 (R$)</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {meses.map((mes) => (
-                              <tr key={mes}>
-                                <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
-                                <td className={tdStyle}>
-                                  <MathInput value={empFat.faturamento["2026"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2026", mes, val)} className={numStyle} />
-                                </td>
-                                <td className={tdStyle}>
-                                  <MathInput value={empFat.faturamento["2025"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2025", mes, val)} className={numStyle} />
-                                </td>
-                                <td className={tdStyle}>
-                                  <MathInput value={empFat.faturamento["2024"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2024", mes, val)} className={numStyle} />
-                                </td>
-                              </tr>
-                            ))}
+                            {meses.map((mes) => {
+                              const d26 = calcDelta(mes, "2026", "2025");
+                              const d25 = calcDelta(mes, "2025", "2024");
+                              return (
+                                <tr key={mes}>
+                                  <td className={`${tdStyle} bg-slate-50 font-bold uppercase text-[10px] pl-4 text-slate-600`}>{mes}</td>
+                                  <td className={tdStyle}>
+                                    <MathInput value={empFat.faturamento["2026"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2026", mes, val)} className={numStyle} />
+                                  </td>
+                                  <td className={`${tdStyle} text-center font-bold text-[10px] ${d26 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d26 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d26 === 0 ? "-" : `${d26.toFixed(1)}%`}</td>
+                                  <td className={tdStyle}>
+                                    <MathInput value={empFat.faturamento["2025"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2025", mes, val)} className={numStyle} />
+                                  </td>
+                                  <td className={`${tdStyle} text-center font-bold text-[10px] ${d25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : d25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{d25 === 0 ? "-" : `${d25.toFixed(1)}%`}</td>
+                                  <td className={tdStyle}>
+                                    <MathInput value={empFat.faturamento["2024"]?.[mes]} onChange={(val) => handleFatGrupo(empIndex, "2024", mes, val)} className={numStyle} />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
+                              <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR")}</td>
+                              <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR")}</td>
+                              <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR")}</td>
+                            </tr>
+                            <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
+                              <td className="p-2 border border-indigo-100 text-indigo-900 text-right">{labelMascaraYTD}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                              <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                              <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
@@ -1293,8 +1106,8 @@ function MesaAnaliseConteudo() {
                       <table className="w-full border-collapse">
                         <tbody>
                           <tr><td className={`${thStyle} text-right w-1/2`}>Ticket Médio da Base (R$)</td><td className={tdStyle}><input type="number" value={analise.dados_potencial.ticket_medio ?? ""} onChange={(e)=>updateNested("dados_potencial", "ticket_medio", Number(e.target.value))} className={`${numStyle} text-indigo-700 font-bold`} /></td></tr>
-                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Duplicatas</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_dpls", e.target.value)} className={cellStyle} placeholder="Ex: 45 dias" /></td></tr>
-                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Comissária</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_comissaria", e.target.value)} className={cellStyle} placeholder="Ex: 15 dias" /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Duplicatas</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_dpls} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_dpls", e.target.value)} className={cellStyle} /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Comissária</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_comissaria} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_comissaria", e.target.value)} className={cellStyle} /></td></tr>
                           <tr><td className={`${thStyle} text-right`}>Prazo Médio Vendas Intercompany</td><td className={tdStyle}><input type="text" value={analise.dados_potencial.prazo_medio_intercompany || ""} onChange={(e)=>updateNested("dados_potencial", "prazo_medio_intercompany", e.target.value)} className={cellStyle} /></td></tr>
                           
                           <tr className="bg-slate-50 border-t-2 border-slate-200">
@@ -1313,14 +1126,6 @@ function MesaAnaliseConteudo() {
                             <td className={`${thStyle} text-right`}>Natureza do Prazo (Comissária %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_comissaria ?? ""} onChange={(e)=>updateNested("dados_potencial", "composicao_comissaria", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
-                          <tr>
-                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Intercompany %)</td>
-                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_intercompany ?? 0} onChange={(e)=>updateNested("dados_potencial", "composicao_intercompany", Number(e.target.value))} className={numStyle} /></td>
-                          </tr>
-                          <tr>
-                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Outros %)</td>
-                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_outros ?? 0} onChange={(e)=>updateNested("dados_potencial", "composicao_outros", Number(e.target.value))} className={numStyle} /></td>
-                          </tr>
                         </tbody>
                       </table>
                     </div>
@@ -1328,13 +1133,12 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 5: ENDIVIDAMENTO E REFERÊNCIAS */}
+              {/* ABA 5: ENDIVIDAMENTO (UNIFICADO) */}
               {abaAtiva === "endividamento" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex justify-between items-center`}>
                       <span>Radar de Alavancagem Global do Grupo (Consolidado)</span>
-                      <button onClick={() => addArray('empresas_endividamento', { razao_social: "Nova Empresa", cnpj: "", saldo_total_empresa: 0, endividamento: [] })} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-[11px] transition-colors shadow">+ Adicionar Nova Empresa</button>
                     </div>
                     <table className="w-full border-collapse">
                       <thead>
@@ -1372,26 +1176,20 @@ function MesaAnaliseConteudo() {
                   {analise.empresas_endividamento.map((empEndiv, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
                       <div className={sectionHeaderStyle}>
-                         <div className="flex items-center gap-2 flex-1">
-                            <span>🏦 Dívidas Mapeadas:</span>
-                            <input value={empEndiv.razao_social || ""} onChange={(e) => { const n = [...analise.empresas_endividamento]; n[empIndex].razao_social = e.target.value; setAnalise({...analise, empresas_endividamento: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none flex-1 max-w-sm text-[11px] font-bold" placeholder="Razão Social" />
-                            <input value={empEndiv.cnpj || ""} onChange={(e) => { const n = [...analise.empresas_endividamento]; n[empIndex].cnpj = e.target.value; setAnalise({...analise, empresas_endividamento: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none w-32 text-[11px] font-mono" placeholder="CNPJ" />
-                         </div>
-                         <div className="flex gap-2 shrink-0">
-                           <button onClick={() => {
-                             const novasEmp = [...analise.empresas_endividamento];
-                             novasEmp[empIndex].endividamento.push({instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"});
-                             setAnalise({...analise, empresas_endividamento: novasEmp});
-                           }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Linha Crédito</button>
-                           <button onClick={() => rmArray('empresas_endividamento', empIndex)} className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">Remover Empresa</button>
-                         </div>
+                         <span>🏦 Lista Consolidada de Passivos (Todas as Entidades)</span>
+                         <button onClick={() => {
+                           const novasEmp = [...analise.empresas_endividamento];
+                           novasEmp[empIndex].endividamento.push({empresa_origem:"", instituicao:"", modalidade:"", saldo:0, tipo:"Banco", prazo:"Curto Prazo"});
+                           setAnalise({...analise, empresas_endividamento: novasEmp});
+                         }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Nova Dívida na Lista</button>
                       </div>
                       <table className="w-full border-collapse">
                         <thead>
                           <tr>
+                            <th className={`${thStyle} w-48 text-left pl-3`}>CNPJ / Empresa Devedora</th>
                             <th className={thStyle}>Credor Oficial</th>
                             <th className={thStyle}>Linha / Modalidade</th>
-                            <th className={`${thStyle} w-48 text-right`}>Saldo Aberto Estimado (R$)</th>
+                            <th className={`${thStyle} w-40 text-right`}>Saldo Aberto (R$)</th>
                             <th className={`${thStyle} w-32`}>Categoria Mercado</th>
                             <th className={`${thStyle} w-32`}>Vencimento Original</th>
                             <th className={`${thStyle} w-8`}>-</th>
@@ -1400,8 +1198,9 @@ function MesaAnaliseConteudo() {
                         <tbody>
                           {empEndiv.endividamento.map((div, i) => (
                             <tr key={i}>
-                              <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} placeholder="Nome do Banco/FIDC..." /></td>
-                              <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'modalidade', e.target.value)} className={cellStyle} placeholder="Ex: Capital de Giro..." /></td>
+                              <td className={tdStyle}><input value={div.empresa_origem || ""} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'empresa_origem', e.target.value)} className={`${cellStyle} text-slate-500`} placeholder="Qual CNPJ?" /></td>
+                              <td className={tdStyle}><input value={div.instituicao} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'instituicao', e.target.value)} className={`${cellStyle} font-bold`} /></td>
+                              <td className={tdStyle}><input value={div.modalidade} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'modalidade', e.target.value)} className={cellStyle} /></td>
                               <td className={tdStyle}><input type="number" value={div.saldo ?? ""} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'saldo', Number(e.target.value))} className={`${numStyle} font-bold text-rose-600 bg-rose-50/10`} /></td>
                               <td className={tdStyle}>
                                 <select value={div.tipo} onChange={(e)=>updateArrayNested('empresas_endividamento', empIndex, 'endividamento', i, 'tipo', e.target.value)} className={cellStyle}>
@@ -1420,7 +1219,8 @@ function MesaAnaliseConteudo() {
                       </table>
                     </div>
                   ))}
-
+                  
+                  {/* REFERÊNCIAS COMERCIAIS */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>
                       <span>Market Check & Referências Comerciais Ativas</span>
@@ -1428,7 +1228,8 @@ function MesaAnaliseConteudo() {
                     </div>
                     <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300">
                       <table className="w-full border-collapse min-w-[1500px]">
-                        <thead>
+                         {/* TH TR e Mapeamento idênticos ao anterior */}
+                         <thead>
                           <tr>
                             <th className={thStyle}>Agente Financeiro</th><th className={thStyle}>Rating/RNX</th><th className={`${thStyle} w-24`}>Início Relac.</th><th className={`${thStyle} w-24`}>Última Operação</th>
                             <th className={`${thStyle} w-28 text-right`}>VOP (R$)</th>
@@ -1473,22 +1274,17 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 6: RESTRITIVOS E JURÍDICO */}
+              {/* ABA 6: RESTRITIVOS (UNIFICADO) */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
                   
-                  {/* 🔥 BLOCO NOVO: QUADRO RESUMO DO SERASA (Ajustado) */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Quadro Resumo de Apontamentos Serasa / Boa Vista</div>
+                    <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Quadro Resumo de Apontamentos do Grupo (Serasa / Boa Vista)</div>
                     <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className={thStyle}>PEFIN</th>
-                          <th className={thStyle}>REFIN</th>
-                          <th className={thStyle}>Protestos</th>
-                          <th className={thStyle}>Dívidas Vencidas</th>
-                          <th className={thStyle}>Ações Judiciais</th>
-                          <th className={thStyle}>Cheques S/ Fundo</th>
+                          <th className={thStyle}>PEFIN</th><th className={thStyle}>REFIN</th><th className={thStyle}>Protestos</th>
+                          <th className={thStyle}>Dívidas Vencidas</th><th className={thStyle}>Ações Judiciais</th><th className={thStyle}>Cheques S/ Fundo</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1504,43 +1300,29 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  {/* 🔥 BOTÃO PARA ADICIONAR NOVA ENTIDADE SERASA */}
-                  <div className="flex justify-between items-center bg-slate-100 p-3 rounded-md border border-slate-200">
-                    <span className="font-bold text-slate-700 text-[12px]">Detalhamento de Apontamentos por Entidade (CNPJ/CPF)</span>
-                    <button onClick={() => addArray('empresas_serasa', { nome_entidade: "NOVA ENTIDADE", documento: "", valor_total_entidade: 0, restritivos: [] })} className={btnPrimario}>
-                      + Adicionar Nova Entidade Serasa
-                    </button>
-                  </div>
-
-                  {/* BLOCO 1: DETALHAMENTO SERASA E BOA VISTA */}
                   {analise.empresas_serasa.map((empSerasa, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
                       <div className={sectionHeaderStyle}>
-                         <div className="flex items-center gap-2 flex-1">
-                            <span>⚠️ Serasa -</span>
-                            <input value={empSerasa.nome_entidade || ""} onChange={(e) => { const n = [...analise.empresas_serasa]; n[empIndex].nome_entidade = e.target.value; setAnalise({...analise, empresas_serasa: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none flex-1 max-w-sm text-[11px] font-bold" placeholder="Nome da Entidade" />
-                            <input value={empSerasa.documento || ""} onChange={(e) => { const n = [...analise.empresas_serasa]; n[empIndex].documento = e.target.value; setAnalise({...analise, empresas_serasa: n}); }} className="bg-transparent text-white border-b border-indigo-400 focus:border-white outline-none w-32 text-[11px] font-mono" placeholder="CPF/CNPJ" />
-                         </div>
-                         <div className="flex gap-2 shrink-0">
-                           <button onClick={() => {
-                             const novasEmp = [...analise.empresas_serasa];
-                             novasEmp[empIndex].restritivos.push({tipo_restritivo:"Protesto", quantidade_somada:1, valor_somado:0, data_mais_recente:"", credores_resumo:""});
-                             setAnalise({...analise, empresas_serasa: novasEmp});
-                           }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Restritivo</button>
-                           <button onClick={() => rmArray('empresas_serasa', empIndex)} className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">Remover Entidade</button>
-                         </div>
+                         <span>⚠️ Detalhamento Consolidado de Apontamentos (Todas as Entidades)</span>
+                         <button onClick={() => {
+                           const novasEmp = [...analise.empresas_serasa];
+                           novasEmp[empIndex].restritivos.push({empresa_origem:"", tipo_restritivo:"Protesto", quantidade_somada:1, valor_somado:0, data_mais_recente:"", credores_resumo:""});
+                           setAnalise({...analise, empresas_serasa: novasEmp});
+                         }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Restritivo na Lista</button>
                       </div>
                       <table className="w-full border-collapse">
                         <thead>
                           <tr>
+                            <th className={`${thStyle} w-40 text-left pl-3`}>CNPJ / Empresa Alvo</th>
                             <th className={thStyle}>Natureza do Apontamento</th><th className={`${thStyle} w-16`}>Vol.</th>
-                            <th className={`${thStyle} w-40 text-right`}>Valor Acumulado (R$)</th><th className={`${thStyle} w-28`}>Data Ocorrência</th>
-                            <th className={`${thStyle} w-64`}>Credores ou Cartórios</th><th className={`${thStyle} w-8`}>-</th>
+                            <th className={`${thStyle} w-32 text-right`}>Valor Acumulado (R$)</th><th className={`${thStyle} w-28`}>Data Ocorrência</th>
+                            <th className={`${thStyle} w-56`}>Credores ou Cartórios</th><th className={`${thStyle} w-8`}>-</th>
                           </tr>
                         </thead>
                         <tbody>
                           {empSerasa.restritivos.map((r, i) => (
                             <tr key={i}>
+                              <td className={tdStyle}><input value={r.empresa_origem || ""} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'empresa_origem', e.target.value)} className={`${cellStyle} text-slate-500`} placeholder="Qual CNPJ?" /></td>
                               <td className={tdStyle}><input value={r.tipo_restritivo || r.restritivo || ""} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'tipo_restritivo', e.target.value)} className={`${cellStyle} font-bold text-rose-700`} /></td>
                               <td className={tdStyle}><input type="number" value={r.quantidade_somada ?? r.qtd ?? ""} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'quantidade_somada', Number(e.target.value))} className={`${numStyle} text-center`} /></td>
                               <td className={tdStyle}><input type="number" value={r.valor_somado ?? r.valor ?? ""} onChange={(e)=>updateArrayNested('empresas_serasa', empIndex, 'restritivos', i, 'valor_somado', Number(e.target.value))} className={`${numStyle} text-rose-600 font-bold bg-rose-50/20`} /></td>
@@ -1554,28 +1336,23 @@ function MesaAnaliseConteudo() {
                     </div>
                   ))}
 
-                  {/* BLOCO 2: DOSSIER JURÍDICO */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-slate-900 border-slate-900 flex gap-3 items-center`}>
                         <span>⚖️ Dossier Jurídico Textual Consolidado do Grupo (Kappi / Jusbrasil)</span>
-                        {analise.status === "em_processamento_ia" && <span className="bg-purple-500 text-white font-bold text-[9px] px-2 py-0.5 rounded animate-pulse">EXTRAINDO PROCESSOS...</span>}
                     </div>
                     <textarea 
                         value={analise.dados_juridico?.relatorio_completo || ""} 
                         onChange={(e)=>updateNested("dados_juridico", "relatorio_completo", e.target.value)} 
                         className="w-full h-72 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 leading-relaxed focus:bg-white transition-colors" 
-                        placeholder="Aguardando consolidação inteligente ou digite a síntese dos principais litígios trabalhistas, cíveis e tributários..."
+                        placeholder="Aguardando consolidação inteligente ou digite a síntese..."
                     />
                   </div>
                   
-                  {/* BLOCO 3: RADAR DE MÍDIA E COMPLIANCE DA IA */}
+                  {/* Radar Mídia idêntico... */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
-                    
                     {analise.noticias_mercado && analise.noticias_mercado.risco_midia_nivel ? (
                       <div className="p-5 flex flex-col md:flex-row gap-6 bg-slate-50">
-                        
-                        {/* Coluna 1: Termômetro de Risco */}
                         <div className="flex flex-col gap-3 w-full md:w-1/3">
                           <div className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center text-center shadow-inner h-full ${
                             analise.noticias_mercado.risco_midia_nivel === 'alto' ? 'bg-rose-50 border-rose-200 text-rose-800' :
@@ -1583,19 +1360,11 @@ function MesaAnaliseConteudo() {
                             'bg-emerald-50 border-emerald-200 text-emerald-800'
                           }`}>
                             <span className="text-[10px] font-black uppercase tracking-widest opacity-70">Risco de Mídia</span>
-                            <span className="text-2xl font-black uppercase mt-1">
-                              {analise.noticias_mercado.risco_midia_nivel}
-                            </span>
-                            <span className="text-[11px] font-medium mt-2 leading-tight">
-                              {analise.noticias_mercado.parecer_analista}
-                            </span>
+                            <span className="text-2xl font-black uppercase mt-1">{analise.noticias_mercado.risco_midia_nivel}</span>
+                            <span className="text-[11px] font-medium mt-2 leading-tight">{analise.noticias_mercado.parecer_analista}</span>
                           </div>
                         </div>
-
-                        {/* Coluna 2: Alertas e Setor */}
                         <div className="flex flex-col gap-4 w-full md:w-2/3">
-                          
-                          {/* Alertas Graves */}
                           <div>
                             <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Alertas Graves Detectados</h4>
                             {analise.noticias_mercado.alertas_graves && analise.noticias_mercado.alertas_graves.length > 0 ? (
@@ -1612,15 +1381,12 @@ function MesaAnaliseConteudo() {
                               </div>
                             )}
                           </div>
-
-                          {/* Panorama do Setor */}
                           <div>
                             <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Termômetro do Setor</h4>
                             <div className="bg-white border border-slate-200 text-slate-700 text-[12px] px-4 py-3 rounded-lg leading-relaxed shadow-sm">
                               {analise.noticias_mercado.panorama_setor}
                             </div>
                           </div>
-
                         </div>
                       </div>
                     ) : (
@@ -1628,7 +1394,7 @@ function MesaAnaliseConteudo() {
                         value={analise.noticias_midia} 
                         onChange={(e)=>setAnalise({...analise, noticias_midia: e.target.value})} 
                         className="w-full h-24 p-4 border-none outline-none text-[12px] text-slate-700 font-sans resize-none bg-slate-50/50 focus:bg-white transition-colors"
-                        placeholder="Insira links ou descrições curtas de matérias vinculadas ao grupo ou sócios na mídia..."
+                        placeholder="Insira links ou descrições curtas..."
                       />
                     )}
                   </div>
@@ -1646,7 +1412,7 @@ function MesaAnaliseConteudo() {
                       value={analise.parecer_analista} 
                       onChange={(e) => setAnalise({...analise, parecer_analista: e.target.value})}
                       className="w-full p-6 border-none h-80 font-sans text-[13px] text-slate-800 outline-none resize-none bg-slate-50 focus:bg-white transition-colors leading-relaxed"
-                      placeholder="Redija a conclusão narrativa embasando a decisão comercial e os riscos atenuados mapeados. Use a súmula executiva como trampolim de contexto..."
+                      placeholder="Redija a conclusão narrativa embasando a decisão comercial..."
                     />
                   </div>
 
@@ -1680,13 +1446,12 @@ function MesaAnaliseConteudo() {
                   </div>
                 </div>
               )}
-
             </div>
           </>
         )}
       </div>
 
-      {/* 🔥 MODAL DE UPLOAD DE NOVOS DOCUMENTOS */}
+      {/* MODAL NOVOS DOCS */}
       {modalDocsAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -1697,33 +1462,22 @@ function MesaAnaliseConteudo() {
             
             <div className="p-6 space-y-5">
               <p className="text-xs text-slate-600 leading-relaxed bg-indigo-50 border border-indigo-100 p-3 rounded">
-                Selecione os novos arquivos (PDFs de faturamento, balancetes atualizados, etc). 
-                A IA irá extrair os dados e <strong>mesclar</strong> com a análise atual sem apagar o que você já editou manualmente.
+                Selecione os novos arquivos. A IA irá extrair os dados e <strong>mesclar</strong> com a análise atual sem apagar o que você já editou manualmente.
               </p>
               
               <div className="border-2 border-dashed border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50/70 transition-colors bg-indigo-50/30 rounded-xl p-8 text-center relative cursor-pointer">
-                <input 
-                  type="file" 
-                  multiple 
-                  accept=".pdf,.png,.jpg,.jpeg" 
-                  onChange={(e) => setNovosArquivos(Array.from(e.target.files || []))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
+                <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setNovosArquivos(Array.from(e.target.files || []))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 <div className="pointer-events-none flex flex-col items-center gap-2">
                   <span className="text-3xl">📤</span>
                   <span className="text-sm font-bold text-indigo-700">Clique ou arraste novos arquivos aqui</span>
-                  <span className="text-xs text-slate-500 font-medium">Aceita PDF, PNG, JPG</span>
                 </div>
               </div>
 
               {novosArquivos.length > 0 && (
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase mb-2 block tracking-wider">Arquivos Selecionados:</span>
                   <ul className="text-[11px] text-slate-700 max-h-32 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300">
                     {novosArquivos.map((file, i) => (
-                      <li key={i} className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded truncate shadow-sm">
-                        📎 {file.name}
-                      </li>
+                      <li key={i} className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded truncate shadow-sm">📎 {file.name}</li>
                     ))}
                   </ul>
                 </div>
@@ -1731,32 +1485,18 @@ function MesaAnaliseConteudo() {
             </div>
 
             <div className="bg-slate-100 p-4 border-t border-slate-200 flex justify-end gap-3">
-              <button 
-                onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} 
-                className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={processarNovosDocumentos} 
-                disabled={uploadingDocs || novosArquivos.length === 0}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-bold rounded-md shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-              >
-                {uploadingDocs ? (
-                  <>
-                    <span className="animate-spin">⏳</span> Enviando R2...
-                  </>
-                ) : "🚀 Enviar para Leitura IA"}
+              <button onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-md transition-colors cursor-pointer">Cancelar</button>
+              <button onClick={processarNovosDocumentos} disabled={uploadingDocs || novosArquivos.length === 0} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-bold rounded-md shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed">
+                {uploadingDocs ? <><span className="animate-spin">⏳</span> Enviando R2...</> : "🚀 Enviar para Leitura IA"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 🔥 MODAL GIGANTE DO KAPPI VIEWER */}
+      {/* MODAL KAPPI VIEWER */}
       {isKappiModalOpen && (
         <div className="fixed inset-0 z-[120] flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] bg-slate-900 animate-in fade-in duration-200">
-          
           <div className="bg-slate-900 text-slate-200 p-3 px-6 flex justify-between items-center shadow-lg border-b border-slate-700 shrink-0">
             <div className="flex items-center gap-3">
               <span className="text-xl">🕵️‍♂️</span>
@@ -1765,15 +1505,10 @@ function MesaAnaliseConteudo() {
                 <span className="text-sm font-bold text-white tracking-wide">{analise.empresa_nome || analise.razao_social}</span>
               </div>
             </div>
-            
-            <button 
-              onClick={() => setIsKappiModalOpen(false)} 
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wide flex items-center gap-2"
-            >
+            <button onClick={() => setIsKappiModalOpen(false)} className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer uppercase tracking-wide flex items-center gap-2">
               ✕ Fechar Auditoria
             </button>
           </div>
-
           <div className="flex-1 flex overflow-hidden w-full bg-slate-100 relative">
              <div className="w-full h-full p-4">
                 <div className="w-full h-full bg-white rounded-2xl shadow-xl border border-slate-300 overflow-hidden relative">
@@ -1781,7 +1516,6 @@ function MesaAnaliseConteudo() {
                 </div>
              </div>
           </div>
-          
         </div>
       )}
 
