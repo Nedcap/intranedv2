@@ -284,6 +284,10 @@ export const gerarHtmlDossie = async (item: any) => {
     const medGeral25 = calcMediaGeralAno("2025");
     const medGeral24 = calcMediaGeralAno("2024");
     
+    // 🔥 AS LINHAS QUE EU DEIXEI CAIR ESTÃO DE VOLTA AQUI:
+    const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
+    const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
+    
     const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
     const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
@@ -958,7 +962,6 @@ export const gerarHtmlDossie = async (item: any) => {
     `;
   } catch (erroGlobal) {
     console.error("Erro fatal na renderização do PDF:", erroGlobal);
-    // Se, por um milagre satânico, der erro, ele vai te mostrar ONDE FOI em vez de engolir!
     return `<html><body><h1 style="color:red; font-family:sans-serif;">Puta merda, falhou!</h1><pre style="background:#f4f4f4; padding:20px;">${String(erroGlobal)}</pre></body></html>`;
   }
 };
@@ -973,9 +976,6 @@ export default function GerarAnalise({ analise }: { analise: any }) {
     setGerando(true);
     try {
       const htmlContent = await gerarHtmlDossie(analise);
-      
-      // ✅ TIREI O THROW. Se rolar erro crítico, ele vai ABRIR A TELA VERMELHA no seu navegador 
-      // pra você ver o log exato, em vez de dar só um alert burro na tela.
 
       const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
