@@ -611,7 +611,6 @@ function MesaAnaliseConteudo() {
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
-  // Como agora forçamos apenas 1 elemento consolidado, o reduce funciona de forma transparente
   const faturamentoConsolidado = analise.empresas_faturamento.reduce((acc, emp) => {
     Object.entries(emp.faturamento || {}).forEach(([ano, m]) => {
       if (!acc[ano]) acc[ano] = {};
@@ -945,6 +944,72 @@ function MesaAnaliseConteudo() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* 🔥 O BLOCO RESTAURADO DO ORGANOGRAMA ENTRA AQUI */}
+                    <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
+                      <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Arquivos Vinculados, Organograma e Endereços Externos</div>
+                      <table className="w-full border-collapse">
+                        <tbody>
+                          <tr>
+                            <td className={`${thStyle} w-1/4 text-right bg-purple-50 text-purple-900 border-purple-200`}>Organograma Interativo (Teia JSON)</td>
+                            <td className={`${tdStyle} bg-purple-50/20`}>
+                              <div className="flex gap-3 items-center h-full px-3 py-1">
+                                <button
+                                  onClick={() => {
+                                    if(!analise.id) return alert("💡 Salve a análise no banco antes de gerar a teia!");
+                                    const cnpjLimpo = analise.cnpj.replace(/\D/g, '');
+                                    window.open(`/dashboard/busca-grupo?analise_id=${analise.id}&cnpj=${cnpjLimpo}`, '_blank');
+                                  }}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-1.5 px-4 text-[10px] rounded shadow-sm flex items-center gap-2 cursor-pointer whitespace-nowrap transition-colors"
+                                >
+                                  🕸️ Abrir Gerador de Teia Interativa
+                                </button>
+                                
+                                <input 
+                                  type="file" 
+                                  accept=".json" 
+                                  ref={uploadJsonRef}
+                                  className="hidden" 
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = (evt) => {
+                                        try {
+                                            const json = JSON.parse(evt.target?.result as string);
+                                            setAnalise({ ...analise, organograma_json: json });
+                                            alert("✅ JSON de Organograma anexado com sucesso!");
+                                        } catch(err: any) {
+                                            alert("❌ Erro ao ler JSON: " + err.message);
+                                        }
+                                    };
+                                    reader.readAsText(file);
+                                  }}
+                                />
+                                <button 
+                                  onClick={() => uploadJsonRef.current?.click()} 
+                                  className="bg-white hover:bg-slate-50 text-slate-700 font-semibold py-1.5 px-3 text-[10px] rounded border border-slate-300 shadow-sm whitespace-nowrap transition-colors"
+                                >
+                                  📎 Anexar JSON Manual
+                                </button>
+                                
+                                {analise.organograma_json && analise.organograma_json.nodes?.length > 0 ? (
+                                  <span className="text-emerald-600 font-bold text-[11px] flex items-center gap-1 ml-2">
+                                    ✅ Teia processada ({analise.organograma_json.nodes.length} nós)
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px] italic ml-2">Sem teia mapeada no sistema</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          <tr><td className={`${thStyle} w-1/4 text-right`}>URL Organograma (Imagem estática)</td><td className={tdStyle}><input type="text" value={analise.anexos?.organograma_url || ""} onChange={(e) => updateNested("anexos", "organograma_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da Imagem do Grupo..." /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>URL Fachada (Google Street View)</td><td className={tdStyle}><input type="text" value={analise.anexos?.fachada_url || ""} onChange={(e) => updateNested("anexos", "fachada_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão da rua..." /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>URL Satélite (Google Maps)</td><td className={tdStyle}><input type="text" value={analise.anexos?.satelite_url || ""} onChange={(e) => updateNested("anexos", "satelite_url", e.target.value)} className={cellStyle} placeholder="Cole o Link da visão aérea..." /></td></tr>
+                          <tr><td className={`${thStyle} text-right`}>URL Fotos da Visita Interna</td><td className={tdStyle}><input type="text" value={analise.anexos?.fotos_visita_url || ""} onChange={(e) => updateNested("anexos", "fotos_visita_url", e.target.value)} className={cellStyle} placeholder="Link do Drive com Evidências Fotográficas..." /></td></tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
               )}
 
@@ -1228,7 +1293,6 @@ function MesaAnaliseConteudo() {
                     </div>
                     <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300">
                       <table className="w-full border-collapse min-w-[1500px]">
-                         {/* TH TR e Mapeamento idênticos ao anterior */}
                          <thead>
                           <tr>
                             <th className={thStyle}>Agente Financeiro</th><th className={thStyle}>Rating/RNX</th><th className={`${thStyle} w-24`}>Início Relac.</th><th className={`${thStyle} w-24`}>Última Operação</th>
@@ -1277,7 +1341,7 @@ function MesaAnaliseConteudo() {
               {/* ABA 6: RESTRITIVOS (UNIFICADO) */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                  
+                   
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Quadro Resumo de Apontamentos do Grupo (Serasa / Boa Vista)</div>
                     <table className="w-full border-collapse">
@@ -1347,8 +1411,7 @@ function MesaAnaliseConteudo() {
                         placeholder="Aguardando consolidação inteligente ou digite a síntese..."
                     />
                   </div>
-                  
-                  {/* Radar Mídia idêntico... */}
+                   
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
                     {analise.noticias_mercado && analise.noticias_mercado.risco_midia_nivel ? (
@@ -1459,12 +1522,12 @@ function MesaAnaliseConteudo() {
               <span className="flex items-center gap-2">📄 Processar Novos Documentos (Merge IA)</span>
               <button onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} className="text-indigo-200 hover:text-white transition-colors cursor-pointer text-xl">✕</button>
             </div>
-            
+             
             <div className="p-6 space-y-5">
               <p className="text-xs text-slate-600 leading-relaxed bg-indigo-50 border border-indigo-100 p-3 rounded">
                 Selecione os novos arquivos. A IA irá extrair os dados e <strong>mesclar</strong> com a análise atual sem apagar o que você já editou manualmente.
               </p>
-              
+               
               <div className="border-2 border-dashed border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50/70 transition-colors bg-indigo-50/30 rounded-xl p-8 text-center relative cursor-pointer">
                 <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setNovosArquivos(Array.from(e.target.files || []))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 <div className="pointer-events-none flex flex-col items-center gap-2">
