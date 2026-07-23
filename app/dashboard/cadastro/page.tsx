@@ -68,6 +68,20 @@ const formatarDataBr = (dataString: string) => {
   return `${dia}/${mes}/${ano}`;
 };
 
+// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real
+const aplicarTagsDinamicas = (texto: string, item: any) => {
+  if (!texto) return "";
+  const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
+
+  return texto
+    .replace(/\{empresa\}/gi, item.cedente || "Empresa Não Informada")
+    .replace(/\{cnpj\}/gi, formatarCNPJ(item.cnpj) || "Sem CNPJ")
+    .replace(/\{contato\}/gi, primeiroNomeComercial)
+    .replace(/\{comercial\}/gi, item.comercial || "Comercial")
+    .replace(/\{limite\}/gi, item.limite || "R$ 0,00")
+    .replace(/\{taxa\}/gi, item.taxa || "0,00%");
+};
+
 export default function CadastroPage() {
   const [cedentes, setCedentes] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -96,6 +110,10 @@ export default function CadastroPage() {
   const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
   const [enviandoLote, setEnviandoLote] = useState(false);
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
+
+  // 🌟 NOVO: Estado para os templates do banco
+  const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
+  const [templateSelecionadoId, setTemplateSelecionadoId] = useState<string>("");
 
   const carregarCadastro = useCallback(async () => {
     try {
@@ -138,6 +156,10 @@ export default function CadastroPage() {
         }
       }
 
+      // 🌟 BUSCA OS TEMPLATES DO BANCO
+      const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
+      if (tpls) setTemplatesEmail(tpls);
+
       const { data } = await supabase.from("cadastro_cedentes").select("*");
       
       if (data) {
@@ -161,6 +183,7 @@ export default function CadastroPage() {
     setTipoDisparoAtual(tipo);
     setSelecionadosParaDisparo([]);
     setLogsDisparo([]);
+    setTemplateSelecionadoId(""); // Reseta a seleção de template
 
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
@@ -202,10 +225,13 @@ export default function CadastroPage() {
   };
 
   const executarDisparoEmLote = async () => {
-    if (selecionadosParaDisparo.length === 0 || !usuarioAtual?.email || !tipoDisparoAtual) return;
+    if (selecionadosParaDisparo.length === 0 || !usuarioAtual?.email || !tipoDisparoAtual || !templateSelecionadoId) return;
     
+    const templateAtivo = templatesEmail.find(t => t.id === templateSelecionadoId);
+    if (!templateAtivo) return;
+
     setEnviandoLote(true);
-    setLogsDisparo(["🚀 Iniciando disparos..."]);
+    setLogsDisparo(["🚀 Iniciando disparos com o roteiro:", `- ${templateAtivo.nome}`]);
 
     const itensParaEnviar = cedentesDisponiveis.filter(c => selecionadosParaDisparo.includes(c.id));
 
@@ -228,25 +254,9 @@ export default function CadastroPage() {
           continue; // Pula pro próximo
         }
 
-        // Monta o Corpo
-        let assunto = "";
-        let texto = `Fala ${item.comercial.split(' ')[0]},\n\nAtualização na esteira do cliente ${item.cedente}:\n\n`;
-
-        if (tipoDisparoAtual === "APTO") {
-          assunto = `✅ APTO PARA OPERAR: ${item.cedente}`;
-          texto += `Boas notícias! O cliente finalizou a esteira e está APTO PARA OPERAR.\n`;
-          if (item.dt_apto_sec) texto += `- Securitizadora: Apto desde ${formatarDataBr(item.dt_apto_sec)}\n`;
-          if (item.dt_apto_fidc) texto += `- FIDC: Apto desde ${formatarDataBr(item.dt_apto_fidc)}\n`;
-          texto += `\nJá pode meter marcha nas operações! 🚀`;
-        } else if (tipoDisparoAtual === "GESTORA") {
-          assunto = `⏳ EM ANÁLISE NA GESTORA: ${item.cedente}`;
-          texto += `A documentação do cliente foi enviada para a Gestora do FIDC em ${formatarDataBr(item.dt_envio_gestora_fidc)}.\n`;
-          texto += `Agora estamos aguardando o aval deles. Qualquer novidade ou pendência, te aviso!`;
-        } else if (tipoDisparoAtual === "ASSINATURA") {
-          assunto = `✍️ CONTRATO EM ASSINATURA: ${item.cedente}`;
-          texto += `Os contratos foram gerados e enviados para assinatura do cliente.\n`;
-          texto += `Dá aquele toque no cliente para ele assinar rápido e a gente liberar o limite.`;
-        }
+        // 🌟 APLICA AS TAGS DINÂMICAS DO TEMPLATE
+        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item);
+        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item);
 
         // Disparo Real
         const res = await fetch("/api/gmail/send", {
@@ -255,8 +265,8 @@ export default function CadastroPage() {
           body: JSON.stringify({
             userEmail: usuarioAtual.email,
             para: emailDestino,
-            assunto,
-            textoResposta: texto
+            assunto: assuntoFinal,
+            textoResposta: textoFinal
           })
         });
 
@@ -1124,6 +1134,24 @@ export default function CadastroPage() {
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 bg-white">
+              
+              {/* 🌟 NOVO: SELECT DE TEMPLATES */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 mb-6">
+                <label className="block text-xs font-bold text-indigo-900 mb-2 uppercase">1. Selecione o Roteiro (Template):</label>
+                <select 
+                  value={templateSelecionadoId}
+                  onChange={(e) => setTemplateSelecionadoId(e.target.value)}
+                  disabled={enviandoLote || templatesEmail.length === 0}
+                  className="w-full p-3 bg-white border border-indigo-200 rounded-lg text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                >
+                  <option value="" disabled>-- Clique para escolher um template --</option>
+                  {templatesEmail.map(t => (
+                    <option key={t.id} value={t.id}>{t.nome}</option>
+                  ))}
+                </select>
+                {templatesEmail.length === 0 && <p className="text-[10px] text-rose-500 mt-1">Nenhum template cadastrado no banco.</p>}
+              </div>
+
               {cedentesDisponiveis.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
                   Nenhum cliente está nesta fase no momento.
@@ -1131,7 +1159,7 @@ export default function CadastroPage() {
               ) : (
                 <>
                   <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs font-bold text-slate-500 uppercase">{cedentesDisponiveis.length} Clientes Encontrados</span>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">2. Selecione os Clientes ({cedentesDisponiveis.length}):</label>
                     <button 
                       onClick={selecionarTodosDisparo} 
                       disabled={enviandoLote}
@@ -1185,13 +1213,13 @@ export default function CadastroPage() {
                 </button>
                 <button 
                   onClick={executarDisparoEmLote}
-                  disabled={enviandoLote || selecionadosParaDisparo.length === 0}
+                  disabled={enviandoLote || selecionadosParaDisparo.length === 0 || !templateSelecionadoId}
                   className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:shadow-none"
                 >
                   {enviandoLote ? (
                     <>
                       <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                      Processando Lote...
+                      Processando...
                     </>
                   ) : (
                     <>
