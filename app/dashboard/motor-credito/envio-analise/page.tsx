@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import UploadDocs from "@/components/UploadDocs";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
@@ -76,6 +76,10 @@ export default function MotorCreditoPage() {
 
   const [isUploadExtraOpen, setIsUploadExtraOpen] = useState(false);
   const [analiseAlvoUpload, setAnaliseAlvoUpload] = useState<FilaItem | null>(null);
+
+  // 🔥 NOVO: Estado para o Modal de Relatório de Visitas
+  const [isRelatorioModalOpen, setIsRelatorioModalOpen] = useState(false);
+  const [analiseParaRelatorio, setAnaliseParaRelatorio] = useState<FilaItem | null>(null);
 
   useEffect(() => {
     carregarFilaComercial();
@@ -846,10 +850,13 @@ export default function MotorCreditoPage() {
                             </button>
                             
                             <button
-                              onClick={() => router.push(`/dashboard/motor-credito/analise?id=${item.id}`)}
+                              onClick={() => {
+                                setAnaliseParaRelatorio(item);
+                                setIsRelatorioModalOpen(true);
+                              }}
                               className="bg-indigo-50 hover:bg-indigo-600 hover:text-white border border-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide flex items-center gap-1 shadow-sm cursor-pointer transition-all"
                             >
-                              👁️ Parecer
+                              📋 Relatório
                             </button>
                           </div>
                         </td>
@@ -1004,6 +1011,34 @@ export default function MotorCreditoPage() {
                   </div>
                 </div>
 
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🔥 MODAL DE RELATÓRIO DE VISITAS */}
+        {isRelatorioModalOpen && analiseParaRelatorio && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
+              <div className="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <div>
+                  <h2 className="font-black text-slate-800 uppercase tracking-tight text-lg">📝 Relatório de Visitas / Súmula</h2>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">{analiseParaRelatorio.empresa_nome} — {formatarCnpj(analiseParaRelatorio.cnpj)}</p>
+                </div>
+                <button 
+                  onClick={() => { setIsRelatorioModalOpen(false); setAnaliseParaRelatorio(null); }} 
+                  className="p-2 bg-white border border-slate-300 hover:bg-rose-50 hover:text-rose-600 rounded-lg font-bold transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-6 bg-slate-50/50 space-y-4 max-h-[60vh] overflow-y-auto">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                  <h3 className="text-[11px] font-black uppercase text-indigo-900 mb-3 border-b border-slate-100 pb-2">Resumo da Visita</h3>
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {analiseParaRelatorio.dados_consolidados?.resumo_visita || <span className="text-slate-400 italic">Nenhum relatório de visita registrado para esta análise.</span>}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
