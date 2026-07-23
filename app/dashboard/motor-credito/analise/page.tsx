@@ -5,10 +5,11 @@ import { useState, useEffect, Suspense, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
 import GerarAnalise, { gerarHtmlDossie } from "@/components/gerar-analise";
-import GerarKappiViewer from "@/components/gerar-kappi";
+import GerarKappiViewer from "@/components/gerar-kappi"; // 🔥 IMPORT DO KAPPI VIEWER
+import JSZip from "jszip"; 
 
 // =========================================================================
-// INTERFACES (ATUALIZADAS PARA SUPORTAR GRUPOS ECONÔMICOS UNIFICADOS)
+// INTERFACES (ATUALIZADAS PARA SUPORTAR GRUPOS ECONÔMICOS)
 // =========================================================================
 interface FilaItem {
   id: string;
@@ -39,7 +40,6 @@ interface EmpresaItem {
 }
 
 interface SocioItem {
-  empresa_origem?: string; // 🔥 Rastreio de onde veio o sócio
   nome: string;
   perc: number;
   funcao: string;
@@ -57,7 +57,6 @@ interface FaturamentoMes {
 }
 
 interface EndividamentoItem {
-  empresa_origem?: string; // 🔥 Rastreio de quem é a dívida no grupo
   instituicao: string;
   modalidade: string;
   saldo: number;
@@ -88,9 +87,8 @@ interface ReferenciaItem {
 }
 
 interface RestritivoItem {
-  empresa_origem?: string; // 🔥 Rastreio de qual CNPJ tomou o protesto
-  tipo_restritivo?: string;
-  restritivo?: string;
+  tipo_restritivo?: string; // Novo padrão
+  restritivo?: string; // Padrão antigo de fallback
   quantidade_somada?: number;
   qtd?: number;
   valor_somado?: number;
@@ -99,12 +97,19 @@ interface RestritivoItem {
   data?: string;
   credores_resumo?: string;
   observacao?: string;
+  empresa_socio?: string;
 }
 
+// 🔥 NOVAS INTERFACES DE GRUPO ECONÔMICO E NOTÍCIAS
 interface EmpresaSocietario {
   papel_no_grupo?: string;
   razao_social: string;
   cnpj: string;
+  fundacao?: string;
+  capital_social?: number;
+  localizacao?: string;
+  ramo?: string;
+  regra_assinatura?: string;
   socios: SocioItem[];
 }
 
@@ -128,6 +133,7 @@ interface EmpresaSerasa {
   restritivos: RestritivoItem[];
 }
 
+// 🔥 INTERFACE DO JSON DE MÍDIA
 interface NoticiasMercado {
   risco_midia_nivel?: "baixo" | "medio" | "alto";
   alertas_graves?: string[];
@@ -262,19 +268,40 @@ const DADOS_MODELO: AnaliseData = {
 // COMPONENTES AUXILIARES
 // =========================================================================
 function MathInput({ value, onChange, className }: { value: any, onChange: (v: string) => void, className: string }) {
-  const [localVal, setLocalVal] = useState(value || "");
-  useEffect(() => { setLocalVal(value || ""); }, [value]);
+  // 🔥 BLINDAGEM: Garante que o valor renderizado já vem sem dízimas absurdas (ex: 790526.8400000001 -> 790526.84)
+  const formatValue = (v: any) => {
+    if (v === undefined || v === null || v === "") return "";
+    const num = Number(v);
+    return !isNaN(num) ? (Math.round(num * 100) / 100).toString() : String(v);
+  };
+
+  const [localVal, setLocalVal] = useState(formatValue(value));
+  
+  useEffect(() => { setLocalVal(formatValue(value)); }, [value]);
 
   const handleBlur = () => {
     try {
-      const valStr = String(localVal).replace(/\s/g, '').replace(',', '.');
+      const valStr = String(localVal).trim().replace(/\s/g, '').replace(',', '.');
+      if (valStr === '') {
+        onChange('');
+        setLocalVal('');
+        return;
+      }
       if (/[\+\-\*\/]/.test(valStr)) {
         const sanitized = valStr.replace(/[^\d\.\+\-\*\/\(\)]/g, '');
         const result = new Function(`'use strict'; return (${sanitized})`)();
-        onChange(result.toString());
-        setLocalVal(result.toString());
+        const finalVal = (Math.round(Number(result) * 100) / 100).toString(); // Arredonda pós-cálculo
+        onChange(finalVal);
+        setLocalVal(finalVal);
       } else {
-        onChange(localVal);
+        const num = Number(valStr);
+        if (!isNaN(num)) {
+          const finalVal = (Math.round(num * 100) / 100).toString(); // Arredonda a digitação solta
+          onChange(finalVal);
+          setLocalVal(finalVal);
+        } else {
+          onChange(localVal);
+        }
       }
     } catch {
       onChange(localVal);
@@ -322,6 +349,7 @@ function MesaAnaliseConteudo() {
   const [modalDocsAberto, setModalDocsAberto] = useState(false);
   const [novosArquivos, setNovosArquivos] = useState<File[]>([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
+
   const [isKappiModalOpen, setIsKappiModalOpen] = useState(false);
 
   useEffect(() => {
@@ -378,14 +406,15 @@ function MesaAnaliseConteudo() {
         
         // 🔥 MAGIA DE CONSOLIDAÇÃO AQUI: Forçamos a UI a ter apenas 1 bloco mestre
         
-        // 1. FATURAMENTO (Soma TUDO numa matriz única)
-        const fatGroup = { "2024": {}, "2025": {}, "2026": {} };
+        // 1. FATURAMENTO (Soma TUDO numa matriz única COM BLINDAGEM DE PRECISÃO)
+        const fatGroup: Record<string, Record<string, number>> = { "2024": {}, "2025": {}, "2026": {} };
         const rawFat = dc.empresas_faturamento?.length ? dc.empresas_faturamento : (dc.dados_faturamento ? [{ faturamento: dc.dados_faturamento }] : []);
         rawFat.forEach((emp: any) => {
             Object.entries(emp.faturamento || {}).forEach(([ano, meses]) => {
                 if (!fatGroup[ano]) fatGroup[ano] = {};
                 Object.entries(meses as any).forEach(([mes, val]) => {
-                    fatGroup[ano][mes] = (Number(fatGroup[ano][mes]) || 0) + Number(val);
+                    const soma = (Number(fatGroup[ano][mes]) || 0) + (Number(val) || 0);
+                    fatGroup[ano][mes] = Math.round(soma * 100) / 100; // Mata dízimas de floating point!
                 });
             });
         });
@@ -486,6 +515,7 @@ function MesaAnaliseConteudo() {
       setProcessandoDecisao(true);
       const { error } = await supabase.from("analises").update({ comercial: novoComercial.trim() }).eq("id", analise.id);
       if (error) throw error;
+      
       setAnalise({ ...analise, comercial: novoComercial.trim() });
       alert("✅ Comercial vinculado com sucesso à análise!");
     } catch (err: any) {
@@ -497,50 +527,90 @@ function MesaAnaliseConteudo() {
 
   const processarNovosDocumentos = async () => {
     if (!idSelecionado || novosArquivos.length === 0) return;
+
     try {
       setUploadingDocs(true);
+      
       const urlsNovosDocs: string[] = [];
       const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
       for (let i = 0; i < novosArquivos.length; i++) {
         const file = novosArquivos[i];
         const pathDinamicoR2 = `analises/${idSelecionado}/adicionais/${Date.now()}`;
+
         const resAuth = await fetch("/api/upload", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: file.name, fileType: file.type || "application/octet-stream", analiseId: pathDinamicoR2 }),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            analiseId: pathDinamicoR2
+          }),
         });
+
         const dataAuth = await resAuth.json().catch(() => ({}));
-        if (!resAuth.ok || dataAuth.error) throw new Error(dataAuth.error || `Erro ao autorizar arquivo ${file.name}`);
-        
+
+        if (!resAuth.ok || dataAuth.error) {
+          throw new Error(dataAuth.error || `Erro ao autorizar arquivo ${file.name}`);
+        }
+
         const { url, path } = dataAuth;
-        const uploadRes = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
-        if (!uploadRes.ok) throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
-        
+
+        const uploadRes = await fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Cloudflare rejeitou o arquivo ${file.name} (Erro ${uploadRes.status}).`);
+        }
+
         const pathCodificado = path.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
         urlsNovosDocs.push(`${r2BaseUrl}/${pathCodificado}`);
       }
       
+      if (urlsNovosDocs.length === 0) {
+        throw new Error("Nenhuma URL foi gerada no upload.");
+      }
+
       const { data: analiseDB } = await supabase.from("analises").select("dados_documentos").eq("id", idSelecionado).single();
-      const docsAtualizados = [...(analiseDB?.dados_documentos || []), ...urlsNovosDocs];
+      const docsAtuais = analiseDB?.dados_documentos || [];
+      const docsAtualizados = [...docsAtuais, ...urlsNovosDocs];
+
       await supabase.from("analises").update({ dados_documentos: docsAtualizados }).eq("id", idSelecionado);
 
       const resIA = await fetch("/api/motor-ia", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analise_id: idSelecionado, urls_documentos: urlsNovosDocs, modo_atualizacao: true })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analise_id: idSelecionado,
+          urls_documentos: urlsNovosDocs,
+          modo_atualizacao: true
+        })
       });
+
       if (!resIA.ok) throw new Error("Falha ao acionar o Motor V8 no Render");
 
       setAnalise(prev => ({ ...prev, status: "em_processamento_ia" }));
       await supabase.from("analises").update({ status: "em_processamento_ia" }).eq("id", idSelecionado);
+
       alert("🤖 Documentos enviados com sucesso! A IA está processando e os dados serão mesclados em breve.");
-      setModalDocsAberto(false); setNovosArquivos([]);
-    } catch (err: any) { alert("❌ Erro: " + err.message); } finally { setUploadingDocs(false); }
+      setModalDocsAberto(false);
+      setNovosArquivos([]);
+      
+    } catch (err: any) {
+      alert("❌ Erro: " + err.message);
+    } finally {
+      setUploadingDocs(false);
+    }
   };
 
   const encaminharParaComite = async () => {
     if (!idSelecionado || !analise.id) return;
     if (!analise.recomendacao_analista || !analise.parecer_analista.trim()) {
-      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê."); return;
+      alert("⚠️ É obrigatório preencher o Parecer Técnico e escolher uma Recomendação Final (na aba Parecer) antes de enviar ao comitê.");
+      return;
     }
     const confirmacao = window.confirm(`Encaminhar para o Comitê de Crédito com a sugestão de: [${analise.recomendacao_analista.toUpperCase()}]?`);
     if (!confirmacao) return;
@@ -548,12 +618,38 @@ function MesaAnaliseConteudo() {
     try {
       setProcessandoDecisao(true);
       await persistirNoBanco(false); 
+      
+      try {
+        const { data: analiseDB } = await supabase.from("analises").select("dados_ia_brutos").eq("id", analise.id).single();
+
+        if (analiseDB?.dados_ia_brutos) {
+            const iaOriginal = analiseDB.dados_ia_brutos;
+            if (JSON.stringify(iaOriginal.empresas_endividamento) !== JSON.stringify(analise.empresas_endividamento)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "endividamento", erro_ia: iaOriginal.empresas_endividamento, correcao_humana: analise.empresas_endividamento });
+            }
+            if (JSON.stringify(iaOriginal.empresas_faturamento) !== JSON.stringify(analise.empresas_faturamento)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "faturamento", erro_ia: iaOriginal.empresas_faturamento, correcao_humana: analise.empresas_faturamento });
+            }
+            if (JSON.stringify(iaOriginal.empresas_serasa) !== JSON.stringify(analise.empresas_serasa)) {
+                await supabase.from("memoria_credito").insert({ analise_id: analise.id, cnpj: analise.cnpj, categoria: "serasa", erro_ia: iaOriginal.empresas_serasa, correcao_humana: analise.empresas_serasa });
+            }
+        }
+      } catch (memError) {
+        console.error("Erro na rotina de memória da IA (não impede o envio):", memError);
+      }
+      
       const { error } = await supabase.from("analises").update({ status: "aberta" }).eq("id", analise.id);
       if (error) throw error;
       
-      alert(`🚀 Análise finalizada com sucesso!`);
-      setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
-    } catch (err: any) { alert("Erro ao processar: " + err.message); } finally { setProcessandoDecisao(false); }
+      alert(`🚀 Análise finalizada com sucesso! Se houve correções, a IA foi notificada para aprender com o erro.`);
+      setIdSelecionado(null); 
+      setAnalise(DADOS_MODELO); 
+      await buscarFilaSupabase(true);
+    } catch (err: any) { 
+      alert("Erro ao processar: " + err.message); 
+    } finally { 
+      setProcessandoDecisao(false); 
+    }
   };
 
   const devolverParaComercialPendente = async () => {
@@ -568,7 +664,11 @@ function MesaAnaliseConteudo() {
       if (error) throw error;
       alert("📥 Empresa devolvida para a tela do Comercial!");
       setIdSelecionado(null); setAnalise(DADOS_MODELO); await buscarFilaSupabase(true);
-    } catch (err: any) { alert("❌ Falha na devolução."); } finally { setProcessandoDecisao(false); }
+    } catch (err: any) { 
+      alert("❌ Falha na devolução."); 
+    } finally { 
+      setProcessandoDecisao(false); 
+    }
   };
 
   const updateArray = (campo: keyof AnaliseData, index: number, subCampo: string, valor: any) => {
@@ -607,15 +707,17 @@ function MesaAnaliseConteudo() {
   };
 
   // =========================================================================
-  // FÓRMULAS E MATEMÁTICA DA VISÃO CONSOLIDADA
+  // FÓRMULAS E MATEMÁTICA CONSOLIDADA (COM BLINDAGEM DE PRECISÃO IEEE 754)
   // =========================================================================
   const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   
+  // 1. ACHATA O FATURAMENTO E ARREDONDA
   const faturamentoConsolidado = analise.empresas_faturamento.reduce((acc, emp) => {
     Object.entries(emp.faturamento || {}).forEach(([ano, m]) => {
       if (!acc[ano]) acc[ano] = {};
       Object.entries(m).forEach(([mes, valor]) => {
-        acc[ano][mes] = (Number(acc[ano][mes]) || 0) + Number(valor);
+        const soma = (Number(acc[ano][mes]) || 0) + Number(valor);
+        acc[ano][mes] = Math.round(soma * 100) / 100;
       });
     });
     return acc;
@@ -645,6 +747,13 @@ function MesaAnaliseConteudo() {
   const mediaYTD24 = calcMediaYTD("2024");
   
   const calcTotAno = (ano: string) => meses.reduce((acc, m) => acc + Number(faturamentoConsolidado[ano]?.[m] || 0), 0);
+  const mesesPreenchidosGeral = (ano: string) => meses.filter(m => Number(faturamentoConsolidado[ano]?.[m] || 0) > 0).length;
+  
+  const calcMediaGeralAno = (ano: string) => { 
+      const pre = mesesPreenchidosGeral(ano); 
+      if (pre === 0) return 0;
+      return calcTotAno(ano) / (ano === "2026" ? pre : 12); 
+  }; 
   
   const calcDelta = (m: string, aAt: string, aAnt: string) => { const at = Number(faturamentoConsolidado[aAt]?.[m] || 0); const ant = Number(faturamentoConsolidado[aAnt]?.[m] || 0); return !ant || ant === 0 ? 0 : ((at - ant) / ant) * 100; };
 
@@ -657,31 +766,43 @@ function MesaAnaliseConteudo() {
   const varTot26_25 = totAno25 > 0 ? ((totAno26 - totAno25) / totAno25) * 100 : 0;
   const varTot25_24 = totAno24 > 0 ? ((totAno25 - totAno24) / totAno24) * 100 : 0;
 
+  const medGeral26 = calcMediaGeralAno("2026");
+  const medGeral25 = calcMediaGeralAno("2025");
+  const medGeral24 = calcMediaGeralAno("2024");
+  const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
+  const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
+
   const faturamentoMedioReferencia = has26Data ? mediaYTD26 : (mediaYTD25 > 0 ? mediaYTD25 : mediaYTD24);
 
   const prazoDiasDpls = parseInt(String(analise.dados_potencial.prazo_medio_dpls).replace(/\D/g, "")) || 0;
   const prazoDiasComissaria = parseInt(String(analise.dados_potencial.prazo_medio_comissaria).replace(/\D/g, "")) || 0;
+  
   const percAPrazo = Number(analise.dados_potencial.forma_recebimento_prazo || 0) / 100;
   const percDpls = Number(analise.dados_potencial.composicao_dpls || 0) / 100;
   const percComissaria = Number(analise.dados_potencial.composicao_comissaria || 0) / 100;
-  
+
   const potDpls = (faturamentoMedioReferencia / 30) * prazoDiasDpls * percDpls * percAPrazo;
   const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
-  const potencialRealCalculado = potDpls + potComissaria;
+  const potencialRealCalculado = Math.round((potDpls + potComissaria) * 100) / 100;
 
   const totLimites = analise.propostas.reduce((acc, p) => acc + Number(p.limite), 0);
   const totPatrimonio = analise.patrimonios.reduce((acc, p) => acc + Number(p.valor), 0);
 
-  const totEndivGeral = endividamentoFlat.reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const endivCurtoPrazo = endividamentoFlat.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const endivLongoPrazo = endividamentoFlat.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const totalBancos = endividamentoFlat.filter(d => d.tipo === "Banco").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
-  const totalFundos = endividamentoFlat.filter(d => d.tipo === "Fundo").reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  // Arredondando dívidas
+  const totEndivGeral = Math.round(endividamentoFlat.reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
+  const endivCurtoPrazo = Math.round(endividamentoFlat.filter(d => d.prazo === "Curto Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
+  const endivLongoPrazo = Math.round(endividamentoFlat.filter(d => d.prazo === "Longo Prazo").reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
+  
+  const totalBancos = Math.round(endividamentoFlat.filter(d => d.tipo === "Banco").reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
+  const totalFundos = Math.round(endividamentoFlat.filter(d => d.tipo === "Fundo").reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
   
   const percBancos = totEndivGeral > 0 ? (totalBancos / totEndivGeral) * 100 : 0;
   const percFundos = totEndivGeral > 0 ? (totalFundos / totEndivGeral) * 100 : 0;
-  const totalDplsCP = endividamentoFlat.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0);
+  
+  const totalDplsCP = Math.round(endividamentoFlat.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
+
+  const totRestritivos = Math.round(restritivosFlat.reduce((acc, r) => acc + Number(r.valor_somado || r.valor || 0), 0) * 100) / 100;
 
   // =========================================================================
   // ESTILOS REFINADOS (UI/UX)
@@ -697,7 +818,7 @@ function MesaAnaliseConteudo() {
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start bg-slate-50 min-h-screen p-4 md:p-6 relative">
       
-      {/* SIDEBAR */}
+      {/* SIDEBAR REFINADA */}
       <div className="w-full xl:w-72 shrink-0 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] sticky top-6 z-20 overflow-hidden">
         <div className="flex justify-between items-center bg-slate-100/80 p-4 border-b border-slate-200">
           <span className="font-bold text-slate-800 text-xs tracking-wide">ESTEIRA DE ANÁLISES <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-1">{fila.length}</span></span>
@@ -735,16 +856,16 @@ function MesaAnaliseConteudo() {
         </div>
       </div>
 
-      {/* WORKSPACE PRINCIPAL */}
+      {/* WORKSPACE PRINCIPAL REFINADO */}
       <div className="flex-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
         {loadingAnalise ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-slate-50">
             <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-[12px] font-semibold text-slate-600 mt-4 tracking-wide">Estruturando Visão Consolidada do Grupo...</p>
+            <p className="text-[12px] font-semibold text-slate-600 mt-4 tracking-wide">Carregando dados estruturados...</p>
           </div>
         ) : (
           <>
-            {/* TOOLBAR */}
+            {/* TOOLBAR MODERNA */}
             <div className="p-4 border-b border-slate-200 bg-white flex flex-wrap justify-between items-center gap-4">
               <div className="flex items-center gap-3">
                 {analise.status === "em_processamento_ia" ? (
@@ -753,24 +874,29 @@ function MesaAnaliseConteudo() {
                   <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 px-2 py-1 text-[10px] font-bold rounded shadow-sm">✅ AUTO-SAVE</div>
                 )}
                 <div className="flex flex-col">
-                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-900 text-lg bg-transparent outline-none border-b-2 border-transparent focus:border-indigo-400 w-full min-w-[300px] xl:w-[450px] uppercase transition-colors" placeholder="NOME DO GRUPO / EMPRESA" />
+                  <input type="text" value={analise.razao_social} onChange={(e)=>setAnalise({...analise, razao_social: e.target.value})} className="font-bold text-slate-900 text-lg bg-transparent outline-none border-b-2 border-transparent focus:border-indigo-400 w-full min-w-[300px] xl:w-[450px] uppercase transition-colors" placeholder="NOME DA EMPRESA" />
                   <div className="flex gap-4 mt-0.5">
                     <input type="text" value={analise.cnpj} onChange={(e)=>setAnalise({...analise, cnpj: e.target.value})} className="font-mono text-xs text-slate-500 bg-transparent outline-none w-36" placeholder="00.000.000/0001-00" />
                     {analise.comercial && <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 rounded-full border border-indigo-100">🤝 Resp: {analise.comercial}</span>}
-                    {analise.is_grupo_economico && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 rounded-full border border-amber-300">🏢 GRUPO ECONÔMICO (CONSOLIDADO)</span>}
+                    {analise.is_grupo_economico && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 rounded-full border border-amber-300">🏢 GRUPO ECONÔMICO</span>}
                   </div>
                 </div>
               </div>
               
               <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={() => setModalDocsAberto(true)} disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} className={btnSecundario} title="Fazer Merge de Novos Documentos (IA)">
-                  🤖 Add Docs (Merge)
+                <button 
+                  onClick={() => setModalDocsAberto(true)} 
+                  disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} 
+                  className={btnSecundario} 
+                  title="Adicionar novos PDFs (Balanço, Endividamento) para mesclar com esta análise"
+                >
+                  🤖 Add e Ler Novos Docs
                 </button>
                 <button onClick={vincularComercial} disabled={!idSelecionado || processandoDecisao} className={btnSecundario}>
-                  👤 Vincular
+                  👤 Vincular Comercial
                 </button>
                 <button onClick={() => persistirNoBanco(true)} disabled={processandoDecisao} className={btnSecundario}>
-                  💾 Salvar
+                  💾 Salvar Manual
                 </button>
                 {idSelecionado && (
                   <>
@@ -778,9 +904,14 @@ function MesaAnaliseConteudo() {
                       ✖ Devolver Req.
                     </button>
                     <GerarAnalise analise={analise} />
-                    <button onClick={() => setIsKappiModalOpen(true)} className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5">
+                    
+                    <button 
+                       onClick={() => setIsKappiModalOpen(true)}
+                       className="bg-slate-900 hover:bg-black text-white font-semibold px-3 py-1.5 text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                    >
                        🕵️‍♂️ Auditoria Kappi
                     </button>
+                    
                     <button onClick={encaminharParaComite} disabled={processandoDecisao || analise.status === "em_processamento_ia"} className={btnPrimario}>
                       ▶ Emitir Parecer Final
                     </button>
@@ -789,7 +920,7 @@ function MesaAnaliseConteudo() {
               </div>
             </div>
 
-            {/* ABAS */}
+            {/* ABAS ESTILO PILLS */}
             <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto scrollbar-none">
               {[
                 { id: "capa", label: "📄 Capa & Proposta" },
@@ -813,9 +944,16 @@ function MesaAnaliseConteudo() {
             {/* ÁREA DA PLANILHA */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50 relative scrollbar-thin scrollbar-thumb-slate-300">
               
-              {/* ABA 1 E 2: MANTIDAS IGUAIS (Não houve solicitação de mudança) */}
+              {/* ABA 1: CAPA E PROPOSTA */}
               {abaAtiva === "capa" && (
                 <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  {analise.status === "em_processamento_ia" && (
+                    <div className="p-4 border-l-4 border-purple-500 bg-purple-50 text-purple-900 font-semibold text-xs rounded-r-md shadow-sm flex items-center gap-3">
+                      <span className="text-lg">🔮</span>
+                      <span>O Motor Python V8 está lendo e estruturando arquivos. Os dados abaixo vão atualizar dinamicamente enquanto você acompanha!</span>
+                    </div>
+                  )}
+
                   <div className="bg-white rounded-md shadow-sm border border-slate-200">
                     <div className={sectionHeaderStyle}>
                       <span>Empresas (Principal e Coobrigados Base)</span>
@@ -838,7 +976,6 @@ function MesaAnaliseConteudo() {
                     </table>
                   </div>
 
-                  {/* RESTO DA CAPA... */}
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <table className="w-full border-collapse">
                       <tbody>
@@ -912,7 +1049,8 @@ function MesaAnaliseConteudo() {
                   </div>
                 </div>
               )}
-              
+
+              {/* ABA 2: DADOS DA EMPRESA */}
               {abaAtiva === "cadastro" && (
                   <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
@@ -945,7 +1083,6 @@ function MesaAnaliseConteudo() {
                       </table>
                     </div>
 
-                    {/* 🔥 O BLOCO RESTAURADO DO ORGANOGRAMA ENTRA AQUI */}
                     <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                       <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Arquivos Vinculados, Organograma e Endereços Externos</div>
                       <table className="w-full border-collapse">
@@ -1016,7 +1153,6 @@ function MesaAnaliseConteudo() {
               {/* ABA 3: SOCIETÁRIO (UNIFICADO) */}
               {abaAtiva === "societario" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                  {/* Como a IA agora vai gerar um array de tamanho 1, isso rodará 1 vez com a tabela de sócios unificada */}
                   {analise.empresas_societario.map((empresaSoc, empIndex) => (
                     <div key={empIndex} className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden mb-6">
                       <div className={sectionHeaderStyle}>
@@ -1094,7 +1230,7 @@ function MesaAnaliseConteudo() {
                 </div>
               )}
 
-              {/* ABA 4: FATURAMENTO (UNIFICADO) */}
+              {/* ABA 4: FATURAMENTO (UNIFICADO COM FORMATAÇÃO LIMPA) */}
               {abaAtiva === "fat" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700 max-w-4xl mx-auto">
@@ -1102,7 +1238,7 @@ function MesaAnaliseConteudo() {
                       <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Grupo Consolidado)</span>
                       <span className="font-mono text-4xl font-black drop-shadow-md z-10 my-3">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       <div className="text-[10px] text-indigo-200 mt-6 space-y-1.5 z-10 bg-black/10 p-3 rounded backdrop-blur-sm w-full max-w-sm text-left">
-                          <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", {maximumFractionDigits:2})}</p>
+                          <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                           <p className="border-t border-indigo-400/30 pt-1.5"><strong>Modelo:</strong> (Fat.Base ÷ 30) × Prazo × Compos(%) × APrazo(%)</p>
                       </div>
                   </div>
@@ -1145,19 +1281,19 @@ function MesaAnaliseConteudo() {
                             })}
                             <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-[11px]">
                               <td className="p-2 border border-slate-200 text-slate-700 text-right">TOTAL ANO</td>
-                              <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR")}</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-indigo-700">{totAno26.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                               <td className={`border border-slate-200 text-center font-mono ${varTot26_25 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot26_25 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot26_25 === 0 ? "-" : `${varTot26_25.toFixed(1)}%`}</td>
-                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR")}</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno25.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                               <td className={`border border-slate-200 text-center font-mono ${varTot25_24 > 0 ? 'text-emerald-600 bg-emerald-50/30' : varTot25_24 < 0 ? 'text-rose-600 bg-rose-50/30' : 'text-slate-400 bg-slate-50/30'}`}>{varTot25_24 === 0 ? "-" : `${varTot25_24.toFixed(1)}%`}</td>
-                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR")}</td>
+                              <td className="p-2 border border-slate-200 text-right font-mono text-slate-800">{totAno24.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                             </tr>
                             <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-bold text-[11px]">
                               <td className="p-2 border border-indigo-100 text-indigo-900 text-right">{labelMascaraYTD}</td>
-                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900">{mediaYTD26.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                               <td className={`border border-indigo-100 text-center font-mono ${varYTD26_25 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD26_25 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD26_25 === 0 ? "-" : `${varYTD26_25.toFixed(1)}%`}</td>
-                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD25.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                               <td className={`border border-indigo-100 text-center font-mono ${varYTD25_24 > 0 ? 'text-emerald-700 bg-emerald-100/50' : varYTD25_24 < 0 ? 'text-rose-700 bg-rose-100/50' : 'text-indigo-600'}`}>{varYTD25_24 === 0 ? "-" : `${varYTD25_24.toFixed(1)}%`}</td>
-                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", {maximumFractionDigits:0})}</td>
+                              <td className="p-2 border border-indigo-100 text-right font-mono text-indigo-900/80">{mediaYTD24.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                             </tr>
                           </tbody>
                         </table>
@@ -1191,6 +1327,14 @@ function MesaAnaliseConteudo() {
                             <td className={`${thStyle} text-right`}>Natureza do Prazo (Comissária %)</td>
                             <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_comissaria ?? ""} onChange={(e)=>updateNested("dados_potencial", "composicao_comissaria", Number(e.target.value))} className={numStyle} /></td>
                           </tr>
+                          <tr>
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Intercompany %)</td>
+                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_intercompany ?? 0} onChange={(e)=>updateNested("dados_potencial", "composicao_intercompany", Number(e.target.value))} className={numStyle} /></td>
+                          </tr>
+                          <tr>
+                            <td className={`${thStyle} text-right`}>Natureza do Prazo (Outros %)</td>
+                            <td className={tdStyle}><input type="number" value={analise.dados_potencial.composicao_outros ?? 0} onChange={(e)=>updateNested("dados_potencial", "composicao_outros", Number(e.target.value))} className={numStyle} /></td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
@@ -1219,9 +1363,9 @@ function MesaAnaliseConteudo() {
                       </thead>
                       <tbody>
                         <tr className="bg-slate-50 font-mono text-[12px] text-center">
-                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivCurtoPrazo.toLocaleString("pt-BR")}</td>
-                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivLongoPrazo.toLocaleString("pt-BR")}</td>
-                          <td className="p-3 border border-slate-200 text-rose-700 bg-rose-50 font-bold">R$ {totEndivGeral.toLocaleString("pt-BR")}</td>
+                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivCurtoPrazo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="p-3 border border-slate-200 text-slate-700">R$ {endivLongoPrazo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="p-3 border border-slate-200 text-rose-700 bg-rose-50 font-bold">R$ {totEndivGeral.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{percDplsCP.toFixed(1)}%</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{percFundos.toFixed(1)}%</td>
                           <td className="p-3 border border-slate-200 text-slate-600">{percBancos.toFixed(1)}%</td>
@@ -1341,7 +1485,7 @@ function MesaAnaliseConteudo() {
               {/* ABA 6: RESTRITIVOS (UNIFICADO) */}
               {abaAtiva === "restritivos" && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-6xl">
-                   
+                  
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`${sectionHeaderStyle} bg-slate-800 border-slate-800`}>Quadro Resumo de Apontamentos do Grupo (Serasa / Boa Vista)</div>
                     <table className="w-full border-collapse">
@@ -1411,7 +1555,7 @@ function MesaAnaliseConteudo() {
                         placeholder="Aguardando consolidação inteligente ou digite a síntese..."
                     />
                   </div>
-                   
+                  
                   <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
                     <div className={sectionHeaderStyle}>Radar de Mídia, Reputação e Compliance</div>
                     {analise.noticias_mercado && analise.noticias_mercado.risco_midia_nivel ? (
@@ -1522,12 +1666,12 @@ function MesaAnaliseConteudo() {
               <span className="flex items-center gap-2">📄 Processar Novos Documentos (Merge IA)</span>
               <button onClick={() => { setModalDocsAberto(false); setNovosArquivos([]); }} className="text-indigo-200 hover:text-white transition-colors cursor-pointer text-xl">✕</button>
             </div>
-             
+            
             <div className="p-6 space-y-5">
               <p className="text-xs text-slate-600 leading-relaxed bg-indigo-50 border border-indigo-100 p-3 rounded">
                 Selecione os novos arquivos. A IA irá extrair os dados e <strong>mesclar</strong> com a análise atual sem apagar o que você já editou manualmente.
               </p>
-               
+              
               <div className="border-2 border-dashed border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50/70 transition-colors bg-indigo-50/30 rounded-xl p-8 text-center relative cursor-pointer">
                 <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setNovosArquivos(Array.from(e.target.files || []))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 <div className="pointer-events-none flex flex-col items-center gap-2">
