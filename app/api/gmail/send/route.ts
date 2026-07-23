@@ -6,9 +6,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { userEmail, contaAtiva, mensagemId, para, assunto, textoResposta } = await request.json();
+    // 🌟 RECEBENDO O CAMPO CC AQUI
+    const { userEmail, contaAtiva, mensagemId, para, cc, assunto, textoResposta } = await request.json();
 
-    // 1. Busca os tokens da conta ativa
     const { data: integracao, error: dbError } = await supabase
       .from("usuarios_integracoes")
       .select("*")
@@ -24,7 +24,6 @@ export async function POST(request: Request) {
     const expiraEm = integracao.gmail_token_expira_em ? new Date(integracao.gmail_token_expira_em).getTime() : 0;
     const agora = Date.now();
 
-    // 2. MECANISMO DE AUTO-REFRESH
     if (!accessToken || agora > (expiraEm - 5 * 60 * 1000)) {
       console.log(`🔄 [Token Expirado] Renovando acesso para a conta: ${contaAtiva}`);
       
@@ -35,7 +34,7 @@ export async function POST(request: Request) {
       const SITE_URL = "https://intraned.nedcapital.com.br";
       const CLIENT_ID = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
       const secretParteA = "GOCSPX-";
-      const secretParteB = "_oqRbHrrLU0Kev2yG5lRFU64l0ze"; // 🚨 ASSEGURE SUA CHAVE AQUI
+      const secretParteB = "_oqRbHrrLU0Kev2yG5lRFU64l0ze"; 
       const CLIENT_SECRET = `${secretParteA}${secretParteB}`;
 
       const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -69,27 +68,21 @@ export async function POST(request: Request) {
         .eq("gmail_conta_conectada", contaAtiva || userEmail);
     }
 
-    // 3. Monta o e-mail bruto (RFC 2822)
     const emailRemetenteReal = integracao.gmail_conta_conectada || userEmail;
-
-    // Ajusta o assunto para garantir que tenha o "Re:" SÓ SE for resposta (tiver mensagemId)
-    const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) 
-      ? `Re: ${assunto}` 
-      : assunto;
+    const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) ? `Re: ${assunto}` : assunto;
 
     const deString = `From: ${emailRemetenteReal}\r\n`;
     const paraString = `To: ${para}\r\n`;
+    // 🌟 INJETANDO O CC AQUI (se existir)
+    const ccString = cc ? `Cc: ${cc}\r\n` : "";
     const assuntoString = `Subject: ${assuntoFormatado}\r\n`;
     
-    // Vincula a mensagem pelos headers RFC padrão SÓ SE houver mensagemId
-    const threadString = mensagemId 
-      ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n`
-      : "";
-      
+    const threadString = mensagemId ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n` : "";
     const tipoString = `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
     const corpoString = `${textoResposta}\r\n`;
 
-    const emailBruto = deString + paraString + assuntoString + threadString + tipoString + corpoString;
+    // 🌟 CONCATENANDO TUDO
+    const emailBruto = deString + paraString + ccString + assuntoString + threadString + tipoString + corpoString;
     
     const base64Safe = btoa(unescape(encodeURIComponent(emailBruto)))
       .replace(/\+/g, "-")

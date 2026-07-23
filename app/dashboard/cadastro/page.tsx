@@ -265,6 +265,7 @@ export default function CadastroPage() {
           body: JSON.stringify({
             userEmail: usuarioAtual.email,
             para: emailDestino,
+            cc: templateAtivo.cc || "", // 🌟 ENVIA O CC DO TEMPLATE AQUI!
             assunto: assuntoFinal,
             textoResposta: textoFinal
           })
