@@ -5,7 +5,6 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
-import JSZip from "jszip";
 
 // ============================================================================
 // FUNÇÕES AUXILIARES
@@ -78,11 +77,14 @@ export default function ComitePage() {
   const [novaMsg, setNovaMsg] = useState("");
   const [diretoresBanco, setDiretoresBanco] = useState<string[]>([]);
 
-  // Perfis de voto
+  // 🎛️ Perfis de voto e Decisão
   const [opcaoVoto, setOpcaoVoto] = useState("");
   const [justificativaVoto, setJustificativaVoto] = useState("");
   const [votoComoDecisao, setVotoComoDecisao] = useState(false); 
   const [enviandoVoto, setEnviandoVoto] = useState(false);
+
+  // 🔥 NOVO ESTADO: MODALIDADES APROVADAS NO VOTO
+  const [modalidadesAprovadas, setModalidadesAprovadas] = useState<{ modalidade: string; limite: string; taxa: string; prazo: string }[]>([]);
   
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
 
@@ -90,7 +92,7 @@ export default function ComitePage() {
   const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
-  // 🔥 NOVO ESTADO: Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
+  // Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
   const [abaEsquerdaFoco, setAbaEsquerdaFoco] = useState<"dossie" | "kappi">("dossie");
 
   const carregarDiretores = async () => {
@@ -261,6 +263,127 @@ export default function ComitePage() {
     } catch (err) { console.error("Erro na API de e-mail Resend:", err); }
   };
 
+  // 🔥 FUNÇÕES DE CONTROLE DE MODALIDADES NO VOTO
+  const addModalidade = () => {
+    setModalidadesAprovadas([...modalidadesAprovadas, { modalidade: "Desconto", limite: "", taxa: "", prazo: "" }]);
+  };
+
+  const removeModalidade = (index: number) => {
+    const novas = [...modalidadesAprovadas];
+    novas.splice(index, 1);
+    setModalidadesAprovadas(novas);
+  };
+
+  const handleModalidadeChange = (index: number, campo: string, valorRaw: string) => {
+    const novas = [...modalidadesAprovadas];
+    if (campo === 'limite') {
+      const apenasNumeros = valorRaw.replace(/\D/g, "");
+      if (!apenasNumeros) {
+        novas[index][campo] = "";
+      } else {
+        const valorNumerico = parseFloat(apenasNumeros) / 100;
+        novas[index][campo] = valorNumerico.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      }
+    } else {
+      novas[index][campo as keyof typeof novas[0]] = valorRaw;
+    }
+    setModalidadesAprovadas(novas);
+  };
+
+  // Calcula o limite total e a taxa média ou indicativo para jogar nas colunas raizes
+  const processarModalidadesParaBanco = () => {
+    let limiteGlobalStr = "R$ 0,00";
+    let taxaIndicativa = "";
+
+    if (modalidadesAprovadas.length > 0) {
+      const somaLimites = modalidadesAprovadas.reduce((acc, mod) => acc + (parseFloat(mod.limite.replace(/\D/g, "")) / 100 || 0), 0);
+      limiteGlobalStr = somaLimites.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      taxaIndicativa = modalidadesAprovadas.length > 1 ? "Múltiplas" : modalidadesAprovadas[0].taxa;
+    }
+    
+    return { limite: limiteGlobalStr, taxa: taxaIndicativa, modalidades_aprovadas: modalidadesAprovadas };
+  };
+
+  const processarVotoWeb = async (empresaItem: any) => {
+    if (!isMaster && !isDiretor) {
+      alert("🚫 ACESSO NEGADO: Registro restrito a Diretores.");
+      return;
+    }
+    if (!opcaoVoto || !justificativaVoto) {
+      alert("Por favor, selecione o seu voto e preencha o parecer/justificativa.");
+      return;
+    }
+    
+    // Se for aprovado e o cara marcou pra decisão final, ele TEM que preencher pelo menos 1 modalidade
+    if (opcaoVoto === "Aprovado" && (autorDoVoto === "Decisão" || (isMaster && votoComoDecisao))) {
+       if (modalidadesAprovadas.length === 0) {
+          alert("⚠️ Para cravar a APROVAÇÃO do comitê, é obrigatório inserir os Limites e Modalidades Aprovadas.");
+          return;
+       }
+    }
+
+    try {
+      setEnviandoVoto(true);
+      const e = empresaItem.empresa_nome;
+      const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
+
+      await supabase.from("votos").upsert({ 
+        empresa_nome: e, 
+        membro_nome: autorDoVoto, 
+        voto: opcaoVoto, 
+        justificativa: justificativaVoto, 
+        email_enviado: autorDoVoto === "Decisão"
+      }, { onConflict: 'membro_nome,empresa_nome' });
+      
+      const { data: listaVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
+      const totalSim = listaVotos?.filter(v => v.voto === "Aprovado").length || 0;
+      const totalNao = listaVotos?.filter(v => v.voto === "Reprovado").length || 0;
+      
+      const dcAtual = empresaItem.dados_consolidados || {};
+      dcAtual.parecer_comite = `Placar do Comitê: ${totalSim} SIM / ${totalNao} NÃO. Detalhamento de Pareceres: ` + 
+        listaVotos?.map(v => `[${v.membro_nome}: ${v.voto} - Parecer: ${v.justificativa}]`).join(" | ");
+
+      let statusDestino = empresaItem.status;
+      if (autorDoVoto === "Decisão") {
+        statusDestino = opcaoVoto.toLowerCase();
+      }
+
+      const modProcessadas = processarModalidadesParaBanco();
+
+      const { error } = await supabase
+        .from("analises")
+        .update({ 
+          dados_consolidados: dcAtual,
+          status: statusDestino,
+          ...(autorDoVoto === "Decisão" && opcaoVoto === "Aprovado" ? modProcessadas : {}) // Só injeta limite se for o voto decisivo
+        })
+        .eq("id", empresaItem.id);
+
+      if (error) throw error;
+      
+      if (autorDoVoto === "Decisão") {
+        const emailsAlvo = await obter_emails_notificacao(e);
+        const htmlAta = `<html><body><h2>Ata de Comitê Finalizada: ${e}</h2><p>Status Final: <b>${opcaoVoto}</b></p></body></html>`;
+        await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
+        if (modoFocoComite) desativarModoLupaExecutiva();
+      }
+      
+      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata salva!" : "🗳️ Seu voto foi computado e injetado no dossiê!");
+      
+      // Reseta os estados
+      setJustificativaVoto(""); 
+      setVotoComoDecisao(false);
+      setModalidadesAprovadas([]);
+      
+      await carregarVotosIniciais(e);
+      await carregarComite();
+    } catch (err: any) { 
+      alert(`❌ Erro ao computar voto: ${err.message}`);
+    } finally { 
+      setEnviandoVoto(false); 
+    }
+  };
+
   const forcarDecisaoMaster = async (empresaItem: any, decisaoFinal: "Aprovado" | "Reprovado") => {
     const conf = confirm(`⚠️ DECISÃO EXECUTIVA: Deseja mover a empresa ${empresaItem.empresa_nome} para ${decisaoFinal}?`);
     if (!conf) return;
@@ -293,70 +416,6 @@ export default function ComitePage() {
       alert(`❌ Erro no painel Master: ${err.message}`);
     } finally { 
       setCarregando(false);
-    }
-  };
-
-  const processarVotoWeb = async (empresaItem: any) => {
-    if (!isMaster && !isDiretor) {
-      alert("🚫 ACESSO NEGADO: Registro restrito a Diretores.");
-      return;
-    }
-    if (!opcaoVoto || !justificativaVoto) {
-      alert("Por favor, selecione o seu voto e preencha o parecer/justificativa.");
-      return;
-    }
-    try {
-      setEnviandoVoto(true);
-      const e = empresaItem.empresa_nome;
-      const autorDoVoto = (isMaster && votoComoDecisao) ? "Decisão" : nomeUsuarioLogado;
-
-      await supabase.from("votos").upsert({ 
-        empresa_nome: e, 
-        membro_nome: autorDoVoto, 
-        voto: opcaoVoto, 
-        justificativa: justificativaVoto, 
-        email_enviado: autorDoVoto === "Decisão"
-      }, { onConflict: 'membro_nome,empresa_nome' });
-      
-      const { data: listaVotos } = await supabase.from("votos").select("*").eq("empresa_nome", e);
-      const totalSim = listaVotos?.filter(v => v.voto === "Aprovado").length || 0;
-      const totalNao = listaVotos?.filter(v => v.voto === "Reprovado").length || 0;
-      
-      const dcAtual = empresaItem.dados_consolidados || {};
-      dcAtual.parecer_comite = `Placar do Comitê: ${totalSim} SIM / ${totalNao} NÃO. Detalhamento de Pareceres: ` + 
-        listaVotos?.map(v => `[${v.membro_nome}: ${v.voto} - Parecer: ${v.justificativa}]`).join(" | ");
-
-      let statusDestino = empresaItem.status;
-      if (autorDoVoto === "Decisão") {
-        statusDestino = opcaoVoto.toLowerCase();
-      }
-
-      const { error } = await supabase
-        .from("analises")
-        .update({ 
-          dados_consolidados: dcAtual,
-          status: statusDestino
-        })
-        .eq("id", empresaItem.id);
-
-      if (error) throw error;
-      
-      if (autorDoVoto === "Decisão") {
-        const emailsAlvo = await obter_emails_notificacao(e);
-        const htmlAta = `<html><body><h2>Ata de Comitê Finalizada: ${e}</h2><p>Status Final: <b>${opcaoVoto}</b></p></body></html>`;
-        await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
-        if (modoFocoComite) desativarModoLupaExecutiva();
-      }
-      
-      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata salva!" : "🗳️ Seu voto foi computado e injetado no dossiê!");
-      setJustificativaVoto(""); 
-      setVotoComoDecisao(false);
-      await carregarVotosIniciais(e);
-      await carregarComite();
-    } catch (err: any) { 
-      alert(`❌ Erro ao computar voto: ${err.message}`);
-    } finally { 
-      setEnviandoVoto(false); 
     }
   };
 
@@ -412,7 +471,7 @@ export default function ComitePage() {
     try {
       setEmpresaFocoAtivo(empresa);
       setIdEmpresaExpandida(empresa.id); 
-      setAbaEsquerdaFoco("dossie"); // Reset pra aba Dossie principal
+      setAbaEsquerdaFoco("dossie"); 
       setModoFocoComite(true);
       
       const htmlMontado = await gerarHtmlDossie(empresa);
@@ -437,6 +496,9 @@ export default function ComitePage() {
     setIdEmpresaExpandida(null); 
     setHtmlDossieRenderizado("");
     setChatMsgs([]);
+    setOpcaoVoto("");
+    setJustificativaVoto("");
+    setModalidadesAprovadas([]);
   };
 
   const enviarMensagemChat = async (empresaNome: string) => {
@@ -482,7 +544,7 @@ export default function ComitePage() {
         <div className="flex-1 flex overflow-hidden w-full bg-slate-50/50">
           
           {/* LADO ESQUERDO: DOSSIÊ E KAPPI */}
-          <div className="w-[70%] h-full p-5 pr-2.5 flex flex-col space-y-3">
+          <div className="w-[65%] h-full p-5 pr-2.5 flex flex-col space-y-3">
             
             {/* 🔥 CONTROLE DE ABAS (ESQUERDA) */}
             <div className="flex gap-2">
@@ -516,7 +578,6 @@ export default function ComitePage() {
                 )
               ) : (
                 <div className="flex-1 overflow-y-auto p-2 bg-slate-50 custom-scrollbar">
-                   {/* Injeção do Gerador Kappi Automático com os documentos passados */}
                    <GerarKappiViewer urlsDocumentos={empresaFocoAtivo?.dados_documentos || []} />
                 </div>
               )}
@@ -524,19 +585,19 @@ export default function ComitePage() {
           </div>
 
           {/* LADO DIREITO: CHAT E VOTOS (FIXO) */}
-          <div className="w-[30%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4 overflow-hidden">
+          <div className="w-[35%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4 overflow-hidden">
             
-            <div className="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200 p-5 rounded-2xl shadow-sm relative">
+            <div className="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200 p-4 rounded-2xl shadow-sm relative">
               
               <div className="flex-1 flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 
-                {/* PAINEL DE VOTAÇÃO */}
-                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4 shrink-0 text-left">
+                {/* PAINEL DE VOTAÇÃO (COM MODALIDADES) */}
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm space-y-4 shrink-0 text-left overflow-y-auto custom-scrollbar max-h-[50%]">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
                     <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                      🗳️ Painel de Voto
+                      🗳️ Painel de Voto e Limites
                     </span>
-                    <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                    <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
                       👤 {votoComoDecisao ? "Decisão Final" : nomeUsuarioLogado}
                     </span>
                   </div>
@@ -547,20 +608,50 @@ export default function ComitePage() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-3">
-                      <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-3 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
+                      <select value={opcaoVoto} onChange={(e) => setOpcaoVoto(e.target.value)} className="w-full p-2.5 bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm">
                         <option value="">Selecione o seu Veredito...</option>
                         <option value="Aprovado">🟢 Aprovado</option>
                         <option value="Reprovado">🔴 Reprovado</option>
                       </select>
 
                       {isMaster && (
-                        <label className="flex items-center gap-2 p-3 text-slate-700 font-bold text-xs bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
-                          <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
+                        <label className="flex items-center gap-2 p-2.5 text-slate-700 font-bold text-[10px] bg-amber-50 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors select-none shadow-sm">
+                          <input type="checkbox" checked={votoComoDecisao} onChange={(e) => setVotoComoDecisao(e.target.checked)} className="w-3.5 h-3.5 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer" />
                           Assegurar como <span className="text-amber-700 uppercase tracking-wide">Decisão Final (Master)</span>
                         </label>
                       )}
 
-                      <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
+                      {/* 🔥 INJEÇÃO DO MÓDULO DE MODALIDADES QUANDO APROVA */}
+                      {opcaoVoto === "Aprovado" && (
+                        <div className="bg-emerald-50/50 border border-emerald-200 p-3 rounded-xl mt-1 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider">💰 Limites Aprovados</span>
+                            <button onClick={addModalidade} className="text-[9px] bg-white border border-emerald-300 text-emerald-700 font-bold px-2 py-1 rounded hover:bg-emerald-100 transition-colors shadow-sm">+ Add Linha</button>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            {modalidadesAprovadas.map((mod, idx) => (
+                              <div key={idx} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-emerald-100 shadow-sm">
+                                <select value={mod.modalidade} onChange={(e) => handleModalidadeChange(idx, 'modalidade', e.target.value)} className="w-24 p-1.5 border border-slate-200 rounded text-[10px] outline-none font-bold text-slate-600">
+                                  <option value="Desconto">Desc.</option>
+                                  <option value="Comissária">Comiss.</option>
+                                  <option value="Intercompany">Inter.</option>
+                                  <option value="Fomento">Fom. M.P.</option>
+                                  <option value="Outros">Outros</option>
+                                </select>
+                                <input type="text" value={mod.limite} onChange={(e) => handleModalidadeChange(idx, 'limite', e.target.value)} placeholder="Limite (R$)" className="flex-1 p-1.5 border border-slate-200 rounded text-[10px] outline-none font-mono font-bold text-emerald-700" />
+                                <input type="text" value={mod.taxa} onChange={(e) => handleModalidadeChange(idx, 'taxa', e.target.value)} placeholder="Taxa%" className="w-14 p-1.5 border border-slate-200 rounded text-[10px] outline-none text-center font-bold" />
+                                <button onClick={() => removeModalidade(idx)} className="text-rose-500 hover:text-rose-700 font-black px-1.5 text-xs">X</button>
+                              </div>
+                            ))}
+                            {modalidadesAprovadas.length === 0 && (
+                              <div className="text-[9px] text-emerald-600/70 text-center font-bold italic py-1">⚠️ Defina os limites caso seja a decisão final.</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <textarea value={justificativaVoto} onChange={(e) => setJustificativaVoto(e.target.value)} placeholder="Escreva sua justificativa técnica, garantias exigidas ou ressalvas..." className="w-full p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 h-20 resize-none transition-all shadow-inner" />
                       
                       <button onClick={() => processarVotoWeb(empresaFocoAtivo)} disabled={enviandoVoto} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/30 uppercase tracking-wide">
                         {enviandoVoto ? "Computando..." : "Confirmar Voto"}
@@ -570,19 +661,19 @@ export default function ComitePage() {
                 </div>
 
                 {/* HISTÓRICO DE PARECERES */}
-                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex flex-col overflow-hidden text-left h-[25%] shrink-0">
-                  <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">📋 Pareceres Registrados</span>
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col overflow-hidden text-left h-[25%] shrink-0">
+                  <span className="text-[11px] font-black text-slate-700 uppercase block tracking-wider mb-2 border-b border-slate-100 pb-2">📋 Pareceres Registrados</span>
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                     {listaDeVotos.length === 0 ? (
-                      <p className="text-slate-400 italic text-xs py-4 text-center font-medium">A mesa ainda não possui votos computados.</p>
+                      <p className="text-slate-400 italic text-[10px] py-2 text-center font-medium">A mesa ainda não possui votos computados.</p>
                     ) : (
                       listaDeVotos.map((v: any, idx: number) => (
-                        <div key={idx} className="p-3.5 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-2 text-xs shadow-sm transition-colors hover:border-slate-200">
+                        <div key={idx} className="p-3 border border-slate-100 rounded-xl bg-slate-50 flex flex-col gap-1.5 text-[11px] shadow-sm transition-colors hover:border-slate-200">
                           <div className="flex justify-between items-center font-bold">
-                            <span className="text-slate-800">{v.membro_nome}</span>
-                            <span className={`px-2.5 py-1 rounded-md text-[9px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
+                            <span className="text-slate-800 truncate pr-2">{v.membro_nome}</span>
+                            <span className={`px-2 py-0.5 rounded-md text-[8px] uppercase font-black tracking-wider ${v.voto === "Aprovado" ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}>{v.voto}</span>
                           </div>
-                          <span className="text-slate-600 font-medium leading-relaxed italic">"{v.justificativa}"</span>
+                          <span className="text-slate-600 font-medium leading-relaxed italic line-clamp-3" title={v.justificativa}>"{v.justificativa}"</span>
                         </div>
                       ))
                     )}
@@ -590,18 +681,18 @@ export default function ComitePage() {
                 </div>
 
                 {/* CHAT / MESA DE DEBATES */}
-                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
-                  <span className="text-[12px] font-black text-slate-700 uppercase block tracking-wider mb-3 border-b border-slate-100 pb-2.5">💬 Mesa de Debates (Ao Vivo)</span>
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left">
+                  <span className="text-[11px] font-black text-slate-700 uppercase block tracking-wider mb-2 border-b border-slate-100 pb-2">💬 Mesa de Debates (Ao Vivo)</span>
                   <div className="flex-1 overflow-y-auto rounded-xl p-1 space-y-3 custom-scrollbar">
                     {chatMsgs.length === 0 ? (
-                      <p className="text-center text-slate-400 py-10 text-xs italic font-medium">Nenhum comentário registrado no chat.</p>
+                      <p className="text-center text-slate-400 py-10 text-[10px] italic font-medium">Nenhum comentário registrado no chat.</p>
                     ) : (
                       chatMsgs.map((m: any) => {
                         const ehMeu = m.usuario === nomeUsuarioLogado;
                         return (
-                          <div key={m.id} className={`flex flex-col text-xs ${ehMeu ? 'items-end' : 'items-start'}`}>
-                            <span className="text-[10px] font-bold text-slate-400 mb-1 px-1">{m.usuario}</span>
-                            <div className={`p-3 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
+                          <div key={m.id} className={`flex flex-col text-[11px] ${ehMeu ? 'items-end' : 'items-start'}`}>
+                            <span className="text-[9px] font-bold text-slate-400 mb-0.5 px-1">{m.usuario}</span>
+                            <div className={`p-2.5 rounded-2xl max-w-[90%] shadow-sm ${ehMeu ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-700 border border-slate-200 rounded-bl-none'}`}>
                               <span className="font-medium whitespace-pre-wrap break-words leading-relaxed">{m.mensagem}</span>
                             </div>
                           </div>
@@ -609,9 +700,9 @@ export default function ComitePage() {
                       })
                     )}
                   </div>
-                  <div className="flex gap-2 mt-4 shrink-0 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-inner">
-                    <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Digite sua mensagem..." className="flex-1 p-2 bg-transparent text-slate-800 text-xs outline-none font-medium placeholder-slate-400" />
-                    <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
+                  <div className="flex gap-2 mt-3 shrink-0 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shadow-inner">
+                    <input type="text" value={novaMsg} onChange={(e) => setNovaMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagemChat(empresaFocoAtivo.empresa_nome)} placeholder="Mensagem..." className="flex-1 p-1.5 bg-transparent text-slate-800 text-[11px] outline-none font-medium placeholder-slate-400" />
+                    <button onClick={() => enviarMensagemChat(empresaFocoAtivo.empresa_nome)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-[10px] px-3 rounded-lg cursor-pointer transition-all shadow-sm">Enviar</button>
                   </div>
                 </div>
 
