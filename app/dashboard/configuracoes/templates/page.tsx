@@ -10,6 +10,7 @@ interface Template {
   assunto: string;
   corpo: string;
   cc?: string; 
+  para?: string; // Novo campo adicionado
 }
 
 export default function GerenciarTemplatesPage() {
@@ -22,6 +23,7 @@ export default function GerenciarTemplatesPage() {
 
   const [inputNome, setInputNome] = useState("");
   const [inputAssunto, setInputAssunto] = useState("");
+  const [inputPara, setInputPara] = useState(""); // Estado do novo campo
   const [inputCc, setInputCc] = useState("");
   const [inputCorpo, setInputCorpo] = useState("");
 
@@ -50,7 +52,8 @@ export default function GerenciarTemplatesPage() {
         nome: inputNome, 
         assunto: inputAssunto, 
         corpo: inputCorpo, 
-        cc: inputCc 
+        cc: inputCc,
+        para: inputPara // Enviando o campo para o banco
       };
 
       if (modoEdicao && idSelecionado) {
@@ -97,6 +100,7 @@ export default function GerenciarTemplatesPage() {
             setModoEdicao(false); 
             setInputNome(""); 
             setInputAssunto(""); 
+            setInputPara(""); 
             setInputCc(""); 
             setInputCorpo(""); 
             setModalAberto(true); 
@@ -116,6 +120,11 @@ export default function GerenciarTemplatesPage() {
             <div>
               <h3 className="font-black text-slate-900 uppercase text-[13px] truncate pr-2">{t.nome}</h3>
               <div className="mt-2 space-y-1">
+                {t.para && (
+                  <p className="text-[10px] text-indigo-600 font-bold font-mono truncate bg-indigo-50 px-2 py-1 rounded border border-indigo-100" title={t.para}>
+                    🎯 Para: {t.para}
+                  </p>
+                )}
                 <p className="text-[10px] text-purple-700 font-bold font-mono truncate bg-purple-50 px-2 py-1 rounded border border-purple-100" title={t.assunto}>
                   🏷️ {t.assunto}
                 </p>
@@ -138,6 +147,7 @@ export default function GerenciarTemplatesPage() {
                   setIdSelecionado(t.id); 
                   setInputNome(t.nome); 
                   setInputAssunto(t.assunto); 
+                  setInputPara(t.para || ""); 
                   setInputCc(t.cc || ""); 
                   setInputCorpo(t.corpo); 
                   setModalAberto(true); 
@@ -159,7 +169,7 @@ export default function GerenciarTemplatesPage() {
 
       {modalAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white p-6 rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
+          <div className="bg-white p-6 rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
             
             <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
               <h3 className="font-black uppercase text-slate-900 text-sm flex items-center gap-2">
@@ -176,7 +186,7 @@ export default function GerenciarTemplatesPage() {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   Tags Dinâmicas Disponíveis:
                 </span>
-                <p className="text-[10px] text-purple-700 mb-3 font-medium">Copie e cole as tags abaixo no Assunto ou Corpo do e-mail. Elas serão substituídas automaticamente pelos dados do cliente no momento do envio.</p>
+                <p className="text-[10px] text-purple-700 mb-3 font-medium">Copie e cole as tags abaixo no Assunto, Corpo ou Destinatário. Elas serão substituídas automaticamente no momento do envio.</p>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono font-bold text-[10px]">
                   <div className="bg-white p-2.5 rounded-lg border border-purple-100 flex flex-col gap-1.5 shadow-sm">
@@ -188,9 +198,8 @@ export default function GerenciarTemplatesPage() {
                   <div className="bg-white p-2.5 rounded-lg border border-purple-100 flex flex-col gap-1.5 shadow-sm">
                     <span className="text-emerald-700 flex justify-between items-center border-b border-slate-50 pb-1">{"{limite}"} <span className="text-slate-400 font-sans font-medium text-[9px]">Limite Aprovado</span></span>
                     <span className="text-emerald-700 flex justify-between items-center border-b border-slate-50 pb-1">{"{taxa}"} <span className="text-slate-400 font-sans font-medium text-[9px]">Taxa Aprovada</span></span>
-                    {/* 🔥 NOVAS TAGS INJETADAS NA INSTRUÇÃO */}
                     <span className="text-rose-600 flex justify-between items-center border-b border-slate-50 pb-1">{"{documentos}"} <span className="text-slate-400 font-sans font-medium text-[9px]">Lista de Docs Pendentes</span></span>
-                    <span className="text-amber-600 flex justify-between items-center pt-0.5">{"{fundo}"} <span className="text-slate-400 font-sans font-medium text-[9px]">Nome do Fundo (SEC/FIDC)</span></span>
+                    <span className="text-amber-600 flex justify-between items-center pt-0.5">{"{codigo_contrato}"} <span className="text-slate-400 font-sans font-medium text-[9px]">Código da Cessão</span></span>
                   </div>
                 </div>
               </div>
@@ -210,12 +219,14 @@ export default function GerenciarTemplatesPage() {
                 
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div className="flex-1">
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Assunto do E-mail:</label>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1 flex items-center gap-1">
+                      Destinatário (Para): <span className="text-slate-400 font-normal normal-case">(Opcional - E-mail fixo ou vazio para pegar o comercial)</span>
+                    </label>
                     <input 
                       type="text" 
-                      value={inputAssunto} 
-                      onChange={e => setInputAssunto(e.target.value)} 
-                      placeholder="Ex: Aprovação de Crédito - {empresa}"
+                      value={inputPara} 
+                      onChange={e => setInputPara(e.target.value)} 
+                      placeholder="Ex: operacoes@gestora.com.br"
                       className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-slate-800 shadow-sm" 
                     />
                   </div>
@@ -232,11 +243,22 @@ export default function GerenciarTemplatesPage() {
                     />
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Assunto do E-mail:</label>
+                  <input 
+                    type="text" 
+                    value={inputAssunto} 
+                    onChange={e => setInputAssunto(e.target.value)} 
+                    placeholder="Ex: Aprovação de Crédito - {empresa}"
+                    className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-slate-800 shadow-sm" 
+                  />
+                </div>
                 
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5 ml-1">Corpo da Mensagem:</label>
                   <textarea 
-                    rows={12} 
+                    rows={10} 
                     value={inputCorpo} 
                     onChange={e => setInputCorpo(e.target.value)} 
                     placeholder={`Olá {contato},\n\nTemos o prazer de informar que o cadastro da {empresa} foi aprovado na {fundo}...\n\nPara prosseguir, envie os seguintes documentos:\n{documentos}`}
