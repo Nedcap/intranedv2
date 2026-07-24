@@ -58,6 +58,28 @@ const PROPOSTA_INICIAL: PropostaComercial = {
   }
 };
 
+// ============================================================================
+// FUNÇÃO DE HIERARQUIA COMERCIAL (Liderança e Subordinados)
+// ============================================================================
+const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
+  if (visitados.has(liderId)) return [];
+  visitados.add(liderId);
+
+  let resultado: string[] = [liderId];
+
+  const subDiretos = usuarios.filter(u => {
+    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
+    return Array.isArray(lideres) && lideres.includes(liderId);
+  });
+
+  subDiretos.forEach(sub => {
+    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
+  });
+
+  return Array.from(new Set(resultado));
+};
+
+
 export default function MotorCreditoPage() {
   const router = useRouter();
   const [cnpjBusca, setCnpjBusca] = useState("");
@@ -89,13 +111,43 @@ export default function MotorCreditoPage() {
     };
   }, []);
 
+  // =========================================================================
+  // CARREGAMENTO SEGURO COM FILTRO DE CARTEIRA (COMERCIAL VÊ SÓ O DELE)
+  // =========================================================================
   const carregarFilaComercial = async () => {
     try {
-      const { data, error } = await supabase
+      const userStr = localStorage.getItem("intraned_user");
+      let query = supabase
         .from("analises")
         .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia")
-        .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"])
-        .order("criado_em", { ascending: false });
+        .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"]);
+
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
+
+        // Cargos de vendas têm restrição de visão (Vê só os seus e os dos liderados)
+        const cargosRestritos = ["comercial", "sdr"];
+
+        if (cargosRestritos.includes(cargoUser)) {
+          const { data: todosUsuarios } = await supabase.from("usuarios").select("id, nome, permissoes");
+          
+          if (todosUsuarios) {
+            const idsPermitidos = obterIdsSubordinados(todosUsuarios, user.id);
+            const nomesPermitidos = todosUsuarios
+              .filter(u => idsPermitidos.includes(u.id))
+              .map(u => u.nome);
+            
+            // Filtra a fila para bater com o array de nomes permitidos
+            query = query.in("comercial", nomesPermitidos);
+          } else {
+            // Fallback de segurança se não achar a tabela de usuários
+            query = query.eq("comercial", user.nome);
+          }
+        }
+      }
+
+      const { data, error } = await query.order("criado_em", { ascending: false });
 
       if (error) throw error;
       if (data) setFilaReal(data as any);
@@ -295,7 +347,7 @@ export default function MotorCreditoPage() {
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
-      setFormComercial(PROPOSTA_INICIAL); // Reseta o form todo
+      setFormComercial(PROPOSTA_INICIAL); 
       await carregarFilaComercial();
 
     } catch (err: any) {
@@ -467,7 +519,6 @@ export default function MotorCreditoPage() {
     });
   };
 
-  // Reutilizando os mesmos estilos compactos da Mesa do Analista para harmonia visual
   const cellStyle = "w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700 bg-white";
   const numStyle = "w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-mono font-bold text-indigo-700 bg-indigo-50/30 text-right";
   const thStyle = "p-2 bg-slate-100 border border-slate-200 font-semibold text-[10px] text-slate-600 uppercase tracking-wider text-left";
