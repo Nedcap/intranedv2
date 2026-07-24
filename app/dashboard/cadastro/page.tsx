@@ -128,7 +128,7 @@ export default function CadastroPage() {
 
   // ================= ESTADOS DO MODAL DE DISPARO =================
   const [modalDisparoAberto, setModalDisparoAberto] = useState(false);
-  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA" | null>(null);
+  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "PORTAL_GESTORA" | "APTO" | "PENDENCIA" | null>(null);
   const [cedentesDisponiveis, setCedentesDisponiveis] = useState<any[]>([]);
   const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
   const [enviandoLote, setEnviandoLote] = useState(false);
@@ -237,7 +237,7 @@ export default function CadastroPage() {
 
 
   // ================= LÓGICA DE DISPARO EM LOTE =================
-  const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA") => {
+  const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "PORTAL_GESTORA" | "APTO" | "PENDENCIA") => {
     setTipoDisparoAtual(tipo);
     setSelecionadosParaDisparo([]);
     setLogsDisparo([]);
@@ -251,7 +251,8 @@ export default function CadastroPage() {
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
       if (tipo === "APTO") return !!(c.dt_apto_sec || c.dt_apto_fidc);
-      if (tipo === "GESTORA") return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
+      if (tipo === "GESTORA") return !!c.dt_assinatura_contrato_fidc && !c.dt_envio_gestora_fidc && !c.dt_apto_fidc;
+      if (tipo === "PORTAL_GESTORA") return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
       if (tipo === "ASSINATURA") return ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)) && !c.dt_apto_sec && !c.dt_apto_fidc;
       if (tipo === "PENDENCIA") return !c.dt_apto_sec && !c.dt_apto_fidc; 
       return false;
@@ -831,7 +832,10 @@ export default function CadastroPage() {
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div> Avisar Assinaturas
                 </button>
                 <button onClick={() => abrirModalDisparo("GESTORA")} className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Avisar FIDC (Gestora)
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Pronto p/ Envio (Gestora)
+                </button>
+                <button onClick={() => abrirModalDisparo("PORTAL_GESTORA")} className="px-3 py-1.5 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 border border-fuchsia-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500"></div> Avisar Cadastro Portal
                 </button>
                 <button onClick={() => abrirModalDisparo("APTO")} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Avisar Aptos a Operar
@@ -1171,7 +1175,7 @@ export default function CadastroPage() {
               <div>
                 <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
                   <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                  Disparo: {tipoDisparoAtual === "APTO" ? "Aptos a Operar" : tipoDisparoAtual === "GESTORA" ? "Em Análise Gestora" : tipoDisparoAtual === "PENDENCIA" ? "Pendência de Documentos" : "Em Assinatura"}
+                  Disparo: {tipoDisparoAtual === "APTO" ? "Aptos a Operar" : tipoDisparoAtual === "GESTORA" ? "Prontos p/ Envio (Gestora)" : tipoDisparoAtual === "PORTAL_GESTORA" ? "Aviso de Cadastro no Portal" : tipoDisparoAtual === "PENDENCIA" ? "Pendência de Documentos" : "Em Assinatura"}
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">Configure o envio automático para os comerciais.</p>
               </div>
