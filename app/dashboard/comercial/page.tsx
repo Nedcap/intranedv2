@@ -40,7 +40,7 @@ export default function ControleComercialVisitasPage() {
 
   // Estado para Modal de Cadastro Manual
   const [modalAberto, setModalAberto] = useState(false);
-  const [novoLead, setNovoLead] = useState({ nome: "", sdr: "", telefone: "", email: "" });
+  const [novoLead, setNovoLead] = useState({ nome: "", sdr: "", telefone: "", email: "", cnpj: "" });
   const [salvandoManual, setSalvandoManual] = useState(false);
 
   // 1. Carrega as configurações de SDR salvas localmente
@@ -186,12 +186,13 @@ export default function ControleComercialVisitasPage() {
 
   const cadastrarVisitaManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!novoLead.nome || !novoLead.sdr) return alert("Nome e SDR são obrigatórios!");
+    if (!novoLead.nome || !novoLead.sdr || !novoLead.cnpj) return alert("Nome, CNPJ e SDR são obrigatórios!");
     
     setSalvandoManual(true);
     try {
       const { error } = await supabase.from("crm_leads").insert({
         razaoSocial: novoLead.nome,
+        cnpj: novoLead.cnpj,
         responsavel_nome: novoLead.sdr,
         email: novoLead.email,
         telefone: novoLead.telefone,
@@ -206,7 +207,7 @@ export default function ControleComercialVisitasPage() {
       if (error) throw error;
       
       setModalAberto(false);
-      setNovoLead({ nome: "", sdr: "", telefone: "", email: "" });
+      setNovoLead({ nome: "", sdr: "", telefone: "", email: "", cnpj: "" });
       alert("🚀 Visita agendada registrada manualmente!");
       buscarCardsComercial();
     } catch (err: any) {
@@ -576,6 +577,18 @@ export default function ControleComercialVisitasPage() {
                   value={novoLead.nome}
                   onChange={e => setNovoLead({...novoLead, nome: e.target.value})}
                   placeholder="Ex: Startups S/A"
+                  className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">CNPJ *</label>
+                <input 
+                  required
+                  type="text" 
+                  value={novoLead.cnpj}
+                  onChange={e => setNovoLead({...novoLead, cnpj: e.target.value})}
+                  placeholder="00.000.000/0000-00"
                   className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
                 />
               </div>
