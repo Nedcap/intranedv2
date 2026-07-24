@@ -68,8 +68,8 @@ const formatarDataBr = (dataString: string) => {
   return `${dia}/${mes}/${ano}`;
 };
 
-// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e insere os documentos
-const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = []) => {
+// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e insere os documentos e o fundo
+const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "") => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
   const listaDocsFormatada = docsSelecionados.length > 0 
@@ -83,7 +83,8 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
     .replace(/\{comercial\}/gi, item.comercial || "Comercial")
     .replace(/\{limite\}/gi, item.limite || "R$ 0,00")
     .replace(/\{taxa\}/gi, item.taxa || "0,00%")
-    .replace(/\{documentos\}/gi, listaDocsFormatada); // 🌟 TAG DE DOCUMENTOS AQUI!
+    .replace(/\{documentos\}/gi, listaDocsFormatada)
+    .replace(/\{fundo\}/gi, fundo); // 🌟 TAG DE FUNDO (SEC OU FIDC) AQUI!
 };
 
 export default function CadastroPage() {
@@ -109,11 +110,15 @@ export default function CadastroPage() {
 
   // ================= ESTADOS DO MODAL DE DISPARO =================
   const [modalDisparoAberto, setModalDisparoAberto] = useState(false);
-  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA" | null>(null); // NOVO TIPO
+  const [tipoDisparoAtual, setTipoDisparoAtual] = useState<"ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA" | null>(null);
   const [cedentesDisponiveis, setCedentesDisponiveis] = useState<any[]>([]);
   const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
   const [enviandoLote, setEnviandoLote] = useState(false);
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
+
+  // 🌟 NOVOS ESTADOS PARA PESQUISA E FUNDO NO MODAL
+  const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
+  const [fundoDisparo, setFundoDisparo] = useState<Record<string, "SEC" | "FIDC">>({});
 
   // 🌟 ESTADO DOS TEMPLATES E DOCUMENTOS
   const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
@@ -163,11 +168,11 @@ export default function CadastroPage() {
         }
       }
 
-      // 🌟 BUSCA OS TEMPLATES DO BANCO
+      // BUSCA OS TEMPLATES DO BANCO
       const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
       if (tpls) setTemplatesEmail(tpls);
 
-      // 🌟 BUSCA A LISTA DE DOCUMENTOS DO BANCO (JSON)
+      // BUSCA A LISTA DE DOCUMENTOS DO BANCO (JSON)
       const { data: configDocs } = await supabase.from("crm_configuracoes").select("valor").eq("chave", "docs_homologacao").single();
       if (configDocs && configDocs.valor) {
         setListaDocsGerais(configDocs.valor as string[]);
@@ -201,13 +206,15 @@ export default function CadastroPage() {
     setBuscaDoc("");
     setNovoDocInput("");
     setTemplateSelecionadoId(""); 
+    setBuscaModalDisparo(""); // Reseta a busca interna do modal
+    setFundoDisparo({}); // Reseta a marcação de fundos
 
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
       if (tipo === "APTO") return !!(c.dt_apto_sec || c.dt_apto_fidc);
       if (tipo === "GESTORA") return !!c.dt_envio_gestora_fidc && !c.dt_aprovacao_gestora_fidc && !c.dt_apto_fidc;
       if (tipo === "ASSINATURA") return ((c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || (c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)) && !c.dt_apto_sec && !c.dt_apto_fidc;
-      if (tipo === "PENDENCIA") return !c.dt_apto_sec && !c.dt_apto_fidc; // Qualquer um não apto pode ter pendência
+      if (tipo === "PENDENCIA") return !c.dt_apto_sec && !c.dt_apto_fidc; 
       return false;
     });
 
@@ -216,28 +223,52 @@ export default function CadastroPage() {
   };
 
   const toggleSelecaoDisparo = (id: string) => {
-    setSelecionadosParaDisparo(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    setSelecionadosParaDisparo(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(i => i !== id);
+      } else {
+        // Quando seleciona, já seta "SEC" como padrão
+        setFundoDisparo(f => ({ ...f, [id]: "SEC" }));
+        return [...prev, id];
+      }
+    });
   };
+
+  // Filtra as opções no modal baseadas na busca interna
+  const cedentesModalFiltrados = useMemo(() => {
+    return cedentesDisponiveis.filter(c => 
+      c.cedente.toLowerCase().includes(buscaModalDisparo.toLowerCase()) ||
+      (c.cnpj && c.cnpj.includes(buscaModalDisparo.replace(/\D/g, "")))
+    );
+  }, [cedentesDisponiveis, buscaModalDisparo]);
 
   const selecionarTodosDisparo = () => {
-    if (selecionadosParaDisparo.length === cedentesDisponiveis.length) setSelecionadosParaDisparo([]);
-    else setSelecionadosParaDisparo(cedentesDisponiveis.map(c => c.id));
+    if (selecionadosParaDisparo.length === cedentesModalFiltrados.length) {
+      setSelecionadosParaDisparo([]);
+    } else {
+      const ids = cedentesModalFiltrados.map(c => c.id);
+      setSelecionadosParaDisparo(ids);
+      
+      const novosFundos = { ...fundoDisparo };
+      ids.forEach(id => {
+        if (!novosFundos[id]) novosFundos[id] = "SEC"; // Marca como SEC os que não tinham fundo atrelado
+      });
+      setFundoDisparo(novosFundos);
+    }
   };
 
-  // 🌟 NOVO: Lógica de marcação de documentos
   const toggleDocMarcado = (doc: string) => {
     setDocsMarcadosParaEnvio(prev => prev.includes(doc) ? prev.filter(d => d !== doc) : [...prev, doc]);
   };
 
-  // 🌟 NOVO: Lógica de adição de documento novo no banco
   const salvarNovoDocumentoNoBanco = async () => {
     if (!novoDocInput.trim()) return;
     const docLimpo = novoDocInput.trim();
-    if (listaDocsGerais.includes(docLimpo)) return setNovoDocInput(""); // Evita duplicados
+    if (listaDocsGerais.includes(docLimpo)) return setNovoDocInput(""); 
     
     const novaLista = [...listaDocsGerais, docLimpo];
     setListaDocsGerais(novaLista);
-    setDocsMarcadosParaEnvio(prev => [...prev, docLimpo]); // Já deixa marcado pra envio
+    setDocsMarcadosParaEnvio(prev => [...prev, docLimpo]); 
     setNovoDocInput("");
 
     try {
@@ -278,9 +309,12 @@ export default function CadastroPage() {
           continue; 
         }
 
-        // 🌟 APLICA AS TAGS DINÂMICAS DO TEMPLATE (INCLUINDO DOCUMENTOS SE TIVER)
-        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio);
-        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio);
+        // 🌟 IDENTIFICA O FUNDO ESCOLHIDO PARA ESTE ITEM
+        const fundoSelecionado = fundoDisparo[item.id] || "SEC";
+
+        // 🌟 APLICA AS TAGS DINÂMICAS (DOCUMENTOS + FUNDO SEC/FIDC)
+        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio, fundoSelecionado);
+        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio, fundoSelecionado);
 
         const res = await fetch("/api/gmail/send", {
           method: "POST",
@@ -294,9 +328,9 @@ export default function CadastroPage() {
           })
         });
 
-        if (!res.ok) throw new Error("Falha na API");
+        if (!res.ok) throw new Error("Falha na API de envio");
         
-        setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente})`]);
+        setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente}) - Via ${fundoSelecionado}`]);
         await new Promise(r => setTimeout(r, 1000));
 
       } catch (err: any) {
@@ -727,6 +761,14 @@ export default function CadastroPage() {
       
       <div className="max-w-[1600px] mx-auto space-y-8">
         
+        {/* OVERLAY DE LOADING GLOBAL */}
+        {statusTexto && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex flex-col items-center justify-center font-bold text-white text-sm gap-4 transition-all">
+            <div className="w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+            <span className="tracking-wide uppercase text-xs">{statusTexto}</span>
+          </div>
+        )}
+
         {/* HEADER MODERNO */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
           <div>
@@ -1190,7 +1232,7 @@ export default function CadastroPage() {
                       value={novoDocInput} 
                       onChange={(e) => {
                         setNovoDocInput(e.target.value);
-                        setBuscaDoc(e.target.value); // Filtra enquanto digita
+                        setBuscaDoc(e.target.value); 
                       }}
                       className="flex-1 p-2 border border-rose-300 rounded-lg text-sm outline-none focus:border-rose-500"
                     />
@@ -1203,7 +1245,7 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
-                  {/* Lista de Documentos em JSON */}
+                  {/* Lista de Documentos */}
                   <div className="max-h-40 overflow-y-auto border border-rose-200 rounded-lg bg-white p-2 space-y-1">
                     {listaDocsGerais.filter(d => d.toLowerCase().includes(buscaDoc.toLowerCase())).map(doc => (
                       <label key={doc} className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${docsMarcadosParaEnvio.includes(doc) ? "bg-rose-100" : "hover:bg-slate-50"}`}>
@@ -1230,33 +1272,72 @@ export default function CadastroPage() {
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <label className="block text-xs font-bold text-slate-700 uppercase">
-                      {tipoDisparoAtual === "PENDENCIA" ? "3." : "2."} Selecione os Clientes ({cedentesDisponiveis.length}):
+                      {tipoDisparoAtual === "PENDENCIA" ? "3." : "2."} Selecione os Clientes ({cedentesModalFiltrados.length}):
                     </label>
                     <button 
                       onClick={selecionarTodosDisparo} 
                       disabled={enviandoLote}
                       className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
                     >
-                      {selecionadosParaDisparo.length === cedentesDisponiveis.length ? "Desmarcar Todos" : "Selecionar Todos"}
+                      {selecionadosParaDisparo.length === cedentesModalFiltrados.length && cedentesModalFiltrados.length > 0 ? "Desmarcar Todos" : "Selecionar Todos"}
                     </button>
                   </div>
 
-                  <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2">
-                    {cedentesDisponiveis.map(c => (
-                      <label key={c.id} className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
-                        <input 
-                          type="checkbox" 
-                          checked={selecionadosParaDisparo.includes(c.id)} 
-                          onChange={() => toggleSelecaoDisparo(c.id)} 
-                          disabled={enviandoLote}
-                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                        />
-                        <div className="flex-1">
-                          <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
-                          <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
-                        </div>
-                      </label>
+                  {/* 🌟 LUPA DE PESQUISA INTERNA NO MODAL */}
+                  <div className="mb-3 relative">
+                    <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input 
+                      type="text" 
+                      placeholder="🔍 Buscar cedente para notificar..." 
+                      value={buscaModalDisparo}
+                      onChange={(e) => setBuscaModalDisparo(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none focus:bg-white focus:border-indigo-400 transition-colors"
+                    />
+                  </div>
+
+                  <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {cedentesModalFiltrados.map(c => (
+                      <div key={c.id} className={`flex items-center justify-between p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
+                        <label className="flex items-center gap-3 cursor-pointer flex-1">
+                          <input 
+                            type="checkbox" 
+                            checked={selecionadosParaDisparo.includes(c.id)} 
+                            onChange={() => toggleSelecaoDisparo(c.id)} 
+                            disabled={enviandoLote}
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                          />
+                          <div>
+                            <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
+                            <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
+                          </div>
+                        </label>
+                        
+                        {/* 🌟 BOTÃO TOGGLE SEC/FIDC */}
+                        {selecionadosParaDisparo.includes(c.id) && (
+                          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-inner ml-2 shrink-0">
+                            <button 
+                              onClick={() => setFundoDisparo(prev => ({...prev, [c.id]: "SEC"}))}
+                              disabled={enviandoLote}
+                              className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                            >
+                              SEC
+                            </button>
+                            <button 
+                              onClick={() => setFundoDisparo(prev => ({...prev, [c.id]: "FIDC"}))}
+                              disabled={enviandoLote}
+                              className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                            >
+                              FIDC
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     ))}
+                    {cedentesModalFiltrados.length === 0 && (
+                      <div className="text-center text-xs text-slate-400 py-4 italic">Nenhum cedente encontrado com este nome.</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1307,6 +1388,13 @@ export default function CadastroPage() {
         </div>
       )}
 
+      {/* ESTILOS DE SCROLL E HIDE */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
     </div>
   );
 }
