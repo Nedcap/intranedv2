@@ -58,18 +58,20 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA (COM AUTO-APROVAÇÃO VIA CNPJ DA TABELA ANALISES)
+  // 2. BUSCA AUTOMÁTICA (COM AUTO-APROVAÇÃO E CORREÇÃO DE ORDENAÇÃO)
   const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
-      // Busca Leads do CRM
+      // 🚨 CORREÇÃO AQUI: Adicionado .order() e .limit() para garantir que os mais recentes não fiquem de fora
       const { data: leadsData, error: leadsError } = await supabase
         .from("crm_leads") 
         .select("*")
         .in("estagio", [
           "visita_agendada", "visita_realizada", "visita_efetuada", "finalizado", "ganhou", "perdido",
           "Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"
-        ]);
+        ])
+        .order("criado_em", { ascending: false })
+        .limit(5000);
 
       if (leadsError) throw leadsError;
 
@@ -246,6 +248,8 @@ export default function ControleComercialVisitasPage() {
       setModalAberto(false);
       setNovoLead({ nome: "", sdr: "", telefone: "", email: "", cnpj: "" });
       alert("🚀 Visita agendada registrada manualmente!");
+      
+      // Traz a base de dados de volta
       buscarCardsComercial();
     } catch (err: any) {
       alert(`❌ Erro ao registrar visita: ${err.message}`);
