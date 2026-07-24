@@ -12,6 +12,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🏠 GERAL
   { nome: "Início (Home)", path: "/dashboard", icone: "🏠", categoria: "Geral", defaultMaster: true },
   { nome: "TriageMail (E-mails)", path: "/dashboard/monitor-email", icone: "📬", categoria: "Geral", defaultMaster: true },
+  { nome: "Manuais Operacionais", path: "/dashboard/manuaisoperacionais", icone: "📖", categoria: "Geral", defaultMaster: true }, // 🔥 NOVO MÓDULO ADICIONADO AQUI!
 
   // 🎯 COMERCIAL
   { nome: "NedHub Comercial", path: "/dashboard/nedhub", icone: "🚀", categoria: "Comercial", defaultMaster: true },

@@ -14,14 +14,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [menuAberto, setMenuAberto] = useState(true);
 
   // 📂 Estado para controlar quais categorias do submenu estão abertas/expandidas
+  // Ajustada a ordem aqui para manter o padrão na renderização
   const [submenusAbertos, setSubmenusAbertos] = useState<Record<string, boolean>>({
     "Geral": true,
     "Comercial": false,
     "Crédito": false,
+    "Cadastro": false, // <-- Cadastro agora logo abaixo de Crédito
     "Consultas": false,
     "Financeiro": false,
-    "Cadastro": false,
-    "RH": false, // <-- Nova Categoria Adicionada
+    "RH": false, 
     "Configurações": false,
   });
 
@@ -71,14 +72,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
 
   // 📦 Agrupa os links permitidos por categoria para montar os submenus
+  // A ORDEM em que as chaves são declaradas aqui dita a ordem no menu visual
   const rotasAgrupadas = {
     "Geral": linksPermitidos.filter(l => l.categoria === "Geral"),
     "Comercial": linksPermitidos.filter(l => l.categoria === "Comercial"),
     "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
+    "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"), // <-- Cadastro reposicionado!
     "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"),
     "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
-    "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
-    "RH": linksPermitidos.filter(l => l.categoria === "RH"), // <-- Novo Agrupamento Adicionado
+    "RH": linksPermitidos.filter(l => l.categoria === "RH"),
     "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
   };
 
@@ -154,11 +156,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 switch(cat) {
                   case "Geral": return "🏠";
                   case "Comercial": return "🎯";
-                  case "Consultas": return "🔎"; 
                   case "Crédito": return "⚖️";
+                  case "Cadastro": return "📝"; // Cadastro colado no Crédito
+                  case "Consultas": return "🔎"; 
                   case "Financeiro": return "💰";
-                  case "Cadastro": return "📝";
-                  case "RH": return "👥"; // <-- Ícone Pai Adicionado
+                  case "RH": return "👥"; 
                   case "Configurações": return "⚙️";
                   default: return "📦";
                 }
