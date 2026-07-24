@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   BookOpen, Plus, Settings, FileText, AlertTriangle, 
   ListOrdered, Type, ArrowLeft, Save, Trash2, CheckCircle2,
-  Image as ImageIcon // 📸 Import do ícone de Imagem
+  Image as ImageIcon, ChevronUp, ChevronDown, X
 } from "lucide-react";
+import { supabase } from "@/lib/supabase"; // ⚠️ AJUSTE AQUI SE SEU CAMINHO DO SUPABASE FOR DIFERENTE
 
 // ============================================================================
 // TIPAGENS DO CONSTRUTOR DE MANUAIS
@@ -24,57 +25,127 @@ interface Bloco {
 // ============================================================================
 export default function ManuaisOperacionaisPage() {
   const [view, setView] = useState<"list" | "editor">("list");
-  const [manualAtivo, setManualAtivo] = useState<string>("Novo Manual Operacional");
+  
+  // Estados do Banco de Dados
+  const [manuais, setManuais] = useState<any[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+
+  // Estados do Manual Ativo (Editor)
+  const [manualIdAtivo, setManualIdAtivo] = useState<string | null>(null);
+  const [manualTitulo, setManualTitulo] = useState<string>("Novo Manual Operacional");
+  const [manualTipo, setManualTipo] = useState<string>("Manual");
+  const [manualStatus, setManualStatus] = useState<string>("Em Revisão");
   const [blocos, setBlocos] = useState<Bloco[]>([]);
 
-  // Mock provisório enquanto não plugamos no Supabase
-  const manuaisSalvos = [
-    { 
-      id: "1", 
-      titulo: "Política de Concessão de Crédito V8", 
-      tipo: "Política", 
-      data: "24/07/2026", 
-      status: "Ativo",
-      blocosFake: [
-        { id: "b1", tipo: "titulo" as TipoBloco, conteudo: "1. Regras Inegociáveis" },
-        { id: "b2", tipo: "alerta" as TipoBloco, conteudo: "Atenção: Proibido aprovar sem consulta no Serasa confirmada e anexada ao dossiê." },
-        { id: "b3", tipo: "texto" as TipoBloco, conteudo: "O comitê de crédito se reunirá todas as terças-feiras para deliberação de propostas acima de R$ 500.000,00." }
-      ]
-    },
-    { 
-      id: "2", 
-      titulo: "Manual de Integração (Onboarding)", 
-      tipo: "Manual", 
-      data: "15/06/2026", 
-      status: "Em Revisão",
-      blocosFake: [] 
-    },
-  ];
+  // ============================================================================
+  // INTEGRAÇÃO SUPABASE (FETCH E SAVE)
+  // ============================================================================
+  const carregarManuais = async () => {
+    setCarregando(true);
+    try {
+      const { data, error } = await supabase
+        .from('manuais_operacionais')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setManuais(data || []);
+    } catch (error) {
+      console.error("Erro ao buscar manuais:", error);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarManuais();
+  }, []);
+
+  const salvarDocumento = async () => {
+    if (!manualTitulo.trim()) return alert("O manual precisa de um título.");
+    setSalvando(true);
+
+    try {
+      // Pega o nome do usuário ativo (opcional, ajustado para o seu Auth)
+      let autor = "Sistema";
+      const userStr = localStorage.getItem("intraned_user");
+      if (userStr) {
+        const u = JSON.parse(userStr);
+        autor = u.nome || "Sistema";
+      }
+
+      const payload = {
+        titulo: manualTitulo,
+        tipo: manualTipo,
+        status: manualStatus,
+        blocos: blocos, // Vai como JSONB pro banco
+        autor_nome: autor,
+        updated_at: new Date().toISOString()
+      };
+
+      if (manualIdAtivo) {
+        // ATUALIZAR EXISTENTE
+        const { error } = await supabase
+          .from('manuais_operacionais')
+          .update(payload)
+          .eq('id', manualIdAtivo);
+        if (error) throw error;
+        alert("Manual atualizado com sucesso!");
+      } else {
+        // CRIAR NOVO
+        const { data, error } = await supabase
+          .from('manuais_operacionais')
+          .insert([payload])
+          .select()
+          .single();
+        if (error) throw error;
+        setManualIdAtivo(data.id);
+        alert("Novo manual criado com sucesso!");
+      }
+
+      carregarManuais();
+    } catch (error: any) {
+      console.error("Erro ao salvar:", error);
+      alert("Falha ao salvar no banco: " + error.message);
+    } finally {
+      setSalvando(false);
+    }
+  };
 
   // ============================================================================
   // AÇÕES DE ABRIR E CRIAR
   // ============================================================================
   const abrirManual = (manual: any) => {
-    setManualAtivo(manual.titulo);
-    // Aqui no futuro vai ser setBlocos(manual.blocos) vindo do banco
-    setBlocos(manual.blocosFake || []); 
+    setManualIdAtivo(manual.id);
+    setManualTitulo(manual.titulo);
+    setManualTipo(manual.tipo || "Manual");
+    setManualStatus(manual.status || "Em Revisão");
+    
+    // Garante que se o JSONB vier null, vira array vazio
+    const blocosDoBanco = Array.isArray(manual.blocos) ? manual.blocos : [];
+    setBlocos(blocosDoBanco); 
+    
     setView("editor");
   };
 
   const criarNovoManual = () => {
-    setManualAtivo("Novo Manual Operacional");
+    setManualIdAtivo(null);
+    setManualTitulo("Novo Manual Operacional");
+    setManualTipo("Manual");
+    setManualStatus("Em Revisão");
     setBlocos([]);
     setView("editor");
   };
 
   // ============================================================================
-  // FUNÇÕES DO CONSTRUTOR (MOTOR DE CUSTOMIZAÇÃO)
+  // MOTOR DE CUSTOMIZAÇÃO DOS BLOCOS (INCLUINDO ORDENAÇÃO)
   // ============================================================================
   const adicionarBloco = (tipo: TipoBloco) => {
     const novoBloco: Bloco = {
       id: Math.random().toString(36).substr(2, 9),
       tipo,
-      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo é array, outros string
+      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo é array
     };
     setBlocos([...blocos, novoBloco]);
   };
@@ -83,9 +154,64 @@ export default function ManuaisOperacionaisPage() {
     setBlocos(blocos.filter((b) => b.id !== id));
   };
 
-  // Atualiza o conteúdo do bloco em tempo real (necessário para a imagem)
+  const moverBloco = (index: number, direcao: 'up' | 'down') => {
+    if (direcao === 'up' && index === 0) return;
+    if (direcao === 'down' && index === blocos.length - 1) return;
+
+    const novosBlocos = [...blocos];
+    const targetIndex = direcao === 'up' ? index - 1 : index + 1;
+    
+    const temp = novosBlocos[index];
+    novosBlocos[index] = novosBlocos[targetIndex];
+    novosBlocos[targetIndex] = temp;
+    
+    setBlocos(novosBlocos);
+  };
+
   const atualizarConteudoBloco = (id: string, novoConteudo: any) => {
     setBlocos(blocos.map(b => b.id === id ? { ...b, conteudo: novoConteudo } : b));
+  };
+
+  // Funções específicas para o Passo a Passo (Array interno)
+  const atualizarPasso = (blocoId: string, indexPasso: number, valor: string) => {
+    setBlocos(blocos.map(b => {
+      if (b.id === blocoId) {
+        const novoConteudo = [...(b.conteudo || [])];
+        novoConteudo[indexPasso] = valor;
+        return { ...b, conteudo: novoConteudo };
+      }
+      return b;
+    }));
+  };
+
+  const addPasso = (blocoId: string) => {
+    setBlocos(blocos.map(b => {
+      if (b.id === blocoId) {
+        const atual = Array.isArray(b.conteudo) ? b.conteudo : [];
+        return { ...b, conteudo: [...atual, ""] };
+      }
+      return b;
+    }));
+  };
+
+  const removerPasso = (blocoId: string, indexPasso: number) => {
+    setBlocos(blocos.map(b => {
+      if (b.id === blocoId) {
+        const atual = Array.isArray(b.conteudo) ? b.conteudo : [];
+        return { ...b, conteudo: atual.filter((_, i) => i !== indexPasso) };
+      }
+      return b;
+    }));
+  };
+
+  // Transforma arquivo em Base64 para salvar direto no JSONB
+  const handleImageUpload = (blocoId: string, file: File) => {
+    if (file.size > 5 * 1024 * 1024) return alert("A imagem não pode passar de 5MB.");
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      atualizarConteudoBloco(blocoId, reader.result); // Salva o Base64 na key conteudo
+    };
+    reader.readAsDataURL(file);
   };
 
   // ============================================================================
@@ -95,11 +221,12 @@ export default function ManuaisOperacionaisPage() {
     switch (bloco.tipo) {
       case "titulo":
         return (
-          <div className="group relative bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4 border-l-4 border-l-blue-600">
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4 border-l-4 border-l-blue-600">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bloco: Título de Seção</div>
             <input 
               type="text" 
-              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
+              value={bloco.conteudo || ""}
+              onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)}
               placeholder="Digite o título da seção..." 
               className="w-full text-2xl font-black text-blue-900 border-none outline-none bg-transparent placeholder:text-slate-300 uppercase tracking-tight"
             />
@@ -108,10 +235,11 @@ export default function ManuaisOperacionaisPage() {
       
       case "texto":
         return (
-          <div className="group relative bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bloco: Parágrafo Padrão</div>
             <textarea 
-              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
+              value={bloco.conteudo || ""}
+              onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)}
               placeholder="Descreva as instruções ou políticas aqui..." 
               className="w-full min-h-[100px] text-[15px] leading-relaxed text-slate-700 border-none outline-none resize-none bg-transparent placeholder:text-slate-300"
             />
@@ -120,13 +248,14 @@ export default function ManuaisOperacionaisPage() {
 
       case "alerta":
         return (
-          <div className="group relative bg-red-50 p-6 rounded-xl border border-red-200 shadow-sm mb-4 border-l-4 border-l-red-500">
+          <div className="bg-red-50 p-6 rounded-xl border border-red-200 shadow-sm mb-4 border-l-4 border-l-red-500">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-5 h-5 text-red-600" />
               <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Bloco: Alerta Crítico</div>
             </div>
             <textarea 
-              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
+              value={bloco.conteudo || ""}
+              onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)}
               placeholder="Atenção: Descreva a restrição ou regra inegociável..." 
               className="w-full text-[15px] font-medium text-red-900 leading-relaxed border-none outline-none resize-none bg-transparent placeholder:text-red-300/70"
             />
@@ -134,36 +263,49 @@ export default function ManuaisOperacionaisPage() {
         );
 
       case "passo-a-passo":
+        const passos = Array.isArray(bloco.conteudo) ? bloco.conteudo : [""];
         return (
-          <div className="group relative bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
+          <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
             <div className="flex items-center gap-2 mb-4">
               <ListOrdered className="w-5 h-5 text-blue-600" />
               <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bloco: Fluxo Operacional (Etapas)</div>
             </div>
             <div className="flex flex-col gap-3">
-              {[1, 2, 3].map((passo) => (
-                <div key={passo} className="flex gap-4 items-start bg-white p-4 rounded-lg border border-slate-200">
+              {passos.map((textoPasso: string, index: number) => (
+                <div key={index} className="flex gap-4 items-start bg-white p-4 rounded-lg border border-slate-200 relative group/passo">
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-black flex items-center justify-center font-mono text-sm">
-                    {passo}
+                    {index + 1}
                   </div>
                   <input 
                     type="text" 
-                    placeholder={`Descreva a etapa ${passo}...`} 
+                    value={textoPasso}
+                    onChange={(e) => atualizarPasso(bloco.id, index, e.target.value)}
+                    placeholder={`Descreva a etapa ${index + 1}...`} 
                     className="w-full mt-1 text-[15px] text-slate-700 border-none outline-none bg-transparent placeholder:text-slate-300"
                   />
+                  {passos.length > 1 && (
+                    <button 
+                      onClick={() => removerPasso(bloco.id, index)}
+                      className="absolute right-3 top-4 text-slate-300 hover:text-red-500 opacity-0 group-hover/passo:opacity-100 transition-opacity"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               ))}
-              <button className="text-[12px] font-bold text-blue-600 uppercase tracking-wider mt-2 hover:underline text-left">
+              <button 
+                onClick={() => addPasso(bloco.id)}
+                className="text-[12px] font-bold text-blue-600 uppercase tracking-wider mt-2 hover:underline text-left"
+              >
                 + Adicionar Nova Etapa
               </button>
             </div>
           </div>
         );
 
-      // 🔥 NOVO BLOCO: IMAGEM / PRINT
       case "imagem":
         return (
-          <div className="group relative bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
+          <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
             <div className="flex items-center gap-2 mb-4">
               <ImageIcon className="w-5 h-5 text-blue-600" />
               <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bloco: Anexo / Print da Tela</div>
@@ -195,10 +337,7 @@ export default function ManuaisOperacionaisPage() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      const urlPreview = URL.createObjectURL(file);
-                      atualizarConteudoBloco(bloco.id, urlPreview);
-                    }
+                    if (file) handleImageUpload(bloco.id, file);
                   }}
                 />
               </label>
@@ -211,12 +350,12 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
-  // TELA 1: LISTAGEM DE MANUAIS
+  // TELA 1: LISTAGEM DE MANUAIS (DASHBOARD)
   // ============================================================================
   if (view === "list") {
     return (
       <div className="p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter']">
-        {/* Header Premium - Inspirado no seu CSS Original */}
+        {/* Header Premium */}
         <div className="bg-gradient-to-br from-blue-900 to-blue-600 p-8 flex flex-col md:flex-row justify-between items-start md:items-center rounded-2xl shadow-[0_10px_30px_-5px_rgba(37,99,235,0.3)] mb-10 gap-6">
           <div>
             <h1 className="text-3xl font-black text-white uppercase tracking-tight mb-2 flex items-center gap-3">
@@ -235,39 +374,47 @@ export default function ManuaisOperacionaisPage() {
           </button>
         </div>
 
-        {/* Grid de Manuais Existentes */}
         <div className="mb-6 flex items-center gap-2 border-b-2 border-slate-200 pb-3">
           <div className="w-1.5 h-6 bg-blue-600 rounded-full"></div>
           <h2 className="text-xl font-black text-blue-900 uppercase tracking-wide">Documentos Homologados</h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {manuaisSalvos.map((manual) => (
-            <div 
-              key={manual.id} 
-              onClick={() => abrirManual(manual)}
-              className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex justify-between items-start mb-4">
-                  <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
-                    manual.tipo === 'Política' ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {manual.tipo}
-                  </span>
-                  <Settings className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+        {carregando ? (
+          <div className="text-center py-20 text-slate-400 font-bold animate-pulse">Carregando manuais do banco de dados...</div>
+        ) : manuais.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-xl border border-slate-200 text-slate-500 shadow-sm">
+            Nenhum documento encontrado. Crie o primeiro!
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {manuais.map((manual) => (
+              <div 
+                key={manual.id} 
+                onClick={() => abrirManual(manual)}
+                className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
+                      manual.tipo === 'Política' ? 'bg-yellow-100 text-yellow-800' : 
+                      manual.tipo === 'Processo' ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {manual.tipo}
+                    </span>
+                    <Settings className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 leading-snug mb-2">{manual.titulo}</h3>
                 </div>
-                <h3 className="text-lg font-bold text-slate-800 leading-snug mb-2">{manual.titulo}</h3>
+                <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs font-semibold text-slate-500">
+                  <span>Autor: <span className="font-bold">{manual.autor_nome || 'Sistema'}</span></span>
+                  <span className={`flex items-center gap-1 ${manual.status === 'Ativo' ? 'text-green-600' : 'text-blue-600'}`}>
+                    <CheckCircle2 className="w-3 h-3" /> {manual.status}
+                  </span>
+                </div>
               </div>
-              <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs font-semibold text-slate-500">
-                <span>Atualizado: {manual.data}</span>
-                <span className={`flex items-center gap-1 ${manual.status === 'Ativo' ? 'text-green-600' : 'text-blue-600'}`}>
-                  <CheckCircle2 className="w-3 h-3" /> {manual.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -278,7 +425,7 @@ export default function ManuaisOperacionaisPage() {
   return (
     <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8">
       
-      {/* Coluna Esquerda: A Tela de Construção (O Relatório em si) */}
+      {/* Coluna Esquerda: A Tela de Construção */}
       <div className="flex-1">
         {/* Barra de Ferramentas Superior */}
         <div className="flex justify-between items-center mb-6">
@@ -289,28 +436,54 @@ export default function ManuaisOperacionaisPage() {
             <ArrowLeft className="w-4 h-4" /> Voltar ao Painel
           </button>
           <div className="flex gap-3">
-            <button className="bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-bold uppercase text-[11px] tracking-wider transition-all flex items-center gap-2 shadow-sm">
-              Visualizar
-            </button>
-            <button className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg font-bold uppercase text-[11px] tracking-wider transition-all flex items-center gap-2 shadow-md">
-              <Save className="w-4 h-4" /> Salvar Documento
+            <button 
+              onClick={salvarDocumento}
+              disabled={salvando}
+              className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-2.5 rounded-lg font-black uppercase text-[11px] tracking-widest transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" /> {salvando ? "Salvando..." : "Salvar no Banco"}
             </button>
           </div>
         </div>
 
-        {/* Capa do Relatório (Estética Head do Dossiê) */}
+        {/* Capa do Relatório */}
         <div className="bg-white rounded-t-2xl border border-slate-200 border-b-0 p-10 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-900 to-blue-500"></div>
+          
           <input 
             type="text" 
-            value={manualAtivo}
-            onChange={(e) => setManualAtivo(e.target.value)}
-            className="w-full text-4xl font-black text-blue-900 uppercase tracking-tighter border-none outline-none bg-transparent placeholder:text-slate-300 mb-4"
+            value={manualTitulo}
+            onChange={(e) => setManualTitulo(e.target.value)}
+            className="w-full text-4xl font-black text-blue-900 uppercase tracking-tighter border-none outline-none bg-transparent placeholder:text-slate-300 mb-6"
+            placeholder="NOME DO DOCUMENTO AQUI..."
           />
-          <div className="flex gap-4 border-t border-slate-100 pt-4 text-sm font-semibold text-slate-500">
-            <span>Data Base: <strong className="text-slate-800">24/07/2026</strong></span>
-            <span>|</span>
-            <span>Autor: <strong className="text-slate-800">Seu Nome</strong></span>
+          
+          <div className="flex gap-6 border-t border-slate-100 pt-6 text-sm font-semibold text-slate-500">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
+              <select 
+                value={manualTipo} 
+                onChange={(e) => setManualTipo(e.target.value)}
+                className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
+              >
+                <option value="Manual">Manual</option>
+                <option value="Política">Política</option>
+                <option value="Processo">Processo</option>
+              </select>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status Legal:</span>
+              <select 
+                value={manualStatus} 
+                onChange={(e) => setManualStatus(e.target.value)}
+                className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
+              >
+                <option value="Em Revisão">Em Revisão</option>
+                <option value="Ativo">Vigente (Ativo)</option>
+                <option value="Inativo">Inativo / Obsoleto</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -324,16 +497,36 @@ export default function ManuaisOperacionaisPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {blocos.map((bloco) => (
+              {blocos.map((bloco, index) => (
                 <div key={bloco.id} className="relative group/bloco">
-                  {/* Botão de Excluir Bloco (Aparece no Hover) */}
-                  <button 
-                    onClick={() => removerBloco(bloco.id)}
-                    className="absolute -right-3 -top-3 z-10 bg-red-100 text-red-600 p-2 rounded-full shadow-md opacity-0 group-hover/bloco:opacity-100 transition-opacity hover:bg-red-200"
-                    title="Remover Bloco"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  
+                  {/* Menu de Ações do Bloco (Sobe, Desce, Exclui) */}
+                  <div className="absolute -right-3 -top-3 z-10 flex gap-1 opacity-0 group-hover/bloco:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => moverBloco(index, 'up')}
+                      disabled={index === 0}
+                      className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Mover para Cima"
+                    >
+                      <ChevronUp className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => moverBloco(index, 'down')}
+                      disabled={index === blocos.length - 1}
+                      className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Mover para Baixo"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => removerBloco(bloco.id)}
+                      className="bg-red-100 border border-red-200 text-red-600 p-1.5 rounded-full shadow-md hover:bg-red-200"
+                      title="Remover Bloco"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
                   {renderizarBloco(bloco)}
                 </div>
               ))}
@@ -378,7 +571,6 @@ export default function ManuaisOperacionaisPage() {
               </div>
             </button>
 
-            {/* 🔥 NOVO BOTÃO DE COMPONENTE NA SIDEBAR: IMAGEM */}
             <button 
               onClick={() => adicionarBloco("imagem")}
               className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
