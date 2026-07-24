@@ -77,7 +77,7 @@ const calcularTotalLimite = (item: any) => {
 };
 
 // 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e consolida a tabela de modalidades
-const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "") => {
+const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "", codigoContrato: string = "") => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
   const listaDocsFormatada = docsSelecionados.length > 0 
@@ -102,7 +102,8 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
     .replace(/\{limite\}/gi, limiteFormatado)
     .replace(/\{taxa\}/gi, detalheTaxa)
     .replace(/\{documentos\}/gi, listaDocsFormatada)
-    .replace(/\{fundo\}/gi, nomeFundoBonito); 
+    .replace(/\{fundo\}/gi, nomeFundoBonito)
+    .replace(/\{codigo_contrato\}/gi, codigoContrato || "Código não informado"); 
 };
 
 export default function CadastroPage() {
@@ -136,6 +137,7 @@ export default function CadastroPage() {
 
   const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
   const [fundoDisparo, setFundoDisparo] = useState<Record<string, "SEC" | "FIDC">>({});
+  const [codigosContrato, setCodigosContrato] = useState<Record<string, string>>({});
 
   // ================= ESTADO DOS TEMPLATES E DOCUMENTOS =================
   const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
@@ -246,7 +248,8 @@ export default function CadastroPage() {
     setNovoDocInput("");
     setTemplateSelecionadoId(""); 
     setBuscaModalDisparo(""); 
-    setFundoDisparo({}); 
+    setFundoDisparo({});
+    setCodigosContrato({});
 
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
@@ -351,8 +354,9 @@ export default function CadastroPage() {
         }
 
         const fundoSelecionado = fundoDisparo[item.id] || "SEC";
-        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio, fundoSelecionado);
-        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio, fundoSelecionado);
+        const codigoDoContrato = codigosContrato[item.id] || "";
+        const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio, fundoSelecionado, codigoDoContrato);
+        const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio, fundoSelecionado, codigoDoContrato);
 
         const res = await fetch("/api/gmail/send", {
           method: "POST",
@@ -1283,43 +1287,59 @@ export default function CadastroPage() {
 
                   <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                     {cedentesModalFiltrados.map(c => (
-                      <div key={c.id} className={`flex items-center justify-between p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
+                      <div key={c.id} className={`flex flex-col p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
                         
-                        {/* Area de clique restrita só ao checkbox e nome */}
-                        <div 
-                          className="flex items-center gap-3 cursor-pointer flex-1"
-                          onClick={() => toggleSelecaoDisparo(c.id)}
-                        >
-                          <input 
-                            type="checkbox" 
-                            checked={selecionadosParaDisparo.includes(c.id)} 
-                            readOnly
-                            disabled={enviandoLote}
-                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer pointer-events-none"
-                          />
-                          <div>
-                            <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
-                            <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
+                        <div className="flex items-center justify-between">
+                          {/* Area de clique restrita só ao checkbox e nome */}
+                          <div 
+                            className="flex items-center gap-3 cursor-pointer flex-1"
+                            onClick={() => toggleSelecaoDisparo(c.id)}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={selecionadosParaDisparo.includes(c.id)} 
+                              readOnly
+                              disabled={enviandoLote}
+                              className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer pointer-events-none"
+                            />
+                            <div>
+                              <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
+                              <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
+                            </div>
                           </div>
+                          
+                          {/* Botões do Fundo protegidos do clique da linha */}
+                          {selecionadosParaDisparo.includes(c.id) && (
+                            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-inner ml-2 shrink-0">
+                              <button 
+                                onClick={() => setarFundoDoDisparo(c.id, "SEC")}
+                                disabled={enviandoLote}
+                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                              >
+                                SEC
+                              </button>
+                              <button 
+                                onClick={() => setarFundoDoDisparo(c.id, "FIDC")}
+                                disabled={enviandoLote}
+                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                              >
+                                FIDC
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        
-                        {/* Botões do Fundo protegidos do clique da linha */}
-                        {selecionadosParaDisparo.includes(c.id) && (
-                          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-inner ml-2 shrink-0">
-                            <button 
-                              onClick={() => setarFundoDoDisparo(c.id, "SEC")}
+
+                        {/* NOVO CAMPO: CÓDIGO DO CONTRATO */}
+                        {selecionadosParaDisparo.includes(c.id) && (tipoDisparoAtual === "GESTORA" || tipoDisparoAtual === "PORTAL_GESTORA") && (
+                          <div className="mt-3 pl-7">
+                            <input 
+                              type="text" 
+                              placeholder="Código do Contrato de Cessão..."
+                              value={codigosContrato[c.id] || ""}
+                              onChange={(e) => setCodigosContrato(prev => ({...prev, [c.id]: e.target.value}))}
                               disabled={enviandoLote}
-                              className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
-                            >
-                              SEC
-                            </button>
-                            <button 
-                              onClick={() => setarFundoDoDisparo(c.id, "FIDC")}
-                              disabled={enviandoLote}
-                              className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
-                            >
-                              FIDC
-                            </button>
+                              className="w-full p-2 border border-indigo-200 rounded-lg text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 bg-white shadow-sm transition-all"
+                            />
                           </div>
                         )}
                       </div>
