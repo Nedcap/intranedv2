@@ -67,7 +67,16 @@ const formatarDataBr = (dataString: string) => {
   return `${dia}/${mes}/${ano}`;
 };
 
-// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real
+// 🌟 FUNÇÃO AUXILIAR: Calcula o Limite Total somando as Modalidades
+const calcularTotalLimite = (item: any) => {
+  if (item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0) {
+    const total = item.modalidades_aprovadas.reduce((acc: number, mod: any) => acc + (parseFloat(String(mod.limite).replace(/\D/g, "")) / 100 || 0), 0);
+    return total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+  return item.limite || "R$ 0,00";
+};
+
+// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e consolida a tabela de modalidades
 const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "") => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
@@ -76,14 +85,22 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
     : "Nenhum documento pendente.";
 
   const nomeFundoBonito = fundo === "SEC" ? "Securitizadora" : "FIDC";
+  
+  const limiteFormatado = calcularTotalLimite(item);
+  
+  // Detalhamento Múltiplo para o Email
+  let detalheTaxa = item.taxa || "0,00%";
+  if (item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0) {
+    detalheTaxa = "\n" + item.modalidades_aprovadas.map((m: any) => `  - ${m.modalidade}: ${m.limite} | Taxa: ${m.taxa} | Prazo: ${m.prazo || 'N/D'}`).join('\n');
+  }
 
   return texto
     .replace(/\{empresa\}/gi, item.cedente || "Empresa Não Informada")
     .replace(/\{cnpj\}/gi, formatarCNPJ(item.cnpj) || "Sem CNPJ")
     .replace(/\{contato\}/gi, primeiroNomeComercial)
     .replace(/\{comercial\}/gi, item.comercial || "Comercial")
-    .replace(/\{limite\}/gi, item.limite || "R$ 0,00")
-    .replace(/\{taxa\}/gi, item.taxa || "0,00%")
+    .replace(/\{limite\}/gi, limiteFormatado)
+    .replace(/\{taxa\}/gi, detalheTaxa)
     .replace(/\{documentos\}/gi, listaDocsFormatada)
     .replace(/\{fundo\}/gi, nomeFundoBonito); 
 };
@@ -117,11 +134,10 @@ export default function CadastroPage() {
   const [enviandoLote, setEnviandoLote] = useState(false);
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
 
-  // 🌟 NOVOS ESTADOS PARA PESQUISA E FUNDO NO MODAL
   const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
   const [fundoDisparo, setFundoDisparo] = useState<Record<string, "SEC" | "FIDC">>({});
 
-  // 🌟 ESTADO DOS TEMPLATES E DOCUMENTOS
+  // ================= ESTADO DOS TEMPLATES E DOCUMENTOS =================
   const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
   const [templateSelecionadoId, setTemplateSelecionadoId] = useState<string>("");
   const [listaDocsGerais, setListaDocsGerais] = useState<string[]>([]);
@@ -179,8 +195,48 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
-  // ================= LÓGICA DE DISPARO EM LOTE =================
+  // ================= LÓGICA DE MODALIDADES JSONB =================
+  const handleModalidadeChange = (indexCedente: number, indexMod: number, campo: string, valorRaw: string) => {
+    const novos = [...cedentes]; 
+    const mods = novos[indexCedente].modalidades_aprovadas ? [...novos[indexCedente].modalidades_aprovadas] : [];
+    
+    if (campo === 'limite') {
+      const apenasNumeros = valorRaw.replace(/\D/g, "");
+      if (!apenasNumeros) {
+        mods[indexMod][campo] = "";
+      } else {
+        const valorNumerico = parseFloat(apenasNumeros) / 100;
+        mods[indexMod][campo] = valorNumerico.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      }
+    } else {
+      mods[indexMod][campo] = valorRaw;
+    }
+    
+    novos[indexCedente].modalidades_aprovadas = mods;
+    novos[indexCedente]._isEditado = true;
+    setCedentes(novos);
+  };
 
+  const addModalidade = (indexCedente: number) => {
+    const novos = [...cedentes];
+    const mods = novos[indexCedente].modalidades_aprovadas ? [...novos[indexCedente].modalidades_aprovadas] : [];
+    mods.push({ modalidade: "Desconto", limite: "", taxa: "", prazo: "" });
+    novos[indexCedente].modalidades_aprovadas = mods;
+    novos[indexCedente]._isEditado = true;
+    setCedentes(novos);
+  };
+
+  const removeModalidade = (indexCedente: number, indexMod: number) => {
+    const novos = [...cedentes];
+    const mods = [...novos[indexCedente].modalidades_aprovadas];
+    mods.splice(indexMod, 1);
+    novos[indexCedente].modalidades_aprovadas = mods;
+    novos[indexCedente]._isEditado = true;
+    setCedentes(novos);
+  };
+
+
+  // ================= LÓGICA DE DISPARO EM LOTE =================
   const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "APTO" | "PENDENCIA") => {
     setTipoDisparoAtual(tipo);
     setSelecionadosParaDisparo([]);
@@ -210,7 +266,6 @@ export default function CadastroPage() {
       if (prev.includes(id)) {
         return prev.filter(i => i !== id);
       } else {
-        // Marca e seta o default pra SEC pra não ficar vazio
         setFundoDisparo(f => ({ ...f, [id]: "SEC" }));
         return [...prev, id];
       }
@@ -234,7 +289,6 @@ export default function CadastroPage() {
     } else {
       const ids = cedentesModalFiltrados.map(c => c.id);
       setSelecionadosParaDisparo(ids);
-      
       const novosFundos = { ...fundoDisparo };
       ids.forEach(id => {
         if (!novosFundos[id]) novosFundos[id] = "SEC"; 
@@ -391,6 +445,7 @@ export default function CadastroPage() {
   const adicionarNovaLinha = () => {
     const novaLinha = {
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
+      modalidades_aprovadas: [],
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
@@ -446,6 +501,7 @@ export default function CadastroPage() {
       const payload: any = {
         cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
         cnpj: cnpjFinal === "" ? null : cnpjFinal,
+        modalidades_aprovadas: item.modalidades_aprovadas || [],
         dt_aprovacao_comite: item.dt_aprovacao_comite || null,
         dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
         dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
@@ -484,6 +540,7 @@ export default function CadastroPage() {
         const payload: any = {
           cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
           cnpj: cnpjFinal === "" ? null : cnpjFinal,
+          modalidades_aprovadas: item.modalidades_aprovadas || [],
           dt_aprovacao_comite: item.dt_aprovacao_comite || null,
           dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
           dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
@@ -899,16 +956,31 @@ export default function CadastroPage() {
                           </td>
                         )}
 
+                        {/* 🌟 LIMITE AGREGADO */}
                         <td className="px-4 py-3 align-top pt-4">
-                          <input type="text" value={item.limite || ""} onChange={(e) => handleLimiteInputChange(index, e.target.value)} 
-                            className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-700 bg-transparent transition-all outline-none" 
-                            placeholder="R$ 0,00" />
+                          {item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0 ? (
+                            <div className="w-full p-1.5 border border-transparent rounded-md text-sm font-bold font-mono text-emerald-700 bg-emerald-50 flex items-center justify-between cursor-pointer shadow-sm hover:border-emerald-300 transition-colors" onClick={() => toggleExpandirLinha(identificadorUnico)} title="Soma das Modalidades. Clique para detalhar.">
+                              <span>{calcularTotalLimite(item)}</span>
+                              <svg className="w-3.5 h-3.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </div>
+                          ) : (
+                            <input type="text" value={item.limite || ""} onChange={(e) => handleLimiteInputChange(index, e.target.value)} 
+                              className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-700 bg-transparent transition-all outline-none" 
+                              placeholder="R$ 0,00" />
+                          )}
                         </td>
                         
+                        {/* 🌟 TAXA AGREGADA */}
                         <td className="px-4 py-3 align-top pt-4">
-                          <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} 
-                            className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-600 bg-transparent transition-all outline-none" 
-                            placeholder="0,00%" />
+                          {item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0 ? (
+                            <div className="w-full p-1.5 border border-transparent rounded-md text-[10px] font-bold font-mono text-emerald-700 bg-emerald-50 flex items-center justify-center cursor-pointer shadow-sm hover:border-emerald-300 transition-colors uppercase tracking-wider" onClick={() => toggleExpandirLinha(identificadorUnico)} title="Clique para ver o detalhamento de taxas">
+                              <span>Múltiplas</span>
+                            </div>
+                          ) : (
+                            <input type="text" value={item.taxa || ""} onChange={(e) => handleInputChange(index, "taxa", e.target.value)} 
+                              className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-bold font-mono text-slate-600 bg-transparent transition-all outline-none" 
+                              placeholder="0,00%" />
+                          )}
                         </td>
 
                         <td className="px-6 py-4 align-top">
@@ -957,6 +1029,67 @@ export default function CadastroPage() {
                               </div>
 
                               <div className="xl:col-span-9 space-y-4">
+                                
+                                {/* 🌟 NOVO PAINEL: MODALIDADES APROVADAS */}
+                                <div className="bg-emerald-50/30 p-5 rounded-xl border border-emerald-100 shadow-sm relative overflow-hidden mb-4">
+                                  <div className={`absolute top-0 left-0 w-1.5 h-full bg-emerald-500`}></div>
+                                  <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
+                                    <span className={`font-black text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-2`}>
+                                      💰 Limites e Modalidades Aprovadas
+                                    </span>
+                                    <button onClick={() => addModalidade(index)} className="text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all border bg-white text-emerald-600 border-emerald-200 hover:border-emerald-300 hover:shadow-sm">
+                                      + Add Modalidade
+                                    </button>
+                                  </div>
+                                  <div className="overflow-x-auto ml-2">
+                                    <table className="w-full text-left border-collapse">
+                                      <thead>
+                                        <tr className="bg-emerald-100/50 text-[9px] font-bold text-emerald-700 uppercase tracking-wider">
+                                          <th className="p-2 border border-emerald-100 rounded-tl-lg">Modalidade</th>
+                                          <th className="p-2 border border-emerald-100">Limite (R$)</th>
+                                          <th className="p-2 border border-emerald-100">Taxa %</th>
+                                          <th className="p-2 border border-emerald-100">Prazo Médio</th>
+                                          <th className="p-2 border border-emerald-100 text-center rounded-tr-lg">Ação</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {item.modalidades_aprovadas?.map((mod: any, modIdx: number) => (
+                                          <tr key={modIdx}>
+                                            <td className="p-1.5 border border-emerald-50">
+                                              <select value={mod.modalidade} onChange={(e) => handleModalidadeChange(index, modIdx, 'modalidade', e.target.value)} className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200">
+                                                <option value="Desconto">Desconto</option>
+                                                <option value="Comissária">Comissária</option>
+                                                <option value="Intercompany">Intercompany</option>
+                                                <option value="Fomento">Fomento M.P.</option>
+                                                <option value="Outros">Outros</option>
+                                              </select>
+                                            </td>
+                                            <td className="p-1.5 border border-emerald-50">
+                                              <input type="text" value={mod.limite} onChange={(e) => handleModalidadeChange(index, modIdx, 'limite', e.target.value)} placeholder="R$ 0,00" className="w-full p-2 border border-slate-200 rounded text-xs font-mono font-bold text-emerald-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200 bg-white" />
+                                            </td>
+                                            <td className="p-1.5 border border-emerald-50">
+                                              <input type="text" value={mod.taxa} onChange={(e) => handleModalidadeChange(index, modIdx, 'taxa', e.target.value)} placeholder="Ex: 3.5%" className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200" />
+                                            </td>
+                                            <td className="p-1.5 border border-emerald-50">
+                                              <input type="text" value={mod.prazo} onChange={(e) => handleModalidadeChange(index, modIdx, 'prazo', e.target.value)} placeholder="Ex: 30 dias" className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200" />
+                                            </td>
+                                            <td className="p-1.5 border border-emerald-50 text-center">
+                                              <button onClick={() => removeModalidade(index, modIdx)} className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded font-bold transition-colors border border-transparent hover:border-rose-200">X</button>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                        {(!item.modalidades_aprovadas || item.modalidades_aprovadas.length === 0) && (
+                                          <tr>
+                                            <td colSpan={5} className="p-4 text-center text-xs text-emerald-600/70 italic font-medium bg-emerald-50/20">
+                                              Nenhuma modalidade específica cadastrada. Usando Limite Global padrão.
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
                                 <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden">
                                   <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_sec ? "bg-slate-300" : "bg-blue-500"}`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
@@ -1071,6 +1204,7 @@ export default function CadastroPage() {
                 <div className="bg-rose-50 p-4 rounded-xl border border-rose-200">
                   <label className="block text-xs font-bold text-rose-900 mb-2 uppercase">2. Selecione os Documentos Pendentes:</label>
                   
+                  {/* Busca e Adição de Documento */}
                   <div className="flex gap-2 mb-3">
                     <input 
                       type="text" 
@@ -1091,6 +1225,7 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
+                  {/* Lista de Documentos */}
                   <div className="max-h-40 overflow-y-auto border border-rose-200 rounded-lg bg-white p-2 space-y-1">
                     {listaDocsGerais.filter(d => d.toLowerCase().includes(buscaDoc.toLowerCase())).map(doc => (
                       <label key={doc} className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${docsMarcadosParaEnvio.includes(doc) ? "bg-rose-100" : "hover:bg-slate-50"}`}>
@@ -1128,6 +1263,7 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
+                  {/* 🌟 LUPA DE PESQUISA INTERNA NO MODAL */}
                   <div className="mb-3 relative">
                     <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1141,7 +1277,6 @@ export default function CadastroPage() {
                     />
                   </div>
 
-                  {/* 🔥 CORRIGIDO: Agora o checkbox e os botões não conflitam! */}
                   <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                     {cedentesModalFiltrados.map(c => (
                       <div key={c.id} className={`flex items-center justify-between p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
