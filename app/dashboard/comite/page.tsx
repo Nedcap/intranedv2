@@ -179,7 +179,14 @@ export default function ComitePage() {
         }
       }
 
-      const { data: dataAnalise } = await queryEsteira.in("status", ["em_processamento_ia", "aguardando_docs"]).order("criado_em", { ascending: false });
+      // 🔥 CORREÇÃO: Mostra na Esteira TUDO que não for finalizado nem estiver em comitê (aberta)
+      const { data: dataAnalise } = await queryEsteira
+        .neq("status", "aberta")
+        .neq("status", "aprovado")
+        .neq("status", "reprovado")
+        .neq("status", "finalizado")
+        .order("criado_em", { ascending: false });
+        
       if (dataAnalise) setEmpresasAnalise(dataAnalise);
 
     } catch (err) {
@@ -819,7 +826,7 @@ export default function ComitePage() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {empresasAnalise.length === 0 ? (
-                  <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic font-bold">Nenhuma esteira pendente de docs ou processamento IA.</td></tr>
+                  <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic font-bold">Nenhuma análise em andamento ou pendente na esteira.</td></tr>
                 ) : (
                   empresasAnalise.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
