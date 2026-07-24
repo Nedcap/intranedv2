@@ -17,7 +17,6 @@ const formatarCNPJ = (cnpj: string) => {
   return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
 };
 
-// Configuração ORIGINAL das Etapas (Usada para gerar o Formulário Expansível)
 const STEPS_SEC = [
   { key: "dt_aprovacao_comite", label: "Aprov. Comitê" },
   { key: "dt_documentos_sec", label: "Documentos" },
@@ -68,13 +67,15 @@ const formatarDataBr = (dataString: string) => {
   return `${dia}/${mes}/${ano}`;
 };
 
-// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e insere os documentos e o fundo
+// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real
 const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "") => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
   const listaDocsFormatada = docsSelecionados.length > 0 
     ? docsSelecionados.map(d => `• ${d}`).join('\n') 
-    : "Nenhum documento especificado.";
+    : "Nenhum documento pendente.";
+
+  const nomeFundoBonito = fundo === "SEC" ? "Securitizadora" : "FIDC";
 
   return texto
     .replace(/\{empresa\}/gi, item.cedente || "Empresa Não Informada")
@@ -84,7 +85,7 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
     .replace(/\{limite\}/gi, item.limite || "R$ 0,00")
     .replace(/\{taxa\}/gi, item.taxa || "0,00%")
     .replace(/\{documentos\}/gi, listaDocsFormatada)
-    .replace(/\{fundo\}/gi, fundo); // 🌟 TAG DE FUNDO (SEC OU FIDC) AQUI!
+    .replace(/\{fundo\}/gi, nomeFundoBonito); 
 };
 
 export default function CadastroPage() {
@@ -131,12 +132,10 @@ export default function CadastroPage() {
   const carregarCadastro = useCallback(async () => {
     try {
       setCarregando(true);
-      
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
         const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo, email').eq('id', user.id).single();
-        
         let emailDoUsuario = ""; 
         
         if (perfilData) {
@@ -150,29 +149,14 @@ export default function CadastroPage() {
         }
 
         if (emailDoUsuario) {
-          const { data: integracoes, error: intError } = await supabase
-            .from("usuarios_integracoes")
-            .select("id")
-            .eq("email_usuario", emailDoUsuario)
-            .limit(1); 
-            
-          if (intError) {
-             console.error("Erro ao buscar integracao:", intError);
-          }
-            
-          if (integracoes && integracoes.length > 0) {
-            setGmailConectado(true);
-          } else {
-            console.log("⚠️ Nenhuma integração Google achada para:", emailDoUsuario);
-          }
+          const { data: integracoes } = await supabase.from("usuarios_integracoes").select("id").eq("email_usuario", emailDoUsuario).limit(1); 
+          if (integracoes && integracoes.length > 0) setGmailConectado(true);
         }
       }
 
-      // BUSCA OS TEMPLATES DO BANCO
       const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
       if (tpls) setTemplatesEmail(tpls);
 
-      // BUSCA A LISTA DE DOCUMENTOS DO BANCO (JSON)
       const { data: configDocs } = await supabase.from("crm_configuracoes").select("valor").eq("chave", "docs_homologacao").single();
       if (configDocs && configDocs.valor) {
         setListaDocsGerais(configDocs.valor as string[]);
@@ -181,7 +165,6 @@ export default function CadastroPage() {
       }
 
       const { data } = await supabase.from("cadastro_cedentes").select("*");
-      
       if (data) {
         setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
       }
@@ -206,8 +189,8 @@ export default function CadastroPage() {
     setBuscaDoc("");
     setNovoDocInput("");
     setTemplateSelecionadoId(""); 
-    setBuscaModalDisparo(""); // Reseta a busca interna do modal
-    setFundoDisparo({}); // Reseta a marcação de fundos
+    setBuscaModalDisparo(""); 
+    setFundoDisparo({}); 
 
     const filtrados = cedentes.filter(c => {
       if (c._isNovo) return false;
@@ -227,14 +210,17 @@ export default function CadastroPage() {
       if (prev.includes(id)) {
         return prev.filter(i => i !== id);
       } else {
-        // Quando seleciona, já seta "SEC" como padrão
+        // Marca e seta o default pra SEC pra não ficar vazio
         setFundoDisparo(f => ({ ...f, [id]: "SEC" }));
         return [...prev, id];
       }
     });
   };
 
-  // Filtra as opções no modal baseadas na busca interna
+  const setarFundoDoDisparo = (id: string, fundo: "SEC" | "FIDC") => {
+    setFundoDisparo(prev => ({ ...prev, [id]: fundo }));
+  };
+
   const cedentesModalFiltrados = useMemo(() => {
     return cedentesDisponiveis.filter(c => 
       c.cedente.toLowerCase().includes(buscaModalDisparo.toLowerCase()) ||
@@ -251,7 +237,7 @@ export default function CadastroPage() {
       
       const novosFundos = { ...fundoDisparo };
       ids.forEach(id => {
-        if (!novosFundos[id]) novosFundos[id] = "SEC"; // Marca como SEC os que não tinham fundo atrelado
+        if (!novosFundos[id]) novosFundos[id] = "SEC"; 
       });
       setFundoDisparo(novosFundos);
     }
@@ -309,10 +295,7 @@ export default function CadastroPage() {
           continue; 
         }
 
-        // 🌟 IDENTIFICA O FUNDO ESCOLHIDO PARA ESTE ITEM
         const fundoSelecionado = fundoDisparo[item.id] || "SEC";
-
-        // 🌟 APLICA AS TAGS DINÂMICAS (DOCUMENTOS + FUNDO SEC/FIDC)
         const assuntoFinal = aplicarTagsDinamicas(templateAtivo.assunto, item, docsMarcadosParaEnvio, fundoSelecionado);
         const textoFinal = aplicarTagsDinamicas(templateAtivo.corpo, item, docsMarcadosParaEnvio, fundoSelecionado);
 
@@ -342,16 +325,10 @@ export default function CadastroPage() {
     setEnviandoLote(false);
   };
 
-
-  // ================= RESTANTE DAS FUNÇÕES ORIGINAIS =================
   const buscarAprovadasDoComite = async () => {
     try {
       setSincronizando(true);
-      
-      const { data: analises, error: errAnalises } = await supabase
-        .from("analises")
-        .select("empresa_nome, comercial, status, criado_em, responsavel_id, cnpj");
-      
+      const { data: analises, error: errAnalises } = await supabase.from("analises").select("empresa_nome, comercial, status, criado_em, responsavel_id, cnpj");
       if (errAnalises) throw errAnalises;
       if (!analises) return;
 
@@ -365,16 +342,13 @@ export default function CadastroPage() {
 
       for (const analise of aprovadas) {
         const nomeLimpo = limparNome(analise.empresa_nome).toUpperCase();
-        
         if (!nomesNaEsteira.has(nomeLimpo)) {
            const dtComiteRaw = analise.criado_em;
            const dtComiteFormatada = dtComiteRaw ? dtComiteRaw.split('T')[0] : null;
            const cnpjLimpo = analise.cnpj ? analise.cnpj.replace(/\D/g, "") : null;
 
            novosCedentes.push({
-             cedente: nomeLimpo,
-             cnpj: cnpjLimpo,
-             comercial: analise.comercial,
+             cedente: nomeLimpo, cnpj: cnpjLimpo, comercial: analise.comercial,
              dt_aprovacao_comite: dtComiteFormatada,
              atualizado_em: new Date().toISOString(),
              responsavel_id: analise.responsavel_id || usuarioAtual?.id 
@@ -386,18 +360,12 @@ export default function CadastroPage() {
       if (novosCedentes.length > 0) {
         const { error } = await supabase.from("cadastro_cedentes").insert(novosCedentes);
         if (error) throw error;
-        alert(`🎉 Sucesso! ${novosCedentes.length} novas empresas aprovadas no comitê foram integradas à Esteira.`);
+        alert(`🎉 Sucesso! ${novosCedentes.length} novas empresas aprovadas integradas.`);
         await carregarCadastro();
       } else {
-        alert("💡 A Esteira já está atualizada! Nenhuma nova empresa aprovada no comitê para integrar.");
+        alert("💡 A Esteira já está atualizada!");
       }
-
-    } catch (err: any) {
-      console.error(err);
-      alert(`❌ Erro ao buscar aprovações do comitê: ${err.message}`);
-    } finally {
-      setSincronizando(false);
-    }
+    } catch (err: any) { alert(`❌ Erro: ${err.message}`); } finally { setSincronizando(false); }
   };
 
   const handleInputChange = (index: number, campo: string, valor: any) => {
@@ -414,10 +382,7 @@ export default function CadastroPage() {
 
   const handleLimiteInputChange = (index: number, valorRaw: string) => {
     const apenasNumeros = valorRaw.replace(/\D/g, "");
-    if (!apenasNumeros) {
-      handleInputChange(index, "limite", "");
-      return;
-    }
+    if (!apenasNumeros) return handleInputChange(index, "limite", "");
     const valorNumerico = parseFloat(apenasNumeros) / 100;
     const formatado = valorNumerico.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
     handleInputChange(index, "limite", formatado);
@@ -425,8 +390,7 @@ export default function CadastroPage() {
 
   const adicionarNovaLinha = () => {
     const novaLinha = {
-      cedente: "", cnpj: null, limite: "", taxa: "", obs: "",
-      dt_aprovacao_comite: null,
+      cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
@@ -442,27 +406,18 @@ export default function CadastroPage() {
   };
 
   const excluirCedente = async (id: string | undefined, index: number, nome: string) => {
-    const confirmacao = window.confirm(`⚠️ TEM CERTEZA?\n\nVocê está prestes a excluir permanentemente o cadastro de:\n"${nome || "Novo Cedente"}"\n\nEssa ação não pode ser desfeita.`);
+    const confirmacao = window.confirm(`⚠️ TEM CERTEZA?\nExcluir "${nome || "Novo Cedente"}"?\nEssa ação não tem volta.`);
     if (!confirmacao) return;
 
     try {
       setCarregando(true);
-      if (id) {
-        const { error } = await supabase.from("cadastro_cedentes").delete().eq("id", id);
-        if (error) throw error;
-      }
-      
+      if (id) await supabase.from("cadastro_cedentes").delete().eq("id", id);
       const novos = [...cedentes];
       novos.splice(index, 1);
       setCedentes(novos);
       setCedentesEmEdicaoDeNome({});
       setLinhasExpandidas({});
-      
-    } catch (err: any) {
-      alert(`❌ Erro ao excluir: ${err.message}`);
-    } finally {
-      setCarregando(false);
-    }
+    } catch (err: any) { alert(`❌ Erro: ${err.message}`); } finally { setCarregando(false); }
   };
 
   const toggleEditarNome = (idOuIndex: string) => setCedentesEmEdicaoDeNome(prev => ({ ...prev, [idOuIndex]: !prev[idOuIndex] }));
@@ -472,33 +427,22 @@ export default function CadastroPage() {
   const handleExpandirTudo = () => {
     const novoEstado: Record<string, boolean> = {};
     const jaEstaoTodosAbertos = Object.keys(linhasExpandidas).length === cedentesProcessados.length;
-    if (!jaEstaoTodosAbertos) {
-      cedentesProcessados.forEach((c, idx) => novoEstado[c.id || `novo-${idx}`] = true);
-    }
+    if (!jaEstaoTodosAbertos) cedentesProcessados.forEach((c, idx) => novoEstado[c.id || `novo-${idx}`] = true);
     setLinhasExpandidas(novoEstado);
   };
 
   const copiarCNPJ = (cnpjRaw: string, idUnico: string) => {
-    const cnpjFormatado = formatarCNPJ(cnpjRaw);
-    navigator.clipboard.writeText(cnpjFormatado);
-    
+    navigator.clipboard.writeText(formatarCNPJ(cnpjRaw));
     setCnpjsCopiados(prev => ({ ...prev, [idUnico]: true }));
-    setTimeout(() => {
-      setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false }));
-    }, 2000);
+    setTimeout(() => setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false })), 2000);
   };
 
   const salvarLinha = async (item: any) => {
     try {
       setSalvando(true);
-      if (item._isNovo && (!item.cedente || item.cedente.trim() === "")) {
-        alert("⚠️ Preencha o nome do Cedente antes de salvar!");
-        setSalvando(false);
-        return;
-      }
+      if (item._isNovo && (!item.cedente || item.cedente.trim() === "")) return alert("⚠️ Preencha o nome do Cedente!");
       
       const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
-
       const payload: any = {
         cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
         cnpj: cnpjFinal === "" ? null : cnpjFinal,
@@ -518,42 +462,25 @@ export default function CadastroPage() {
 
       const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
       if (error) {
-        if (error.code === '23505' && error.message.includes('cnpj')) {
-           throw new Error("Este CNPJ já está cadastrado em outro cedente.");
-        }
+        if (error.code === '23505' && error.message.includes('cnpj')) throw new Error("CNPJ já cadastrado.");
         throw error;
       }
-      
       await carregarCadastro();
-      alert(`✅ Cadastro salvo com sucesso!`);
-      
-    } catch (err: any) { 
-      alert(`❌ Erro ao salvar: ${err.message}`); 
-    } finally { 
-      setSalvando(false); 
-    }
+      alert(`✅ Salvo!`);
+    } catch (err: any) { alert(`❌ Erro: ${err.message}`); } finally { setSalvando(false); }
   };
 
   const salvarAlteracoes = async () => {
     try {
       setSalvando(true);
-      const linhasInvalidas = cedentes.filter(c => c._isNovo && (!c.cedente || c.cedente.trim() === ""));
-      if (linhasInvalidas.length > 0) {
-        alert("⚠️ Preencha o nome do Cedente nas novas linhas antes de salvar!");
-        setSalvando(false);
-        return;
-      }
+      const invalidas = cedentes.filter(c => c._isNovo && (!c.cedente || c.cedente.trim() === ""));
+      if (invalidas.length > 0) return alert("⚠️ Preencha o nome nas novas linhas!");
 
-      const alvosEnvio = cedentes.filter(c => c._isEditado || c._isNovo);
-      if (alvosEnvio.length === 0) {
-        alert("💡 Nenhuma alteração pendente para salvar.");
-        setSalvando(false);
-        return;
-      }
+      const alvos = cedentes.filter(c => c._isEditado || c._isNovo);
+      if (alvos.length === 0) return alert("💡 Nenhuma alteração pendente.");
 
-      for (const item of alvosEnvio) {
+      for (const item of alvos) {
         const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
-        
         const payload: any = {
           cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
           cnpj: cnpjFinal === "" ? null : cnpjFinal,
@@ -567,50 +494,33 @@ export default function CadastroPage() {
           nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
           comercial: item.comercial, atualizado_em: new Date().toISOString()
         };
-
         if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
         if (item.id) payload.id = item.id;
         const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
-        if (error) {
-          if (error.code === '23505' && error.message.includes('cnpj')) {
-            throw new Error(`O CNPJ de ${item.cedente} já está sendo usado por outro cadastro.`);
-          }
-          throw error;
-        }
+        if (error) throw error;
       }
       
-      alert("🎉 Alterações gravadas com sucesso!");
+      alert("🎉 Tudo gravado!");
       setCedentesEmEdicaoDeNome({});
       setLinhasExpandidas({});
       await carregarCadastro();
-    } catch (err: any) { 
-      alert(`❌ Erro ao salvar: ${err.message}`); 
-    } finally { 
-      setSalvando(false); 
-    }
+    } catch (err: any) { alert(`❌ Erro: ${err.message}`); } finally { setSalvando(false); }
   };
 
   const analiseEsteira = useMemo(() => {
     let pendenteEnvio = 0, aguardandoAssinatura = 0, emAndamento = 0, aptos = 0, somaDiasSla = 0, totalContratosAssinados = 0;
-
     cedentes.forEach(c => {
       const isApto = c.dt_apto_sec || c.dt_apto_fidc;
       if (isApto) aptos++;
       else {
-        const isEmAndamento = 
-          (!c.nao_opera_sec && c.dt_assinatura_contrato_sec && !c.dt_apto_sec) || 
-          (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc && !c.dt_apto_fidc);
-
-        if (isEmAndamento) {
-          emAndamento++;
-        } else if (
+        const isEmAndamento = (!c.nao_opera_sec && c.dt_assinatura_contrato_sec && !c.dt_apto_sec) || (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc && !c.dt_apto_fidc);
+        if (isEmAndamento) emAndamento++;
+        else if (
           (!c.nao_opera_sec && c.dt_geracao_contrato_sec && !c.dt_assinatura_contrato_sec) || 
           (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc && !c.dt_assinatura_contrato_fidc)
         ) {
           aguardandoAssinatura++;
-        } else if (!c.dt_aprovacao_comite && (!c.nao_opera_sec || !c.nao_opera_fidc)) {
-          pendenteEnvio++;
-        }
+        } else if (!c.dt_aprovacao_comite && (!c.nao_opera_sec || !c.nao_opera_fidc)) pendenteEnvio++;
       }
 
       if (c.dt_aprovacao_comite && (c.dt_assinatura_contrato_sec || c.dt_assinatura_contrato_fidc)) {
@@ -625,12 +535,9 @@ export default function CadastroPage() {
   }, [cedentes]);
 
   const getStatusWeight = (c: any) => {
-    const isApto = c.dt_apto_sec || c.dt_apto_fidc;
-    if (isApto) return 4;
-    const isEmAndamento = (!c.nao_opera_sec && c.dt_assinatura_contrato_sec) || (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc);
-    if (isEmAndamento) return 3;
-    const isAguardandoAssinatura = (!c.nao_opera_sec && c.dt_geracao_contrato_sec) || (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc);
-    if (isAguardandoAssinatura) return 2;
+    if (c.dt_apto_sec || c.dt_apto_fidc) return 4;
+    if ((!c.nao_opera_sec && c.dt_assinatura_contrato_sec) || (!c.nao_opera_fidc && c.dt_assinatura_contrato_fidc)) return 3;
+    if ((!c.nao_opera_sec && c.dt_geracao_contrato_sec) || (!c.nao_opera_fidc && c.dt_geracao_contrato_fidc)) return 2;
     return 1;
   };
 
@@ -653,10 +560,7 @@ export default function CadastroPage() {
     });
 
     resultado.sort((a: any, b: any) => {
-      if (sortConfig.key === "status") {
-        return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
-      }
-      
+      if (sortConfig.key === "status") return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
       let valA = a[sortConfig.key], valB = b[sortConfig.key];
       if (sortConfig.key === "limite") {
         valA = parseFloat(String(valA || "").replace(/\D/g, "")) || 0;
@@ -722,13 +626,9 @@ export default function CadastroPage() {
                 {isCurrent && !naoOpera && <div className={`absolute w-8 h-8 rounded-full animate-ping opacity-30 ${currentPulseBg}`} />}
                 <div className={circleClasses}>
                   {isNA ? (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   ) : isDone ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                   ) : isCurrent ? (
                     <div className={`w-2.5 h-2.5 rounded-full ${naoOpera ? "bg-slate-300" : `animate-pulse ${currentPulseBg}`}`} />
                   ) : null}
@@ -761,14 +661,6 @@ export default function CadastroPage() {
       
       <div className="max-w-[1600px] mx-auto space-y-8">
         
-        {/* OVERLAY DE LOADING GLOBAL */}
-        {statusTexto && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex flex-col items-center justify-center font-bold text-white text-sm gap-4 transition-all">
-            <div className="w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
-            <span className="tracking-wide uppercase text-xs">{statusTexto}</span>
-          </div>
-        )}
-
         {/* HEADER MODERNO */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
           <div>
@@ -852,7 +744,7 @@ export default function CadastroPage() {
           </div>
         </div>
 
-        {/* =============== NOVOS BOTÕES DE DISPARO EM LOTE =============== */}
+        {/* =============== BOTÕES DE DISPARO EM LOTE =============== */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="bg-emerald-100 text-emerald-700 p-1.5 rounded-lg">
@@ -875,33 +767,17 @@ export default function CadastroPage() {
               </a>
             ) : (
               <>
-                <button 
-                  onClick={() => abrirModalDisparo("PENDENCIA")}
-                  className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
-                >
-                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
-                  Avisar Pendência (Docs)
+                <button onClick={() => abrirModalDisparo("PENDENCIA")} className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div> Avisar Pendência (Docs)
                 </button>
-                <button 
-                  onClick={() => abrirModalDisparo("ASSINATURA")}
-                  className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
-                >
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                  Avisar Assinaturas
+                <button onClick={() => abrirModalDisparo("ASSINATURA")} className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div> Avisar Assinaturas
                 </button>
-                <button 
-                  onClick={() => abrirModalDisparo("GESTORA")}
-                  className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
-                >
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
-                  Avisar FIDC (Gestora)
+                <button onClick={() => abrirModalDisparo("GESTORA")} className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Avisar FIDC (Gestora)
                 </button>
-                <button 
-                  onClick={() => abrirModalDisparo("APTO")}
-                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5"
-                >
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                  Avisar Aptos a Operar
+                <button onClick={() => abrirModalDisparo("APTO")} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Avisar Aptos a Operar
                 </button>
               </>
             )}
@@ -920,14 +796,9 @@ export default function CadastroPage() {
             onChange={(e) => setBusca(e.target.value)}
             className="flex-1 bg-transparent border-none outline-none text-slate-700 font-medium p-2"
           />
-          {busca && (
-            <button onClick={() => setBusca("")} className="mr-3 text-slate-400 hover:text-slate-600">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          )}
         </div>
 
-        {/* ÁREA DA TABELA */}
+        {/* ÁREA DA TABELA DE CEDENTES */}
         <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto pb-6">
             <table className="w-full text-left border-collapse min-w-[1300px]">
@@ -981,7 +852,6 @@ export default function CadastroPage() {
                           </button>
                         </td>
                         
-                        {/* COLUNA DO CEDENTE + CNPJ */}
                         <td className="px-4 py-3 align-top">
                           {isEditandoNome ? (
                             <div className="flex flex-col gap-2">
@@ -1007,28 +877,15 @@ export default function CadastroPage() {
                                 </button>
                               </div>
                               
-                              {/* EXIBIÇÃO DO CNPJ FORMATADO */}
                               {item.cnpj ? (
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[11px] font-mono font-semibold text-slate-500 select-all cursor-text" title="Duplo clique para selecionar">
-                                    {formatarCNPJ(item.cnpj)}
-                                  </span>
-                                  <button 
-                                    onClick={() => copiarCNPJ(item.cnpj, identificadorUnico)} 
-                                    className={`p-1 rounded transition-colors ${cnpjsCopiados[identificadorUnico] ? "text-emerald-500 bg-emerald-50" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`}
-                                    title="Copiar CNPJ"
-                                  >
-                                    {cnpjsCopiados[identificadorUnico] ? (
-                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                                    ) : (
-                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                                    )}
+                                  <span className="text-[11px] font-mono font-semibold text-slate-500 select-all cursor-text" title="Duplo clique para selecionar">{formatarCNPJ(item.cnpj)}</span>
+                                  <button onClick={() => copiarCNPJ(item.cnpj, identificadorUnico)} className={`p-1 rounded transition-colors ${cnpjsCopiados[identificadorUnico] ? "text-emerald-500 bg-emerald-50" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`} title="Copiar CNPJ">
+                                    {cnpjsCopiados[identificadorUnico] ? <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
                                   </button>
                                 </div>
                               ) : (
-                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="text-[10px] text-slate-400 hover:text-indigo-600 hover:border-indigo-400 text-left border border-dashed border-slate-300 rounded px-1.5 py-0.5 w-max transition-colors mt-0.5">
-                                  + Add CNPJ
-                                </button>
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="text-[10px] text-slate-400 hover:text-indigo-600 hover:border-indigo-400 text-left border border-dashed border-slate-300 rounded px-1.5 py-0.5 w-max transition-colors mt-0.5">+ Add CNPJ</button>
                               )}
                             </div>
                           )}
@@ -1075,11 +932,7 @@ export default function CadastroPage() {
                               
                               <div className="xl:col-span-3 space-y-4">
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
-                                  <button
-                                    onClick={() => excluirCedente(item.id, index, item.cedente)}
-                                    className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"
-                                    title="Excluir Cedente"
-                                  >
+                                  <button onClick={() => excluirCedente(item.id, index, item.cedente)} className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors" title="Excluir Cedente">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                   </button>
                                   
@@ -1108,10 +961,7 @@ export default function CadastroPage() {
                                   <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_sec ? "bg-slate-300" : "bg-blue-500"}`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
                                     <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_sec ? "text-slate-400 line-through" : "text-blue-800"}`}>🏦 Fluxo Securitizadora</span>
-                                    <button 
-                                      onClick={() => handleInputChange(index, "nao_opera_sec", !item.nao_opera_sec)} 
-                                      className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_sec ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}
-                                    >
+                                    <button onClick={() => handleInputChange(index, "nao_opera_sec", !item.nao_opera_sec)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_sec ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
                                       {item.nao_opera_sec ? "🚫 NÃO OPERA (INATIVO)" : "Desativar Securitizadora"}
                                     </button>
                                   </div>
@@ -1130,10 +980,7 @@ export default function CadastroPage() {
                                   <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_fidc ? "bg-slate-300" : "bg-purple-500"}`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
                                     <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_fidc ? "text-slate-400 line-through" : "text-purple-800"}`}>🔮 Fluxo FIDC</span>
-                                    <button 
-                                      onClick={() => handleInputChange(index, "nao_opera_fidc", !item.nao_opera_fidc)} 
-                                      className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_fidc ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}
-                                    >
+                                    <button onClick={() => handleInputChange(index, "nao_opera_fidc", !item.nao_opera_fidc)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_fidc ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
                                       {item.nao_opera_fidc ? "🚫 NÃO OPERA (INATIVO)" : "Desativar FIDC"}
                                     </button>
                                   </div>
@@ -1224,7 +1071,6 @@ export default function CadastroPage() {
                 <div className="bg-rose-50 p-4 rounded-xl border border-rose-200">
                   <label className="block text-xs font-bold text-rose-900 mb-2 uppercase">2. Selecione os Documentos Pendentes:</label>
                   
-                  {/* Busca e Adição de Documento */}
                   <div className="flex gap-2 mb-3">
                     <input 
                       type="text" 
@@ -1245,7 +1091,6 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
-                  {/* Lista de Documentos */}
                   <div className="max-h-40 overflow-y-auto border border-rose-200 rounded-lg bg-white p-2 space-y-1">
                     {listaDocsGerais.filter(d => d.toLowerCase().includes(buscaDoc.toLowerCase())).map(doc => (
                       <label key={doc} className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${docsMarcadosParaEnvio.includes(doc) ? "bg-rose-100" : "hover:bg-slate-50"}`}>
@@ -1283,7 +1128,6 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
-                  {/* 🌟 LUPA DE PESQUISA INTERNA NO MODAL */}
                   <div className="mb-3 relative">
                     <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1297,35 +1141,41 @@ export default function CadastroPage() {
                     />
                   </div>
 
+                  {/* 🔥 CORRIGIDO: Agora o checkbox e os botões não conflitam! */}
                   <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                     {cedentesModalFiltrados.map(c => (
                       <div key={c.id} className={`flex items-center justify-between p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
-                        <label className="flex items-center gap-3 cursor-pointer flex-1">
+                        
+                        {/* Area de clique restrita só ao checkbox e nome */}
+                        <div 
+                          className="flex items-center gap-3 cursor-pointer flex-1"
+                          onClick={() => toggleSelecaoDisparo(c.id)}
+                        >
                           <input 
                             type="checkbox" 
                             checked={selecionadosParaDisparo.includes(c.id)} 
-                            onChange={() => toggleSelecaoDisparo(c.id)} 
+                            readOnly
                             disabled={enviandoLote}
-                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer pointer-events-none"
                           />
                           <div>
                             <p className="font-bold text-sm text-slate-800">{c.cedente}</p>
                             <p className="text-[10px] text-slate-500 font-medium">Comercial: {c.comercial || "Não definido"}</p>
                           </div>
-                        </label>
+                        </div>
                         
-                        {/* 🌟 BOTÃO TOGGLE SEC/FIDC */}
+                        {/* Botões do Fundo protegidos do clique da linha */}
                         {selecionadosParaDisparo.includes(c.id) && (
                           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-inner ml-2 shrink-0">
                             <button 
-                              onClick={() => setFundoDisparo(prev => ({...prev, [c.id]: "SEC"}))}
+                              onClick={() => setarFundoDoDisparo(c.id, "SEC")}
                               disabled={enviandoLote}
                               className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
                             >
                               SEC
                             </button>
                             <button 
-                              onClick={() => setFundoDisparo(prev => ({...prev, [c.id]: "FIDC"}))}
+                              onClick={() => setarFundoDoDisparo(c.id, "FIDC")}
                               disabled={enviandoLote}
                               className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
                             >
