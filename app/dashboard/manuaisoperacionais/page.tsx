@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { 
   BookOpen, Plus, Settings, FileText, AlertTriangle, 
   ListOrdered, Type, ArrowLeft, Save, Trash2, CheckCircle2,
-  Image as ImageIcon, ChevronUp, ChevronDown, X
+  Image as ImageIcon, ChevronUp, ChevronDown, X, Eye, Lock
 } from "lucide-react";
 import { supabase } from "@/lib/supabase"; // ⚠️ AJUSTE AQUI SE SEU CAMINHO DO SUPABASE FOR DIFERENTE
 
@@ -21,25 +21,29 @@ interface Bloco {
 }
 
 // ============================================================================
-// COMPONENTE PRINCIPAL (DASHBOARD & EDITOR)
+// COMPONENTE PRINCIPAL (DASHBOARD & EDITOR/VIEWER)
 // ============================================================================
 export default function ManuaisOperacionaisPage() {
   const [view, setView] = useState<"list" | "editor">("list");
   
+  // Usuário Atual
+  const [usuarioAtual, setUsuarioAtual] = useState<any>(null);
+
   // Estados do Banco de Dados
   const [manuais, setManuais] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
-  // Estados do Manual Ativo (Editor)
+  // Estados do Manual Ativo (Editor/Viewer)
   const [manualIdAtivo, setManualIdAtivo] = useState<string | null>(null);
   const [manualTitulo, setManualTitulo] = useState<string>("Novo Manual Operacional");
   const [manualTipo, setManualTipo] = useState<string>("Manual");
   const [manualStatus, setManualStatus] = useState<string>("Em Revisão");
+  const [manualAutor, setManualAutor] = useState<string>("");
   const [blocos, setBlocos] = useState<Bloco[]>([]);
 
   // ============================================================================
-  // INTEGRAÇÃO SUPABASE (FETCH E SAVE)
+  // INTEGRAÇÃO SUPABASE E SESSÃO
   // ============================================================================
   const carregarManuais = async () => {
     setCarregando(true);
@@ -59,6 +63,11 @@ export default function ManuaisOperacionaisPage() {
   };
 
   useEffect(() => {
+    // Pega o usuário na primeira carga
+    const userStr = localStorage.getItem("intraned_user");
+    if (userStr) {
+      setUsuarioAtual(JSON.parse(userStr));
+    }
     carregarManuais();
   }, []);
 
@@ -67,20 +76,14 @@ export default function ManuaisOperacionaisPage() {
     setSalvando(true);
 
     try {
-      // Pega o nome do usuário ativo (opcional, ajustado para o seu Auth)
-      let autor = "Sistema";
-      const userStr = localStorage.getItem("intraned_user");
-      if (userStr) {
-        const u = JSON.parse(userStr);
-        autor = u.nome || "Sistema";
-      }
+      const autor = usuarioAtual?.nome || "Sistema";
 
       const payload = {
         titulo: manualTitulo,
         tipo: manualTipo,
         status: manualStatus,
         blocos: blocos, // Vai como JSONB pro banco
-        autor_nome: autor,
+        autor_nome: manualIdAtivo ? manualAutor : autor, // Mantém o autor original se estiver editando
         updated_at: new Date().toISOString()
       };
 
@@ -101,6 +104,7 @@ export default function ManuaisOperacionaisPage() {
           .single();
         if (error) throw error;
         setManualIdAtivo(data.id);
+        setManualAutor(autor); // Atualiza para liberar edição imediata
         alert("Novo manual criado com sucesso!");
       }
 
@@ -114,6 +118,22 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
+  // LÓGICA DE PERMISSÃO E FILTROS
+  // ============================================================================
+  
+  // 1. O usuário tem poder de edição se for novo, se for o criador ou se for Master
+  const isMaster = String(usuarioAtual?.cargo || "").toLowerCase() === "master";
+  const canEdit = !manualIdAtivo || manualAutor === usuarioAtual?.nome || isMaster;
+
+  // 2. Só aparece no Dashboard se for Ativo, se ele for o dono ou Master
+  const manuaisPermitidos = manuais.filter(m => {
+    if (m.status === 'Ativo') return true;
+    if (m.autor_nome === usuarioAtual?.nome) return true;
+    if (isMaster) return true;
+    return false;
+  });
+
+  // ============================================================================
   // AÇÕES DE ABRIR E CRIAR
   // ============================================================================
   const abrirManual = (manual: any) => {
@@ -121,6 +141,7 @@ export default function ManuaisOperacionaisPage() {
     setManualTitulo(manual.titulo);
     setManualTipo(manual.tipo || "Manual");
     setManualStatus(manual.status || "Em Revisão");
+    setManualAutor(manual.autor_nome || "");
     
     // Garante que se o JSONB vier null, vira array vazio
     const blocosDoBanco = Array.isArray(manual.blocos) ? manual.blocos : [];
@@ -134,6 +155,7 @@ export default function ManuaisOperacionaisPage() {
     setManualTitulo("Novo Manual Operacional");
     setManualTipo("Manual");
     setManualStatus("Em Revisão");
+    setManualAutor(usuarioAtual?.nome || "Sistema");
     setBlocos([]);
     setView("editor");
   };
@@ -145,14 +167,12 @@ export default function ManuaisOperacionaisPage() {
     const novoBloco: Bloco = {
       id: Math.random().toString(36).substr(2, 9),
       tipo,
-      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo é array
+      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo começa com 1 input vazio
     };
     setBlocos([...blocos, novoBloco]);
   };
 
-  const removerBloco = (id: string) => {
-    setBlocos(blocos.filter((b) => b.id !== id));
-  };
+  const removerBloco = (id: string) => setBlocos(blocos.filter((b) => b.id !== id));
 
   const moverBloco = (index: number, direcao: 'up' | 'down') => {
     if (direcao === 'up' && index === 0) return;
@@ -172,7 +192,6 @@ export default function ManuaisOperacionaisPage() {
     setBlocos(blocos.map(b => b.id === id ? { ...b, conteudo: novoConteudo } : b));
   };
 
-  // Funções específicas para o Passo a Passo (Array interno)
   const atualizarPasso = (blocoId: string, indexPasso: number, valor: string) => {
     setBlocos(blocos.map(b => {
       if (b.id === blocoId) {
@@ -204,20 +223,17 @@ export default function ManuaisOperacionaisPage() {
     }));
   };
 
-  // Transforma arquivo em Base64 para salvar direto no JSONB
   const handleImageUpload = (blocoId: string, file: File) => {
     if (file.size > 5 * 1024 * 1024) return alert("A imagem não pode passar de 5MB.");
     const reader = new FileReader();
-    reader.onloadend = () => {
-      atualizarConteudoBloco(blocoId, reader.result); // Salva o Base64 na key conteudo
-    };
+    reader.onloadend = () => atualizarConteudoBloco(blocoId, reader.result); 
     reader.readAsDataURL(file);
   };
 
   // ============================================================================
-  // RENDERIZAÇÃO DOS BLOCOS (ESTÉTICA DO SEU DOSSIÊ)
+  // RENDERIZAÇÃO: MODO EDIÇÃO
   // ============================================================================
-  const renderizarBloco = (bloco: Bloco) => {
+  const renderizarBlocoEdit = (bloco: Bloco) => {
     switch (bloco.tipo) {
       case "titulo":
         return (
@@ -313,12 +329,7 @@ export default function ManuaisOperacionaisPage() {
             
             {bloco.conteudo ? (
               <div className="relative rounded-lg overflow-hidden border border-slate-200 group/img">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={bloco.conteudo} 
-                  alt="Print Anexado" 
-                  className="w-full h-auto object-contain max-h-[500px] bg-slate-200" 
-                />
+                <img src={bloco.conteudo} alt="Print Anexado" className="w-full h-auto object-contain max-h-[500px] bg-slate-200" />
                 <button 
                   onClick={() => atualizarConteudoBloco(bloco.id, "")}
                   className="absolute top-2 right-2 bg-slate-900/80 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover/img:opacity-100 shadow-lg"
@@ -332,9 +343,7 @@ export default function ManuaisOperacionaisPage() {
                 <span className="text-sm font-bold text-slate-600 group-hover/upload:text-blue-600">Clique para fazer upload do print</span>
                 <span className="text-xs text-slate-400 mt-1">PNG, JPG ou WEBP (Max 5MB)</span>
                 <input 
-                  type="file" 
-                  accept="image/*"
-                  className="hidden"
+                  type="file" accept="image/*" className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) handleImageUpload(bloco.id, file);
@@ -350,12 +359,63 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
+  // RENDERIZAÇÃO: MODO VISUALIZAÇÃO PREMIUM (SOMENTE LEITURA)
+  // ============================================================================
+  const renderizarBlocoView = (bloco: Bloco) => {
+    switch (bloco.tipo) {
+      case "titulo":
+        return <h2 className="text-2xl font-black text-blue-900 uppercase tracking-tight border-l-4 border-blue-600 pl-4 py-1 mb-6 mt-10">{bloco.conteudo}</h2>;
+      
+      case "texto":
+        return <div className="text-[15px] leading-relaxed text-slate-700 mb-6 whitespace-pre-wrap">{bloco.conteudo}</div>;
+
+      case "alerta":
+        return (
+          <div className="bg-red-50 p-6 rounded-xl border border-red-200 shadow-sm mb-8 border-l-4 border-l-red-500">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <div className="text-[11px] font-black text-red-600 uppercase tracking-widest">Atenção Crítica</div>
+            </div>
+            <div className="text-[15px] font-medium text-red-900 leading-relaxed whitespace-pre-wrap">{bloco.conteudo}</div>
+          </div>
+        );
+
+      case "passo-a-passo":
+        const passosView = Array.isArray(bloco.conteudo) ? bloco.conteudo : [];
+        if (passosView.length === 0 || !passosView[0]) return null;
+        return (
+          <div className="mb-8 mt-4">
+            <div className="flex flex-col gap-4">
+              {passosView.map((textoPasso: string, index: number) => (
+                <div key={index} className="flex gap-5 items-start bg-slate-50 p-5 rounded-xl border border-slate-200">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white font-black flex items-center justify-center font-mono text-sm shadow-md">
+                    {index + 1}
+                  </div>
+                  <div className="mt-1 text-[15px] text-slate-700 font-medium leading-relaxed">{textoPasso}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case "imagem":
+        if (!bloco.conteudo) return null;
+        return (
+          <div className="mb-8 bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
+            <img src={bloco.conteudo} alt="Evidência" className="w-auto h-auto max-h-[600px] object-contain rounded-lg shadow-sm border border-slate-300" />
+          </div>
+        );
+      
+      default: return null;
+    }
+  };
+
+  // ============================================================================
   // TELA 1: LISTAGEM DE MANUAIS (DASHBOARD)
   // ============================================================================
   if (view === "list") {
     return (
       <div className="p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter']">
-        {/* Header Premium */}
         <div className="bg-gradient-to-br from-blue-900 to-blue-600 p-8 flex flex-col md:flex-row justify-between items-start md:items-center rounded-2xl shadow-[0_10px_30px_-5px_rgba(37,99,235,0.3)] mb-10 gap-6">
           <div>
             <h1 className="text-3xl font-black text-white uppercase tracking-tight mb-2 flex items-center gap-3">
@@ -363,56 +423,67 @@ export default function ManuaisOperacionaisPage() {
               Base de Conhecimento Operacional
             </h1>
             <p className="text-blue-100 font-medium opacity-90 text-sm">
-              Gerencie políticas, fluxos de crédito e manuais internos da plataforma.
+              Consulte políticas, manuais corporativos e processos operacionais da plataforma.
             </p>
           </div>
           <button 
             onClick={criarNovoManual}
             className="bg-white text-blue-900 hover:bg-slate-100 px-6 py-3 rounded-lg font-black uppercase text-xs tracking-wider shadow-lg transition-transform hover:-translate-y-0.5 flex items-center gap-2"
           >
-            <Plus className="w-4 h-4" /> Criar Novo Dossiê / Manual
+            <Plus className="w-4 h-4" /> Criar Novo Documento
           </button>
         </div>
 
         <div className="mb-6 flex items-center gap-2 border-b-2 border-slate-200 pb-3">
           <div className="w-1.5 h-6 bg-blue-600 rounded-full"></div>
-          <h2 className="text-xl font-black text-blue-900 uppercase tracking-wide">Documentos Homologados</h2>
+          <h2 className="text-xl font-black text-blue-900 uppercase tracking-wide">Biblioteca Oficial</h2>
         </div>
 
         {carregando ? (
-          <div className="text-center py-20 text-slate-400 font-bold animate-pulse">Carregando manuais do banco de dados...</div>
-        ) : manuais.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-xl border border-slate-200 text-slate-500 shadow-sm">
-            Nenhum documento encontrado. Crie o primeiro!
+          <div className="text-center py-20 text-slate-400 font-bold animate-pulse">Carregando documentação...</div>
+        ) : manuaisPermitidos.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-xl border border-slate-200 text-slate-500 shadow-sm flex flex-col items-center justify-center">
+            <Lock className="w-10 h-10 text-slate-300 mb-3" />
+            <p className="font-bold">Nenhum manual liberado para o seu perfil no momento.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {manuais.map((manual) => (
-              <div 
-                key={manual.id} 
-                onClick={() => abrirManual(manual)}
-                className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex justify-between items-start mb-4">
-                    <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
-                      manual.tipo === 'Política' ? 'bg-yellow-100 text-yellow-800' : 
-                      manual.tipo === 'Processo' ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {manual.tipo}
-                    </span>
-                    <Settings className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+            {manuaisPermitidos.map((manual) => {
+              const isAdminDesteManual = manual.autor_nome === usuarioAtual?.nome || isMaster;
+              return (
+                <div 
+                  key={manual.id} 
+                  onClick={() => abrirManual(manual)}
+                  className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
+                        manual.tipo === 'Política' ? 'bg-yellow-100 text-yellow-800' : 
+                        manual.tipo === 'Processo' ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {manual.tipo}
+                      </span>
+                      {isAdminDesteManual ? (
+                        <Settings className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" title="Você tem permissão de edição" />
+                      ) : (
+                        <Eye className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors" title="Modo Leitura" />
+                      )}
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800 leading-snug mb-2">{manual.titulo}</h3>
                   </div>
-                  <h3 className="text-lg font-bold text-slate-800 leading-snug mb-2">{manual.titulo}</h3>
+                  <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs font-semibold text-slate-500">
+                    <span className="truncate max-w-[120px]">Autor: <span className="font-bold">{manual.autor_nome || 'Sistema'}</span></span>
+                    <span className={`flex items-center gap-1 shrink-0 ${
+                      manual.status === 'Ativo' ? 'text-green-600' : 
+                      manual.status === 'Inativo' ? 'text-red-500' : 'text-amber-500'
+                    }`}>
+                      <CheckCircle2 className="w-3 h-3" /> {manual.status}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs font-semibold text-slate-500">
-                  <span>Autor: <span className="font-bold">{manual.autor_nome || 'Sistema'}</span></span>
-                  <span className={`flex items-center gap-1 ${manual.status === 'Ativo' ? 'text-green-600' : 'text-blue-600'}`}>
-                    <CheckCircle2 className="w-3 h-3" /> {manual.status}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -420,13 +491,14 @@ export default function ManuaisOperacionaisPage() {
   }
 
   // ============================================================================
-  // TELA 2: EDITOR / CONSTRUTOR DE BLOCOS
+  // TELA 2: EDITOR / LEITURA DO MANUAL
   // ============================================================================
   return (
-    <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8">
+    <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8 justify-center">
       
-      {/* Coluna Esquerda: A Tela de Construção */}
-      <div className="flex-1">
+      {/* Coluna Esquerda: O Documento */}
+      <div className={`flex-1 ${!canEdit ? 'max-w-[900px]' : ''}`}>
+        
         {/* Barra de Ferramentas Superior */}
         <div className="flex justify-between items-center mb-6">
           <button 
@@ -435,99 +507,138 @@ export default function ManuaisOperacionaisPage() {
           >
             <ArrowLeft className="w-4 h-4" /> Voltar ao Painel
           </button>
-          <div className="flex gap-3">
-            <button 
-              onClick={salvarDocumento}
-              disabled={salvando}
-              className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-2.5 rounded-lg font-black uppercase text-[11px] tracking-widest transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" /> {salvando ? "Salvando..." : "Salvar no Banco"}
-            </button>
-          </div>
+          
+          {canEdit && (
+            <div className="flex gap-3">
+              <button 
+                onClick={salvarDocumento}
+                disabled={salvando}
+                className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-2.5 rounded-lg font-black uppercase text-[11px] tracking-widest transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" /> {salvando ? "Salvando..." : "Salvar no Banco"}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Capa do Relatório */}
-        <div className="bg-white rounded-t-2xl border border-slate-200 border-b-0 p-10 relative overflow-hidden">
+        <div className={`bg-white rounded-t-2xl border border-slate-200 border-b-0 relative overflow-hidden ${canEdit ? 'p-10' : 'p-12 pb-8'}`}>
           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-900 to-blue-500"></div>
           
-          <input 
-            type="text" 
-            value={manualTitulo}
-            onChange={(e) => setManualTitulo(e.target.value)}
-            className="w-full text-4xl font-black text-blue-900 uppercase tracking-tighter border-none outline-none bg-transparent placeholder:text-slate-300 mb-6"
-            placeholder="NOME DO DOCUMENTO AQUI..."
-          />
+          {canEdit ? (
+            <input 
+              type="text" 
+              value={manualTitulo}
+              onChange={(e) => setManualTitulo(e.target.value)}
+              className="w-full text-4xl font-black text-blue-900 uppercase tracking-tighter border-none outline-none bg-transparent placeholder:text-slate-300 mb-6"
+              placeholder="NOME DO DOCUMENTO AQUI..."
+            />
+          ) : (
+            <h1 className="w-full text-4xl font-black text-blue-900 uppercase tracking-tighter mb-8 leading-tight">
+              {manualTitulo}
+            </h1>
+          )}
           
-          <div className="flex gap-6 border-t border-slate-100 pt-6 text-sm font-semibold text-slate-500">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
-              <select 
-                value={manualTipo} 
-                onChange={(e) => setManualTipo(e.target.value)}
-                className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
-              >
-                <option value="Manual">Manual</option>
-                <option value="Política">Política</option>
-                <option value="Processo">Processo</option>
-              </select>
-            </div>
+          <div className={`flex gap-6 border-t border-slate-100 ${canEdit ? 'pt-6' : 'pt-4'} text-sm font-semibold text-slate-500`}>
             
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status Legal:</span>
-              <select 
-                value={manualStatus} 
-                onChange={(e) => setManualStatus(e.target.value)}
-                className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
-              >
-                <option value="Em Revisão">Em Revisão</option>
-                <option value="Ativo">Vigente (Ativo)</option>
-                <option value="Inativo">Inativo / Obsoleto</option>
-              </select>
+            {/* Classificação */}
+            {canEdit ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
+                <select 
+                  value={manualTipo} 
+                  onChange={(e) => setManualTipo(e.target.value)}
+                  className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
+                >
+                  <option value="Manual">Manual</option>
+                  <option value="Política">Política</option>
+                  <option value="Processo">Processo</option>
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
+                <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs font-bold uppercase">{manualTipo}</span>
+              </div>
+            )}
+            
+            {/* Status Legal */}
+            {canEdit ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status Legal:</span>
+                <select 
+                  value={manualStatus} 
+                  onChange={(e) => setManualStatus(e.target.value)}
+                  className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer"
+                >
+                  <option value="Em Revisão">Em Revisão</option>
+                  <option value="Ativo">Vigente (Ativo)</option>
+                  <option value="Inativo">Inativo / Obsoleto</option>
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status Legal:</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                  manualStatus === 'Ativo' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+                }`}>{manualStatus}</span>
+              </div>
+            )}
+
+            {/* Autor Real Oficial */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Criado por:</span>
+              <span className="text-slate-800 font-bold text-xs uppercase">{manualAutor || "Sistema"}</span>
             </div>
+
           </div>
         </div>
 
         {/* Área de Renderização dos Blocos */}
-        <div className="bg-slate-100/50 min-h-[500px] border border-slate-200 p-8 rounded-b-2xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]">
+        <div className={`${canEdit ? 'bg-slate-100/50' : 'bg-white'} min-h-[500px] border border-slate-200 border-t-0 p-8 ${!canEdit && 'px-12'} rounded-b-2xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]`}>
           {blocos.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 py-20 border-2 border-dashed border-slate-300 rounded-xl">
               <FileText className="w-12 h-12 mb-4 opacity-50" />
               <p className="font-bold uppercase tracking-wider text-sm">O documento está vazio</p>
-              <p className="text-xs mt-2">Use o painel lateral para adicionar blocos de conteúdo.</p>
+              {canEdit && <p className="text-xs mt-2">Use o painel lateral para adicionar blocos de conteúdo.</p>}
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col">
               {blocos.map((bloco, index) => (
                 <div key={bloco.id} className="relative group/bloco">
                   
-                  {/* Menu de Ações do Bloco (Sobe, Desce, Exclui) */}
-                  <div className="absolute -right-3 -top-3 z-10 flex gap-1 opacity-0 group-hover/bloco:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => moverBloco(index, 'up')}
-                      disabled={index === 0}
-                      className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Mover para Cima"
-                    >
-                      <ChevronUp className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => moverBloco(index, 'down')}
-                      disabled={index === blocos.length - 1}
-                      className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Mover para Baixo"
-                    >
-                      <ChevronDown className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => removerBloco(bloco.id)}
-                      className="bg-red-100 border border-red-200 text-red-600 p-1.5 rounded-full shadow-md hover:bg-red-200"
-                      title="Remover Bloco"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {/* Se puder editar, mostra os botões flutuantes */}
+                  {canEdit && (
+                    <div className="absolute -right-3 -top-3 z-10 flex gap-1 opacity-0 group-hover/bloco:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => moverBloco(index, 'up')}
+                        disabled={index === 0}
+                        className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Mover para Cima"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => moverBloco(index, 'down')}
+                        disabled={index === blocos.length - 1}
+                        className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Mover para Baixo"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => removerBloco(bloco.id)}
+                        className="bg-red-100 border border-red-200 text-red-600 p-1.5 rounded-full shadow-md hover:bg-red-200"
+                        title="Remover Bloco"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
 
-                  {renderizarBloco(bloco)}
+                  {/* Renderiza diferente baseado na permissão */}
+                  {canEdit ? renderizarBlocoEdit(bloco) : renderizarBlocoView(bloco)}
+                  
                 </div>
               ))}
             </div>
@@ -535,83 +646,45 @@ export default function ManuaisOperacionaisPage() {
         </div>
       </div>
 
-      {/* Coluna Direita: Painel de Controle / Adição de Blocos */}
-      <div className="w-80 shrink-0">
-        <div className="sticky top-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-slate-50 p-4 border-b border-slate-200">
-            <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-              <Settings className="w-4 h-4" /> Componentes
-            </h3>
-          </div>
-          
-          <div className="p-4 flex flex-col gap-2">
-            <button 
-              onClick={() => adicionarBloco("titulo")}
-              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
-            >
-              <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <Type className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 text-sm">Título Principal</div>
-                <div className="text-[11px] text-slate-500">Cabeçalho de seção (H2)</div>
-              </div>
-            </button>
+      {/* Coluna Direita: Painel de Controle (Só aparece se puder EDITAR) */}
+      {canEdit && (
+        <div className="w-80 shrink-0">
+          <div className="sticky top-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-slate-50 p-4 border-b border-slate-200">
+              <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                <Settings className="w-4 h-4" /> Componentes
+              </h3>
+            </div>
+            
+            <div className="p-4 flex flex-col gap-2">
+              <button onClick={() => adicionarBloco("titulo")} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group">
+                <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Type className="w-4 h-4" /></div>
+                <div><div className="font-bold text-slate-800 text-sm">Título Principal</div><div className="text-[11px] text-slate-500">Cabeçalho de seção (H2)</div></div>
+              </button>
 
-            <button 
-              onClick={() => adicionarBloco("texto")}
-              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
-            >
-              <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <FileText className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 text-sm">Parágrafo Padrão</div>
-                <div className="text-[11px] text-slate-500">Texto formatado livre</div>
-              </div>
-            </button>
+              <button onClick={() => adicionarBloco("texto")} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group">
+                <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><FileText className="w-4 h-4" /></div>
+                <div><div className="font-bold text-slate-800 text-sm">Parágrafo Padrão</div><div className="text-[11px] text-slate-500">Texto formatado livre</div></div>
+              </button>
 
-            <button 
-              onClick={() => adicionarBloco("imagem")}
-              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
-            >
-              <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <ImageIcon className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 text-sm">Print / Imagem</div>
-                <div className="text-[11px] text-slate-500">Anexo visual na documentação</div>
-              </div>
-            </button>
+              <button onClick={() => adicionarBloco("imagem")} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group">
+                <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><ImageIcon className="w-4 h-4" /></div>
+                <div><div className="font-bold text-slate-800 text-sm">Print / Imagem</div><div className="text-[11px] text-slate-500">Anexo visual na documentação</div></div>
+              </button>
 
-            <button 
-              onClick={() => adicionarBloco("passo-a-passo")}
-              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
-            >
-              <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <ListOrdered className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 text-sm">Passo a Passo</div>
-                <div className="text-[11px] text-slate-500">Lista ordenada com numeração</div>
-              </div>
-            </button>
+              <button onClick={() => adicionarBloco("passo-a-passo")} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group">
+                <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><ListOrdered className="w-4 h-4" /></div>
+                <div><div className="font-bold text-slate-800 text-sm">Passo a Passo</div><div className="text-[11px] text-slate-500">Lista ordenada com numeração</div></div>
+              </button>
 
-            <button 
-              onClick={() => adicionarBloco("alerta")}
-              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-red-200 hover:bg-red-50 text-left transition-colors group"
-            >
-              <div className="bg-slate-100 p-2 rounded text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 text-sm">Card de Alerta</div>
-                <div className="text-[11px] text-slate-500">Destaque para riscos/regras</div>
-              </div>
-            </button>
+              <button onClick={() => adicionarBloco("alerta")} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-red-200 hover:bg-red-50 text-left transition-colors group">
+                <div className="bg-slate-100 p-2 rounded text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors"><AlertTriangle className="w-4 h-4" /></div>
+                <div><div className="font-bold text-slate-800 text-sm">Card de Alerta</div><div className="text-[11px] text-slate-500">Destaque para riscos/regras</div></div>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
     </div>
   );
