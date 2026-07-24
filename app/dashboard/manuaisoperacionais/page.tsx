@@ -1,15 +1,17 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState } from "react";
 import { 
   BookOpen, Plus, Settings, FileText, AlertTriangle, 
-  ListOrdered, Type, ArrowLeft, Save, Trash2, CheckCircle2 
+  ListOrdered, Type, ArrowLeft, Save, Trash2, CheckCircle2,
+  Image as ImageIcon // 📸 Import do ícone de Imagem
 } from "lucide-react";
 
 // ============================================================================
 // TIPAGENS DO CONSTRUTOR DE MANUAIS
 // ============================================================================
-type TipoBloco = "titulo" | "texto" | "passo-a-passo" | "alerta" | "politica";
+type TipoBloco = "titulo" | "texto" | "passo-a-passo" | "alerta" | "politica" | "imagem";
 
 interface Bloco {
   id: string;
@@ -25,11 +27,45 @@ export default function ManuaisOperacionaisPage() {
   const [manualAtivo, setManualAtivo] = useState<string>("Novo Manual Operacional");
   const [blocos, setBlocos] = useState<Bloco[]>([]);
 
-  // Mock de manuais existentes
+  // Mock provisório enquanto não plugamos no Supabase
   const manuaisSalvos = [
-    { id: 1, titulo: "Política de Concessão de Crédito V8", tipo: "Política", data: "24/07/2026", status: "Ativo" },
-    { id: 2, titulo: "Manual de Integração (Onboarding)", tipo: "Manual", data: "15/06/2026", status: "Em Revisão" },
+    { 
+      id: "1", 
+      titulo: "Política de Concessão de Crédito V8", 
+      tipo: "Política", 
+      data: "24/07/2026", 
+      status: "Ativo",
+      blocosFake: [
+        { id: "b1", tipo: "titulo" as TipoBloco, conteudo: "1. Regras Inegociáveis" },
+        { id: "b2", tipo: "alerta" as TipoBloco, conteudo: "Atenção: Proibido aprovar sem consulta no Serasa confirmada e anexada ao dossiê." },
+        { id: "b3", tipo: "texto" as TipoBloco, conteudo: "O comitê de crédito se reunirá todas as terças-feiras para deliberação de propostas acima de R$ 500.000,00." }
+      ]
+    },
+    { 
+      id: "2", 
+      titulo: "Manual de Integração (Onboarding)", 
+      tipo: "Manual", 
+      data: "15/06/2026", 
+      status: "Em Revisão",
+      blocosFake: [] 
+    },
   ];
+
+  // ============================================================================
+  // AÇÕES DE ABRIR E CRIAR
+  // ============================================================================
+  const abrirManual = (manual: any) => {
+    setManualAtivo(manual.titulo);
+    // Aqui no futuro vai ser setBlocos(manual.blocos) vindo do banco
+    setBlocos(manual.blocosFake || []); 
+    setView("editor");
+  };
+
+  const criarNovoManual = () => {
+    setManualAtivo("Novo Manual Operacional");
+    setBlocos([]);
+    setView("editor");
+  };
 
   // ============================================================================
   // FUNÇÕES DO CONSTRUTOR (MOTOR DE CUSTOMIZAÇÃO)
@@ -38,13 +74,18 @@ export default function ManuaisOperacionaisPage() {
     const novoBloco: Bloco = {
       id: Math.random().toString(36).substr(2, 9),
       tipo,
-      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo é um array de strings
+      conteudo: tipo === "passo-a-passo" ? [""] : "" // Passo a passo é array, outros string
     };
     setBlocos([...blocos, novoBloco]);
   };
 
   const removerBloco = (id: string) => {
     setBlocos(blocos.filter((b) => b.id !== id));
+  };
+
+  // Atualiza o conteúdo do bloco em tempo real (necessário para a imagem)
+  const atualizarConteudoBloco = (id: string, novoConteudo: any) => {
+    setBlocos(blocos.map(b => b.id === id ? { ...b, conteudo: novoConteudo } : b));
   };
 
   // ============================================================================
@@ -58,6 +99,7 @@ export default function ManuaisOperacionaisPage() {
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bloco: Título de Seção</div>
             <input 
               type="text" 
+              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
               placeholder="Digite o título da seção..." 
               className="w-full text-2xl font-black text-blue-900 border-none outline-none bg-transparent placeholder:text-slate-300 uppercase tracking-tight"
             />
@@ -69,6 +111,7 @@ export default function ManuaisOperacionaisPage() {
           <div className="group relative bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bloco: Parágrafo Padrão</div>
             <textarea 
+              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
               placeholder="Descreva as instruções ou políticas aqui..." 
               className="w-full min-h-[100px] text-[15px] leading-relaxed text-slate-700 border-none outline-none resize-none bg-transparent placeholder:text-slate-300"
             />
@@ -83,6 +126,7 @@ export default function ManuaisOperacionaisPage() {
               <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Bloco: Alerta Crítico</div>
             </div>
             <textarea 
+              defaultValue={typeof bloco.conteudo === 'string' ? bloco.conteudo : ''}
               placeholder="Atenção: Descreva a restrição ou regra inegociável..." 
               className="w-full text-[15px] font-medium text-red-900 leading-relaxed border-none outline-none resize-none bg-transparent placeholder:text-red-300/70"
             />
@@ -115,6 +159,52 @@ export default function ManuaisOperacionaisPage() {
             </div>
           </div>
         );
+
+      // 🔥 NOVO BLOCO: IMAGEM / PRINT
+      case "imagem":
+        return (
+          <div className="group relative bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
+            <div className="flex items-center gap-2 mb-4">
+              <ImageIcon className="w-5 h-5 text-blue-600" />
+              <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bloco: Anexo / Print da Tela</div>
+            </div>
+            
+            {bloco.conteudo ? (
+              <div className="relative rounded-lg overflow-hidden border border-slate-200 group/img">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={bloco.conteudo} 
+                  alt="Print Anexado" 
+                  className="w-full h-auto object-contain max-h-[500px] bg-slate-200" 
+                />
+                <button 
+                  onClick={() => atualizarConteudoBloco(bloco.id, "")}
+                  className="absolute top-2 right-2 bg-slate-900/80 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover/img:opacity-100 shadow-lg"
+                >
+                  Trocar Imagem
+                </button>
+              </div>
+            ) : (
+              <label className="border-2 border-dashed border-slate-300 rounded-lg p-8 flex flex-col items-center justify-center bg-white hover:bg-slate-50 transition-colors cursor-pointer hover:border-blue-400 group/upload">
+                <ImageIcon className="w-8 h-8 text-slate-400 mb-2 group-hover/upload:text-blue-500 transition-colors" />
+                <span className="text-sm font-bold text-slate-600 group-hover/upload:text-blue-600">Clique para fazer upload do print</span>
+                <span className="text-xs text-slate-400 mt-1">PNG, JPG ou WEBP (Max 5MB)</span>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const urlPreview = URL.createObjectURL(file);
+                      atualizarConteudoBloco(bloco.id, urlPreview);
+                    }
+                  }}
+                />
+              </label>
+            )}
+          </div>
+        );
       
       default: return null;
     }
@@ -138,7 +228,7 @@ export default function ManuaisOperacionaisPage() {
             </p>
           </div>
           <button 
-            onClick={() => setView("editor")}
+            onClick={criarNovoManual}
             className="bg-white text-blue-900 hover:bg-slate-100 px-6 py-3 rounded-lg font-black uppercase text-xs tracking-wider shadow-lg transition-transform hover:-translate-y-0.5 flex items-center gap-2"
           >
             <Plus className="w-4 h-4" /> Criar Novo Dossiê / Manual
@@ -153,7 +243,11 @@ export default function ManuaisOperacionaisPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {manuaisSalvos.map((manual) => (
-            <div key={manual.id} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between">
+            <div 
+              key={manual.id} 
+              onClick={() => abrirManual(manual)}
+              className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group flex flex-col justify-between"
+            >
               <div>
                 <div className="flex justify-between items-start mb-4">
                   <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
@@ -281,6 +375,20 @@ export default function ManuaisOperacionaisPage() {
               <div>
                 <div className="font-bold text-slate-800 text-sm">Parágrafo Padrão</div>
                 <div className="text-[11px] text-slate-500">Texto formatado livre</div>
+              </div>
+            </button>
+
+            {/* 🔥 NOVO BOTÃO DE COMPONENTE NA SIDEBAR: IMAGEM */}
+            <button 
+              onClick={() => adicionarBloco("imagem")}
+              className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50 text-left transition-colors group"
+            >
+              <div className="bg-slate-100 p-2 rounded text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <ImageIcon className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-sm">Print / Imagem</div>
+                <div className="text-[11px] text-slate-500">Anexo visual na documentação</div>
               </div>
             </button>
 
