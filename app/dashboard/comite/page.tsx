@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
@@ -83,7 +83,7 @@ export default function ComitePage() {
   const [votoComoDecisao, setVotoComoDecisao] = useState(false); 
   const [enviandoVoto, setEnviandoVoto] = useState(false);
 
-  // 🔥 ESTADO: MODALIDADES APROVADAS NO VOTO
+  // 🔥 NOVO ESTADO: MODALIDADES APROVADAS NO VOTO
   const [modalidadesAprovadas, setModalidadesAprovadas] = useState<{ modalidade: string; limite: string; taxa: string; prazo: string }[]>([]);
   
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
@@ -92,6 +92,7 @@ export default function ComitePage() {
   const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
+  // Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
   const [abaEsquerdaFoco, setAbaEsquerdaFoco] = useState<"dossie" | "kappi">("dossie");
 
   const carregarDiretores = async () => {
@@ -165,9 +166,14 @@ export default function ComitePage() {
         }
       }
       
+      // 1. CARREGA O COMITÊ (Apenas status "aberta")
       const { data: dataComite } = await queryComite.eq("status", "aberta").order("criado_em", { ascending: false });
+      
+      const idsEmComite = new Set<string>(); // Para impedir que os mesmos apareçam em baixo
+      
       if (dataComite) {
         const analisesComImagensR2 = await Promise.all(dataComite.map(async (item) => {
+           idsEmComite.add(item.id);
            const urlsR2 = await vasculharImagensR2(item);
            return { ...item, todas_as_imagens_r2: urlsR2 };
         }));
@@ -178,15 +184,23 @@ export default function ComitePage() {
         }
       }
 
-      // 🔥 Filtro cravado: Pega TUDO o que não está em comitê nem foi finalizado de vez
-      const { data: dataAnalise } = await queryEsteira
-        .neq("status", "aberta")
-        .neq("status", "aprovado")
-        .neq("status", "reprovado")
-        .neq("status", "finalizado")
-        .order("criado_em", { ascending: false });
-        
-      if (dataAnalise) setEmpresasAnalise(dataAnalise);
+      // 2. CARREGA A ESTEIRA INFERIOR (Filtro JS Absoluto)
+      const { data: dataAnalise } = await queryEsteira.order("criado_em", { ascending: false });
+      
+      if (dataAnalise) {
+        const esteiraFiltrada = dataAnalise.filter(item => {
+          const st = String(item.status || "").toLowerCase().trim();
+          return (
+            !idsEmComite.has(item.id) && // Se tá lá em cima no comitê, corta!
+            st !== "aberta" && 
+            st !== "aprovado" && 
+            st !== "reprovado" && 
+            st !== "finalizado" &&
+            st !== "com restritivo"
+          );
+        });
+        setEmpresasAnalise(esteiraFiltrada);
+      }
 
     } catch (err) {
       console.error("Erro ao carregar dados do comitê:", err);
@@ -296,6 +310,7 @@ export default function ComitePage() {
     setModalidadesAprovadas(novas);
   };
 
+  // Calcula o limite total e a taxa média ou indicativo para jogar nas colunas raizes
   const processarModalidadesParaBanco = () => {
     let limiteGlobalStr = "R$ 0,00";
     let taxaIndicativa = "";
@@ -352,19 +367,16 @@ export default function ComitePage() {
         statusDestino = opcaoVoto.toLowerCase();
       }
 
-      // Se for a decisão Master aprovando, a gente pega os limites da tela e joga pro banco
-      const modProcessadas = (autorDoVoto === "Decisão" && opcaoVoto === "Aprovado") ? processarModalidadesParaBanco() : {};
-
-      const payloadFinal = {
-        dados_consolidados: dcAtual,
-        status: statusDestino,
-        status_comite: statusDestino, // Força a propulsão do trigger
-        ...modProcessadas
-      };
+      const modProcessadas = processarModalidadesParaBanco();
 
       const { error } = await supabase
         .from("analises")
-        .update(payloadFinal)
+        .update({ 
+          dados_consolidados: dcAtual,
+          status: statusDestino,
+          status_comite: statusDestino, // Força a propulsão do trigger
+          ...(autorDoVoto === "Decisão" && opcaoVoto === "Aprovado" ? modProcessadas : {}) // Só injeta limite se for o voto decisivo
+        })
         .eq("id", empresaItem.id);
 
       if (error) throw error;
