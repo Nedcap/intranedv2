@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
@@ -83,7 +83,7 @@ export default function ComitePage() {
   const [votoComoDecisao, setVotoComoDecisao] = useState(false); 
   const [enviandoVoto, setEnviandoVoto] = useState(false);
 
-  // 🔥 NOVO ESTADO: MODALIDADES APROVADAS NO VOTO
+  // 🔥 ESTADO: MODALIDADES APROVADAS NO VOTO
   const [modalidadesAprovadas, setModalidadesAprovadas] = useState<{ modalidade: string; limite: string; taxa: string; prazo: string }[]>([]);
   
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
@@ -92,7 +92,6 @@ export default function ComitePage() {
   const [isDiretor, setIsDiretor] = useState(false); 
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
-  // Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
   const [abaEsquerdaFoco, setAbaEsquerdaFoco] = useState<"dossie" | "kappi">("dossie");
 
   const carregarDiretores = async () => {
@@ -179,7 +178,7 @@ export default function ComitePage() {
         }
       }
 
-      // 🔥 CORREÇÃO: Mostra na Esteira TUDO que não for finalizado nem estiver em comitê (aberta)
+      // 🔥 Filtro cravado: Pega TUDO o que não está em comitê nem foi finalizado de vez
       const { data: dataAnalise } = await queryEsteira
         .neq("status", "aberta")
         .neq("status", "aprovado")
@@ -297,7 +296,6 @@ export default function ComitePage() {
     setModalidadesAprovadas(novas);
   };
 
-  // Calcula o limite total e a taxa média ou indicativo para jogar nas colunas raizes
   const processarModalidadesParaBanco = () => {
     let limiteGlobalStr = "R$ 0,00";
     let taxaIndicativa = "";
@@ -321,10 +319,9 @@ export default function ComitePage() {
       return;
     }
     
-    // Se for aprovado e o cara marcou pra decisão final, ele TEM que preencher pelo menos 1 modalidade
-    if (opcaoVoto === "Aprovado" && (autorDoVoto === "Decisão" || (isMaster && votoComoDecisao))) {
+    if (opcaoVoto === "Aprovado" && (votoComoDecisao)) {
        if (modalidadesAprovadas.length === 0) {
-          alert("⚠️ Para cravar a APROVAÇÃO do comitê, é obrigatório inserir os Limites e Modalidades Aprovadas.");
+          alert("⚠️ ATENÇÃO: Para cravar a APROVAÇÃO DEFINITIVA do comitê, é OBRIGATÓRIO inserir os Limites e Modalidades Aprovadas na tabela acima.");
           return;
        }
     }
@@ -355,15 +352,19 @@ export default function ComitePage() {
         statusDestino = opcaoVoto.toLowerCase();
       }
 
-      const modProcessadas = processarModalidadesParaBanco();
+      // Se for a decisão Master aprovando, a gente pega os limites da tela e joga pro banco
+      const modProcessadas = (autorDoVoto === "Decisão" && opcaoVoto === "Aprovado") ? processarModalidadesParaBanco() : {};
+
+      const payloadFinal = {
+        dados_consolidados: dcAtual,
+        status: statusDestino,
+        status_comite: statusDestino, // Força a propulsão do trigger
+        ...modProcessadas
+      };
 
       const { error } = await supabase
         .from("analises")
-        .update({ 
-          dados_consolidados: dcAtual,
-          status: statusDestino,
-          ...(autorDoVoto === "Decisão" && opcaoVoto === "Aprovado" ? modProcessadas : {}) // Só injeta limite se for o voto decisivo
-        })
+        .update(payloadFinal)
         .eq("id", empresaItem.id);
 
       if (error) throw error;
@@ -375,9 +376,8 @@ export default function ComitePage() {
         if (modoFocoComite) desativarModoLupaExecutiva();
       }
       
-      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e Ata salva!" : "🗳️ Seu voto foi computado e injetado no dossiê!");
+      alert(autorDoVoto === "Decisão" ? "🏁 Comitê encerrado e empresa enviada para Esteira de Contratos!" : "🗳️ Seu voto foi computado e injetado no dossiê!");
       
-      // Reseta os estados
       setJustificativaVoto(""); 
       setVotoComoDecisao(false);
       setModalidadesAprovadas([]);
@@ -391,38 +391,33 @@ export default function ComitePage() {
     }
   };
 
-  const forcarDecisaoMaster = async (empresaItem: any, decisaoFinal: "Aprovado" | "Reprovado") => {
-    const conf = confirm(`⚠️ DECISÃO EXECUTIVA: Deseja mover a empresa ${empresaItem.empresa_nome} para ${decisaoFinal}?`);
-    if (!conf) return;
-
-    try {
+  const handleForcarDecisaoPrompt = (item: any) => {
+    const res = prompt(`⚠️ AÇÃO EXECUTIVA RÁPIDA ⚠️\n\nEssa ação pula a mesa de debates.\nDigite "Reprovar" para matar o processo imediatamente.\nSe quiser "Aprovar", entre na mesa para destrinchar os limites primeiro.`);
+    
+    if (!res) return;
+    const cleanRes = res.trim().toLowerCase();
+    
+    if (cleanRes === "reprovar" || cleanRes === "reprovado") {
       setCarregando(true);
-      const e = empresaItem.empresa_nome;
+      const e = item.empresa_nome;
+      const dcAtual = item.dados_consolidados || {};
+      dcAtual.parecer_comite = `Decisão Executiva Master Direta: Processo REPROVADO sumariamente em ${new Date().toLocaleDateString('pt-BR')}.`;
 
-      const dcAtual = empresaItem.dados_consolidados || {};
-      dcAtual.parecer_comite = `Decisão Executiva Master: Processo encerrado diretamente como [${decisaoFinal.toUpperCase()}] em ${new Date().toLocaleDateString('pt-BR')}.`;
-
-      const { error } = await supabase
-        .from("analises")
-        .update({ 
-          status: decisaoFinal.toLowerCase(),
+      supabase.from("analises").update({ 
+          status: "reprovado",
+          status_comite: "reprovado",
           dados_consolidados: dcAtual 
-        })
-        .eq("id", empresaItem.id);
-
-      if (error) throw error;
-
-      const emailsAlvo = await obter_emails_notificacao(e);
-      const htmlAta = `<html><body><h2>Ata de Comitê Encerrada: ${e}</h2><p>Veredito Final: <b>${decisaoFinal}</b></p></body></html>`;
-      await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
-
-      alert(`✅ Orquestração concluída! Empresa movida para ${decisaoFinal}.`);
-      if (modoFocoComite) desativarModoLupaExecutiva();
-      await carregarComite();
-    } catch (err: any) {
-      alert(`❌ Erro no painel Master: ${err.message}`);
-    } finally { 
-      setCarregando(false);
+      }).eq("id", item.id).then(() => {
+          obter_emails_notificacao(e).then(emails => {
+             dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, `<html><body><h2>Ata de Comitê Encerrada: ${e}</h2><p>Veredito Final: <b>Reprovado</b></p></body></html>`, emails);
+          });
+          alert(`✅ Processo reprovado e removido do comitê.`);
+          carregarComite();
+      });
+    } else if (cleanRes === "aprovar" || cleanRes === "aprovado") {
+      alert("⚠️ Ação Interrompida: Para aprovar uma empresa, você deve clicar em 'ENTRAR NO COMITÊ' e preencher a tabela de Limites/Modalidades aprovadas.");
+    } else {
+      alert("Comando inválido. Operação cancelada.");
     }
   };
 
@@ -458,19 +453,6 @@ export default function ComitePage() {
     } catch (err: any) { 
       alert(`❌ Erro: ${err.message}`);
     } finally { setCarregando(false); }
-  };
-
-  const handleForcarDecisaoPrompt = (item: any) => {
-    const res = prompt(`Forçar Decisão Executiva para ${item.empresa_nome}\n\nDigite "Aprovar" ou "Reprovar":`);
-    if (!res) return;
-    const cleanRes = res.trim().toLowerCase();
-    if (cleanRes === "aprovar" || cleanRes === "aprovado") {
-      forcarDecisaoMaster(item, "Aprovado");
-    } else if (cleanRes === "reprovar" || cleanRes === "reprovado") {
-      forcarDecisaoMaster(item, "Reprovado");
-    } else {
-      alert("Comando inválido. Operação cancelada.");
-    }
   };
 
   const activarModoLupaExecutiva = async (empresa: any) => {
@@ -553,7 +535,6 @@ export default function ComitePage() {
           {/* LADO ESQUERDO: DOSSIÊ E KAPPI */}
           <div className="w-[65%] h-full p-5 pr-2.5 flex flex-col space-y-3">
             
-            {/* 🔥 CONTROLE DE ABAS (ESQUERDA) */}
             <div className="flex gap-2">
                <button 
                   onClick={() => setAbaEsquerdaFoco("dossie")}
@@ -629,7 +610,7 @@ export default function ComitePage() {
                       )}
 
                       {/* 🔥 INJEÇÃO DO MÓDULO DE MODALIDADES QUANDO APROVA */}
-                      {opcaoVoto === "Aprovado" && (
+                      {opcaoVoto === "Aprovado" && (votoComoDecisao) && (
                         <div className="bg-emerald-50/50 border border-emerald-200 p-3 rounded-xl mt-1 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider">💰 Limites Aprovados</span>
