@@ -23,9 +23,15 @@ interface SDRConfig {
   valorComite: number;
 }
 
+interface UsuarioOption {
+  id: string;
+  nome: string;
+}
+
 export default function ControleComercialVisitasPage() {
   const [visitas, setVisitas] = useState<VisitaRow[]>([]);
   const [configsSDR, setConfigsSDR] = useState<Record<string, SDRConfig>>({});
+  const [usuariosDB, setUsuariosDB] = useState<UsuarioOption[]>([]);
   const [carregando, setCarregando] = useState(false);
 
   // Filtros
@@ -40,10 +46,10 @@ export default function ControleComercialVisitasPage() {
 
   // Estado para Modal de Cadastro Manual
   const [modalAberto, setModalAberto] = useState(false);
-  const [novoLead, setNovoLead] = useState({ nome: "", sdr: "", telefone: "", email: "", cnpj: "" });
+  const [novoLead, setNovoLead] = useState({ nome: "", sdrNome: "", sdrId: "", telefone: "", email: "", cnpj: "" });
   const [salvandoManual, setSalvandoManual] = useState(false);
 
-  // 1. Carrega as configurações de SDR salvas localmente
+  // 1. Carrega as configurações de SDR localmente + Carrega usuários do banco
   useEffect(() => {
     try {
       const salvasConfigs = localStorage.getItem("ned_comercial_sdr_configs");
@@ -51,6 +57,20 @@ export default function ControleComercialVisitasPage() {
     } catch (e) {
       console.error("Erro ao ler cache de configs:", e);
     }
+
+    // Carrega a lista de usuários da tabela public.usuarios
+    const carregarUsuarios = async () => {
+      try {
+        const { data, error } = await supabase.from("usuarios").select("id, nome").order("nome", { ascending: true });
+        if (!error && data) {
+          setUsuariosDB(data);
+        }
+      } catch (e) {
+        console.error("Erro ao carregar lista de usuários:", e);
+      }
+    };
+
+    carregarUsuarios();
   }, []);
 
   const persistirConfigs = (novasConfigs: Record<string, SDRConfig>) => {
@@ -58,18 +78,14 @@ export default function ControleComercialVisitasPage() {
     localStorage.setItem("ned_comercial_sdr_configs", JSON.stringify(novasConfigs));
   };
 
-  // 2. BUSCA AUTOMÁTICA (COM AUTO-APROVAÇÃO E CORREÇÃO DE ORDENAÇÃO)
+  // 2. BUSCA AUTOMÁTICA (Mapeamento CRM + Tabela Analises)
   const buscarCardsComercial = useCallback(async () => {
     setCarregando(true);
     try {
-      // 🚨 CORREÇÃO AQUI: Adicionado .order() e .limit() para garantir que os mais recentes não fiquem de fora
+      // Busca os leads no CRM
       const { data: leadsData, error: leadsError } = await supabase
         .from("crm_leads") 
         .select("*")
-        .in("estagio", [
-          "visita_agendada", "visita_realizada", "visita_efetuada", "finalizado", "ganhou", "perdido",
-          "Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido"
-        ])
         .order("criado_em", { ascending: false })
         .limit(5000);
 
@@ -86,8 +102,20 @@ export default function ControleComercialVisitasPage() {
       if (leadsData) {
         const sdrsEncontrados = new Set<string>();
         
-        const dadosMapeados: VisitaRow[] = leadsData.map((item: any) => {
-          const sdrNome = item.responsavel_nome || item.responsavel_id || "Sem SDR Mapeado";
+        // Filtra os leads que fazem parte dos estágios de visitas comercial
+        const estagiosPermitidos = [
+          "visita_agendada", "visita_realizada", "visita_efetuada", "finalizado", "ganhou", "perdido",
+          "Visita Agendada", "Visita Realizada", "Visita Efetuada", "Finalizado", "Ganhou", "Perdido",
+          "convertida_aprovada"
+        ];
+
+        const leadsFiltradosEstagio = leadsData.filter((item: any) => {
+          if (!item.estagio) return true; // Inclui por segurança se estiver sem estágio preenchido
+          return estagiosPermitidos.some(e => e.toLowerCase() === item.estagio.toLowerCase());
+        });
+
+        const dadosMapeados: VisitaRow[] = leadsFiltradosEstagio.map((item: any) => {
+          const sdrNome = item.responsavel_nome || "Sem SDR Mapeado";
           sdrsEncontrados.add(sdrNome);
 
           let statusComiteInicial: any = "Em Análise";
@@ -103,9 +131,7 @@ export default function ControleComercialVisitasPage() {
           let statusComiteSalvo = item.campos_customizados?.status_comissao_comite || statusComiteInicial;
           const anotacoesSalvas = item.campos_customizados?.anotacoes_comerciais || "";
 
-          // =========================================================
-          // VERIFICAÇÃO AUTOMÁTICA DE CNPJ (Raiz ou Completo)
-          // =========================================================
+          // Checagem automática via CNPJ
           const crmCnpj = typeof item.cnpj === 'string' ? item.cnpj.replace(/\D/g, "") : "";
           const crmCnpjRoot = crmCnpj.length >= 8 ? crmCnpj.slice(0, 8) : "";
 
@@ -113,16 +139,11 @@ export default function ControleComercialVisitasPage() {
             const aCnpj = typeof a.cnpj === 'string' ? a.cnpj.replace(/\D/g, "") : "";
             if (!aCnpj) return false;
             const aCnpjRoot = aCnpj.length >= 8 ? aCnpj.slice(0, 8) : "";
-            
-            // Bate CNPJ inteiro ou os primeiros 8 dígitos (Matriz/Filial)
             return (crmCnpj && aCnpj === crmCnpj) || (crmCnpjRoot && aCnpjRoot === crmCnpjRoot);
           });
 
-          // Se achou aprovado na tabela analises e ainda não refletiu aqui:
           if (temAprovacaoNoComite && statusComiteSalvo !== "Aprovado" && statusComiteSalvo !== "Pago") {
             statusComiteSalvo = "Aprovado";
-            
-            // Dispara update invisível para persistir essa aprovação automática no banco do CRM
             const updatePayload = {
               campos_customizados: { ...(item.campos_customizados || {}), status_comissao_comite: "Aprovado" },
               estagio: "convertida_aprovada"
@@ -134,7 +155,7 @@ export default function ControleComercialVisitasPage() {
             id: item.id.toString(),
             nome: item.razaoSocial || item.razaosocial || item.nomeContato || "Empresa sem Nome",
             responsavelSDR: sdrNome,
-            etapa: statusComiteSalvo === "Aprovado" ? "convertida_aprovada" : (item.estagio || ""),
+            etapa: statusComiteSalvo === "Aprovado" ? "convertida_aprovada" : (item.estagio || "visita_agendada"),
             email: item.email || "",
             telefone: item.telefone || "",
             cnpj: item.cnpj || "",
@@ -223,34 +244,40 @@ export default function ControleComercialVisitasPage() {
     }
   };
 
+  // Cadastro Manual com vínculo do usuário
   const cadastrarVisitaManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!novoLead.nome || !novoLead.sdr || !novoLead.cnpj) return alert("Nome, CNPJ e SDR são obrigatórios!");
+    if (!novoLead.nome || !novoLead.sdrNome || !novoLead.cnpj) return alert("Nome, CNPJ e SDR são obrigatórios!");
     
     setSalvandoManual(true);
     try {
-      const { error } = await supabase.from("crm_leads").insert({
+      const insertPayload: any = {
         razaoSocial: novoLead.nome,
         cnpj: novoLead.cnpj,
-        responsavel_nome: novoLead.sdr,
-        email: novoLead.email,
-        telefone: novoLead.telefone,
+        responsavel_nome: novoLead.sdrNome,
+        email: novoLead.email || null,
+        telefone: novoLead.telefone || null,
         estagio: "visita_agendada",
         campos_customizados: {
           status_comissao_agendamento: "Pendente",
           status_comissao_comite: "Em Análise",
           anotacoes_comerciais: ""
         }
-      });
+      };
+
+      if (novoLead.sdrId) {
+        insertPayload.responsavel_id = novoLead.sdrId;
+      }
+
+      const { error } = await supabase.from("crm_leads").insert(insertPayload);
 
       if (error) throw error;
       
       setModalAberto(false);
-      setNovoLead({ nome: "", sdr: "", telefone: "", email: "", cnpj: "" });
+      setNovoLead({ nome: "", sdrNome: "", sdrId: "", telefone: "", email: "", cnpj: "" });
       alert("🚀 Visita agendada registrada manualmente!");
       
-      // Traz a base de dados de volta
-      buscarCardsComercial();
+      await buscarCardsComercial();
     } catch (err: any) {
       alert(`❌ Erro ao registrar visita: ${err.message}`);
     } finally {
@@ -282,9 +309,6 @@ export default function ControleComercialVisitasPage() {
     });
   }, [visitas, filtroSDR, filtroStatusComite, buscaTexto]);
 
-  // =========================================================
-  // CÁLCULO ATUALIZADO DE KPIS
-  // =========================================================
   const kpisGlobais = useMemo(() => {
     let totalAgendamentosPendentes = 0;
     let totalComiteAprovado = 0;
@@ -293,11 +317,9 @@ export default function ControleComercialVisitasPage() {
     visitasFiltradas.forEach(v => {
       const cfg = configsSDR[v.responsavelSDR] || { valorAgendamento: 50, valorComite: 80 };
       
-      // Agendamento
       if (v.statusComissaoAgendamento === "Pendente") totalAgendamentosPendentes += cfg.valorAgendamento;
       else if (v.statusComissaoAgendamento === "Pago") totalPago += cfg.valorAgendamento;
 
-      // Comitê
       if (v.statusComissaoComite === "Aprovado") totalComiteAprovado += cfg.valorComite;
       else if (v.statusComissaoComite === "Pago") totalPago += cfg.valorComite;
     });
@@ -386,7 +408,7 @@ export default function ControleComercialVisitasPage() {
             </div>
           </div>
 
-          {/* KPIS (ATUALIZADOS) */}
+          {/* KPIS */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
             <div className="bg-slate-900 text-white p-5 rounded-xl shadow-md flex flex-col justify-center">
               <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider">Leads Comercial Ativos</span>
@@ -434,7 +456,7 @@ export default function ControleComercialVisitasPage() {
             </div>
           </div>
 
-          {/* TABELA CONDICIONAL COM LINHAS EXPANSÍVEIS */}
+          {/* TABELA CONDICIONAL */}
           {visitasFiltradas.length === 0 ? (
             <div className="p-16 border-2 border-dashed border-slate-200 bg-white rounded-2xl text-center space-y-3 shadow-xs">
               <div className="text-4xl opacity-80">🗂️</div>
@@ -530,7 +552,7 @@ export default function ControleComercialVisitasPage() {
                             </td>
                           </tr>
 
-                          {/* BLOCO EXPANSÍVEL (ANOTAÇÕES) */}
+                          {/* BLOCO EXPANSÍVEL */}
                           {expandido && (
                             <tr className="bg-slate-50/50 border-b-2 border-slate-100">
                               <td colSpan={6} className="p-6 pt-2">
@@ -602,16 +624,38 @@ export default function ControleComercialVisitasPage() {
                 />
               </div>
 
+              {/* SDR / Responsável puxando direto da tabela usuarios */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 uppercase">SDR Responsável *</label>
-                <input 
-                  required
-                  type="text" 
-                  value={novoLead.sdr}
-                  onChange={e => setNovoLead({...novoLead, sdr: e.target.value})}
-                  placeholder="Nome do pré-vendedor"
-                  className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
-                />
+                {usuariosDB.length > 0 ? (
+                  <select
+                    required
+                    value={novoLead.sdrId}
+                    onChange={e => {
+                      const selected = usuariosDB.find(u => u.id === e.target.value);
+                      setNovoLead({
+                        ...novoLead,
+                        sdrId: e.target.value,
+                        sdrNome: selected ? selected.nome : ""
+                      });
+                    }}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white"
+                  >
+                    <option value="">Selecione um SDR / Comercial...</option>
+                    {usuariosDB.map(u => (
+                      <option key={u.id} value={u.id}>{u.nome}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input 
+                    required
+                    type="text" 
+                    value={novoLead.sdrNome}
+                    onChange={e => setNovoLead({...novoLead, sdrNome: e.target.value})}
+                    placeholder="Nome do pré-vendedor"
+                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
+                  />
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
