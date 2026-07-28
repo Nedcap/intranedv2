@@ -5,7 +5,7 @@ import { useState } from "react";
 
 // Formatação super blindada para moeda
 export const formatarMoeda = (valor: any) => {
-  if (!valor && valor !== 0) return "R$ 0,00";
+  if (valor === undefined || valor === null || valor === "") return "R$ 0,00";
   let num = Number(valor);
   
   // Se for uma string suja tipo "15.000,00", ele limpa antes de tentar formatar
@@ -218,6 +218,37 @@ export const gerarHtmlDossie = async (item: any) => {
         </tr>`;
     }).join("") : '<tr><td colspan="4" class="text-center">Nada Consta</td></tr>';
 
+    // 🌟 RENDERIZANDO OS MINICARDS DE RESTRITIVOS (SERASA)
+    const quad = analise.restritivos_quadro || { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 };
+    const restritivosMiniCards = `
+    <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-top: 1.5rem; margin-bottom: 2rem;">
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #dc2626;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">PEFIN</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.pefin || 0}</div>
+        </div>
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #dc2626;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">REFIN</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.refin || 0}</div>
+        </div>
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #ea580c;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Protestos</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.protesto || 0}</div>
+        </div>
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #ca8a04;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Ações Jud.</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.acao_judicial || 0}</div>
+        </div>
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #9333ea;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Dív. Vencidas</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.div_vencida || 0}</div>
+        </div>
+        <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #000;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Chq. S/ Fundo</div>
+            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.cheque_sem_fundo || 0}</div>
+        </div>
+    </div>
+    `;
+
     const arrRefs = safeArray(analise.referencias).length > 0 ? safeArray(analise.referencias) : [{}];
     const refRows = arrRefs.map((r: any) => {
         const calcLiq5 = (Number(r.liquidez_pontual) || 0) + (Number(r.atraso_5_dias) || 0);
@@ -240,7 +271,7 @@ export const gerarHtmlDossie = async (item: any) => {
       }).join("");
 
     // ==========================================
-    // MATEMÁTICA CONSOLIDADA DE FATURAMENTO
+    // MATEMÁTICA CONSOLIDADA DE FATURAMENTO (BLINDADA CONTRA MESES FALTANTES)
     // ==========================================
     const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
     
@@ -284,28 +315,34 @@ export const gerarHtmlDossie = async (item: any) => {
     const medGeral25 = calcMediaGeralAno("2025");
     const medGeral24 = calcMediaGeralAno("2024");
     
-    // 🔥 AS LINHAS QUE EU DEIXEI CAIR ESTÃO DE VOLTA AQUI:
     const varMedGeral26_25 = medGeral25 > 0 ? ((medGeral26 - medGeral25) / medGeral25) * 100 : 0;
     const varMedGeral25_24 = medGeral24 > 0 ? ((medGeral25 - medGeral24) / medGeral24) * 100 : 0;
     
     const varYTD26_25 = mediaYTD25 > 0 ? ((mediaYTD26 - mediaYTD25) / mediaYTD25) * 100 : 0;
     const varYTD25_24 = mediaYTD24 > 0 ? ((mediaYTD25 - mediaYTD24) / mediaYTD24) * 100 : 0;
 
-    const fatRows = meses.map(mes => {
+    const fatRows = meses.map((mes, indexAtual) => {
       const val2024 = Number(faturamentoConsolidado?.["2024"]?.[mes]) || 0;
       const val2025 = Number(faturamentoConsolidado?.["2025"]?.[mes]) || 0;
       const val2026 = Number(faturamentoConsolidado?.["2026"]?.[mes]) || 0;
 
       const delta1 = val2024 > 0 ? ((val2025 - val2024) / val2024) * 100 : 0;
-      const delta2 = val2025 > 0 ? ((val2026 - val2025) / val2025) * 100 : 0;
+      
+      // 🔥 AQUI FICA A BLINDAGEM DO MÊS FUTURO (-100%)
+      let delta2 = 0;
+      let showDelta2 = false;
+      if (indexAtual <= limitIndex) {
+          delta2 = val2025 > 0 ? ((val2026 - val2025) / val2025) * 100 : 0;
+          showDelta2 = true;
+      }
       
       return `
       <tr>
           <td style="font-weight: 700; text-transform: uppercase; color: var(--text);">${mes}</td>
           <td class="text-center font-mono font-bold" style="color: var(--blue-dark);">${formatarMoeda(val2026)}</td>
-          <td class="text-center font-mono ${delta2 > 0 ? 'delta-pos' : delta2 < 0 ? 'delta-neg' : ''}">${delta2 !== 0 ? delta2.toFixed(1) + '%' : '-'}</td>
+          <td class="text-center font-mono ${showDelta2 ? (delta2 > 0 ? 'delta-pos' : delta2 < 0 ? 'delta-neg' : '') : ''}">${showDelta2 && val2025 > 0 ? delta2.toFixed(1) + '%' : '-'}</td>
           <td class="text-center font-mono">${formatarMoeda(val2025)}</td>
-          <td class="text-center font-mono ${delta1 > 0 ? 'delta-pos' : delta1 < 0 ? 'delta-neg' : ''}">${delta1 !== 0 ? delta1.toFixed(1) + '%' : '-'}</td>
+          <td class="text-center font-mono ${delta1 > 0 ? 'delta-pos' : delta1 < 0 ? 'delta-neg' : ''}">${val2024 > 0 ? delta1.toFixed(1) + '%' : '-'}</td>
           <td class="text-center font-mono" style="color: var(--muted);">${formatarMoeda(val2024)}</td>
       </tr>`;
     }).join("");
@@ -395,6 +432,9 @@ export const gerarHtmlDossie = async (item: any) => {
     const normalizarOrganogramaUrl = (u: any) => { if (typeof u !== 'string') return null; if (/\.(jpeg|jpg|gif|png|webp)/i.test(u)) return u.trim(); return null; };
     const organogramaUrlTratado = normalizarOrganogramaUrl(analise.anexos?.organograma_url);
 
+    // ==========================================
+    // ESTRUTURA DO HTML FINAL GERADO
+    // ==========================================
     return `
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -433,13 +473,9 @@ export const gerarHtmlDossie = async (item: any) => {
             .row-total td { background: #f8fafc; font-weight: 800; font-size: 0.95rem; border-top: 2px solid var(--border); }
             .chart-container { position: relative; height: 300px; width: 100%; }
             .parecer-wrapper { background: white; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); overflow: hidden; position: relative; margin-bottom: 2rem;}
-            .parecer-wrapper::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--blue); }
-            .parecer-header { background: #f8fafc; padding: 1rem 1.5rem; font-weight: 900; color: var(--blue-dark); border-bottom: 1px solid #e2e8f0; text-transform: uppercase; font-size: 1.05rem; letter-spacing: 0.5px;}
-            .parecer-body { padding: 1.5rem; font-size: 1rem; line-height: 1.6; color: #334155; white-space: pre-wrap; word-break: break-word; text-align: justify;}
-            .parecer-footer { background: #f8fafc; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.85rem; font-weight: 700; text-align: right;}
             .btn-maps { background: var(--blue); color: white; padding: 12px 20px; border-radius: 0.5rem; text-decoration: none; font-size: 0.85rem; font-weight: 800; display: inline-block; transition: 0.2s; box-shadow: 0 4px 6px rgba(37,99,235,0.2); border: 1px solid rgba(0,0,0,0.1); text-transform: uppercase; letter-spacing: 0.5px; }
             .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 8px 15px rgba(37,99,235,0.3); }
-            .org-container { width: 100%; height: 500px; border-radius: 0.5rem; background: #ffffff; border: 1px solid #e2e8f0; }
+            .org-container { width: 100%; height: 600px; border-radius: 0.5rem; background: #ffffff; border: 1px solid #e2e8f0; }
             .hover-card { transition: box-shadow 0.3s, transform 0.3s; }
             .hover-card:hover { box-shadow: 0 15px 30px -5px rgba(0,0,0,0.1); transform: translateY(-2px); }
             .expandable-box { position: relative; max-height: 120px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
@@ -551,7 +587,7 @@ export const gerarHtmlDossie = async (item: any) => {
                 
                 <div style="display: flex; gap: 1rem; width: 100%; justify-content: center; flex-wrap: wrap;">
                     <a href="https://www.google.com/maps/search/?api=1&query=${enderecoQuery}" target="_blank" class="btn-maps">🗺️ Abrir Mapa</a>
-                    <a href="https://www.google.com/maps?q=${enderecoQuery}&layer=c" target="_blank" class="btn-maps" style="background: var(--green);">🚶‍♂️ Ver Fachada (Street View)</a>
+                    <a href="https://www.google.com/maps?q=${enderecoQuery}&layer=c" target="_blank" class="btn-maps" style="background: var(--green);">🚶‍♂️ Ver Fachada</a>
                 </div>
             </div>
         </div>
@@ -723,7 +759,7 @@ export const gerarHtmlDossie = async (item: any) => {
             </table>
         </div>
 
-        <h2>6. Market Check (Referências e Fundos)</h2>
+        <h2>6. Bureaus de Crédito e Referências Comerciais</h2>
         <div class="table-wrap">
             <table>
                 <thead>
@@ -744,7 +780,7 @@ export const gerarHtmlDossie = async (item: any) => {
         </div>
 
         <h2>7. Apontamentos Restritivos & Jurídico (Visão Global)</h2>
-        <div class="grid-2" style="margin-bottom: 2rem;">
+        <div class="grid-2">
             <div class="card hover-card" style="display:flex; flex-direction:column; justify-content:center; align-items:center; border: 2px solid ${totalRestritivos > 0 ? '#fca5a5' : '#86efac'}; background: ${totalRestritivos > 0 ? '#fef2f2' : '#f0fdf4'};">
                 <div class="metric-label" style="color: ${totalRestritivos > 0 ? '#991b1b' : '#166534'}; font-size: 0.9rem;">Volume Financeiro Restritivo</div>
                 <div class="metric-value font-mono" style="color: ${totalRestritivos > 0 ? '#b91c1c' : '#15803d'}; font-size:2.5rem; margin-top:0.75rem;">${formatarMoeda(totalRestritivos)}</div>
@@ -754,6 +790,8 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div class="metric-value font-mono" style="color: ${qtdRestritivos > 0 ? '#a16207' : '#15803d'}; font-size:2.5rem; margin-top:0.75rem;">${qtdRestritivos}</div>
             </div>
         </div>
+
+        ${restritivosMiniCards}
 
         <div class="table-wrap">
             <table>
@@ -784,31 +822,35 @@ export const gerarHtmlDossie = async (item: any) => {
 
         <div class="print-break"></div>
 
-        <div class="parecer-wrapper" style="margin-top: 2rem;">
-            <div class="parecer-header">Parecer Técnico Formal - Mesa de Risco</div>
-            <div class="parecer-body">
-                <span style="color: var(--blue-dark); font-weight: 900; font-size: 1.15rem; display:block; margin-bottom: 1rem;">
-                    RECOMENDAÇÃO DO ANALISTA: <span style="color: var(--blue);">${safeUpper(analise.recomendacao_analista) || 'EM ANÁLISE'}</span>
+        <div class="parecer-wrapper" style="margin-top: 2.5rem; border-left: 6px solid ${analise.recomendacao_analista === 'Aprovado' ? 'var(--green)' : analise.recomendacao_analista === 'Reprovado' ? 'var(--red)' : 'var(--blue)'};">
+            <div class="parecer-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Parecer Técnico Formal - Mesa de Risco</span>
+                <span style="background: ${analise.recomendacao_analista === 'Aprovado' ? '#dcfce7' : analise.recomendacao_analista === 'Reprovado' ? '#fee2e2' : '#e0e7ff'}; color: ${analise.recomendacao_analista === 'Aprovado' ? '#166534' : analise.recomendacao_analista === 'Reprovado' ? '#991b1b' : '#1e3a8a'}; padding: 0.4rem 1.25rem; border-radius: 2rem; font-size: 0.85rem; font-weight: 900; border: 1px solid ${analise.recomendacao_analista === 'Aprovado' ? '#86efac' : analise.recomendacao_analista === 'Reprovado' ? '#fca5a5' : '#a5b4fc'}; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    ${safeUpper(analise.recomendacao_analista) || 'EM ANÁLISE'}
                 </span>
-                
-                <div style="margin-bottom: 1rem;">
-                    <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Justificativa do Analista:</strong>
-                    <div style="background: #f8fafc; border: 1px solid var(--border); padding: 1rem; border-radius: 0.5rem; font-size: 0.95rem;">
-                      ${safeStr(analise.parecer_analista) || 'Sem parecer técnico elaborado para este dossiê.'}
+            </div>
+            
+            <div class="parecer-body" style="padding: 2.5rem 2rem;">
+                <div style="margin-bottom: 1.5rem;">
+                    <strong style="color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.75rem;">Justificativa do Analista de Crédito:</strong>
+                    <div style="font-size: 1rem; color: var(--text); line-height: 1.8;">
+                      ${safeStr(analise.parecer_analista) || '<span style="color: var(--muted); font-style: italic;">Sem parecer técnico elaborado para este dossiê.</span>'}
                     </div>
                 </div>
 
                 ${analise.parecer_comite ? `
-                <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
-                    <strong style="color: var(--blue-dark); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.5rem;">Deliberação Oficial do Comitê:</strong>
-                    <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1rem; border-radius: 0.5rem; color: #1e3a8a; font-weight: 500; font-size: 0.95rem;">
+                <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
+                    <strong style="color: var(--blue-dark); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.75rem;">Deliberação Oficial do Comitê:</strong>
+                    <div style="background: #f8fafc; border-left: 4px solid var(--blue); padding: 1.25rem 1.5rem; border-radius: 0 0.5rem 0.5rem 0; color: var(--blue-dark); font-weight: 500; font-size: 0.95rem; line-height: 1.6;">
                       ${safeStr(analise.parecer_comite)}
                     </div>
                 </div>
                 ` : ''}
             </div>
-            <div class="parecer-footer">
-              Relatório Oficial validado digitalmente por: <strong style="color: var(--blue-dark); text-transform: uppercase;">${safeUpper(analise.analista) || safeUpper(item.comercial) || 'ANALISTA DE CRÉDITO RESPONSÁVEL'}</strong>
+            
+            <div class="parecer-footer" style="background: #f1f5f9; padding: 1rem 2rem; border-top: 1px solid #e2e8f0; color: var(--muted); font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
+                <span>Documento Confidencial de Uso Interno</span>
+                <span>Validado digitalmente por: <strong style="color: var(--text); text-transform: uppercase; margin-left: 0.25rem;">${safeUpper(analise.analista) || safeUpper(item.comercial) || 'ANALISTA RESPONSÁVEL'}</strong></span>
             </div>
         </div>
 
@@ -915,8 +957,8 @@ export const gerarHtmlDossie = async (item: any) => {
                         id: n.id, 
                         label: finalLabel,
                         shape: 'circle',
-                        margin: 12, 
-                        font: { color: '#ffffff', size: 11, face: 'Inter', bold: true },
+                        margin: 14, 
+                        font: { color: '#ffffff', size: 12, face: 'Inter', bold: true },
                         color: { 
                             background: bgColor, 
                             border: borderColor,
@@ -944,12 +986,22 @@ export const gerarHtmlDossie = async (item: any) => {
                     };
                 }));
                 
+                // 🔥 NOVA FÍSICA PRA DESGRUDAR AS BOLINHAS
                 new vis.Network(container, { nodes, edges }, {
                     layout: { randomSeed: 2 },
                     physics: {
-                        solver: 'forceAtlas2Based',
-                        forceAtlas2Based: { gravitationalConstant: -50, centralGravity: 0.01, springLength: 100, springConstant: 0.08 },
-                        maxVelocity: 50, timestep: 0.35, stabilization: { iterations: 150 }
+                        solver: 'barnesHut',
+                        barnesHut: { 
+                            gravitationalConstant: -3000, 
+                            centralGravity: 0.3, 
+                            springLength: 220, 
+                            springConstant: 0.04, 
+                            damping: 0.09, 
+                            avoidOverlap: 0.5 
+                        },
+                        maxVelocity: 50, 
+                        timestep: 0.35, 
+                        stabilization: { iterations: 150 }
                     },
                     interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true }
                 });
@@ -962,7 +1014,7 @@ export const gerarHtmlDossie = async (item: any) => {
     `;
   } catch (erroGlobal) {
     console.error("Erro fatal na renderização do PDF:", erroGlobal);
-    return `<html><body><h1 style="color:red; font-family:sans-serif;">Puta merda, falhou!</h1><pre style="background:#f4f4f4; padding:20px;">${String(erroGlobal)}</pre></body></html>`;
+    return `<html><body><h1 style="color:red; font-family:sans-serif;">Falhou a renderização!</h1><pre style="background:#f4f4f4; padding:20px;">${String(erroGlobal)}</pre></body></html>`;
   }
 };
 
@@ -981,7 +1033,7 @@ export default function GerarAnalise({ analise }: { analise: any }) {
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
     } catch (err) {
-      alert("Cara, deu um erro sistêmico na hora de abrir a nova guia. Checa o console (F12).");
+      alert("Erro sistêmico na hora de abrir a nova guia. Verifique os pop-ups.");
       console.error(err);
     } finally {
       setGerando(false);
