@@ -134,13 +134,12 @@ export default function MonitoreDiarioPage() {
           if (linha.length < 40) continue;
           if (linha.substring(9, 10) !== "1") continue;
 
+          // FATIAMENTO ABSOLUTO DO BLOCO E CNPJ
           const cnpjBaseRaw = linha.substring(19, 28);
-          const blocoCodigoRaw = linha.substring(28, 34);
+          const blocoCodigo = linha.substring(28, 34);
 
-          if (!codigosChave.includes(blocoCodigoRaw)) continue;
+          if (!codigosChave.includes(blocoCodigo)) continue;
 
-          const blocoCodigo = blocoCodigoRaw;
-          const idxBloco = 28; 
           const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
 
           if (cnpjBase === "00000000" || !cnpjBase) continue;
@@ -157,24 +156,25 @@ export default function MonitoreDiarioPage() {
             escopoAtual[cnpjBase] = "EMPRESA";
           }
 
-          // --- INÍCIO DA EXTRAÇÃO DETALHADA ---
+          // --- INÍCIO DA EXTRAÇÃO DETALHADA COM POSIÇÕES ABSOLUTAS ---
+          
           if (blocoCodigo === "010102") {
             escopoAtual[cnpjBase] = "EMPRESA";
             if (clientesHoje[cnpjBase].cedente_serasa === "N/A") {
-              clientesHoje[cnpjBase].cedente_serasa = linha.substring(idxBloco + 6, idxBloco + 66).trim();
+              clientesHoje[cnpjBase].cedente_serasa = linha.substring(34, 94).trim();
             }
             continue;
           }
 
           if (blocoCodigo === "010104" && escopoAtual[cnpjBase] === "EMPRESA") {
-            const cidadeBruta = linha.substring(idxBloco + 6, idxBloco + 46);
+            const cidadeBruta = linha.substring(34, 74);
             clientesHoje[cnpjBase].jsonb.cadastro.cidade = cidadeBruta.replace(/\d+$/, "").replace(/\s{2,}/g, " - ").trim();
             continue;
           }
 
           if (blocoCodigo === "030102" && escopoAtual[cnpjBase] === "EMPRESA") {
-            const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14);
-            const nomeBruto = linha.substring(idxBloco + 14, idxBloco + 59);
+            const dataConsulta = linha.substring(34, 42);
+            const nomeBruto = linha.substring(42, 87);
             clientesHoje[cnpjBase].jsonb.consultas.push({ 
               data: dataConsulta, 
               instituicao: nomeBruto.replace(/\d+$/, "").trim() 
@@ -198,21 +198,19 @@ export default function MonitoreDiarioPage() {
           }
 
           if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
-            // 🛡️ CORTE MATEMÁTICO BLINDADO (Fim das cidades mastigadas e valores estratosféricos)
+            // 🛡️ FATIAMENTO ABSOLUTO DA DÍVIDA
+            const dataOcorrencia = linha.substring(43, 51);
             
-            // 1. Data (Ocupa 8 posições: da 15 até a 23)
-            const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23);
-            
-            // 2. Valor (Ocupa exatas 18 posições: da 23 até a 41. Limpamos o "R$ " usando \D)
-            const valorBruto = linha.substring(idxBloco + 23, idxBloco + 41).replace(/\D/g, "");
+            // O valor ocupa exatas 15 posições, sempre da 54 até a 69
+            const valorBruto = linha.substring(54, 69).replace(/\D/g, "");
             const valorFormatado = parseFloat(valorBruto) / 100;
             
-            // 3. Praça (Ocupa 40 posições: começa exatemente na 41 até a 81)
-            let praca = linha.substring(idxBloco + 41, idxBloco + 81);
+            // A Praça/Origem vem logo depois do valor, da posição 69 em diante
+            let praca = linha.substring(69, 109);
             
             // 🧹 LIXEIRO ATIVADO
-            praca = praca.replace(/(Z1\s*)?IPZ[A-Z0-9]+/g, ""); // Aniquila códigos do sistema Serasa
-            praca = praca.replace(/\s{2,}/g, " - ").replace(/(-\s*)+$/, "").trim(); // Arruma os traços
+            praca = praca.replace(/(Z1\s*)?IPZ[A-Z0-9]+/g, ""); 
+            praca = praca.replace(/\s{2,}/g, " - ").replace(/(-\s*)+$/, "").trim(); 
             
             if (valorFormatado > 0) {
               clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
@@ -223,15 +221,16 @@ export default function MonitoreDiarioPage() {
             }
             continue;
           }
-          // --- FIM DA EXTRAÇÃO DETALHADA ---
 
           if (blocoCodigo === "010117") {
             escopoAtual[cnpjBase] = "SOCIO";
-            const nomeSocio = linha.substring(idxBloco + 29, idxBloco + 89).trim() || "SOCIO_DESCONHECIDO";
+            const nomeSocio = linha.substring(57, 117).trim() || "SOCIO_DESCONHECIDO";
             socioAtivo[cnpjBase] = nomeSocio;
             if (!clientesHoje[cnpjBase].socios[nomeSocio]) clientesHoje[cnpjBase].socios[nomeSocio] = [];
             continue;
           }
+
+          // --- FIM DA EXTRAÇÃO DETALHADA ---
 
           if (blocoCodigo === "041099") {
             if (escopoAtual[cnpjBase] === "EMPRESA") clientesHoje[cnpjBase].nada_consta = true;
