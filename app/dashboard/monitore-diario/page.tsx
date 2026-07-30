@@ -265,7 +265,7 @@ export default function MonitoreDiarioPage() {
       const { data: cedentesDB } = await supabase
         .from("cadastro_cedentes")
         .select("id, cedente, cnpj, responsavel_id, grupo_economico, limite")
-        .not("cnpj", "is", null); // Garante que traga apenas quem tem CNPJ
+        .not("cnpj", "is", null);
 
       // Busca histórico anterior para calcular a evolução
       const cnpjsAproximados = Object.keys(clientesHoje).map(c => c + "000100");
@@ -281,16 +281,12 @@ export default function MonitoreDiarioPage() {
 
       for (const [cnpjBase, dadosHoje] of Object.entries(clientesHoje)) {
         
-        // 🛡️ A MÁGICA DO MATCH PELA RAIZ DO CNPJ
-        // Tentamos achar a empresa oficial no cadastro cruzando os 8 primeiros digitos
         const cedenteOficial = cedentesDB?.find(c => extrairRaizCnpj(c.cnpj) === cnpjBase);
 
-        // Se achou no banco, usamos o CNPJ e Nome oficiais. Se não, usamos o fallback do Serasa (Prospecto)
         const cnpjParaSalvar = cedenteOficial ? cedenteOficial.cnpj : dadosHoje.cnpj_completo_serasa;
         const nomeParaSalvar = cedenteOficial ? cedenteOficial.cedente : dadosHoje.cedente_serasa;
         const idResponsavel = cedenteOficial ? cedenteOficial.responsavel_id : null;
 
-        // Injetando dados financeiros comerciais direto no JSONB para a futura view
         if (cedenteOficial) {
            dadosHoje.jsonb.comercial = {
              grupo_economico: cedenteOficial.grupo_economico,
@@ -332,9 +328,9 @@ export default function MonitoreDiarioPage() {
 
         registrosHistorico.push({
           data_processamento: dataArquivo, 
-          cnpj_cliente: cnpjParaSalvar, // CNPJ Normalizado
-          cedente: nomeParaSalvar,      // Nome Normalizado
-          responsavel_id: idResponsavel, // Vínculo com o CRM
+          cnpj_cliente: cnpjParaSalvar,
+          cedente: nomeParaSalvar,
+          responsavel_id: idResponsavel,
           saldo_anterior: saldoAnterior, 
           evolucao, 
           saldo_atual: saldoAtual, 
@@ -344,7 +340,7 @@ export default function MonitoreDiarioPage() {
           total_protesto: vFinais.PROTESTO,
           total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
           total_div_vencida: vFinais["DÍVIDA VENCIDA"],
-          detalhes_completos: dadosHoje.jsonb // 🚀 O JSON RICO VAI AQUI
+          detalhes_completos: dadosHoje.jsonb
         });
 
         if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjParaSalvar, cedente: nomeParaSalvar, evolucao, resumo: resumoTexto });
@@ -429,105 +425,109 @@ export default function MonitoreDiarioPage() {
     return { total: dados.length, piora, melhora, estaveis };
   }, [dados]);
 
-  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Varrendo logs e checando permissões...</div>;
+  if (carregando) return <div className="p-8 text-center text-slate-500 font-bold animate-pulse">Carregando painel de monitoramento...</div>;
 
   return (
-    <div className="space-y-5 max-w-[1600px] mx-auto pb-6 text-[13px] font-sans text-slate-800">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-4 md:p-6 font-sans text-slate-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
-      {/* HEADER E BOTÃO DE UPLOAD */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-3 gap-4">
+      {/* 🚀 HEADER PREMIUM COM GRADIENTE */}
+      <div className="bg-gradient-to-br from-slate-900 to-blue-900 text-white p-6 md:p-8 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">🔍 Monitoramento Diário (Serasa)</h2>
-          <span className="text-xs text-slate-500 font-medium">Acompanhe as oscilações diárias de risco da sua carteira de cedentes.</span>
+          <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight mb-2">🔍 Monitoramento Diário</h1>
+          <p className="text-blue-200 opacity-90 text-sm font-medium">
+            Acompanhe as oscilações de risco da sua carteira processadas via bureau Serasa.
+          </p>
         </div>
 
-        <label className={`px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-xs uppercase cursor-pointer shadow-md transition-all flex items-center gap-2 ${processando ? "opacity-50 pointer-events-none animate-pulse" : ""}`}>
+        <label className={`shrink-0 px-6 py-3.5 bg-white text-blue-900 hover:bg-slate-50 font-black rounded-xl text-xs uppercase cursor-pointer shadow-xl transition-all flex items-center gap-2 border border-transparent hover:border-blue-100 ${processando ? "opacity-50 pointer-events-none animate-pulse" : ""}`}>
           {processando ? `⏳ ${statusProcessamento}` : "📥 Subir Relatório Serasa (.TXT)"}
           <input type="file" accept=".txt" className="hidden" onChange={processarArquivoSerasa} />
         </label>
       </div>
 
-      {/* CARDS DE RESUMO MASTIGADO */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex flex-col justify-center">
-          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total na Data Atual</span>
-          <span className="text-2xl font-black font-mono mt-1 text-slate-700">{kpis.total}</span>
+      {/* 📊 CARDS DE RESUMO MASTIGADO (TITANIUM DESIGN) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        <div className="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1">
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Total na Data Atual</div>
+          <div className="text-3xl font-black font-mono text-slate-800">{kpis.total}</div>
         </div>
-        <div className="bg-white border border-slate-200 border-l-4 border-l-rose-500 p-4 rounded-xl shadow-xs flex flex-col justify-center">
-          <span className="text-[10px] font-black uppercase tracking-wider text-rose-600">🚨 Pioras (Risco Aumentou)</span>
-          <span className="text-2xl font-black font-mono mt-1 text-slate-800">{kpis.piora}</span>
+        <div className="bg-white border border-slate-200 border-l-4 border-l-rose-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1">
+          <div className="text-[10px] font-black uppercase tracking-widest text-rose-600 mb-1">🚨 Pioras (Risco Aumentou)</div>
+          <div className="text-3xl font-black font-mono text-slate-800">{kpis.piora}</div>
         </div>
-        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 p-4 rounded-xl shadow-xs flex flex-col justify-center">
-          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600">✅ Melhoras (Risco Diminuiu)</span>
-          <span className="text-2xl font-black font-mono mt-1 text-slate-800">{kpis.melhora}</span>
+        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1">
+          <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-1">✅ Melhoras (Risco Caiu)</div>
+          <div className="text-3xl font-black font-mono text-slate-800">{kpis.melhora}</div>
         </div>
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex flex-col justify-center">
-          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">⚖️ Estáveis (Sem Ocorrências)</span>
-          <span className="text-2xl font-black font-mono mt-1 text-slate-700">{kpis.estaveis}</span>
+        <div className="bg-white border border-slate-200 border-l-4 border-l-slate-400 rounded-xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1">
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">⚖️ Estáveis (Sem Ocorrências)</div>
+          <div className="text-3xl font-black font-mono text-slate-800">{kpis.estaveis}</div>
         </div>
       </div>
 
-      {/* TABELA DE MOVIMENTAÇÕES */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+      {/* 📋 TABELA DE MOVIMENTAÇÕES (CLEAN UI) */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1700px] text-[13px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-400 text-[10px] tracking-wider h-11">
-                <th className="p-3 text-center">Data</th>
-                <th className="p-3 w-40">CNPJ</th>
-                <th className="p-3 w-64">Cedente</th>
-                <th className="p-3 text-right">Risco Aberto</th>
-                <th className="p-3 text-right">Saldo Ant.</th>
-                <th className="p-3 text-right">Evolução</th>
-                <th className="p-3 text-right">Saldo Atual</th>
-                <th className="p-3 w-64">Resumo da Ocorrência</th>
-                <th className="p-3 text-right">PEFIN</th>
-                <th className="p-3 text-right">REFIN</th>
-                <th className="p-3 text-right">Protestos</th>
-                <th className="p-3 text-right">Ações Jud.</th>
-                <th className="p-3 text-right">Dív. Vencida</th>
+            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+              <tr>
+                <th className="p-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-500">Data</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-40">CNPJ</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Cedente</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50/50">Risco Aberto</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Saldo Ant.</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Evolução</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-800 bg-slate-100/50">Saldo Atual</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Resumo da Ocorrência</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">PEFIN</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">REFIN</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Protestos</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Ações Jud.</th>
+                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Dív. Vencida</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+            <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {dados.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="text-center p-10 text-slate-400 font-bold italic">
-                    Nenhuma movimentação ou registro disponível para a data de hoje. Faça o upload do arquivo Serasa.
+                  <td colSpan={13} className="text-center p-12 text-slate-400 font-bold italic">
+                    Nenhuma movimentação ou registro disponível para a data de hoje. Aguardando upload.
                   </td>
                 </tr>
               ) : (
                 dados.map((item, idx) => {
                   const evo = parseFloat(item.evolucao || 0);
-                  // Verifica se é prospecto checando o JSONB
                   const isProspecto = item.detalhes_completos?.comercial?.status_banco === "PROSPECTO_AVULSO";
 
                   return (
-                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-3 text-center text-slate-400 font-normal whitespace-nowrap">{fD(item.data_processamento)}</td>
-                      <td className="p-3 font-mono text-slate-400 text-xs whitespace-nowrap">{item.cnpj_cliente}</td>
-                      <td className="p-3 font-black text-slate-900 truncate max-w-[250px]" title={item.cedente}>
-                        {isProspecto && <span className="inline-block mr-2 px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] rounded uppercase font-bold tracking-wider">Avulso</span>}
+                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors group">
+                      <td className="p-4 text-center text-slate-400 font-mono text-xs whitespace-nowrap">{fD(item.data_processamento)}</td>
+                      <td className="p-4 font-mono text-slate-400 text-xs whitespace-nowrap group-hover:text-blue-600 transition-colors">{item.cnpj_cliente}</td>
+                      <td className="p-4 font-black text-slate-800 truncate max-w-[250px] uppercase" title={item.cedente}>
+                        {isProspecto && <span className="inline-block mr-2 px-1.5 py-0.5 bg-orange-100 text-orange-700 border border-orange-200 text-[9px] rounded uppercase font-black tracking-wider shadow-sm">Avulso</span>}
                         {item.cedente}
                       </td>
-                      <td className="p-3 text-right font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
-                      <td className="p-3 text-right text-slate-400 whitespace-nowrap">{fM(item.saldo_anterior)}</td>
+                      <td className="p-4 text-right font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
+                      <td className="p-4 text-right text-slate-400 font-mono whitespace-nowrap">{fM(item.saldo_anterior)}</td>
                       
                       {/* EVOLUÇÃO DESTACADA */}
-                      <td className="p-3 text-right whitespace-nowrap">
-                        <span className={`inline-flex items-center justify-end gap-1 font-black px-2 py-0.5 rounded text-[11px] w-[120px] shadow-xs ${evo === 0 ? "text-slate-500 bg-slate-100 border border-slate-200" : evo > 0 ? "text-rose-700 bg-rose-50 border border-rose-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"}`}>
+                      <td className="p-4 text-right whitespace-nowrap">
+                        <span className={`inline-flex items-center justify-end gap-1 font-black px-2.5 py-1 rounded text-[11px] min-w-[120px] shadow-sm ${evo === 0 ? "text-slate-500 bg-slate-100 border border-slate-200" : evo > 0 ? "text-rose-700 bg-rose-50 border border-rose-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"}`}>
                           {evo === 0 ? "•" : evo > 0 ? "▲" : "▼"} {fM(evo)}
                         </span>
                       </td>
                       
-                      <td className="p-3 text-right font-mono font-black text-slate-900 whitespace-nowrap">{fM(item.saldo_atual)}</td>
-                      <td className="p-3 text-slate-500 text-[11px] leading-tight pr-4">{item.resumo_movimento || "Estável"}</td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900 bg-slate-50/50 whitespace-nowrap">{fM(item.saldo_atual)}</td>
+                      <td className="p-4 text-slate-500 text-[11px] leading-tight pr-4 font-semibold">{item.resumo_movimento || "Estável"}</td>
                       
                       {/* COLUNAS RESTRITIVOS */}
-                      {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => (
-                        <td key={k} className={`p-3 text-right font-mono text-xs whitespace-nowrap ${parseFloat(item[k]) > 0 ? "text-rose-600 font-bold bg-rose-50/40" : "text-slate-300 font-normal"}`}>
-                          {fM(item[k])}
-                        </td>
-                      ))}
+                      {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => {
+                        const val = parseFloat(item[k]);
+                        return (
+                          <td key={k} className={`p-4 text-right font-mono text-xs whitespace-nowrap ${val > 0 ? "text-rose-600 font-black bg-rose-50/30" : "text-slate-300 font-medium"}`}>
+                            {fM(item[k])}
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })
