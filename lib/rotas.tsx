@@ -46,6 +46,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
 
   // 📝 CADASTRO
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Cadastro", defaultMaster: true },
+  { nome: "Controle Cadastro", path: "/dashboard/controle-cadastro", icone: "🎛️", categoria: "Cadastro", defaultMaster: true }, // 🔥 NOVA TELA ADICIONADA AQUI!
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Cadastro", defaultMaster: true },
 
   // 👥 RH E CONTROLE (NOVO)
