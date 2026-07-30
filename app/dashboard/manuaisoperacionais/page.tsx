@@ -8,7 +8,7 @@ import {
   Image as ImageIcon, ChevronUp, ChevronDown, X, Eye, Lock, History, GitCompare,
   Printer
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase"; // ⚠️ AJUSTE AQUI SE SEU CAMINHO DO SUPABASE FOR DIFERENTE
 
 // ============================================================================
 // TIPAGENS DO CONSTRUTOR DE MANUAIS
@@ -49,10 +49,10 @@ export default function ManuaisOperacionaisPage() {
   const [versaoB, setVersaoB] = useState<any>(null);
 
   // ============================================================================
-  // FUNÇÃO DE IMPRESSÃO
+  // FUNÇÃO DE IMPRESSÃO (DISPONÍVEL PARA QUALQUER PAPEL/ROLE)
   // ============================================================================
   const handleImprimir = (e?: React.MouseEvent, manual?: any) => {
-    if (e) e.stopPropagation();
+    if (e) e.stopPropagation(); 
 
     if (manual) {
       setManualIdAtivo(manual.id);
@@ -63,9 +63,11 @@ export default function ManuaisOperacionaisPage() {
       setBlocos(Array.isArray(manual.blocos) ? manual.blocos : []);
       setView("editor");
       
+      // Aumentei o timeout para 500ms para garantir a renderização do React 
+      // antes de chamar a janela de impressão da máquina.
       setTimeout(() => {
         window.print();
-      }, 300);
+      }, 500);
     } else {
       window.print();
     }
@@ -86,7 +88,7 @@ export default function ManuaisOperacionaisPage() {
       setManuais(data || []);
     } catch (error) {
       console.error("Erro ao buscar manuais:", error);
-    } finally { // <- Corrigido aqui (estava "fontally")
+    } finally {
       setCarregando(false);
     }
   };
@@ -298,14 +300,14 @@ export default function ManuaisOperacionaisPage() {
       case "titulo":
         return (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4 border-l-4 border-l-blue-600">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 print:hidden">Bloco: Título de Seção</div>
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 hide-on-print">Bloco: Título de Seção</div>
             <input type="text" value={bloco.conteudo || ""} onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)} placeholder="Digite o título da seção..." className="w-full text-2xl font-black text-blue-900 border-none outline-none bg-transparent placeholder:text-slate-300 uppercase tracking-tight" />
           </div>
         );
       case "texto":
         return (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 print:hidden">Bloco: Parágrafo Padrão</div>
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 hide-on-print">Bloco: Parágrafo Padrão</div>
             <textarea value={bloco.conteudo || ""} onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)} placeholder="Descreva as instruções ou políticas aqui..." className="w-full min-h-[100px] text-[15px] leading-relaxed text-slate-700 border-none outline-none resize-none bg-transparent placeholder:text-slate-300" />
           </div>
         );
@@ -314,7 +316,7 @@ export default function ManuaisOperacionaisPage() {
           <div className="bg-red-50 p-6 rounded-xl border border-red-200 shadow-sm mb-4 border-l-4 border-l-red-500">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-5 h-5 text-red-600" />
-              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest print:hidden">Bloco: Alerta Crítico</div>
+              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest hide-on-print">Bloco: Alerta Crítico</div>
             </div>
             <textarea value={bloco.conteudo || ""} onChange={(e) => atualizarConteudoBloco(bloco.id, e.target.value)} placeholder="Atenção: Descreva a restrição ou regra inegociável..." className="w-full text-[15px] font-medium text-red-900 leading-relaxed border-none outline-none resize-none bg-transparent placeholder:text-red-300/70" />
           </div>
@@ -323,30 +325,30 @@ export default function ManuaisOperacionaisPage() {
         const passos = Array.isArray(bloco.conteudo) ? bloco.conteudo : [""];
         return (
           <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
-            <div className="flex items-center gap-2 mb-4"><ListOrdered className="w-5 h-5 text-blue-600" /><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest print:hidden">Bloco: Fluxo Operacional (Etapas)</div></div>
+            <div className="flex items-center gap-2 mb-4"><ListOrdered className="w-5 h-5 text-blue-600" /><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest hide-on-print">Bloco: Fluxo Operacional (Etapas)</div></div>
             <div className="flex flex-col gap-3">
               {passos.map((textoPasso: string, index: number) => (
                 <div key={index} className="flex gap-4 items-start bg-white p-4 rounded-lg border border-slate-200 relative group/passo">
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-black flex items-center justify-center font-mono text-sm">{index + 1}</div>
                   <input type="text" value={textoPasso} onChange={(e) => atualizarPasso(bloco.id, index, e.target.value)} placeholder={`Descreva a etapa ${index + 1}...`} className="w-full mt-1 text-[15px] text-slate-700 border-none outline-none bg-transparent placeholder:text-slate-300" />
-                  {passos.length > 1 && (<button onClick={() => removerPasso(bloco.id, index)} className="absolute right-3 top-4 text-slate-300 hover:text-red-500 opacity-0 group-hover/passo:opacity-100 transition-opacity print:hidden"><X className="w-4 h-4" /></button>)}
+                  {passos.length > 1 && (<button onClick={() => removerPasso(bloco.id, index)} className="absolute right-3 top-4 text-slate-300 hover:text-red-500 opacity-0 group-hover/passo:opacity-100 transition-opacity hide-on-print"><X className="w-4 h-4" /></button>)}
                 </div>
               ))}
-              <button onClick={() => addPasso(bloco.id)} className="text-[12px] font-bold text-blue-600 uppercase tracking-wider mt-2 hover:underline text-left print:hidden">+ Adicionar Nova Etapa</button>
+              <button onClick={() => addPasso(bloco.id)} className="text-[12px] font-bold text-blue-600 uppercase tracking-wider mt-2 hover:underline text-left hide-on-print">+ Adicionar Nova Etapa</button>
             </div>
           </div>
         );
       case "imagem":
         return (
           <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm mb-4">
-            <div className="flex items-center gap-2 mb-4"><ImageIcon className="w-5 h-5 text-blue-600" /><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest print:hidden">Bloco: Anexo / Print da Tela</div></div>
+            <div className="flex items-center gap-2 mb-4"><ImageIcon className="w-5 h-5 text-blue-600" /><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest hide-on-print">Bloco: Anexo / Print da Tela</div></div>
             {bloco.conteudo ? (
               <div className="relative rounded-lg overflow-hidden border border-slate-200 group/img">
                 <img src={bloco.conteudo} alt="Print Anexado" className="w-full h-auto object-contain max-h-[500px] bg-slate-200" />
-                <button onClick={() => atualizarConteudoBloco(bloco.id, "")} className="absolute top-2 right-2 bg-slate-900/80 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover/img:opacity-100 shadow-lg print:hidden">Trocar Imagem</button>
+                <button onClick={() => atualizarConteudoBloco(bloco.id, "")} className="absolute top-2 right-2 bg-slate-900/80 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover/img:opacity-100 shadow-lg hide-on-print">Trocar Imagem</button>
               </div>
             ) : (
-              <label className="border-2 border-dashed border-slate-300 rounded-lg p-8 flex flex-col items-center justify-center bg-white hover:bg-slate-50 transition-colors cursor-pointer hover:border-blue-400 group/upload print:hidden">
+              <label className="border-2 border-dashed border-slate-300 rounded-lg p-8 flex flex-col items-center justify-center bg-white hover:bg-slate-50 transition-colors cursor-pointer hover:border-blue-400 group/upload hide-on-print">
                 <ImageIcon className="w-8 h-8 text-slate-400 mb-2 group-hover/upload:text-blue-500 transition-colors" />
                 <span className="text-sm font-bold text-slate-600 group-hover/upload:text-blue-600">Clique para fazer upload do print</span>
                 <span className="text-xs text-slate-400 mt-1">PNG, JPG ou WEBP (Max 5MB)</span>
@@ -360,7 +362,7 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
-  // RENDERIZAÇÃO: MODO VISUALIZAÇÃO
+  // RENDERIZAÇÃO: MODO VISUALIZAÇÃO PREMIUM
   // ============================================================================
   const renderizarBlocoView = (bloco: Bloco) => {
     switch (bloco.tipo) {
@@ -557,19 +559,52 @@ export default function ManuaisOperacionaisPage() {
   // ============================================================================
   return (
     <>
+      {/* ⚠️ CORREÇÃO DE ESTILOS DE IMPRESSÃO APLICADA AQUI ⚠️ */}
       <style>{`
         @media print {
-          body { background: white !important; }
-          .print\\:hidden { display: none !important; }
-          .print\\:border-none { border: none !important; }
-          .print\\:shadow-none { box-shadow: none !important; }
-          .print\\:p-0 { padding: 0 !important; }
+          /* 1. Oculta absolutamente tudo da aplicação */
+          body * {
+            visibility: hidden !important;
+          }
+          
+          /* 2. Mostra apenas a área do relatório e seus filhos */
+          #area-de-impressao, #area-de-impressao * {
+            visibility: visible !important;
+          }
+          
+          /* 3. Posiciona a área do relatório no canto superior ignorando a navbar/sidebar */
+          #area-de-impressao {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: white !important;
+          }
+
+          /* 4. Oculta botões e inputs indesejados da impressão */
+          .hide-on-print, .hide-on-print * {
+            display: none !important;
+            visibility: hidden !important;
+          }
+
+          /* 5. Esconde o placeholder dos inputs vazios ao imprimir */
+          ::-webkit-input-placeholder { color: transparent !important; }
+          :-moz-placeholder { color: transparent !important; }
+          ::-moz-placeholder { color: transparent !important; }
+          :-ms-input-placeholder { color: transparent !important; }
         }
       `}</style>
 
-      <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8 justify-center print:p-0 print:bg-white">
-        <div className={`flex-1 ${!canEdit ? 'max-w-[900px]' : ''} print:max-w-full print:w-full`}>
-          <div className="flex justify-between items-center mb-6 print:hidden">
+      <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8 justify-center">
+        
+        {/* A INJEÇÃO DE ID FOI APLICADA NESSA DIV: id="area-de-impressao" */}
+        <div id="area-de-impressao" className={`flex-1 ${!canEdit ? 'max-w-[900px]' : ''}`}>
+          
+          <div className="flex justify-between items-center mb-6 hide-on-print">
             <button onClick={() => setView("list")} className="text-slate-500 hover:text-blue-600 flex items-center gap-2 font-bold text-sm uppercase transition-colors">
               <ArrowLeft className="w-4 h-4" /> Voltar ao Painel
             </button>
@@ -604,8 +639,8 @@ export default function ManuaisOperacionaisPage() {
             </div>
           </div>
 
-          <div className={`bg-white rounded-t-2xl border border-slate-200 border-b-0 relative overflow-hidden print:border-none print:shadow-none ${canEdit ? 'p-10' : 'p-12 pb-8'}`}>
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-900 to-blue-500 print:hidden"></div>
+          <div className={`bg-white rounded-t-2xl border border-slate-200 border-b-0 relative overflow-hidden ${canEdit ? 'p-10' : 'p-12 pb-8'}`}>
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-900 to-blue-500 hide-on-print"></div>
             
             {canEdit ? (
               <input 
@@ -623,7 +658,7 @@ export default function ManuaisOperacionaisPage() {
               {canEdit ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
-                  <select value={manualTipo} onChange={(e) => setManualTipo(e.target.value)} className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer print:bg-transparent">
+                  <select value={manualTipo} onChange={(e) => setManualTipo(e.target.value)} className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer">
                     <option value="Manual">Manual</option>
                     <option value="Política">Política</option>
                     <option value="Processo">Processo</option>
@@ -639,7 +674,7 @@ export default function ManuaisOperacionaisPage() {
               {canEdit ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status Legal:</span>
-                  <select value={manualStatus} onChange={(e) => setManualStatus(e.target.value)} className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer print:bg-transparent">
+                  <select value={manualStatus} onChange={(e) => setManualStatus(e.target.value)} className="bg-slate-100 text-slate-800 border-none outline-none rounded px-2 py-1 text-xs font-bold uppercase cursor-pointer">
                     <option value="Em Revisão">Em Revisão</option>
                     <option value="Ativo">Vigente (Ativo)</option>
                     <option value="Inativo">Inativo / Obsoleto</option>
@@ -659,9 +694,9 @@ export default function ManuaisOperacionaisPage() {
             </div>
           </div>
 
-          <div className={`${canEdit ? 'bg-slate-100/50' : 'bg-white'} min-h-[500px] border border-slate-200 border-t-0 p-8 ${!canEdit && 'px-12'} rounded-b-2xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)] print:border-none print:shadow-none print:p-0 print:bg-white`}>
+          <div className={`${canEdit ? 'bg-slate-100/50' : 'bg-white'} min-h-[500px] border border-slate-200 border-t-0 p-8 ${!canEdit && 'px-12'} rounded-b-2xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]`}>
             {blocos.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400 py-20 border-2 border-dashed border-slate-300 rounded-xl print:hidden">
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 py-20 border-2 border-dashed border-slate-300 rounded-xl hide-on-print">
                 <FileText className="w-12 h-12 mb-4 opacity-50" />
                 <p className="font-bold uppercase tracking-wider text-sm">O documento está vazio</p>
                 {canEdit && <p className="text-xs mt-2">Use o painel lateral para adicionar blocos de conteúdo.</p>}
@@ -671,7 +706,7 @@ export default function ManuaisOperacionaisPage() {
                 {blocos.map((bloco, index) => (
                   <div key={bloco.id} className="relative group/bloco">
                     {canEdit && (
-                      <div className="absolute -right-3 -top-3 z-10 flex gap-1 opacity-0 group-hover/bloco:opacity-100 transition-opacity print:hidden">
+                      <div className="absolute -right-3 -top-3 z-10 flex gap-1 opacity-0 group-hover/bloco:opacity-100 transition-opacity hide-on-print">
                         <button onClick={() => moverBloco(index, 'up')} disabled={index === 0} className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Mover para Cima"><ChevronUp className="w-4 h-4" /></button>
                         <button onClick={() => moverBloco(index, 'down')} disabled={index === blocos.length - 1} className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded-full shadow-md hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Mover para Baixo"><ChevronDown className="w-4 h-4" /></button>
                         <button onClick={() => removerBloco(bloco.id)} className="bg-red-100 border border-red-200 text-red-600 p-1.5 rounded-full shadow-md hover:bg-red-200" title="Remover Bloco"><Trash2 className="w-4 h-4" /></button>
@@ -686,7 +721,7 @@ export default function ManuaisOperacionaisPage() {
         </div>
 
         {canEdit && (
-          <div className="w-80 shrink-0 print:hidden">
+          <div className="w-80 shrink-0 hide-on-print">
             <div className="sticky top-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50 p-4 border-b border-slate-200">
                 <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
