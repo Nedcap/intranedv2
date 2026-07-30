@@ -91,7 +91,7 @@ export default function MonitoreDiarioPage() {
   }, []);
 
   // ============================================================================
-  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA (LOTE & SILENCIOSO)
+  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA
   // ============================================================================
   const processarArquivoSerasa = async (event: React.ChangeEvent<HTMLInputElement>, dispararEmail: boolean) => {
     const files = event.target.files;
@@ -101,7 +101,6 @@ export default function MonitoreDiarioPage() {
       setProcessando(true);
       const resumoGlobalDisparo: any[] = [];
 
-      // 🛡️ OTIMIZAÇÃO: Busca a tabela de cedentes apenas UMA vez para o lote inteiro
       setStatusProcessamento("Carregando base do CRM...");
       const { data: cedentesDB } = await supabase
         .from("cadastro_cedentes")
@@ -128,23 +127,22 @@ export default function MonitoreDiarioPage() {
         const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
         const socioAtivo: Record<string, string> = {};
 
-        const codigosChave = ["010102", "010104", "010117", "030102", "041099", "040101", "040102", "040202", "040301"];
+        // 🧠 Códigos Estratégicos Expandidos (INCLUINDO 021105)
+        const codigosChave = ["010102", "010104", "010117", "030102", "021105", "041099", "040101", "040102", "040202", "040301"];
 
         for (const linha of linhas) {
           if (linha.length < 40) continue;
           if (linha.substring(9, 10) !== "1") continue;
 
-          // 🛡️ A BALA DE PRATA: Lemos as posições cravadas em vez de usar indexOf
           const cnpjBaseRaw = linha.substring(19, 28);
           const blocoCodigoRaw = linha.substring(28, 34);
 
           if (!codigosChave.includes(blocoCodigoRaw)) continue;
 
           const blocoCodigo = blocoCodigoRaw;
-          const idxBloco = 28; // Travamos o índice da lógica antiga
+          const idxBloco = 28; 
           const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
 
-          // Pula lixos ou cnpjs vazios
           if (cnpjBase === "00000000" || !cnpjBase) continue;
 
           if (!clientesHoje[cnpjBase]) {
@@ -159,7 +157,7 @@ export default function MonitoreDiarioPage() {
             escopoAtual[cnpjBase] = "EMPRESA";
           }
 
-          // --- INÍCIO DA EXTRAÇÃO DETALHADA COM REGEX ---
+          // --- INÍCIO DA EXTRAÇÃO DETALHADA ---
           if (blocoCodigo === "010102") {
             escopoAtual[cnpjBase] = "EMPRESA";
             if (clientesHoje[cnpjBase].cedente_serasa === "N/A") {
@@ -184,20 +182,38 @@ export default function MonitoreDiarioPage() {
             continue;
           }
 
+          if (blocoCodigo === "021105" && escopoAtual[cnpjBase] === "EMPRESA") {
+            const tipo = linha.substring(34, 48).trim();
+            const mes = linha.substring(48, 55).trim();
+            const avaliacao = linha.substring(55, 85).replace(/-/g, "").trim();
+
+            if (tipo && mes && avaliacao) {
+              clientesHoje[cnpjBase].jsonb.comportamento.push({
+                tipo: tipo,
+                mes: mes,
+                avaliacao: avaliacao
+              });
+            }
+            continue;
+          }
+
           if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
-            const tail = linha.substring(idxBloco);
-            const match = tail.match(/(20\d{6}).*?(\d{15})(.*)/);
+            const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23);
             
-            if (match) {
-              const dataOcorrencia = match[1];
-              const valorFormatado = parseFloat(match[2]) / 100;
-              const praca = match[3].replace(/\d+$/, "").replace(/\s{2,}/g, " - ").trim();
-              
-              if (valorFormatado > 0) {
-                clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
-                  data: dataOcorrencia, valor: valorFormatado, praca: praca
-                });
-              }
+            const valorBruto = linha.substring(idxBloco + 23, idxBloco + 38).replace(/\D/g, "");
+            const valorFormatado = parseFloat(valorBruto) / 100;
+            
+            let praca = linha.substring(idxBloco + 38, idxBloco + 78);
+            
+            praca = praca.replace(/(Z1\s*)?IPZ[A-Z0-9]+/g, "");
+            praca = praca.replace(/\s{2,}/g, " - ").replace(/(-\s*)+$/, "").trim();
+            
+            if (valorFormatado > 0) {
+              clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
+                data: dataOcorrencia, 
+                valor: valorFormatado, 
+                praca: praca
+              });
             }
             continue;
           }
@@ -328,7 +344,6 @@ export default function MonitoreDiarioPage() {
             detalhes_completos: dadosHoje.jsonb
           });
 
-          // Acumula os emails no array global apenas se não for upload silencioso
           if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjParaSalvar, cedente: nomeParaSalvar, evolucao, resumo: resumoTexto });
 
           if (dadosHoje.socios) {
@@ -364,9 +379,8 @@ export default function MonitoreDiarioPage() {
         for (let i = 0; i < registrosSocios.length; i += 500) {
           await supabase.from("restritivos_socios").insert(registrosSocios.slice(i, i + 500));
         }
-      } // <- FIM DO LOOP DE ARQUIVOS
+      }
 
-      // 🛡️ O DISPARO CONDICIONAL: Só aciona o resend se o usuário escolheu o botão amarelo
       if (dispararEmail && resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
         const respostaEmail = await fetch("/api/email", {
@@ -499,7 +513,6 @@ export default function MonitoreDiarioPage() {
                       <td className="p-4 text-right font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
                       <td className="p-4 text-right text-slate-400 font-mono whitespace-nowrap">{fM(item.saldo_anterior)}</td>
                       
-                      {/* EVOLUÇÃO DESTACADA */}
                       <td className="p-4 text-right whitespace-nowrap">
                         <span className={`inline-flex items-center justify-end gap-1 font-black px-2.5 py-1 rounded text-[11px] min-w-[120px] shadow-sm ${evo === 0 ? "text-slate-500 bg-slate-100 border border-slate-200" : evo > 0 ? "text-rose-700 bg-rose-50 border border-rose-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"}`}>
                           {evo === 0 ? "•" : evo > 0 ? "▲" : "▼"} {fM(evo)}
@@ -509,7 +522,6 @@ export default function MonitoreDiarioPage() {
                       <td className="p-4 text-right font-mono font-black text-slate-900 bg-slate-50/50 whitespace-nowrap">{fM(item.saldo_atual)}</td>
                       <td className="p-4 text-slate-500 text-[11px] leading-tight pr-4 font-semibold">{item.resumo_movimento || "Estável"}</td>
                       
-                      {/* COLUNAS RESTRITIVOS */}
                       {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => {
                         const val = parseFloat(item[k]);
                         return (

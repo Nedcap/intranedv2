@@ -22,6 +22,14 @@ const formatarDataSerasa = (dataStr: string) => {
   return `${dataStr.substring(6, 8)}/${dataStr.substring(4, 6)}/${dataStr.substring(0, 4)}`;
 };
 
+const formatarMesSerasa = (mesStr: string) => {
+  // Ex: "2607JUL" -> "Jul/2026"
+  if (!mesStr || mesStr.length < 7) return mesStr;
+  const ano = "20" + mesStr.substring(0, 2);
+  const mesExtenso = mesStr.substring(4, 7);
+  return `${mesExtenso.charAt(0) + mesExtenso.slice(1).toLowerCase()}/${ano}`;
+};
+
 const formatarDataBr = (str: string) => {
   if (!str) return "-";
   return str.split("-").reverse().join("/");
@@ -33,14 +41,10 @@ export default function RaioXSerasaPage() {
   const [busca, setBusca] = useState("");
   const [selecionado, setSelecionado] = useState<any | null>(null);
 
-  // ============================================================================
-  // 📥 CARREGAMENTO DE DADOS (Pega sempre a versão mais recente de cada CNPJ)
-  // ============================================================================
   useEffect(() => {
     const carregarHistorico = async () => {
       try {
         setLoading(true);
-        // Busca os registros ordenados do mais novo pro mais velho
         const { data, error } = await supabase
           .from("historico_consolidado")
           .select("*")
@@ -49,12 +53,9 @@ export default function RaioXSerasaPage() {
         if (error) throw error;
         
         if (data) {
-          // Filtra para manter apenas o registro mais recente de cada CNPJ
-          // e garante que ele tenha o JSONB preenchido com a inteligência nova
           const mapUnicos = new Map();
           data.forEach(item => {
             const temInteligencia = item.detalhes_completos && Object.keys(item.detalhes_completos).length > 0;
-            
             if (temInteligencia && !mapUnicos.has(item.cnpj_cliente)) {
               mapUnicos.set(item.cnpj_cliente, item);
             }
@@ -67,11 +68,9 @@ export default function RaioXSerasaPage() {
         setLoading(false);
       }
     };
-
     carregarHistorico();
   }, []);
 
-  // Filtro de busca na barra lateral
   const registrosFiltrados = useMemo(() => {
     if (!busca) return registros;
     const b = busca.toLowerCase();
@@ -98,8 +97,9 @@ export default function RaioXSerasaPage() {
     const jsonb = selecionado.detalhes_completos || {};
     const cadastro = jsonb.cadastro || {};
     const comercial = jsonb.comercial || {};
-    const consultas = jsonb.consultas || [];
-    const dividas = jsonb.detalhes_dividas || [];
+    const consultas = Array.isArray(jsonb.consultas) ? jsonb.consultas : [];
+    const dividas = Array.isArray(jsonb.detalhes_dividas) ? jsonb.detalhes_dividas : [];
+    const comportamentoBruto = Array.isArray(jsonb.comportamento) ? jsonb.comportamento : [];
 
     const isProspecto = comercial.status_banco === "PROSPECTO_AVULSO";
     const statusLabel = isProspecto ? "PROSPECTO (AVULSO)" : "CLIENTE DA BASE";
@@ -112,8 +112,17 @@ export default function RaioXSerasaPage() {
 
     let totalDetalhado = 0;
 
+    // 🧠 Agrupamento de Comportamento por Mês
+    const compAgrupado = comportamentoBruto.reduce((acc: any, curr: any) => {
+      if (!acc[curr.mes]) acc[curr.mes] = { mes: curr.mes, totalMes: "-", pontual: "-" };
+      if (curr.tipo === "TOTAL MES") acc[curr.mes].totalMes = curr.avaliacao;
+      if (curr.tipo === "PONTUAL") acc[curr.mes].pontual = curr.avaliacao;
+      return acc;
+    }, {});
+    const comportamentoRows = Object.values(compAgrupado).sort((a: any, b: any) => b.mes.localeCompare(a.mes));
+
     return (
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-10">
         
         {/* CABEÇALHO DO DOSSIÊ */}
         <div className="bg-gradient-to-br from-slate-900 to-blue-900 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-start md:items-stretch gap-4">
@@ -158,14 +167,48 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* MINI-CARDS DE RESTRITIVOS */}
+        {/* COMPORTAMENTO DE PAGAMENTO (BLOCO 0211) */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
-            <span className="w-1.5 h-5 bg-blue-600 rounded-full inline-block"></span>
-            1. Quadro de Ocorrências
+            <span className="w-1.5 h-5 bg-emerald-500 rounded-full inline-block"></span>
+            1. Pontualidade e Poder de Compra
+          </h2>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-32">Competência</th>
+                    <th className="p-3 font-bold uppercase text-slate-400 tracking-wider">Volume Total Comprado (Fornecedores)</th>
+                    <th className="p-3 font-bold uppercase text-emerald-600 tracking-wider">Volume Pago Pontualmente</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {comportamentoRows.length === 0 ? (
+                    <tr><td colSpan={3} className="p-6 text-center text-slate-400 italic">Nenhum histórico de comportamento mapeado neste arquivo.</td></tr>
+                  ) : (
+                    comportamentoRows.map((c: any, i: number) => (
+                      <tr key={i} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 text-center font-mono font-bold text-slate-500">{formatarMesSerasa(c.mes)}</td>
+                        <td className="p-3 font-bold text-slate-700 uppercase">{c.totalMes}</td>
+                        <td className="p-3 font-black text-emerald-700 uppercase bg-emerald-50/30">{c.pontual}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* MINI-CARDS DE RESTRITIVOS */}
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4 mt-6">
+            <span className="w-1.5 h-5 bg-rose-600 rounded-full inline-block"></span>
+            2. Quadro de Ocorrências e Dívidas
           </h2>
           
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             {[
               { label: "PEFIN", valor: selecionado.total_pefin, color: "border-b-rose-600" },
               { label: "REFIN", valor: selecionado.total_refin, color: "border-b-rose-600" },
@@ -179,18 +222,14 @@ export default function RaioXSerasaPage() {
               </div>
             ))}
           </div>
-        </div>
 
-        {/* DETALHAMENTO & RADAR */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* TABELA DÍVIDAS DETALHADAS */}
-          <div>
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
-              Detalhamento de Protestos e Ações
-            </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* TABELA DÍVIDAS DETALHADAS */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="max-h-[400px] overflow-y-auto">
+              <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold uppercase text-slate-600 tracking-wider text-xs text-center">
+                Detalhamento de Protestos e Ações
+              </div>
+              <div className="max-h-[350px] overflow-y-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
                     <tr>
@@ -224,20 +263,16 @@ export default function RaioXSerasaPage() {
                 </table>
               </div>
             </div>
-          </div>
 
-          {/* TABELA RADAR DE CONSULTAS */}
-          <div>
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
-              Radar de Buscas (Mercado)
-            </h3>
-            
-            <div className="bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r-lg mb-4 text-xs text-blue-900 leading-relaxed text-justify">
-              <strong>Atenção Estratégica:</strong> Um volume elevado de consultas recentes por bancos, factorings ou securitizadoras neste quadro pode indicar busca urgente por capital de giro ou refinanciamento no mercado.
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="max-h-[330px] overflow-y-auto">
+            {/* TABELA RADAR DE CONSULTAS */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+              <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold uppercase text-slate-600 tracking-wider text-xs text-center">
+                Radar de Buscas (Mercado)
+              </div>
+              <div className="bg-blue-50 border-b border-blue-100 p-3 text-xs text-blue-900 leading-relaxed text-center">
+                Volume elevado pode indicar busca urgente por refinanciamento.
+              </div>
+              <div className="max-h-[305px] overflow-y-auto flex-1">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
                     <tr>
@@ -261,8 +296,8 @@ export default function RaioXSerasaPage() {
               </div>
             </div>
           </div>
-          
         </div>
+
       </div>
     );
   };
@@ -273,7 +308,6 @@ export default function RaioXSerasaPage() {
       {/* 📜 SIDEBAR: LISTA DE CEDENTES */}
       <div className="w-full md:w-80 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden shrink-0">
         
-        {/* Header da Sidebar */}
         <div className="p-5 border-b border-slate-200 bg-slate-50">
           <h2 className="text-lg font-black uppercase tracking-tight text-slate-800">Raio-X Serasa</h2>
           <p className="text-xs text-slate-500 mt-1 mb-4">Selecione o cedente monitorado</p>
@@ -286,7 +320,6 @@ export default function RaioXSerasaPage() {
           />
         </div>
 
-        {/* Lista de Itens */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {loading ? (
             <div className="p-4 text-center text-sm font-bold text-slate-400 animate-pulse">Carregando base...</div>
@@ -314,7 +347,6 @@ export default function RaioXSerasaPage() {
                     <div className="text-[10px] font-mono text-slate-400 mt-0.5">{item.cnpj_cliente}</div>
                   </div>
                   
-                  {/* Bolinha indicadora de risco */}
                   <div className={`w-2.5 h-2.5 rounded-full shrink-0 ml-3 shadow-inner
                     ${temDivida ? 'bg-rose-500 shadow-rose-200' : 'bg-emerald-400 shadow-emerald-200'}
                   `}></div>
