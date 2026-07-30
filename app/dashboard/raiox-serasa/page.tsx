@@ -34,33 +34,51 @@ const formatarDataBr = (str: string) => {
   return str.split("-").reverse().join("/");
 };
 
-// Limpa o lixo de zeros que o Serasa manda no final do bloco 0211
+// Limpa o lixo de zeros que o Serasa manda no final do bloco
 const limparTextoComp = (txt: string) => {
   if (!txt) return "-";
   const limpo = txt.replace(/0+$/, "").trim();
   return limpo || "-";
 };
 
-// Componente visual para separar a "Classe" (ex: C1) do "Valor"
+// 💎 TRADUTOR DE COMPORTAMENTO SERASA (Desempacota: B1913 MIL -> Classe B | 19 Fornecedores | 13 MIL)
 const RenderizarFaixa = ({ texto, isPontual }: { texto: string, isPontual?: boolean }) => {
-  if (!texto || texto === "-") return <span className="text-slate-300 font-medium">-</span>;
+  if (!texto || texto === "-") return <span className="text-slate-300 font-bold text-sm">-</span>;
   
-  // Captura o código da classe (Letra + Número) e o resto do texto
-  const match = texto.match(/^([A-Z]\d+)\s+(.*)/);
+  // A Mágica: Pega a Letra, tenta pegar 1 ou 2 números de fornecedores, e garante que o resto comece de 1 a 9 (o dinheiro)
+  const match = texto.match(/^([A-Z])(\d{1,2})\s*([1-9].*)/);
+  
   if (match) {
+    const classe = match[1];
+    const fornecedores = match[2];
+    const valor = match[3];
+
+    // Cores dinâmicas baseadas no Rating
+    let colorBadge = "bg-slate-100 text-slate-600 border-slate-200";
+    if (classe === 'A') colorBadge = "bg-emerald-100 text-emerald-800 border-emerald-200";
+    if (classe === 'B') colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
+    if (classe === 'C') colorBadge = "bg-amber-100 text-amber-800 border-amber-200";
+    if (classe === 'D') colorBadge = "bg-rose-100 text-rose-800 border-rose-200";
+
     return (
-      <div className="flex items-center gap-2.5">
-        <span className={`px-2 py-0.5 rounded text-[10px] font-black border shadow-xs ${isPontual ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-          {match[1]}
+      <div className="flex flex-col gap-1.5 py-1">
+        <span className={`font-black text-[13px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-800'}`}>
+          {valor}
         </span>
-        <span className={`font-bold text-[11px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-700'}`}>
-          {match[2]}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border shadow-xs ${colorBadge}`}>
+            Classe {classe}
+          </span>
+          <span className="text-[10px] font-bold text-slate-400 tracking-wide uppercase">
+            {fornecedores} Fornecedores
+          </span>
+        </div>
       </div>
     );
   }
   
-  return <span className={`font-bold text-[11px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-700'}`}>{texto}</span>;
+  // Fallback caso a string seja diferente do padrão
+  return <span className={`font-bold text-[13px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-800'}`}>{texto}</span>;
 };
 
 export default function RaioXSerasaPage() {
@@ -147,7 +165,7 @@ export default function RaioXSerasaPage() {
     const compAgrupado = comportamentoBruto.reduce((acc: any, curr: any) => {
       if (!acc[curr.mes]) acc[curr.mes] = { mes: curr.mes, totalMes: "-", pontual: "-" };
       
-      // Limpa os lixos antes de salvar na memória da tabela
+      // Limpa os lixos de zero na hora de montar as colunas
       if (curr.tipo === "TOTAL MES") acc[curr.mes].totalMes = limparTextoComp(curr.avaliacao);
       if (curr.tipo === "PONTUAL") acc[curr.mes].pontual = limparTextoComp(curr.avaliacao);
       
