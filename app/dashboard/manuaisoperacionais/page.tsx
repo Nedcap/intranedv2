@@ -88,7 +88,7 @@ export default function ManuaisOperacionaisPage() {
       setManuais(data || []);
     } catch (error) {
       console.error("Erro ao buscar manuais:", error);
-    } fontally {
+    } finally {
       setCarregando(false);
     }
   };
