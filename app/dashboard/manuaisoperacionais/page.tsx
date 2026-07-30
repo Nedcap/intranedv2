@@ -8,7 +8,7 @@ import {
   Image as ImageIcon, ChevronUp, ChevronDown, X, Eye, Lock, History, GitCompare,
   Printer
 } from "lucide-react";
-import { supabase } from "@/lib/supabase"; // ⚠️ AJUSTE AQUI SE SEU CAMINHO DO SUPABASE FOR DIFERENTE
+import { supabase } from "@/lib/supabase";
 
 // ============================================================================
 // TIPAGENS DO CONSTRUTOR DE MANUAIS
@@ -49,13 +49,12 @@ export default function ManuaisOperacionaisPage() {
   const [versaoB, setVersaoB] = useState<any>(null);
 
   // ============================================================================
-  // FUNÇÃO DE IMPRESSÃO (DISPONÍVEL PARA QUALQUER PAPEL/ROLE)
+  // FUNÇÃO DE IMPRESSÃO
   // ============================================================================
   const handleImprimir = (e?: React.MouseEvent, manual?: any) => {
-    if (e) e.stopPropagation(); // Evita abrir o editor se clicado direto no card
+    if (e) e.stopPropagation();
 
     if (manual) {
-      // Se clicado no card da listagem, carrega os dados e depois dispara a impressão
       setManualIdAtivo(manual.id);
       setManualTitulo(manual.titulo);
       setManualTipo(manual.tipo || "Manual");
@@ -68,7 +67,6 @@ export default function ManuaisOperacionaisPage() {
         window.print();
       }, 300);
     } else {
-      // Se clicado diretamente na tela de visualização/edição
       window.print();
     }
   };
@@ -88,7 +86,7 @@ export default function ManuaisOperacionaisPage() {
       setManuais(data || []);
     } catch (error) {
       console.error("Erro ao buscar manuais:", error);
-    } finally {
+    } finally { // <- Corrigido aqui (estava "fontally")
       setCarregando(false);
     }
   };
@@ -119,7 +117,6 @@ export default function ManuaisOperacionaisPage() {
       };
 
       if (currentManualId) {
-        // ATUALIZAR EXISTENTE
         const { error } = await supabase
           .from('manuais_operacionais')
           .update(payload)
@@ -127,7 +124,6 @@ export default function ManuaisOperacionaisPage() {
         if (error) throw error;
         alert("Manual atualizado com sucesso!");
       } else {
-        // CRIAR NOVO
         const { data, error } = await supabase
           .from('manuais_operacionais')
           .insert([payload])
@@ -140,7 +136,6 @@ export default function ManuaisOperacionaisPage() {
         alert("Novo manual criado com sucesso!");
       }
 
-      // 🔥 GATILHO DE VERSIONAMENTO (Se está ATIVO, salva uma cópia na tabela de versões)
       if (manualStatus === "Ativo" && currentManualId) {
         const versaoPayload = {
           manual_id: currentManualId,
@@ -203,7 +198,6 @@ export default function ManuaisOperacionaisPage() {
     if (!manualIdAtivo) return;
     setCarregando(true);
     try {
-      // Busca as versões salvas
       const { data, error } = await supabase
         .from('manuais_operacionais_versoes')
         .select('*')
@@ -234,7 +228,7 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
-  // MOTOR DE CUSTOMIZAÇÃO DOS BLOCOS (INCLUINDO ORDENAÇÃO)
+  // MOTOR DE CUSTOMIZAÇÃO DOS BLOCOS
   // ============================================================================
   const adicionarBloco = (tipo: TipoBloco) => {
     const novoBloco: Bloco = { id: Math.random().toString(36).substr(2, 9), tipo, conteudo: tipo === "passo-a-passo" ? [""] : "" };
@@ -366,7 +360,7 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
-  // RENDERIZAÇÃO: MODO VISUALIZAÇÃO PREMIUM (SOMENTE LEITURA & COMPARAÇÃO)
+  // RENDERIZAÇÃO: MODO VISUALIZAÇÃO
   // ============================================================================
   const renderizarBlocoView = (bloco: Bloco) => {
     switch (bloco.tipo) {
@@ -406,7 +400,7 @@ export default function ManuaisOperacionaisPage() {
   };
 
   // ============================================================================
-  // TELA 1: LISTAGEM DE MANUAIS (DASHBOARD)
+  // TELA 1: LISTAGEM DE MANUAIS
   // ============================================================================
   if (view === "list") {
     return (
@@ -453,7 +447,6 @@ export default function ManuaisOperacionaisPage() {
                         {manual.tipo}
                       </span>
                       <div className="flex items-center gap-2">
-                        {/* 🖨️ BOTÃO DE IMPRESSÃO - DISPONÍVEL PARA QUALQUER PESSOA */}
                         <button
                           onClick={(e) => handleImprimir(e, manual)}
                           title="Imprimir Relatório"
@@ -490,12 +483,11 @@ export default function ManuaisOperacionaisPage() {
   }
 
   // ============================================================================
-  // TELA 3: COMPARADOR DE VERSÕES (LADO A LADO)
+  // TELA 3: COMPARADOR DE VERSÕES
   // ============================================================================
   if (view === "compare") {
     return (
       <div className="p-4 md:p-8 max-w-[1800px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex flex-col">
-        {/* Header do Comparador */}
         <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-4">
             <button onClick={() => setView("editor")} className="text-slate-500 hover:text-blue-600 flex items-center gap-2 font-bold text-sm uppercase transition-colors border-r border-slate-200 pr-4">
@@ -511,10 +503,7 @@ export default function ManuaisOperacionaisPage() {
           </div>
         </div>
 
-        {/* Grid Lado a Lado */}
         <div className="flex-1 grid grid-cols-2 gap-6 h-full">
-          
-          {/* LADO A */}
           <div className="bg-white rounded-2xl border border-slate-200 flex flex-col overflow-hidden shadow-sm">
             <div className="bg-slate-100 p-4 border-b border-slate-200">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Selecione a Versão (A):</span>
@@ -537,7 +526,6 @@ export default function ManuaisOperacionaisPage() {
             </div>
           </div>
 
-          {/* LADO B */}
           <div className="bg-white rounded-2xl border border-slate-200 flex flex-col overflow-hidden shadow-sm">
             <div className="bg-blue-50 p-4 border-b border-blue-100">
               <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest block mb-2">Selecione a Versão (B):</span>
@@ -559,18 +547,16 @@ export default function ManuaisOperacionaisPage() {
               )}
             </div>
           </div>
-
         </div>
       </div>
     );
   }
 
   // ============================================================================
-  // TELA 2: EDITOR / LEITURA DO MANUAL (VIEW DEFAULT DO RELATÓRIO)
+  // TELA 2: EDITOR / LEITURA DO MANUAL
   // ============================================================================
   return (
     <>
-      {/* 🖨️ ESTILO CSS PARA AJUSTAR A IMPRESSÃO E ESCONDER BOTÕES DE INTERFACE */}
       <style>{`
         @media print {
           body { background: white !important; }
@@ -582,17 +568,13 @@ export default function ManuaisOperacionaisPage() {
       `}</style>
 
       <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen bg-slate-50 font-['Inter'] flex gap-8 justify-center print:p-0 print:bg-white">
-        
-        {/* Coluna Esquerda: O Documento */}
         <div className={`flex-1 ${!canEdit ? 'max-w-[900px]' : ''} print:max-w-full print:w-full`}>
-          
           <div className="flex justify-between items-center mb-6 print:hidden">
             <button onClick={() => setView("list")} className="text-slate-500 hover:text-blue-600 flex items-center gap-2 font-bold text-sm uppercase transition-colors">
               <ArrowLeft className="w-4 h-4" /> Voltar ao Painel
             </button>
             
             <div className="flex gap-3 items-center">
-              {/* 🖨️ BOTÃO DE IMPRESSÃO GLOBAL - VISÍVEL PARA TODOS OS USUÁRIOS */}
               <button 
                 onClick={() => handleImprimir()}
                 className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-lg font-black uppercase text-[11px] tracking-widest transition-all flex items-center gap-2 shadow-sm"
@@ -638,7 +620,6 @@ export default function ManuaisOperacionaisPage() {
             )}
             
             <div className={`flex gap-6 border-t border-slate-100 ${canEdit ? 'pt-6' : 'pt-4'} text-sm font-semibold text-slate-500`}>
-              
               {canEdit ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classificação:</span>
@@ -675,7 +656,6 @@ export default function ManuaisOperacionaisPage() {
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Criado por:</span>
                 <span className="text-slate-800 font-bold text-xs uppercase">{manualAutor || "Sistema"}</span>
               </div>
-
             </div>
           </div>
 
@@ -743,7 +723,6 @@ export default function ManuaisOperacionaisPage() {
             </div>
           </div>
         )}
-
       </div>
     </>
   );
