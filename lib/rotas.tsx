@@ -33,6 +33,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🔎 CONSULTAS
   { nome: "Lemitt", path: "/dashboard/lemitt", icone: "🔎", categoria: "Consultas", defaultMaster: true },
   { nome: "Monitore Diário", path: "/dashboard/monitore-diario", icone: "🚨", categoria: "Consultas", defaultMaster: true },
+  { nome: "Raio-X Serasa", path: "/dashboard/raiox-serasa", icone: "🩻", categoria: "Consultas", defaultMaster: true }, // 🔥 NOVA TELA AQUI!
   { nome: "Monitore Histórico", path: "/dashboard/monitore-historico", icone: "📚", categoria: "Consultas", defaultMaster: true },
   { nome: "Restritivos Sócios", path: "/dashboard/restritivos-socios", icone: "👥", categoria: "Consultas", defaultMaster: true },
 
