@@ -28,7 +28,6 @@ export default function MonitoreDiarioPage() {
     try {
       setCarregando(true);
 
-      // 🎯 CORREÇÃO: Cache Buster - impede o cache fantasma do Next.js
       const { data: maxDateList } = await supabase
         .from("historico_consolidado")
         .select("data_processamento")
@@ -43,7 +42,6 @@ export default function MonitoreDiarioPage() {
 
       const ultimaData = maxDateList[0].data_processamento;
 
-      // 🎯 CORREÇÃO: Adicionado .limit(10000) para evitar o corte padrão de 1000 linhas
       const [resHist, resCadastro] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -100,17 +98,14 @@ export default function MonitoreDiarioPage() {
 
       if (linhas.length === 0) throw new Error("O arquivo está vazio.");
 
-      // 🎯 CORREÇÃO SUPREMA: Ignorar o nome do arquivo e ler a data oficial do cabeçalho (Linha 1)
       let dataArquivo = new Date().toISOString().split("T")[0];
       
-      // Pesca o padrão DD/MM/AAAA que SEMPRE vem cravado na primeira linha do arquivo Serasa
       const matchData = linhas[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
       
       if (matchData) {
         const dia = matchData[1];
         const mes = matchData[2];
         const ano = matchData[3];
-        // Converte para o padrão de banco de dados (YYYY-MM-DD)
         dataArquivo = `${ano}-${mes}-${dia}`;
       } else {
         console.warn("Aviso: Data não encontrada no cabeçalho. Usando a data de hoje como fallback.");
@@ -176,6 +171,9 @@ export default function MonitoreDiarioPage() {
         const valDigits = blocoValor.replace(/\D/g, "");
         if (!valDigits) continue;
 
+        // 🛡️ TRAVA DE SEGURANÇA 1: Se a string capturada tem mais de 15 números, é erro de leitura do TXT (ID, Código de barras, etc)
+        if (valDigits.length > 15) continue;
+
         let tipo = "";
         let valor = 0;
 
@@ -188,6 +186,11 @@ export default function MonitoreDiarioPage() {
           else if (lNorm.includes("VENCIDA") || lNorm.includes("DIVIDA")) tipo = "DÍVIDA VENCIDA";
           else continue;
           valor = parseFloat(valDigits.length > 2 ? valDigits.slice(0, -2) : "0");
+        }
+
+        // 🛡️ TRAVA DE SEGURANÇA 2: Previne envio de Infinity, NaN ou valores acima de R$ 9 bilhões
+        if (isNaN(valor) || valor > 9999999999 || !isFinite(valor)) {
+          continue;
         }
 
         if (tipo) {
@@ -210,7 +213,6 @@ export default function MonitoreDiarioPage() {
 
       const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
       
-      // 🎯 CORREÇÃO: Adicionado .limit(10000) para evitar corte no cruzamento
       const [histDBResponse, cedentesDBResponse] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -314,7 +316,6 @@ export default function MonitoreDiarioPage() {
       await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
       await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
 
-      // 🎯 CORREÇÃO: Tratamento de erro explícito para o Supabase não falhar silenciosamente
       for (let i = 0; i < registrosHistorico.length; i += 500) {
         const { error: errHist } = await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
         if (errHist) throw new Error(`Erro ao salvar histórico: ${errHist.message}`);
