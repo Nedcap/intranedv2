@@ -61,13 +61,23 @@ const VISUAL_STEPS_FIDC = [
   { key: "dt_apto_fidc", label: "Apto Operar" }
 ];
 
+// Campos que devem ser ESPELHADOS quando agrupamos as empresas
+const CAMPOS_HERANCA_GRUPO = [
+  "limite", "taxa", "docs_ok", "obs", "data_5", "data_6", "data_7", "data_8", "data_9", "apto",
+  "comercial", "risco_sec", "risco_fidc", "vencido_sec", "vencido_fidc",
+  "dt_aprovacao_comite", "dt_documentos_sec", "dt_geracao_contrato_sec", "dt_assinatura_contrato_sec", "dt_apto_sec",
+  "dt_documentos_fidc", "dt_geracao_contrato_fidc", "dt_assinatura_contrato_fidc", "dt_envio_gestora_fidc",
+  "dt_aprovacao_gestora_fidc", "dt_envio_admin_fidc", "dt_aprovacao_admin_fidc", "dt_apto_fidc",
+  "responsavel_id", "nao_opera_sec", "nao_opera_fidc", "modalidades_aprovadas"
+];
+
 const formatarDataBr = (dataString: string) => {
   if (!dataString) return "";
   const [ano, mes, dia] = dataString.split("-");
   return `${dia}/${mes}/${ano}`;
 };
 
-// 🌟 FUNÇÃO AUXILIAR: Calcula o Limite Total somando as Modalidades
+// Calcula o Limite Total somando as Modalidades
 const calcularTotalLimite = (item: any) => {
   if (item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0) {
     const total = item.modalidades_aprovadas.reduce((acc: number, mod: any) => acc + (parseFloat(String(mod.limite).replace(/\D/g, "")) / 100 || 0), 0);
@@ -76,7 +86,7 @@ const calcularTotalLimite = (item: any) => {
   return item.limite || "R$ 0,00";
 };
 
-// 🌟 FUNÇÃO MÁGICA: Substitui as tags pelo dado real e consolida a tabela de modalidades
+// Substitui as tags pelo dado real e consolida a tabela de modalidades
 const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string[] = [], fundo: string = "", codigoContrato: string = "") => {
   if (!texto) return "";
   const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
@@ -85,10 +95,8 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
     : "Nenhum documento pendente.";
 
   const nomeFundoBonito = fundo === "SEC" ? "Securitizadora" : "FIDC";
-  
   const limiteFormatado = calcularTotalLimite(item);
   
-  // Detalhamento Múltiplo para o Email
   let detalheTaxa = item.taxa || "0,00%";
   if (item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0) {
     detalheTaxa = "\n" + item.modalidades_aprovadas.map((m: any) => `  - ${m.modalidade}: ${m.limite} | Taxa: ${m.taxa} | Prazo: ${m.prazo || 'N/D'}`).join('\n');
@@ -202,7 +210,7 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
-  // ================= LÓGICA DO GRUPO ECONÔMICO =================
+  // ================= LÓGICA DO GRUPO ECONÔMICO E CLONAGEM DE DADOS =================
   const abrirModalGrupo = () => {
     setNomeGrupoInput("");
     setBuscaModalGrupo("");
@@ -219,21 +227,40 @@ export default function CadastroPage() {
       return alert("Preencha o nome do grupo e selecione pelo menos uma empresa.");
     }
     
+    const empresasSelecionadas = cedentes.filter(c => selecionadosParaGrupo.includes(c.id));
+    
+    // 🌟 ENCONTRA A EMPRESA "MATRIZ": Prioriza a que já tem Limite ou Comitê
+    let empresaMatriz = empresasSelecionadas.find(c => c.limite || c.dt_aprovacao_comite) || empresasSelecionadas[0];
+
     const novos = cedentes.map(c => {
       if (selecionadosParaGrupo.includes(c.id)) {
-        return { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
+        // Aplica o nome do grupo
+        const clonado = { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
+        
+        // Se a empresa na iteração NÃO for a matriz, copia todos os dados operacionais dela
+        if (c.id !== empresaMatriz.id) {
+          CAMPOS_HERANCA_GRUPO.forEach(campo => {
+            // Verifica deep copy para as modalidades
+            if (campo === "modalidades_aprovadas" && empresaMatriz[campo]) {
+              clonado[campo] = JSON.parse(JSON.stringify(empresaMatriz[campo]));
+            } else if (empresaMatriz[campo] !== undefined) {
+              clonado[campo] = empresaMatriz[campo];
+            }
+          });
+        }
+        return clonado;
       }
       return c;
     });
 
     setCedentes(novos);
     setModalGrupoAberto(false);
-    alert(`Grupo "${nomeGrupoInput.trim().toUpperCase()}" aplicado localmente. Lembre-se de clicar em 'Salvar Tudo' para gravar no banco!`);
+    alert(`Grupo "${nomeGrupoInput.trim().toUpperCase()}" aplicado com sucesso!\nOs dados da empresa [${empresaMatriz.cedente || 'Nova'}] foram replicados para as outras.\n\nLembre-se de clicar em "Salvar Tudo" para gravar.`);
   };
 
   const cedentesModalGrupoFiltrados = useMemo(() => {
+    // 🌟 Agora permite que as linhas manuais (_isNovo) apareçam na lista para poderem ser vinculadas e receberem os dados
     return cedentes.filter(c => 
-      !c._isNovo && // Não mostrar itens não salvos no banco
       (c.cedente.toLowerCase().includes(buscaModalGrupo.toLowerCase()) ||
       (c.cnpj && c.cnpj.includes(buscaModalGrupo.replace(/\D/g, ""))))
     );
@@ -490,13 +517,15 @@ export default function CadastroPage() {
 
   const adicionarNovaLinha = () => {
     const novaLinha = {
+      // 🌟 ID temporário para permitir seleção no modal de grupo antes de salvar no banco
+      id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, 
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
       modalidades_aprovadas: [],
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
       nao_opera_sec: false, nao_opera_fidc: false,
-      grupo_economico: null, // Novo campo
+      grupo_economico: null,
       comercial: usuarioAtual?.perfil === "comercial" || usuarioAtual?.perfil === "sdr" ? usuarioAtual.nome : "",
       _isNovo: true, _isEditado: true
     };
@@ -513,7 +542,9 @@ export default function CadastroPage() {
 
     try {
       setCarregando(true);
-      if (id) await supabase.from("cadastro_cedentes").delete().eq("id", id);
+      if (id && !String(id).startsWith("temp-")) {
+        await supabase.from("cadastro_cedentes").delete().eq("id", id);
+      }
       const novos = [...cedentes];
       novos.splice(index, 1);
       setCedentes(novos);
@@ -539,14 +570,14 @@ export default function CadastroPage() {
     setTimeout(() => setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false })), 2000);
   };
 
-  // Função para montar o Payload atualizado
+  // Função para montar o Payload atualizado e remover o ID temporário
   const montarPayload = (item: any) => {
     const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
     const payload: any = {
       cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
       cnpj: cnpjFinal === "" ? null : cnpjFinal,
       modalidades_aprovadas: item.modalidades_aprovadas || [],
-      grupo_economico: item.grupo_economico || null, // Garante envio do grupo
+      grupo_economico: item.grupo_economico || null, 
       dt_aprovacao_comite: item.dt_aprovacao_comite || null,
       dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
       dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
@@ -558,7 +589,10 @@ export default function CadastroPage() {
       comercial: item.comercial, atualizado_em: new Date().toISOString()
     };
     if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
-    if (item.id) payload.id = item.id;
+    // Só envia o ID se não for o ID falso que geramos
+    if (item.id && !String(item.id).startsWith("temp-")) {
+      payload.id = item.id;
+    }
     return payload;
   };
 
@@ -653,7 +687,7 @@ export default function CadastroPage() {
     });
 
     resultado.sort((a: any, b: any) => {
-      // 🌟 NOVA REGRA DE ORDENAÇÃO: Força Grupos Econômicos a ficarem juntos no topo da ordenação primária
+      // Força Grupos Econômicos a ficarem juntos no topo da ordenação primária
       if (a.grupo_economico && b.grupo_economico && a.grupo_economico !== b.grupo_economico) {
         return a.grupo_economico.localeCompare(b.grupo_economico);
       }
@@ -774,7 +808,6 @@ export default function CadastroPage() {
             <span className="text-sm text-slate-500 font-medium ml-12">Monitoramento de cadastro, conversão e emissão de contratos.</span>
           </div>
           
-          {/* 🌟 BOTÕES ATUALIZADOS */}
           <div className="flex gap-3 w-full md:w-auto flex-wrap md:flex-nowrap">
             <button 
               onClick={buscarAprovadasDoComite} 
@@ -789,13 +822,11 @@ export default function CadastroPage() {
               Sincronizar Comitê
             </button>
 
-            {/* Novo Botão de CNPJ Manual */}
             <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
               + Add CNPJ
             </button>
 
-            {/* Novo Botão de Grupo Econômico */}
             <button onClick={abrirModalGrupo} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
               + Criar Grupo
@@ -1313,8 +1344,8 @@ export default function CadastroPage() {
                         className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
                       />
                       <div className="flex-1">
-                        <span className="text-sm font-bold text-slate-800 block truncate">{c.cedente}</span>
-                        <span className="text-[10px] font-mono text-slate-500">{formatarCNPJ(c.cnpj)}</span>
+                        <span className="text-sm font-bold text-slate-800 block truncate">{c.cedente || "[NOVA EMPRESA]"}</span>
+                        <span className="text-[10px] font-mono text-slate-500">{c.cnpj ? formatarCNPJ(c.cnpj) : "Sem CNPJ"}</span>
                       </div>
                       {c.grupo_economico && !selecionadosParaGrupo.includes(c.id) && (
                         <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-bold">Já em: {c.grupo_economico}</span>
