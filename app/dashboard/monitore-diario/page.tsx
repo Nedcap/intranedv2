@@ -111,12 +111,17 @@ export default function MonitoreDiarioPage() {
         console.warn("Aviso: Data não encontrada no cabeçalho. Usando a data de hoje como fallback.");
       }
 
-      setStatusProcessamento("Minerando CNPJs e Sócios...");
+      setStatusProcessamento("Minerando inteligência do TXT...");
       const clientesHoje: Record<string, any> = {};
       const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
       const socioAtivo: Record<string, string> = {};
 
-      const codigosChave = ["010102", "010117", "041099", "040101", "040102", "040202"];
+      // 🧠 ADICIONADOS OS CÓDIGOS ESTRATÉGICOS (Endereço, Consultas, Detalhes de Dívida)
+      const codigosChave = [
+        "010102", "010104", "010117", 
+        "030102", 
+        "041099", "040101", "040102", "040202", "040301"
+      ];
 
       for (const linha of linhas) {
         if (linha.length < 40) continue;
@@ -140,10 +145,25 @@ export default function MonitoreDiarioPage() {
         const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
 
         if (!clientesHoje[cnpjBase]) {
-          clientesHoje[cnpjBase] = { restritivos: [], socios: {}, nada_consta: false, cedente: "N/A" };
+          clientesHoje[cnpjBase] = { 
+            restritivos: [], 
+            socios: {}, 
+            nada_consta: false, 
+            cedente: "N/A",
+            // 💎 O NOVO CORAÇÃO DOS DADOS
+            jsonb: {
+              cadastro: {},
+              consultas: [],
+              comportamento: [],
+              detalhes_dividas: []
+            }
+          };
           escopoAtual[cnpjBase] = "EMPRESA";
         }
 
+        // --- INÍCIO DA EXTRAÇÃO DE DADOS INTELIGENTES JSONB ---
+
+        // Captura Razão Social (Bloco 010102)
         if (blocoCodigo === "010102") {
           escopoAtual[cnpjBase] = "EMPRESA";
           if (clientesHoje[cnpjBase].cedente === "N/A") {
@@ -151,6 +171,40 @@ export default function MonitoreDiarioPage() {
           }
           continue;
         }
+
+        // Captura Endereço / Cidade / UF (Bloco 010104)
+        if (blocoCodigo === "010104" && escopoAtual[cnpjBase] === "EMPRESA") {
+          const cidade_uf = linha.substring(idxBloco + 6, idxBloco + 46).trim();
+          clientesHoje[cnpjBase].jsonb.cadastro.cidade = cidade_uf;
+          continue;
+        }
+
+        // Captura Histórico de Consultas (Bloco 030102)
+        if (blocoCodigo === "030102" && escopoAtual[cnpjBase] === "EMPRESA") {
+          const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14); // Formato YYYYMMDD
+          const nomeInstituicao = linha.substring(idxBloco + 14, idxBloco + 59).trim();
+          clientesHoje[cnpjBase].jsonb.consultas.push({ data: dataConsulta, instituicao: nomeInstituicao });
+          continue;
+        }
+
+        // Captura Detalhamento de Protestos e Ações (Bloco 040301)
+        if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
+          const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23); // YYYYMMDD
+          const valorBruto = linha.substring(idxBloco + 23, idxBloco + 45).replace(/\D/g, "");
+          const valorFormatado = parseFloat(valorBruto) / 100; // Tratando centavos do arquivo posicional
+          const praca = linha.substring(idxBloco + 45, idxBloco + 75).trim();
+          
+          if (valorFormatado > 0) {
+            clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
+              data: dataOcorrencia,
+              valor: valorFormatado,
+              praca: praca
+            });
+          }
+          continue;
+        }
+
+        // --- FIM DA EXTRAÇÃO JSONB ---
 
         if (blocoCodigo === "010117") {
           escopoAtual[cnpjBase] = "SOCIO";
@@ -165,14 +219,12 @@ export default function MonitoreDiarioPage() {
           continue;
         }
 
+        // Processamento de Totais Relacionais (Blocos 040101, 040102, 040202)
         const partes = linha.trim().split(/\s+/);
         if (partes.length < 2) continue;
         const blocoValor = partes[partes.length - 2] || "";
         const valDigits = blocoValor.replace(/\D/g, "");
-        if (!valDigits) continue;
-
-        // 🛡️ TRAVA DE SEGURANÇA 1: Se a string capturada tem mais de 15 números, é erro de leitura do TXT (ID, Código de barras, etc)
-        if (valDigits.length > 15) continue;
+        if (!valDigits || valDigits.length > 15) continue; // Trava contra lixo do TXT
 
         let tipo = "";
         let valor = 0;
@@ -188,10 +240,7 @@ export default function MonitoreDiarioPage() {
           valor = parseFloat(valDigits.length > 2 ? valDigits.slice(0, -2) : "0");
         }
 
-        // 🛡️ TRAVA DE SEGURANÇA 2: Previne envio de Infinity, NaN ou valores acima de R$ 9 bilhões
-        if (isNaN(valor) || valor > 9999999999 || !isFinite(valor)) {
-          continue;
-        }
+        if (isNaN(valor) || valor > 9999999999 || !isFinite(valor)) continue;
 
         if (tipo) {
           const gaveta = escopoAtual[cnpjBase];
@@ -283,7 +332,9 @@ export default function MonitoreDiarioPage() {
           total_refin: vFinais.REFIN, 
           total_protesto: vFinais.PROTESTO,
           total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
-          total_div_vencida: vFinais["DÍVIDA VENCIDA"]
+          total_div_vencida: vFinais["DÍVIDA VENCIDA"],
+          // 🚀 ENVIANDO O JSONB PARA O SUPABASE AQUI:
+          detalhes_completos: dadosHoje.jsonb
         });
 
         if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjCompleto, cedente: cedNome, evolucao, resumo: resumoTexto });
@@ -325,12 +376,8 @@ export default function MonitoreDiarioPage() {
         if (errSocio) throw new Error(`Erro ao salvar sócios: ${errSocio.message}`);
       }
 
-      // ========================================================================
-      // 📧 DISPARO DE E-MAIL
-      // ========================================================================
       if (resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
-        
         const respostaEmail = await fetch("/api/email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -339,10 +386,7 @@ export default function MonitoreDiarioPage() {
             resumoGlobalDisparo: resumoGlobalDisparo
           })
         });
-
-        if (!respostaEmail.ok) {
-          console.error("Aviso: Falha no disparo de e-mail.");
-        }
+        if (!respostaEmail.ok) console.error("Aviso: Falha no disparo de e-mail.");
       }
 
       alert(`🎉 Sucesso! Relatório Serasa do dia ${fD(dataArquivo)} importado com sucesso.`);
