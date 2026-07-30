@@ -50,9 +50,12 @@ export default function RaioXSerasaPage() {
         
         if (data) {
           // Filtra para manter apenas o registro mais recente de cada CNPJ
+          // e garante que ele tenha o JSONB preenchido com a inteligência nova
           const mapUnicos = new Map();
           data.forEach(item => {
-            if (!mapUnicos.has(item.cnpj_cliente)) {
+            const temInteligencia = item.detalhes_completos && Object.keys(item.detalhes_completos).length > 0;
+            
+            if (temInteligencia && !mapUnicos.has(item.cnpj_cliente)) {
               mapUnicos.set(item.cnpj_cliente, item);
             }
           });
@@ -155,7 +158,7 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* MINI-CARDS DE RESTRITIVOS (Estética Titânio) */}
+        {/* MINI-CARDS DE RESTRITIVOS */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
             <span className="w-1.5 h-5 bg-blue-600 rounded-full inline-block"></span>
@@ -288,7 +291,7 @@ export default function RaioXSerasaPage() {
           {loading ? (
             <div className="p-4 text-center text-sm font-bold text-slate-400 animate-pulse">Carregando base...</div>
           ) : registrosFiltrados.length === 0 ? (
-            <div className="p-4 text-center text-sm text-slate-400 italic">Nenhum registro encontrado.</div>
+            <div className="p-4 text-center text-sm text-slate-400 italic">Nenhum registro com inteligência de dados encontrado.</div>
           ) : (
             registrosFiltrados.map((item) => {
               const temDivida = parseFloat(item.saldo_atual || 0) > 0;
