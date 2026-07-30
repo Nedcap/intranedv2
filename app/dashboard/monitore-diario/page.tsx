@@ -48,7 +48,6 @@ export default function MonitoreDiarioPage() {
 
       const ultimaData = maxDateList[0].data_processamento;
 
-      // Busca o histórico do dia e a tabela de cedentes completa
       const [resHist, resCadastro] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -72,7 +71,6 @@ export default function MonitoreDiarioPage() {
           return evo !== 0 || temRestritivos || (r.resumo_movimento && r.resumo_movimento.trim() !== "");
         });
 
-        // 🛡️ BLINDAGEM NO FRONT: Cruza o risco atualizado usando a raiz do CNPJ
         setDados(filtrados.map(linha => {
           const raizLinha = extrairRaizCnpj(linha.cnpj_cliente);
           const match = resCadastro.data?.find(c => extrairRaizCnpj(c.cnpj) === raizLinha);
@@ -93,309 +91,293 @@ export default function MonitoreDiarioPage() {
   }, []);
 
   // ============================================================================
-  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA
+  // 🤖 MOTOR DE PROCESSAMENTO DO ARQUIVO SERASA (LOTE & SILENCIOSO)
   // ============================================================================
-  const processarArquivoSerasa = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const processarArquivoSerasa = async (event: React.ChangeEvent<HTMLInputElement>, dispararEmail: boolean) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
     try {
       setProcessando(true);
-      setStatusProcessamento("Lendo arquivo...");
+      const resumoGlobalDisparo: any[] = [];
 
-      const texto = await file.text();
-      const linhas = texto.split(/\r?\n/);
-
-      if (linhas.length === 0) throw new Error("O arquivo está vazio.");
-
-      let dataArquivo = new Date().toISOString().split("T")[0];
-      const matchData = linhas[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      
-      if (matchData) {
-        dataArquivo = `${matchData[3]}-${matchData[2]}-${matchData[1]}`;
-      } else {
-        console.warn("Aviso: Data não encontrada no cabeçalho. Usando a data de hoje como fallback.");
-      }
-
-      setStatusProcessamento("Minerando inteligência do TXT...");
-      const clientesHoje: Record<string, any> = {};
-      const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
-      const socioAtivo: Record<string, string> = {};
-
-      // 🧠 Códigos Estratégicos Expandidos
-      const codigosChave = [
-        "010102", "010104", "010117", 
-        "030102", 
-        "041099", "040101", "040102", "040202", "040301"
-      ];
-
-      for (const linha of linhas) {
-        if (linha.length < 40) continue;
-        if (linha.substring(9, 10) !== "1") continue;
-
-        let idxBloco = -1;
-        let blocoCodigo = "";
-
-        for (const cod of codigosChave) {
-          const pos = linha.indexOf(cod);
-          if (pos !== -1 && (idxBloco === -1 || pos < idxBloco)) {
-            idxBloco = pos;
-            blocoCodigo = cod;
-          }
-        }
-
-        if (!blocoCodigo) continue;
-
-        const startCnpj = Math.max(0, idxBloco - 9);
-        const cnpjBaseRaw = linha.substring(startCnpj, idxBloco).trim();
-        // Garantindo os 8 dígitos da raiz
-        const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
-
-        if (!clientesHoje[cnpjBase]) {
-          clientesHoje[cnpjBase] = { 
-            restritivos: [], 
-            socios: {}, 
-            nada_consta: false, 
-            cedente_serasa: "N/A", // Guardamos o nome do Serasa como fallback
-            cnpj_completo_serasa: cnpjBase + "000100", // Tentativa inicial
-            jsonb: {
-              cadastro: {},
-              consultas: [],
-              comportamento: [],
-              detalhes_dividas: []
-            }
-          };
-          escopoAtual[cnpjBase] = "EMPRESA";
-        }
-
-        // --- INÍCIO DA EXTRAÇÃO DETALHADA ---
-
-        if (blocoCodigo === "010102") {
-          escopoAtual[cnpjBase] = "EMPRESA";
-          if (clientesHoje[cnpjBase].cedente_serasa === "N/A") {
-            clientesHoje[cnpjBase].cedente_serasa = linha.substring(idxBloco + 6, idxBloco + 66).trim();
-          }
-          continue;
-        }
-
-        if (blocoCodigo === "010104" && escopoAtual[cnpjBase] === "EMPRESA") {
-          clientesHoje[cnpjBase].jsonb.cadastro.cidade = linha.substring(idxBloco + 6, idxBloco + 46).trim();
-          continue;
-        }
-
-        if (blocoCodigo === "030102" && escopoAtual[cnpjBase] === "EMPRESA") {
-          const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14);
-          const nomeInstituicao = linha.substring(idxBloco + 14, idxBloco + 59).trim();
-          clientesHoje[cnpjBase].jsonb.consultas.push({ data: dataConsulta, instituicao: nomeInstituicao });
-          continue;
-        }
-
-        if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
-          const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23);
-          const valorBruto = linha.substring(idxBloco + 23, idxBloco + 45).replace(/\D/g, "");
-          const valorFormatado = parseFloat(valorBruto) / 100;
-          const praca = linha.substring(idxBloco + 45, idxBloco + 75).trim();
-          
-          if (valorFormatado > 0) {
-            clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
-              data: dataOcorrencia,
-              valor: valorFormatado,
-              praca: praca
-            });
-          }
-          continue;
-        }
-
-        // --- FIM DA EXTRAÇÃO DETALHADA ---
-
-        if (blocoCodigo === "010117") {
-          escopoAtual[cnpjBase] = "SOCIO";
-          const nomeSocio = linha.substring(idxBloco + 29, idxBloco + 89).trim() || "SOCIO_DESCONHECIDO";
-          socioAtivo[cnpjBase] = nomeSocio;
-          if (!clientesHoje[cnpjBase].socios[nomeSocio]) clientesHoje[cnpjBase].socios[nomeSocio] = [];
-          continue;
-        }
-
-        if (blocoCodigo === "041099") {
-          if (escopoAtual[cnpjBase] === "EMPRESA") clientesHoje[cnpjBase].nada_consta = true;
-          continue;
-        }
-
-        const partes = linha.trim().split(/\s+/);
-        if (partes.length < 2) continue;
-        const blocoValor = partes[partes.length - 2] || "";
-        const valDigits = blocoValor.replace(/\D/g, "");
-        if (!valDigits || valDigits.length > 15) continue;
-
-        let tipo = "";
-        let valor = 0;
-
-        if (blocoCodigo === "040101") { tipo = "PEFIN"; valor = parseFloat(valDigits); } 
-        else if (blocoCodigo === "040102") { tipo = "REFIN"; valor = parseFloat(valDigits); } 
-        else if (blocoCodigo === "040202") {
-          const lNorm = normalizarTexto(linha);
-          if (lNorm.includes("PROTESTO")) tipo = "PROTESTO";
-          else if (lNorm.includes("JUD") || lNorm.includes("ACAO")) tipo = "AÇÃO JUDICIAL";
-          else if (lNorm.includes("VENCIDA") || lNorm.includes("DIVIDA")) tipo = "DÍVIDA VENCIDA";
-          else continue;
-          valor = parseFloat(valDigits.length > 2 ? valDigits.slice(0, -2) : "0");
-        }
-
-        if (isNaN(valor) || valor > 9999999999 || !isFinite(valor)) continue;
-
-        if (tipo) {
-          const gaveta = escopoAtual[cnpjBase];
-          if (gaveta === "EMPRESA") {
-            if (linha.includes("IPZ1")) continue;
-            if (!clientesHoje[cnpjBase].restritivos.some((r: any) => r.tipo === tipo)) {
-              clientesHoje[cnpjBase].restritivos.push({ tipo, valor });
-            }
-          } else if (gaveta === "SOCIO") {
-            const sName = socioAtivo[cnpjBase];
-            if (sName && !clientesHoje[cnpjBase].socios[sName].some((r: any) => r.tipo === tipo)) {
-              clientesHoje[cnpjBase].socios[sName].push({ tipo, valor });
-            }
-          }
-        }
-      }
-
-      setStatusProcessamento("Cruzando histórico com o Supabase (Via CNPJ)...");
-
-      // 🛡️ Buscamos todos os cedentes para fazer o match perfeito pela RAIZ do CNPJ
+      // 🛡️ OTIMIZAÇÃO: Busca a tabela de cedentes apenas UMA vez para o lote inteiro
+      setStatusProcessamento("Carregando base do CRM...");
       const { data: cedentesDB } = await supabase
         .from("cadastro_cedentes")
         .select("id, cedente, cnpj, responsavel_id, grupo_economico, limite")
         .not("cnpj", "is", null);
 
-      // Busca histórico anterior para calcular a evolução
-      const cnpjsAproximados = Object.keys(clientesHoje).map(c => c + "000100");
-      const { data: histDB } = await supabase
-        .from("historico_consolidado")
-        .select("*")
-        .in("cnpj_cliente", cnpjsAproximados)
-        .order("data_processamento", { ascending: false });
+      for (let idxFile = 0; idxFile < files.length; idxFile++) {
+        const file = files[idxFile];
+        setStatusProcessamento(`Lendo arquivo ${idxFile + 1}/${files.length}...`);
 
-      const registrosHistorico: any[] = [];
-      const registrosSocios: any[] = [];
-      const resumoGlobalDisparo: any[] = [];
+        const texto = await file.text();
+        const linhas = texto.split(/\r?\n/);
+        if (linhas.length === 0) continue;
 
-      for (const [cnpjBase, dadosHoje] of Object.entries(clientesHoje)) {
+        let dataArquivo = new Date().toISOString().split("T")[0];
+        const matchData = linhas[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
         
-        const cedenteOficial = cedentesDB?.find(c => extrairRaizCnpj(c.cnpj) === cnpjBase);
-
-        const cnpjParaSalvar = cedenteOficial ? cedenteOficial.cnpj : dadosHoje.cnpj_completo_serasa;
-        const nomeParaSalvar = cedenteOficial ? cedenteOficial.cedente : dadosHoje.cedente_serasa;
-        const idResponsavel = cedenteOficial ? cedenteOficial.responsavel_id : null;
-
-        if (cedenteOficial) {
-           dadosHoje.jsonb.comercial = {
-             grupo_economico: cedenteOficial.grupo_economico,
-             limite_credito: cedenteOficial.limite,
-             status_banco: "CLIENTE_BASE"
-           };
-        } else {
-           dadosHoje.jsonb.comercial = { status_banco: "PROSPECTO_AVULSO" };
+        if (matchData) {
+          dataArquivo = `${matchData[3]}-${matchData[2]}-${matchData[1]}`;
         }
 
-        const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjParaSalvar && h.data_processamento <= dataArquivo) || [];
-        
-        let saldoAnterior = 0;
-        const vFinais: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
+        setStatusProcessamento(`[${fD(dataArquivo)}] Minerando inteligência...`);
+        const clientesHoje: Record<string, any> = {};
+        const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
+        const socioAtivo: Record<string, string> = {};
 
-        if (regsAnteriores.length > 0) {
-          saldoAnterior = parseFloat(regsAnteriores[0].saldo_atual) || 0;
-          vFinais.PEFIN = parseFloat(regsAnteriores[0].total_pefin) || 0;
-          vFinais.REFIN = parseFloat(regsAnteriores[0].total_refin) || 0;
-          vFinais.PROTESTO = parseFloat(regsAnteriores[0].total_protesto) || 0;
-          vFinais["AÇÃO JUDICIAL"] = parseFloat(regsAnteriores[0].total_acao_jud) || 0;
-          vFinais["DÍVIDA VENCIDA"] = parseFloat(regsAnteriores[0].total_div_vencida) || 0;
-        }
+        const codigosChave = ["010102", "010104", "010117", "030102", "041099", "040101", "040102", "040202", "040301"];
 
-        const vOriginais = { ...vFinais };
+        for (const linha of linhas) {
+          if (linha.length < 40) continue;
+          if (linha.substring(9, 10) !== "1") continue;
 
-        if (dadosHoje.nada_consta && dadosHoje.restritivos.length === 0) {
-          Object.keys(vFinais).forEach(k => vFinais[k] = 0);
-        } else {
-          dadosHoje.restritivos.forEach((r: any) => { vFinais[r.tipo] = r.valor; });
-        }
+          // 🛡️ A BALA DE PRATA: Lemos as posições cravadas em vez de usar indexOf
+          const cnpjBaseRaw = linha.substring(19, 28);
+          const blocoCodigoRaw = linha.substring(28, 34);
 
-        const saldoAtual = Object.values(vFinais).reduce((a, b) => a + b, 0);
-        const evolucao = saldoAtual - saldoAnterior;
+          if (!codigosChave.includes(blocoCodigoRaw)) continue;
 
-        const mudancas: string[] = [];
-        Object.keys(vFinais).forEach(k => { if (vFinais[k] !== vOriginais[k]) mudancas.push(k); });
-        const resumoTexto = (dadosHoje.nada_consta && dadosHoje.restritivos.length === 0) ? "Atualização: Nada Consta" : (mudancas.length > 0 ? `Movimentação: ${mudancas.join(", ")}` : "Atualização Cadastral Simétrica");
+          const blocoCodigo = blocoCodigoRaw;
+          const idxBloco = 28; // Travamos o índice da lógica antiga
+          const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
 
-        registrosHistorico.push({
-          data_processamento: dataArquivo, 
-          cnpj_cliente: cnpjParaSalvar,
-          cedente: nomeParaSalvar,
-          responsavel_id: idResponsavel,
-          saldo_anterior: saldoAnterior, 
-          evolucao, 
-          saldo_atual: saldoAtual, 
-          resumo_movimento: resumoTexto,
-          total_pefin: vFinais.PEFIN, 
-          total_refin: vFinais.REFIN, 
-          total_protesto: vFinais.PROTESTO,
-          total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
-          total_div_vencida: vFinais["DÍVIDA VENCIDA"],
-          detalhes_completos: dadosHoje.jsonb
-        });
+          // Pula lixos ou cnpjs vazios
+          if (cnpjBase === "00000000" || !cnpjBase) continue;
 
-        if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjParaSalvar, cedente: nomeParaSalvar, evolucao, resumo: resumoTexto });
+          if (!clientesHoje[cnpjBase]) {
+            clientesHoje[cnpjBase] = { 
+              restritivos: [], 
+              socios: {}, 
+              nada_consta: false, 
+              cedente_serasa: "N/A",
+              cnpj_completo_serasa: cnpjBase + "000100",
+              jsonb: { cadastro: {}, consultas: [], comportamento: [], detalhes_dividas: [] }
+            };
+            escopoAtual[cnpjBase] = "EMPRESA";
+          }
 
-        if (dadosHoje.socios) {
-          for (const [nomeSocio, restSocio] of Object.entries(dadosHoje.socios)) {
-            const vSocio: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
-            (restSocio as any[]).forEach(r => { vSocio[r.tipo] = r.valor; });
-            const sTotalSocio = Object.values(vSocio).reduce((a, b) => a + b, 0);
+          // --- INÍCIO DA EXTRAÇÃO DETALHADA COM REGEX ---
+          if (blocoCodigo === "010102") {
+            escopoAtual[cnpjBase] = "EMPRESA";
+            if (clientesHoje[cnpjBase].cedente_serasa === "N/A") {
+              clientesHoje[cnpjBase].cedente_serasa = linha.substring(idxBloco + 6, idxBloco + 66).trim();
+            }
+            continue;
+          }
 
-            if (sTotalSocio > 0) {
-              registrosSocios.push({
-                data_processamento: dataArquivo, 
-                cnpj_empresa: cnpjParaSalvar, 
-                nome_socio: nomeSocio,
-                responsavel_id: idResponsavel,
-                total_pefin: vSocio.PEFIN, 
-                total_refin: vSocio.REFIN, 
-                total_protesto: vSocio.PROTESTO,
-                total_acao_jud: vSocio["AÇÃO JUDICIAL"], 
-                total_div_vencida: vSocio["DÍVIDA VENCIDA"], 
-                saldo_total: sTotalSocio
-              });
+          if (blocoCodigo === "010104" && escopoAtual[cnpjBase] === "EMPRESA") {
+            const cidadeBruta = linha.substring(idxBloco + 6, idxBloco + 46);
+            clientesHoje[cnpjBase].jsonb.cadastro.cidade = cidadeBruta.replace(/\d+$/, "").replace(/\s{2,}/g, " - ").trim();
+            continue;
+          }
+
+          if (blocoCodigo === "030102" && escopoAtual[cnpjBase] === "EMPRESA") {
+            const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14);
+            const nomeBruto = linha.substring(idxBloco + 14, idxBloco + 59);
+            clientesHoje[cnpjBase].jsonb.consultas.push({ 
+              data: dataConsulta, 
+              instituicao: nomeBruto.replace(/\d+$/, "").trim() 
+            });
+            continue;
+          }
+
+          if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
+            const tail = linha.substring(idxBloco);
+            const match = tail.match(/(20\d{6}).*?(\d{15})(.*)/);
+            
+            if (match) {
+              const dataOcorrencia = match[1];
+              const valorFormatado = parseFloat(match[2]) / 100;
+              const praca = match[3].replace(/\d+$/, "").replace(/\s{2,}/g, " - ").trim();
+              
+              if (valorFormatado > 0) {
+                clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({
+                  data: dataOcorrencia, valor: valorFormatado, praca: praca
+                });
+              }
+            }
+            continue;
+          }
+          // --- FIM DA EXTRAÇÃO DETALHADA ---
+
+          if (blocoCodigo === "010117") {
+            escopoAtual[cnpjBase] = "SOCIO";
+            const nomeSocio = linha.substring(idxBloco + 29, idxBloco + 89).trim() || "SOCIO_DESCONHECIDO";
+            socioAtivo[cnpjBase] = nomeSocio;
+            if (!clientesHoje[cnpjBase].socios[nomeSocio]) clientesHoje[cnpjBase].socios[nomeSocio] = [];
+            continue;
+          }
+
+          if (blocoCodigo === "041099") {
+            if (escopoAtual[cnpjBase] === "EMPRESA") clientesHoje[cnpjBase].nada_consta = true;
+            continue;
+          }
+
+          const partes = linha.trim().split(/\s+/);
+          if (partes.length < 2) continue;
+          const blocoValor = partes[partes.length - 2] || "";
+          const valDigits = blocoValor.replace(/\D/g, "");
+          if (!valDigits || valDigits.length > 15) continue;
+
+          let tipo = "";
+          let valor = 0;
+
+          if (blocoCodigo === "040101") { tipo = "PEFIN"; valor = parseFloat(valDigits); } 
+          else if (blocoCodigo === "040102") { tipo = "REFIN"; valor = parseFloat(valDigits); } 
+          else if (blocoCodigo === "040202") {
+            const lNorm = normalizarTexto(linha);
+            if (lNorm.includes("PROTESTO")) tipo = "PROTESTO";
+            else if (lNorm.includes("JUD") || lNorm.includes("ACAO")) tipo = "AÇÃO JUDICIAL";
+            else if (lNorm.includes("VENCIDA") || lNorm.includes("DIVIDA")) tipo = "DÍVIDA VENCIDA";
+            else continue;
+            valor = parseFloat(valDigits.length > 2 ? valDigits.slice(0, -2) : "0");
+          }
+
+          if (isNaN(valor) || valor > 9999999999 || !isFinite(valor)) continue;
+
+          if (tipo) {
+            const gaveta = escopoAtual[cnpjBase];
+            if (gaveta === "EMPRESA") {
+              if (linha.includes("IPZ1")) continue;
+              if (!clientesHoje[cnpjBase].restritivos.some((r: any) => r.tipo === tipo)) {
+                clientesHoje[cnpjBase].restritivos.push({ tipo, valor });
+              }
+            } else if (gaveta === "SOCIO") {
+              const sName = socioAtivo[cnpjBase];
+              if (sName && !clientesHoje[cnpjBase].socios[sName].some((r: any) => r.tipo === tipo)) {
+                clientesHoje[cnpjBase].socios[sName].push({ tipo, valor });
+              }
             }
           }
         }
-      }
 
-      setStatusProcessamento("Limpando duplicidades e salvando novo lote...");
-      await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
-      await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
+        setStatusProcessamento(`[${fD(dataArquivo)}] Salvando lotes no banco...`);
+        const cnpjsAproximados = Object.keys(clientesHoje).map(c => c + "000100");
+        const { data: histDB } = await supabase
+          .from("historico_consolidado")
+          .select("*")
+          .in("cnpj_cliente", cnpjsAproximados)
+          .order("data_processamento", { ascending: false });
 
-      for (let i = 0; i < registrosHistorico.length; i += 500) {
-        const { error: errHist } = await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
-        if (errHist) throw new Error(`Erro ao salvar histórico: ${errHist.message}`);
-      }
-      for (let i = 0; i < registrosSocios.length; i += 500) {
-        const { error: errSocio } = await supabase.from("restritivos_socios").insert(registrosSocios.slice(i, i + 500));
-        if (errSocio) throw new Error(`Erro ao salvar sócios: ${errSocio.message}`);
-      }
+        const registrosHistorico: any[] = [];
+        const registrosSocios: any[] = [];
 
-      if (resumoGlobalDisparo.length > 0) {
+        for (const [cnpjBase, dadosHoje] of Object.entries(clientesHoje)) {
+          const cedenteOficial = cedentesDB?.find(c => extrairRaizCnpj(c.cnpj) === cnpjBase);
+
+          const cnpjParaSalvar = cedenteOficial ? cedenteOficial.cnpj : dadosHoje.cnpj_completo_serasa;
+          const nomeParaSalvar = cedenteOficial ? cedenteOficial.cedente : dadosHoje.cedente_serasa;
+          const idResponsavel = cedenteOficial ? cedenteOficial.responsavel_id : null;
+
+          if (cedenteOficial) {
+             dadosHoje.jsonb.comercial = {
+               grupo_economico: cedenteOficial.grupo_economico,
+               limite_credito: cedenteOficial.limite,
+               status_banco: "CLIENTE_BASE"
+             };
+          } else {
+             dadosHoje.jsonb.comercial = { status_banco: "PROSPECTO_AVULSO" };
+          }
+
+          const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjParaSalvar && h.data_processamento <= dataArquivo) || [];
+          
+          let saldoAnterior = 0;
+          const vFinais: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
+
+          if (regsAnteriores.length > 0) {
+            saldoAnterior = parseFloat(regsAnteriores[0].saldo_atual) || 0;
+            vFinais.PEFIN = parseFloat(regsAnteriores[0].total_pefin) || 0;
+            vFinais.REFIN = parseFloat(regsAnteriores[0].total_refin) || 0;
+            vFinais.PROTESTO = parseFloat(regsAnteriores[0].total_protesto) || 0;
+            vFinais["AÇÃO JUDICIAL"] = parseFloat(regsAnteriores[0].total_acao_jud) || 0;
+            vFinais["DÍVIDA VENCIDA"] = parseFloat(regsAnteriores[0].total_div_vencida) || 0;
+          }
+
+          const vOriginais = { ...vFinais };
+
+          if (dadosHoje.nada_consta && dadosHoje.restritivos.length === 0) {
+            Object.keys(vFinais).forEach(k => vFinais[k] = 0);
+          } else {
+            dadosHoje.restritivos.forEach((r: any) => { vFinais[r.tipo] = r.valor; });
+          }
+
+          const saldoAtual = Object.values(vFinais).reduce((a, b) => a + b, 0);
+          const evolucao = saldoAtual - saldoAnterior;
+
+          const mudancas: string[] = [];
+          Object.keys(vFinais).forEach(k => { if (vFinais[k] !== vOriginais[k]) mudancas.push(k); });
+          const resumoTexto = (dadosHoje.nada_consta && dadosHoje.restritivos.length === 0) ? "Atualização: Nada Consta" : (mudancas.length > 0 ? `Movimentação: ${mudancas.join(", ")}` : "Atualização Cadastral Simétrica");
+
+          registrosHistorico.push({
+            data_processamento: dataArquivo, 
+            cnpj_cliente: cnpjParaSalvar,
+            cedente: nomeParaSalvar,
+            responsavel_id: idResponsavel,
+            saldo_anterior: saldoAnterior, 
+            evolucao, 
+            saldo_atual: saldoAtual, 
+            resumo_movimento: resumoTexto,
+            total_pefin: vFinais.PEFIN, 
+            total_refin: vFinais.REFIN, 
+            total_protesto: vFinais.PROTESTO,
+            total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
+            total_div_vencida: vFinais["DÍVIDA VENCIDA"],
+            detalhes_completos: dadosHoje.jsonb
+          });
+
+          // Acumula os emails no array global apenas se não for upload silencioso
+          if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjParaSalvar, cedente: nomeParaSalvar, evolucao, resumo: resumoTexto });
+
+          if (dadosHoje.socios) {
+            for (const [nomeSocio, restSocio] of Object.entries(dadosHoje.socios)) {
+              const vSocio: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
+              (restSocio as any[]).forEach(r => { vSocio[r.tipo] = r.valor; });
+              const sTotalSocio = Object.values(vSocio).reduce((a, b) => a + b, 0);
+
+              if (sTotalSocio > 0) {
+                registrosSocios.push({
+                  data_processamento: dataArquivo, 
+                  cnpj_empresa: cnpjParaSalvar, 
+                  nome_socio: nomeSocio,
+                  responsavel_id: idResponsavel,
+                  total_pefin: vSocio.PEFIN, 
+                  total_refin: vSocio.REFIN, 
+                  total_protesto: vSocio.PROTESTO,
+                  total_acao_jud: vSocio["AÇÃO JUDICIAL"], 
+                  total_div_vencida: vSocio["DÍVIDA VENCIDA"], 
+                  saldo_total: sTotalSocio
+                });
+              }
+            }
+          }
+        }
+
+        await supabase.from("historico_consolidado").delete().eq("data_processamento", dataArquivo);
+        await supabase.from("restritivos_socios").delete().eq("data_processamento", dataArquivo);
+
+        for (let i = 0; i < registrosHistorico.length; i += 500) {
+          await supabase.from("historico_consolidado").insert(registrosHistorico.slice(i, i + 500));
+        }
+        for (let i = 0; i < registrosSocios.length; i += 500) {
+          await supabase.from("restritivos_socios").insert(registrosSocios.slice(i, i + 500));
+        }
+      } // <- FIM DO LOOP DE ARQUIVOS
+
+      // 🛡️ O DISPARO CONDICIONAL: Só aciona o resend se o usuário escolheu o botão amarelo
+      if (dispararEmail && resumoGlobalDisparo.length > 0) {
         setStatusProcessamento("Disparando Alertas por E-mail...");
         const respostaEmail = await fetch("/api/email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tipo: "monitore",
-            resumoGlobalDisparo: resumoGlobalDisparo
-          })
+          body: JSON.stringify({ tipo: "monitore", resumoGlobalDisparo })
         });
         if (!respostaEmail.ok) console.error("Aviso: Falha no disparo de e-mail.");
       }
 
-      alert(`🎉 Sucesso! Relatório Serasa do dia ${fD(dataArquivo)} importado com sucesso.`);
+      alert(`🎉 Sucesso! ${files.length} arquivo(s) importado(s) com êxito.`);
       carregarDiario(); 
 
     } catch (e: any) {
@@ -431,7 +413,7 @@ export default function MonitoreDiarioPage() {
     <div className="space-y-6 max-w-[1600px] mx-auto p-4 md:p-6 font-sans text-slate-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
       {/* 🚀 HEADER PREMIUM COM GRADIENTE */}
-      <div className="bg-gradient-to-br from-slate-900 to-blue-900 text-white p-6 md:p-8 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <div className="bg-gradient-to-br from-slate-900 to-blue-900 text-white p-6 md:p-8 rounded-2xl shadow-lg flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight mb-2">🔍 Monitoramento Diário</h1>
           <p className="text-blue-200 opacity-90 text-sm font-medium">
@@ -439,10 +421,18 @@ export default function MonitoreDiarioPage() {
           </p>
         </div>
 
-        <label className={`shrink-0 px-6 py-3.5 bg-white text-blue-900 hover:bg-slate-50 font-black rounded-xl text-xs uppercase cursor-pointer shadow-xl transition-all flex items-center gap-2 border border-transparent hover:border-blue-100 ${processando ? "opacity-50 pointer-events-none animate-pulse" : ""}`}>
-          {processando ? `⏳ ${statusProcessamento}` : "📥 Subir Relatório Serasa (.TXT)"}
-          <input type="file" accept=".txt" className="hidden" onChange={processarArquivoSerasa} />
-        </label>
+        {/* 🎛️ BOTÕES DE UPLOAD DUPLOS (MÚLTIPLOS ARQUIVOS) */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
+          <label className={`flex-1 sm:flex-none justify-center px-6 py-3.5 bg-slate-800/80 hover:bg-slate-700 text-white font-black rounded-xl text-[10px] uppercase cursor-pointer shadow-sm transition-all flex items-center gap-2 border border-slate-600 ${processando ? "opacity-50 pointer-events-none" : ""}`}>
+            {processando ? `⏳` : "🤫 Reprocessar em Lote (Sem E-mail)"}
+            <input type="file" accept=".txt" multiple className="hidden" onChange={(e) => processarArquivoSerasa(e, false)} />
+          </label>
+
+          <label className={`flex-1 sm:flex-none justify-center px-6 py-3.5 bg-white text-blue-900 hover:bg-slate-50 font-black rounded-xl text-[10px] uppercase cursor-pointer shadow-xl transition-all flex items-center gap-2 border border-transparent hover:border-blue-100 ${processando ? "opacity-50 pointer-events-none animate-pulse" : ""}`}>
+            {processando ? `⏳ ${statusProcessamento}` : "📥 Importar TXT e Notificar Equipe"}
+            <input type="file" accept=".txt" multiple className="hidden" onChange={(e) => processarArquivoSerasa(e, true)} />
+          </label>
+        </div>
       </div>
 
       {/* 📊 CARDS DE RESUMO MASTIGADO (TITANIUM DESIGN) */}
