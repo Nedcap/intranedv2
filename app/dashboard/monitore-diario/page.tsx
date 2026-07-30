@@ -127,7 +127,7 @@ export default function MonitoreDiarioPage() {
         const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
         const socioAtivo: Record<string, string> = {};
 
-        // 🧠 Códigos Estratégicos Expandidos (INCLUINDO 021105)
+        // 🧠 Códigos Estratégicos
         const codigosChave = ["010102", "010104", "010117", "030102", "021105", "041099", "040101", "040102", "040202", "040301"];
 
         for (const linha of linhas) {
@@ -198,15 +198,21 @@ export default function MonitoreDiarioPage() {
           }
 
           if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
+            // 🛡️ CORTE MATEMÁTICO BLINDADO (Fim das cidades mastigadas e valores estratosféricos)
+            
+            // 1. Data (Ocupa 8 posições: da 15 até a 23)
             const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23);
             
-            const valorBruto = linha.substring(idxBloco + 23, idxBloco + 38).replace(/\D/g, "");
+            // 2. Valor (Ocupa exatas 18 posições: da 23 até a 41. Limpamos o "R$ " usando \D)
+            const valorBruto = linha.substring(idxBloco + 23, idxBloco + 41).replace(/\D/g, "");
             const valorFormatado = parseFloat(valorBruto) / 100;
             
-            let praca = linha.substring(idxBloco + 38, idxBloco + 78);
+            // 3. Praça (Ocupa 40 posições: começa exatemente na 41 até a 81)
+            let praca = linha.substring(idxBloco + 41, idxBloco + 81);
             
-            praca = praca.replace(/(Z1\s*)?IPZ[A-Z0-9]+/g, "");
-            praca = praca.replace(/\s{2,}/g, " - ").replace(/(-\s*)+$/, "").trim();
+            // 🧹 LIXEIRO ATIVADO
+            praca = praca.replace(/(Z1\s*)?IPZ[A-Z0-9]+/g, ""); // Aniquila códigos do sistema Serasa
+            praca = praca.replace(/\s{2,}/g, " - ").replace(/(-\s*)+$/, "").trim(); // Arruma os traços
             
             if (valorFormatado > 0) {
               clientesHoje[cnpjBase].jsonb.detalhes_dividas.push({

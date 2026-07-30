@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================================
-// 🧽 UTILS DE FORMATAÇÃO
+// 🧽 UTILS DE FORMATAÇÃO E LIMPEZA
 // ============================================================================
 const formatarMoeda = (valor: any) => {
   if (valor === undefined || valor === null || valor === "") return "R$ 0,00";
@@ -23,7 +23,6 @@ const formatarDataSerasa = (dataStr: string) => {
 };
 
 const formatarMesSerasa = (mesStr: string) => {
-  // Ex: "2607JUL" -> "Jul/2026"
   if (!mesStr || mesStr.length < 7) return mesStr;
   const ano = "20" + mesStr.substring(0, 2);
   const mesExtenso = mesStr.substring(4, 7);
@@ -35,12 +34,44 @@ const formatarDataBr = (str: string) => {
   return str.split("-").reverse().join("/");
 };
 
+// Limpa o lixo de zeros que o Serasa manda no final do bloco 0211
+const limparTextoComp = (txt: string) => {
+  if (!txt) return "-";
+  const limpo = txt.replace(/0+$/, "").trim();
+  return limpo || "-";
+};
+
+// Componente visual para separar a "Classe" (ex: C1) do "Valor"
+const RenderizarFaixa = ({ texto, isPontual }: { texto: string, isPontual?: boolean }) => {
+  if (!texto || texto === "-") return <span className="text-slate-300 font-medium">-</span>;
+  
+  // Captura o código da classe (Letra + Número) e o resto do texto
+  const match = texto.match(/^([A-Z]\d+)\s+(.*)/);
+  if (match) {
+    return (
+      <div className="flex items-center gap-2.5">
+        <span className={`px-2 py-0.5 rounded text-[10px] font-black border shadow-xs ${isPontual ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+          {match[1]}
+        </span>
+        <span className={`font-bold text-[11px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-700'}`}>
+          {match[2]}
+        </span>
+      </div>
+    );
+  }
+  
+  return <span className={`font-bold text-[11px] uppercase tracking-wide ${isPontual ? 'text-emerald-700' : 'text-slate-700'}`}>{texto}</span>;
+};
+
 export default function RaioXSerasaPage() {
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState("");
   const [selecionado, setSelecionado] = useState<any | null>(null);
 
+  // ============================================================================
+  // 📥 CARREGAMENTO DE DADOS
+  // ============================================================================
   useEffect(() => {
     const carregarHistorico = async () => {
       try {
@@ -81,7 +112,7 @@ export default function RaioXSerasaPage() {
   }, [busca, registros]);
 
   // ============================================================================
-  // 🧩 COMPONENTES INTERNOS DO RAIO-X
+  // 🧩 RENDERIZAÇÃO DO PAINEL PRINCIPAL
   // ============================================================================
   const renderizarPainel = () => {
     if (!selecionado) {
@@ -115,10 +146,14 @@ export default function RaioXSerasaPage() {
     // 🧠 Agrupamento de Comportamento por Mês
     const compAgrupado = comportamentoBruto.reduce((acc: any, curr: any) => {
       if (!acc[curr.mes]) acc[curr.mes] = { mes: curr.mes, totalMes: "-", pontual: "-" };
-      if (curr.tipo === "TOTAL MES") acc[curr.mes].totalMes = curr.avaliacao;
-      if (curr.tipo === "PONTUAL") acc[curr.mes].pontual = curr.avaliacao;
+      
+      // Limpa os lixos antes de salvar na memória da tabela
+      if (curr.tipo === "TOTAL MES") acc[curr.mes].totalMes = limparTextoComp(curr.avaliacao);
+      if (curr.tipo === "PONTUAL") acc[curr.mes].pontual = limparTextoComp(curr.avaliacao);
+      
       return acc;
     }, {});
+    
     const comportamentoRows = Object.values(compAgrupado).sort((a: any, b: any) => b.mes.localeCompare(a.mes));
 
     return (
@@ -133,7 +168,7 @@ export default function RaioXSerasaPage() {
             <div className="flex gap-4 text-xs md:text-sm pt-4 border-t border-white/10 opacity-90 font-medium">
               <span><strong className="text-white">Processamento:</strong> {formatarDataBr(selecionado.data_processamento)}</span>
               <span>|</span>
-              <span><strong className="text-white">Praça:</strong> {cadastro.cidade || "Não informada"}</span>
+              <span><strong className="text-white">Praça Base:</strong> {cadastro.cidade || "Não informada"}</span>
             </div>
           </div>
 
@@ -141,7 +176,7 @@ export default function RaioXSerasaPage() {
             <div className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider border text-center ${statusColor}`}>
               {statusLabel}
             </div>
-            <div className="px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider border border-white/20 bg-black/20 text-center backdrop-blur-sm text-white">
+            <div className="px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider border border-white/20 bg-black/20 text-center backdrop-blur-sm text-white shadow-inner">
               <span className="opacity-70 mr-1">EVOLUÇÃO:</span>
               <span className={evoNum > 0 ? "text-rose-300" : evoNum < 0 ? "text-emerald-300" : "text-slate-300"}>{evolucaoStr}</span>
             </div>
@@ -153,12 +188,12 @@ export default function RaioXSerasaPage() {
           <div className="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Limite de Crédito Interno</div>
             <div className="text-2xl font-black font-mono text-blue-900">{formatarMoeda(comercial.limite_credito || 0)}</div>
-            <div className="text-xs text-slate-500 mt-2">Cadastrado no CRM</div>
+            <div className="text-xs text-slate-500 mt-2 font-medium">Cadastrado no CRM</div>
           </div>
           <div className="bg-white border border-slate-200 border-l-4 border-l-amber-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Risco Securitizadora + FIDC</div>
             <div className="text-2xl font-black font-mono text-amber-600">{formatarMoeda(selecionado.risco_aberto || 0)}</div>
-            <div className="text-xs text-slate-500 mt-2">Exposição atual na casa</div>
+            <div className="text-xs text-slate-500 mt-2 font-medium">Exposição atual na casa</div>
           </div>
           <div className="bg-rose-50 border border-rose-100 border-l-4 border-l-rose-600 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-[10px] font-black uppercase tracking-wider text-rose-700 mb-1">Saldo Devedor (Serasa)</div>
@@ -170,28 +205,32 @@ export default function RaioXSerasaPage() {
         {/* COMPORTAMENTO DE PAGAMENTO (BLOCO 0211) */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
-            <span className="w-1.5 h-5 bg-emerald-500 rounded-full inline-block"></span>
+            <span className="w-1.5 h-5 bg-emerald-500 rounded-full inline-block shadow-sm"></span>
             1. Pontualidade e Poder de Compra
           </h2>
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-[13px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-32">Competência</th>
-                    <th className="p-3 font-bold uppercase text-slate-400 tracking-wider">Volume Total Comprado (Fornecedores)</th>
-                    <th className="p-3 font-bold uppercase text-emerald-600 tracking-wider">Volume Pago Pontualmente</th>
+                    <th className="p-4 font-bold uppercase text-slate-400 tracking-wider text-center w-32 text-[10px]">Competência</th>
+                    <th className="p-4 font-bold uppercase text-slate-400 tracking-wider text-[10px]">Volume Total Comprado (Fornecedores)</th>
+                    <th className="p-4 font-bold uppercase text-emerald-600 tracking-wider text-[10px] bg-emerald-50/50">Volume Pago Pontualmente</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {comportamentoRows.length === 0 ? (
-                    <tr><td colSpan={3} className="p-6 text-center text-slate-400 italic">Nenhum histórico de comportamento mapeado neste arquivo.</td></tr>
+                    <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic font-medium">Nenhum histórico de comportamento mapeado neste arquivo.</td></tr>
                   ) : (
                     comportamentoRows.map((c: any, i: number) => (
-                      <tr key={i} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 text-center font-mono font-bold text-slate-500">{formatarMesSerasa(c.mes)}</td>
-                        <td className="p-3 font-bold text-slate-700 uppercase">{c.totalMes}</td>
-                        <td className="p-3 font-black text-emerald-700 uppercase bg-emerald-50/30">{c.pontual}</td>
+                      <tr key={i} className="hover:bg-slate-50/70 transition-colors group">
+                        <td className="p-4 text-center font-mono font-bold text-slate-500 group-hover:text-blue-600 transition-colors">{formatarMesSerasa(c.mes)}</td>
+                        <td className="p-4">
+                          <RenderizarFaixa texto={c.totalMes} />
+                        </td>
+                        <td className="p-4 bg-emerald-50/30">
+                          <RenderizarFaixa texto={c.pontual} isPontual={true} />
+                        </td>
                       </tr>
                     ))
                   )}
@@ -204,7 +243,7 @@ export default function RaioXSerasaPage() {
         {/* MINI-CARDS DE RESTRITIVOS */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4 mt-6">
-            <span className="w-1.5 h-5 bg-rose-600 rounded-full inline-block"></span>
+            <span className="w-1.5 h-5 bg-rose-600 rounded-full inline-block shadow-sm"></span>
             2. Quadro de Ocorrências e Dívidas
           </h2>
           
@@ -225,22 +264,22 @@ export default function RaioXSerasaPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* TABELA DÍVIDAS DETALHADAS */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold uppercase text-slate-600 tracking-wider text-xs text-center">
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+              <div className="bg-slate-50 border-b border-slate-200 p-3.5 font-bold uppercase text-slate-600 tracking-wider text-[10px] text-center">
                 Detalhamento de Protestos e Ações
               </div>
-              <div className="max-h-[350px] overflow-y-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
+              <div className="max-h-[350px] overflow-y-auto flex-1">
+                <table className="w-full text-left border-collapse text-[12px]">
+                  <thead className="bg-slate-50/80 backdrop-blur-md sticky top-0 border-b border-slate-200 z-10">
                     <tr>
-                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-28">Data</th>
-                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider">Praça / Origem</th>
-                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-right w-32">Valor</th>
+                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-28 text-[9px]">Data</th>
+                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-[9px]">Praça / Origem</th>
+                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-right w-32 text-[9px]">Valor</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {dividas.length === 0 ? (
-                      <tr><td colSpan={3} className="p-6 text-center text-slate-400 italic">Nenhuma restrição detalhada localizada.</td></tr>
+                      <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic font-medium">Nenhuma restrição detalhada localizada.</td></tr>
                     ) : (
                       dividas.map((d: any, i: number) => {
                         totalDetalhado += Number(d.valor || 0);
@@ -248,15 +287,15 @@ export default function RaioXSerasaPage() {
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3 text-center font-mono text-slate-500">{formatarDataSerasa(d.data)}</td>
                             <td className="p-3 font-bold text-slate-700 uppercase">{d.praca || "-"}</td>
-                            <td className="p-3 text-right font-mono font-bold text-rose-600">{formatarMoeda(d.valor)}</td>
+                            <td className="p-3 text-right font-mono font-bold text-rose-600 bg-rose-50/30">{formatarMoeda(d.valor)}</td>
                           </tr>
                         );
                       })
                     )}
                     {dividas.length > 0 && (
                       <tr className="bg-slate-50 border-t-2 border-slate-200">
-                        <td colSpan={2} className="p-3 font-bold text-slate-700">SOMA APROXIMADA DO DETALHAMENTO</td>
-                        <td className="p-3 text-right font-mono font-black text-rose-700 text-sm">{formatarMoeda(totalDetalhado)}</td>
+                        <td colSpan={2} className="p-3.5 font-black text-slate-700 text-[10px] uppercase tracking-wider">Soma Aproximada do Detalhamento</td>
+                        <td className="p-3.5 text-right font-mono font-black text-rose-700 text-sm">{formatarMoeda(totalDetalhado)}</td>
                       </tr>
                     )}
                   </tbody>
@@ -266,28 +305,28 @@ export default function RaioXSerasaPage() {
 
             {/* TABELA RADAR DE CONSULTAS */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-              <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold uppercase text-slate-600 tracking-wider text-xs text-center">
+              <div className="bg-slate-50 border-b border-slate-200 p-3.5 font-bold uppercase text-slate-600 tracking-wider text-[10px] text-center">
                 Radar de Buscas (Mercado)
               </div>
-              <div className="bg-blue-50 border-b border-blue-100 p-3 text-xs text-blue-900 leading-relaxed text-center">
+              <div className="bg-blue-50 border-b border-blue-100 p-3 text-[11px] text-blue-900 leading-relaxed text-center font-medium">
                 Volume elevado pode indicar busca urgente por refinanciamento.
               </div>
               <div className="max-h-[305px] overflow-y-auto flex-1">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
+                <table className="w-full text-left border-collapse text-[12px]">
+                  <thead className="bg-slate-50/80 backdrop-blur-md sticky top-0 border-b border-slate-200 z-10">
                     <tr>
-                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-28">Data</th>
-                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider">Instituição Solicitante</th>
+                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-center w-28 text-[9px]">Data</th>
+                      <th className="p-3 font-bold uppercase text-slate-400 tracking-wider text-[9px]">Instituição Solicitante</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {consultas.length === 0 ? (
-                      <tr><td colSpan={2} className="p-6 text-center text-slate-400 italic">Nenhuma consulta recente mapeada.</td></tr>
+                      <tr><td colSpan={2} className="p-8 text-center text-slate-400 italic font-medium">Nenhuma consulta recente mapeada.</td></tr>
                     ) : (
                       consultas.map((c: any, i: number) => (
                         <tr key={i} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 text-center font-mono font-bold text-blue-700">{formatarDataSerasa(c.data)}</td>
-                          <td className="p-3 font-semibold text-slate-700">{c.instituicao}</td>
+                          <td className="p-3 text-center font-mono font-bold text-blue-700 bg-blue-50/30">{formatarDataSerasa(c.data)}</td>
+                          <td className="p-3 font-bold text-slate-700 uppercase">{c.instituicao}</td>
                         </tr>
                       ))
                     )}
@@ -316,7 +355,7 @@ export default function RaioXSerasaPage() {
             placeholder="Buscar cedente ou CNPJ..."
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all shadow-inner"
           />
         </div>
 
@@ -344,7 +383,7 @@ export default function RaioXSerasaPage() {
                     <div className={`text-sm font-black truncate uppercase ${isSelected ? 'text-blue-900' : 'text-slate-700'}`}>
                       {item.cedente}
                     </div>
-                    <div className="text-[10px] font-mono text-slate-400 mt-0.5">{item.cnpj_cliente}</div>
+                    <div className="text-[10px] font-mono text-slate-400 mt-0.5 tracking-wide">{item.cnpj_cliente}</div>
                   </div>
                   
                   <div className={`w-2.5 h-2.5 rounded-full shrink-0 ml-3 shadow-inner
