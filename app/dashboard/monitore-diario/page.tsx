@@ -3,7 +3,6 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { simplificarNome } from "@/actions/dashboard-service";
 
 // ============================================================================
 // 🧽 UTILS DE LIMPEZA E CÁLCULO
@@ -11,6 +10,13 @@ import { simplificarNome } from "@/actions/dashboard-service";
 const normalizarTexto = (txt: string) => {
   if (!txt) return "";
   return txt.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+};
+
+// Extrai apenas os números e garante que temos a raiz (8 primeiros dígitos)
+const extrairRaizCnpj = (cnpj: string) => {
+  if (!cnpj) return "";
+  const apenasNumeros = cnpj.replace(/\D/g, "");
+  return apenasNumeros.substring(0, 8).padStart(8, "0");
 };
 
 const fM = (v: any) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(v || 0));
@@ -42,6 +48,7 @@ export default function MonitoreDiarioPage() {
 
       const ultimaData = maxDateList[0].data_processamento;
 
+      // Busca o histórico do dia e a tabela de cedentes completa
       const [resHist, resCadastro] = await Promise.all([
         supabase
           .from("historico_consolidado")
@@ -50,7 +57,7 @@ export default function MonitoreDiarioPage() {
           .limit(10000),
         supabase
           .from("cadastro_cedentes")
-          .select("cedente, risco_sec, risco_fidc")
+          .select("cedente, cnpj, risco_sec, risco_fidc, limite")
           .limit(10000)
       ]);
 
@@ -65,8 +72,11 @@ export default function MonitoreDiarioPage() {
           return evo !== 0 || temRestritivos || (r.resumo_movimento && r.resumo_movimento.trim() !== "");
         });
 
+        // 🛡️ BLINDAGEM NO FRONT: Cruza o risco atualizado usando a raiz do CNPJ
         setDados(filtrados.map(linha => {
-          const match = resCadastro.data?.find(c => simplificarNome(c.cedente) === simplificarNome(linha.cedente));
+          const raizLinha = extrairRaizCnpj(linha.cnpj_cliente);
+          const match = resCadastro.data?.find(c => extrairRaizCnpj(c.cnpj) === raizLinha);
+          
           const riscoConsolidated = match ? (parseFloat(match.risco_sec || 0) + parseFloat(match.risco_fidc || 0)) : 0;
           return { ...linha, risco_aberto: riscoConsolidated };
         }));
@@ -99,14 +109,10 @@ export default function MonitoreDiarioPage() {
       if (linhas.length === 0) throw new Error("O arquivo está vazio.");
 
       let dataArquivo = new Date().toISOString().split("T")[0];
-      
       const matchData = linhas[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
       
       if (matchData) {
-        const dia = matchData[1];
-        const mes = matchData[2];
-        const ano = matchData[3];
-        dataArquivo = `${ano}-${mes}-${dia}`;
+        dataArquivo = `${matchData[3]}-${matchData[2]}-${matchData[1]}`;
       } else {
         console.warn("Aviso: Data não encontrada no cabeçalho. Usando a data de hoje como fallback.");
       }
@@ -116,7 +122,7 @@ export default function MonitoreDiarioPage() {
       const escopoAtual: Record<string, "EMPRESA" | "SOCIO"> = {};
       const socioAtivo: Record<string, string> = {};
 
-      // 🧠 ADICIONADOS OS CÓDIGOS ESTRATÉGICOS (Endereço, Consultas, Detalhes de Dívida)
+      // 🧠 Códigos Estratégicos Expandidos
       const codigosChave = [
         "010102", "010104", "010117", 
         "030102", 
@@ -142,6 +148,7 @@ export default function MonitoreDiarioPage() {
 
         const startCnpj = Math.max(0, idxBloco - 9);
         const cnpjBaseRaw = linha.substring(startCnpj, idxBloco).trim();
+        // Garantindo os 8 dígitos da raiz
         const cnpjBase = cnpjBaseRaw.replace(/\D/g, "").padStart(8, "0").slice(-8);
 
         if (!clientesHoje[cnpjBase]) {
@@ -149,8 +156,8 @@ export default function MonitoreDiarioPage() {
             restritivos: [], 
             socios: {}, 
             nada_consta: false, 
-            cedente: "N/A",
-            // 💎 O NOVO CORAÇÃO DOS DADOS
+            cedente_serasa: "N/A", // Guardamos o nome do Serasa como fallback
+            cnpj_completo_serasa: cnpjBase + "000100", // Tentativa inicial
             jsonb: {
               cadastro: {},
               consultas: [],
@@ -161,37 +168,32 @@ export default function MonitoreDiarioPage() {
           escopoAtual[cnpjBase] = "EMPRESA";
         }
 
-        // --- INÍCIO DA EXTRAÇÃO DE DADOS INTELIGENTES JSONB ---
+        // --- INÍCIO DA EXTRAÇÃO DETALHADA ---
 
-        // Captura Razão Social (Bloco 010102)
         if (blocoCodigo === "010102") {
           escopoAtual[cnpjBase] = "EMPRESA";
-          if (clientesHoje[cnpjBase].cedente === "N/A") {
-            clientesHoje[cnpjBase].cedente = linha.substring(idxBloco + 6, idxBloco + 66).trim();
+          if (clientesHoje[cnpjBase].cedente_serasa === "N/A") {
+            clientesHoje[cnpjBase].cedente_serasa = linha.substring(idxBloco + 6, idxBloco + 66).trim();
           }
           continue;
         }
 
-        // Captura Endereço / Cidade / UF (Bloco 010104)
         if (blocoCodigo === "010104" && escopoAtual[cnpjBase] === "EMPRESA") {
-          const cidade_uf = linha.substring(idxBloco + 6, idxBloco + 46).trim();
-          clientesHoje[cnpjBase].jsonb.cadastro.cidade = cidade_uf;
+          clientesHoje[cnpjBase].jsonb.cadastro.cidade = linha.substring(idxBloco + 6, idxBloco + 46).trim();
           continue;
         }
 
-        // Captura Histórico de Consultas (Bloco 030102)
         if (blocoCodigo === "030102" && escopoAtual[cnpjBase] === "EMPRESA") {
-          const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14); // Formato YYYYMMDD
+          const dataConsulta = linha.substring(idxBloco + 6, idxBloco + 14);
           const nomeInstituicao = linha.substring(idxBloco + 14, idxBloco + 59).trim();
           clientesHoje[cnpjBase].jsonb.consultas.push({ data: dataConsulta, instituicao: nomeInstituicao });
           continue;
         }
 
-        // Captura Detalhamento de Protestos e Ações (Bloco 040301)
         if (blocoCodigo === "040301" && escopoAtual[cnpjBase] === "EMPRESA") {
-          const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23); // YYYYMMDD
+          const dataOcorrencia = linha.substring(idxBloco + 15, idxBloco + 23);
           const valorBruto = linha.substring(idxBloco + 23, idxBloco + 45).replace(/\D/g, "");
-          const valorFormatado = parseFloat(valorBruto) / 100; // Tratando centavos do arquivo posicional
+          const valorFormatado = parseFloat(valorBruto) / 100;
           const praca = linha.substring(idxBloco + 45, idxBloco + 75).trim();
           
           if (valorFormatado > 0) {
@@ -204,7 +206,7 @@ export default function MonitoreDiarioPage() {
           continue;
         }
 
-        // --- FIM DA EXTRAÇÃO JSONB ---
+        // --- FIM DA EXTRAÇÃO DETALHADA ---
 
         if (blocoCodigo === "010117") {
           escopoAtual[cnpjBase] = "SOCIO";
@@ -219,12 +221,11 @@ export default function MonitoreDiarioPage() {
           continue;
         }
 
-        // Processamento de Totais Relacionais (Blocos 040101, 040102, 040202)
         const partes = linha.trim().split(/\s+/);
         if (partes.length < 2) continue;
         const blocoValor = partes[partes.length - 2] || "";
         const valDigits = blocoValor.replace(/\D/g, "");
-        if (!valDigits || valDigits.length > 15) continue; // Trava contra lixo do TXT
+        if (!valDigits || valDigits.length > 15) continue;
 
         let tipo = "";
         let valor = 0;
@@ -258,33 +259,49 @@ export default function MonitoreDiarioPage() {
         }
       }
 
-      setStatusProcessamento("Cruzando histórico com o Supabase...");
+      setStatusProcessamento("Cruzando histórico com o Supabase (Via CNPJ)...");
 
-      const cnpjsCompletos = Object.keys(clientesHoje).map(c => c + "000100");
-      
-      const [histDBResponse, cedentesDBResponse] = await Promise.all([
-        supabase
-          .from("historico_consolidado")
-          .select("*")
-          .in("cnpj_cliente", cnpjsCompletos)
-          .order("data_processamento", { ascending: false })
-          .limit(10000),
-        supabase
-          .from("cadastro_cedentes")
-          .select("cedente, responsavel_id")
-          .limit(10000)
-      ]);
-      
-      const histDB = histDBResponse.data;
-      const cedentesDB = cedentesDBResponse.data;
+      // 🛡️ Buscamos todos os cedentes para fazer o match perfeito pela RAIZ do CNPJ
+      const { data: cedentesDB } = await supabase
+        .from("cadastro_cedentes")
+        .select("id, cedente, cnpj, responsavel_id, grupo_economico, limite")
+        .not("cnpj", "is", null); // Garante que traga apenas quem tem CNPJ
+
+      // Busca histórico anterior para calcular a evolução
+      const cnpjsAproximados = Object.keys(clientesHoje).map(c => c + "000100");
+      const { data: histDB } = await supabase
+        .from("historico_consolidado")
+        .select("*")
+        .in("cnpj_cliente", cnpjsAproximados)
+        .order("data_processamento", { ascending: false });
 
       const registrosHistorico: any[] = [];
       const registrosSocios: any[] = [];
       const resumoGlobalDisparo: any[] = [];
 
       for (const [cnpjBase, dadosHoje] of Object.entries(clientesHoje)) {
-        const cnpjCompleto = cnpjBase + "000100";
-        const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjCompleto && h.data_processamento <= dataArquivo) || [];
+        
+        // 🛡️ A MÁGICA DO MATCH PELA RAIZ DO CNPJ
+        // Tentamos achar a empresa oficial no cadastro cruzando os 8 primeiros digitos
+        const cedenteOficial = cedentesDB?.find(c => extrairRaizCnpj(c.cnpj) === cnpjBase);
+
+        // Se achou no banco, usamos o CNPJ e Nome oficiais. Se não, usamos o fallback do Serasa (Prospecto)
+        const cnpjParaSalvar = cedenteOficial ? cedenteOficial.cnpj : dadosHoje.cnpj_completo_serasa;
+        const nomeParaSalvar = cedenteOficial ? cedenteOficial.cedente : dadosHoje.cedente_serasa;
+        const idResponsavel = cedenteOficial ? cedenteOficial.responsavel_id : null;
+
+        // Injetando dados financeiros comerciais direto no JSONB para a futura view
+        if (cedenteOficial) {
+           dadosHoje.jsonb.comercial = {
+             grupo_economico: cedenteOficial.grupo_economico,
+             limite_credito: cedenteOficial.limite,
+             status_banco: "CLIENTE_BASE"
+           };
+        } else {
+           dadosHoje.jsonb.comercial = { status_banco: "PROSPECTO_AVULSO" };
+        }
+
+        const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjParaSalvar && h.data_processamento <= dataArquivo) || [];
         
         let saldoAnterior = 0;
         const vFinais: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
@@ -313,17 +330,11 @@ export default function MonitoreDiarioPage() {
         Object.keys(vFinais).forEach(k => { if (vFinais[k] !== vOriginais[k]) mudancas.push(k); });
         const resumoTexto = (dadosHoje.nada_consta && dadosHoje.restritivos.length === 0) ? "Atualização: Nada Consta" : (mudancas.length > 0 ? `Movimentação: ${mudancas.join(", ")}` : "Atualização Cadastral Simétrica");
 
-        const cedNome = dadosHoje.cedente !== "N/A" ? dadosHoje.cedente : (regsAnteriores[0]?.cedente || "N/A");
-
-        const cedNomeLimpo = simplificarNome(cedNome);
-        const donoMatch = cedentesDB?.find(c => simplificarNome(c.cedente) === cedNomeLimpo);
-        const idResponsavel = donoMatch ? donoMatch.responsavel_id : null;
-
         registrosHistorico.push({
           data_processamento: dataArquivo, 
-          cnpj_cliente: cnpjCompleto, 
-          cedente: cedNome,
-          responsavel_id: idResponsavel,
+          cnpj_cliente: cnpjParaSalvar, // CNPJ Normalizado
+          cedente: nomeParaSalvar,      // Nome Normalizado
+          responsavel_id: idResponsavel, // Vínculo com o CRM
           saldo_anterior: saldoAnterior, 
           evolucao, 
           saldo_atual: saldoAtual, 
@@ -333,11 +344,10 @@ export default function MonitoreDiarioPage() {
           total_protesto: vFinais.PROTESTO,
           total_acao_jud: vFinais["AÇÃO JUDICIAL"], 
           total_div_vencida: vFinais["DÍVIDA VENCIDA"],
-          // 🚀 ENVIANDO O JSONB PARA O SUPABASE AQUI:
-          detalhes_completos: dadosHoje.jsonb
+          detalhes_completos: dadosHoje.jsonb // 🚀 O JSON RICO VAI AQUI
         });
 
-        if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjCompleto, cedente: cedNome, evolucao, resumo: resumoTexto });
+        if (evolucao !== 0) resumoGlobalDisparo.push({ cnpj: cnpjParaSalvar, cedente: nomeParaSalvar, evolucao, resumo: resumoTexto });
 
         if (dadosHoje.socios) {
           for (const [nomeSocio, restSocio] of Object.entries(dadosHoje.socios)) {
@@ -348,7 +358,7 @@ export default function MonitoreDiarioPage() {
             if (sTotalSocio > 0) {
               registrosSocios.push({
                 data_processamento: dataArquivo, 
-                cnpj_empresa: cnpjCompleto, 
+                cnpj_empresa: cnpjParaSalvar, 
                 nome_socio: nomeSocio,
                 responsavel_id: idResponsavel,
                 total_pefin: vSocio.PEFIN, 
@@ -488,11 +498,17 @@ export default function MonitoreDiarioPage() {
               ) : (
                 dados.map((item, idx) => {
                   const evo = parseFloat(item.evolucao || 0);
+                  // Verifica se é prospecto checando o JSONB
+                  const isProspecto = item.detalhes_completos?.comercial?.status_banco === "PROSPECTO_AVULSO";
+
                   return (
                     <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                       <td className="p-3 text-center text-slate-400 font-normal whitespace-nowrap">{fD(item.data_processamento)}</td>
                       <td className="p-3 font-mono text-slate-400 text-xs whitespace-nowrap">{item.cnpj_cliente}</td>
-                      <td className="p-3 font-black text-slate-900 truncate max-w-[250px]" title={item.cedente}>{item.cedente}</td>
+                      <td className="p-3 font-black text-slate-900 truncate max-w-[250px]" title={item.cedente}>
+                        {isProspecto && <span className="inline-block mr-2 px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] rounded uppercase font-bold tracking-wider">Avulso</span>}
+                        {item.cedente}
+                      </td>
                       <td className="p-3 text-right font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
                       <td className="p-3 text-right text-slate-400 whitespace-nowrap">{fM(item.saldo_anterior)}</td>
                       
