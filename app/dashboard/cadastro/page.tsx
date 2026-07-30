@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 
@@ -134,7 +134,6 @@ export default function CadastroPage() {
   const [selecionadosParaDisparo, setSelecionadosParaDisparo] = useState<string[]>([]);
   const [enviandoLote, setEnviandoLote] = useState(false);
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
-
   const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
   const [fundoDisparo, setFundoDisparo] = useState<Record<string, "SEC" | "FIDC">>({});
   const [codigosContrato, setCodigosContrato] = useState<Record<string, string>>({});
@@ -146,6 +145,12 @@ export default function CadastroPage() {
   const [docsMarcadosParaEnvio, setDocsMarcadosParaEnvio] = useState<string[]>([]);
   const [buscaDoc, setBuscaDoc] = useState("");
   const [novoDocInput, setNovoDocInput] = useState("");
+
+  // ================= ESTADOS DO GRUPO ECONÔMICO =================
+  const [modalGrupoAberto, setModalGrupoAberto] = useState(false);
+  const [nomeGrupoInput, setNomeGrupoInput] = useState("");
+  const [buscaModalGrupo, setBuscaModalGrupo] = useState("");
+  const [selecionadosParaGrupo, setSelecionadosParaGrupo] = useState<string[]>([]);
 
   const carregarCadastro = useCallback(async () => {
     try {
@@ -197,6 +202,43 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
+  // ================= LÓGICA DO GRUPO ECONÔMICO =================
+  const abrirModalGrupo = () => {
+    setNomeGrupoInput("");
+    setBuscaModalGrupo("");
+    setSelecionadosParaGrupo([]);
+    setModalGrupoAberto(true);
+  };
+
+  const toggleSelecaoParaGrupo = (id: string) => {
+    setSelecionadosParaGrupo(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const aplicarGrupoLocal = () => {
+    if (!nomeGrupoInput.trim() || selecionadosParaGrupo.length === 0) {
+      return alert("Preencha o nome do grupo e selecione pelo menos uma empresa.");
+    }
+    
+    const novos = cedentes.map(c => {
+      if (selecionadosParaGrupo.includes(c.id)) {
+        return { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
+      }
+      return c;
+    });
+
+    setCedentes(novos);
+    setModalGrupoAberto(false);
+    alert(`Grupo "${nomeGrupoInput.trim().toUpperCase()}" aplicado localmente. Lembre-se de clicar em 'Salvar Tudo' para gravar no banco!`);
+  };
+
+  const cedentesModalGrupoFiltrados = useMemo(() => {
+    return cedentes.filter(c => 
+      !c._isNovo && // Não mostrar itens não salvos no banco
+      (c.cedente.toLowerCase().includes(buscaModalGrupo.toLowerCase()) ||
+      (c.cnpj && c.cnpj.includes(buscaModalGrupo.replace(/\D/g, ""))))
+    );
+  }, [cedentes, buscaModalGrupo]);
+
   // ================= LÓGICA DE MODALIDADES JSONB =================
   const handleModalidadeChange = (indexCedente: number, indexMod: number, campo: string, valorRaw: string) => {
     const novos = [...cedentes]; 
@@ -236,7 +278,6 @@ export default function CadastroPage() {
     novos[indexCedente]._isEditado = true;
     setCedentes(novos);
   };
-
 
   // ================= LÓGICA DE DISPARO EM LOTE =================
   const abrirModalDisparo = (tipo: "ASSINATURA" | "GESTORA" | "PORTAL_GESTORA" | "APTO" | "PENDENCIA") => {
@@ -455,6 +496,7 @@ export default function CadastroPage() {
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
       nao_opera_sec: false, nao_opera_fidc: false,
+      grupo_economico: null, // Novo campo
       comercial: usuarioAtual?.perfil === "comercial" || usuarioAtual?.perfil === "sdr" ? usuarioAtual.nome : "",
       _isNovo: true, _isEditado: true
     };
@@ -497,30 +539,35 @@ export default function CadastroPage() {
     setTimeout(() => setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false })), 2000);
   };
 
+  // Função para montar o Payload atualizado
+  const montarPayload = (item: any) => {
+    const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
+    const payload: any = {
+      cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
+      cnpj: cnpjFinal === "" ? null : cnpjFinal,
+      modalidades_aprovadas: item.modalidades_aprovadas || [],
+      grupo_economico: item.grupo_economico || null, // Garante envio do grupo
+      dt_aprovacao_comite: item.dt_aprovacao_comite || null,
+      dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
+      dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
+      dt_documentos_fidc: item.dt_documentos_fidc || null, dt_geracao_contrato_fidc: item.dt_geracao_contrato_fidc || null,
+      dt_assinatura_contrato_fidc: item.dt_assinatura_contrato_fidc || null, dt_envio_gestora_fidc: item.dt_envio_gestora_fidc || null,
+      dt_aprovacao_gestora_fidc: item.dt_aprovacao_gestora_fidc || null, dt_envio_admin_fidc: item.dt_envio_admin_fidc || null,
+      dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
+      nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
+      comercial: item.comercial, atualizado_em: new Date().toISOString()
+    };
+    if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
+    if (item.id) payload.id = item.id;
+    return payload;
+  };
+
   const salvarLinha = async (item: any) => {
     try {
       setSalvando(true);
       if (item._isNovo && (!item.cedente || item.cedente.trim() === "")) return alert("⚠️ Preencha o nome do Cedente!");
       
-      const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
-      const payload: any = {
-        cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
-        cnpj: cnpjFinal === "" ? null : cnpjFinal,
-        modalidades_aprovadas: item.modalidades_aprovadas || [],
-        dt_aprovacao_comite: item.dt_aprovacao_comite || null,
-        dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
-        dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
-        dt_documentos_fidc: item.dt_documentos_fidc || null, dt_geracao_contrato_fidc: item.dt_geracao_contrato_fidc || null,
-        dt_assinatura_contrato_fidc: item.dt_assinatura_contrato_fidc || null, dt_envio_gestora_fidc: item.dt_envio_gestora_fidc || null,
-        dt_aprovacao_gestora_fidc: item.dt_aprovacao_gestora_fidc || null, dt_envio_admin_fidc: item.dt_envio_admin_fidc || null,
-        dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
-        nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
-        comercial: item.comercial, atualizado_em: new Date().toISOString()
-      };
-
-      if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
-      if (item.id) payload.id = item.id;
-
+      const payload = montarPayload(item);
       const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
       if (error) {
         if (error.code === '23505' && error.message.includes('cnpj')) throw new Error("CNPJ já cadastrado.");
@@ -541,23 +588,7 @@ export default function CadastroPage() {
       if (alvos.length === 0) return alert("💡 Nenhuma alteração pendente.");
 
       for (const item of alvos) {
-        const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
-        const payload: any = {
-          cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
-          cnpj: cnpjFinal === "" ? null : cnpjFinal,
-          modalidades_aprovadas: item.modalidades_aprovadas || [],
-          dt_aprovacao_comite: item.dt_aprovacao_comite || null,
-          dt_documentos_sec: item.dt_documentos_sec || null, dt_geracao_contrato_sec: item.dt_geracao_contrato_sec || null,
-          dt_assinatura_contrato_sec: item.dt_assinatura_contrato_sec || null, dt_apto_sec: item.dt_apto_sec || null,
-          dt_documentos_fidc: item.dt_documentos_fidc || null, dt_geracao_contrato_fidc: item.dt_geracao_contrato_fidc || null,
-          dt_assinatura_contrato_fidc: item.dt_assinatura_contrato_fidc || null, dt_envio_gestora_fidc: item.dt_envio_gestora_fidc || null,
-          dt_aprovacao_gestora_fidc: item.dt_aprovacao_gestora_fidc || null, dt_envio_admin_fidc: item.dt_envio_admin_fidc || null,
-          dt_aprovacao_admin_fidc: item.dt_aprovacao_admin_fidc || null, dt_apto_fidc: item.dt_apto_fidc || null,
-          nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
-          comercial: item.comercial, atualizado_em: new Date().toISOString()
-        };
-        if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
-        if (item.id) payload.id = item.id;
+        const payload = montarPayload(item);
         const { error } = await supabase.from("cadastro_cedentes").upsert(payload);
         if (error) throw error;
       }
@@ -622,6 +653,14 @@ export default function CadastroPage() {
     });
 
     resultado.sort((a: any, b: any) => {
+      // 🌟 NOVA REGRA DE ORDENAÇÃO: Força Grupos Econômicos a ficarem juntos no topo da ordenação primária
+      if (a.grupo_economico && b.grupo_economico && a.grupo_economico !== b.grupo_economico) {
+        return a.grupo_economico.localeCompare(b.grupo_economico);
+      }
+      if (a.grupo_economico && !b.grupo_economico) return -1;
+      if (!a.grupo_economico && b.grupo_economico) return 1;
+
+      // Ordenação secundária (definida pelo usuário)
       if (sortConfig.key === "status") return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
       let valA = a[sortConfig.key], valB = b[sortConfig.key];
       if (sortConfig.key === "limite") {
@@ -735,6 +774,7 @@ export default function CadastroPage() {
             <span className="text-sm text-slate-500 font-medium ml-12">Monitoramento de cadastro, conversão e emissão de contratos.</span>
           </div>
           
+          {/* 🌟 BOTÕES ATUALIZADOS */}
           <div className="flex gap-3 w-full md:w-auto flex-wrap md:flex-nowrap">
             <button 
               onClick={buscarAprovadasDoComite} 
@@ -749,9 +789,16 @@ export default function CadastroPage() {
               Sincronizar Comitê
             </button>
 
-            <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-600 text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2">
+            {/* Novo Botão de CNPJ Manual */}
+            <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
-              Novo Manual
+              + Add CNPJ
+            </button>
+
+            {/* Novo Botão de Grupo Econômico */}
+            <button onClick={abrirModalGrupo} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+              + Criar Grupo
             </button>
             
             <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto">
@@ -856,7 +903,7 @@ export default function CadastroPage() {
           </svg>
           <input 
             type="text" 
-            placeholder="Buscar por nome do Cedente..." 
+            placeholder="Buscar por nome do Cedente ou CNPJ..." 
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             className="flex-1 bg-transparent border-none outline-none text-slate-700 font-medium p-2"
@@ -899,15 +946,37 @@ export default function CadastroPage() {
                   <tr>
                     <td colSpan={6} className="text-center py-10 text-slate-500 font-medium">Nenhum cedente encontrado para esse filtro.</td>
                   </tr>
-                ) : cedentesProcessados.map((item) => {
+                ) : cedentesProcessados.map((item, mapIndex, array) => {
                   const index = cedentes.findIndex(c => c === item);
                   const identificadorUnico = item.id || `novo-${index}`;
                   const isEditandoNome = !!cedentesEmEdicaoDeNome[identificadorUnico] || item._isNovo;
                   const isOpen = !!linhasExpandidas[identificadorUnico];
 
+                  // 🌟 LÓGICA VISUAL DO GRUPO ECONÔMICO
+                  const isGrupo = !!item.grupo_economico;
+                  const showGroupHeader = isGrupo && item.grupo_economico !== array[mapIndex - 1]?.grupo_economico;
+
                   return (
-                    <tr key={identificadorUnico} style={{ display: "contents" }}>
-                      <tr className={`group transition-all duration-200 ${isOpen ? "bg-indigo-50/30" : "hover:bg-slate-50"} ${item._isNovo ? "bg-amber-50/30" : ""}`}>
+                    <React.Fragment key={identificadorUnico}>
+                      
+                      {/* HEADER DO GRUPO (Aparece 1 vez no topo das empresas agrupadas) */}
+                      {showGroupHeader && (
+                        <tr>
+                          <td colSpan={10} className="bg-indigo-100/60 border-t-2 border-indigo-200 px-4 py-2">
+                            <div className="flex items-center gap-2 text-indigo-900">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                              <span className="text-xs font-black uppercase tracking-widest">Grupo Econômico: {item.grupo_economico}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+
+                      {/* LINHA PRINCIPAL */}
+                      <tr className={`group transition-all duration-200 
+                        ${isOpen ? (isGrupo ? "bg-indigo-50/80" : "bg-indigo-50/30") : (isGrupo ? "bg-indigo-50/20 hover:bg-indigo-50/40" : "hover:bg-slate-50")} 
+                        ${item._isNovo ? "bg-amber-50/30" : ""}
+                        ${isGrupo ? "border-l-4 border-l-indigo-400" : ""}
+                      `}>
                         <td className="px-4 py-3 text-center">
                           <button 
                             onClick={() => toggleExpandirLinha(identificadorUnico)}
@@ -935,9 +1004,16 @@ export default function CadastroPage() {
                             </div>
                           ) : (
                             <div className="flex flex-col gap-1 mt-1">
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-extrabold text-slate-800 tracking-tight truncate max-w-[200px]" title={item.cedente}>{item.cedente}</span>
-                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1.5 rounded-md transition-all">
+                                
+                                {isGrupo && (
+                                  <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider" title={`Grupo: ${item.grupo_economico}`}>
+                                    Grupo
+                                  </span>
+                                )}
+
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-all">
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                 </button>
                               </div>
@@ -1005,9 +1081,10 @@ export default function CadastroPage() {
                         </td>
                       </tr>
 
+                      {/* CORPO EXPANDIDO (DETALHES) */}
                       {isOpen && (
                         <tr>
-                          <td colSpan={usuarioAtual?.perfil !== "comercial" ? 6 : 5} className="bg-slate-50 border-b-2 border-indigo-100 p-6 shadow-inner">
+                          <td colSpan={usuarioAtual?.perfil !== "comercial" ? 6 : 5} className={`${isGrupo ? "bg-indigo-50/20" : "bg-slate-50"} border-b-2 border-indigo-100 p-6 shadow-inner`}>
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                               
                               <div className="xl:col-span-3 space-y-4">
@@ -1034,11 +1111,22 @@ export default function CadastroPage() {
                                     className="w-full p-3 border border-slate-300 rounded-lg text-sm h-[88px] resize-none outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 bg-slate-50 hover:bg-white transition-all text-slate-700" 
                                     placeholder="Ex: No aguardo das certidões..." />
                                 </div>
+                                
+                                {/* CONTROLE INDIVIDUAL DO GRUPO */}
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                  <label className="flex items-center gap-2 mb-2 text-[10px] text-slate-500 font-bold uppercase">
+                                    <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> 
+                                    Vincular a um Grupo
+                                  </label>
+                                  <input type="text" value={item.grupo_economico || ""} onChange={(e) => handleInputChange(index, "grupo_economico", e.target.value.toUpperCase())} 
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 uppercase outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all bg-slate-50 hover:bg-white" 
+                                    placeholder="NOME DO GRUPO" />
+                                </div>
                               </div>
 
                               <div className="xl:col-span-9 space-y-4">
                                 
-                                {/* 🌟 NOVO PAINEL: MODALIDADES APROVADAS */}
+                                {/* 🌟 PAINEL: MODALIDADES APROVADAS */}
                                 <div className="bg-emerald-50/30 p-5 rounded-xl border border-emerald-100 shadow-sm relative overflow-hidden mb-4">
                                   <div className={`absolute top-0 left-0 w-1.5 h-full bg-emerald-500`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
@@ -1160,7 +1248,7 @@ export default function CadastroPage() {
                           </td>
                         </tr>
                       )}
-                    </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -1169,6 +1257,92 @@ export default function CadastroPage() {
         </div>
 
       </div>
+
+      {/* ======================= MODAL DE CRIAÇÃO DE GRUPO ECONÔMICO ======================= */}
+      {modalGrupoAberto && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full flex flex-col overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                  Criar Grupo Econômico
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Vincule múltiplos CNPJs sob o mesmo grupo.</p>
+              </div>
+              <button onClick={() => setModalGrupoAberto(false)} className="text-slate-400 hover:text-slate-600">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto bg-white space-y-5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-2">1. Nome do Grupo Econômico:</label>
+                <input 
+                  type="text" 
+                  placeholder="EX: GRUPO VOTORANTIM" 
+                  value={nomeGrupoInput}
+                  onChange={(e) => setNomeGrupoInput(e.target.value.toUpperCase())}
+                  className="w-full p-3 border-2 border-emerald-200 rounded-xl text-sm font-black uppercase text-slate-800 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 transition-all bg-white shadow-inner"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-2">2. Selecione as Empresas:</label>
+                
+                <div className="mb-3 relative">
+                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input 
+                    type="text" 
+                    placeholder="Buscar empresa na tabela..." 
+                    value={buscaModalGrupo}
+                    onChange={(e) => setBuscaModalGrupo(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none focus:bg-white focus:border-emerald-400 transition-colors"
+                  />
+                </div>
+
+                <div className="border border-slate-200 rounded-xl max-h-56 overflow-y-auto custom-scrollbar bg-slate-50 p-2 space-y-1">
+                  {cedentesModalGrupoFiltrados.map(c => (
+                    <label key={c.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors border ${selecionadosParaGrupo.includes(c.id) ? "bg-emerald-50 border-emerald-300" : "bg-white border-transparent hover:border-slate-300 shadow-sm"}`}>
+                      <input 
+                        type="checkbox" 
+                        checked={selecionadosParaGrupo.includes(c.id)} 
+                        onChange={() => toggleSelecaoParaGrupo(c.id)} 
+                        className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-bold text-slate-800 block truncate">{c.cedente}</span>
+                        <span className="text-[10px] font-mono text-slate-500">{formatarCNPJ(c.cnpj)}</span>
+                      </div>
+                      {c.grupo_economico && !selecionadosParaGrupo.includes(c.id) && (
+                        <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-bold">Já em: {c.grupo_economico}</span>
+                      )}
+                    </label>
+                  ))}
+                  {cedentesModalGrupoFiltrados.length === 0 && (
+                    <div className="text-center text-xs text-slate-400 py-4 italic">Nenhuma empresa encontrada com esse nome.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-500">
+                {selecionadosParaGrupo.length} empresa(s) selecionada(s)
+              </span>
+              <button 
+                onClick={aplicarGrupoLocal}
+                disabled={!nomeGrupoInput.trim() || selecionadosParaGrupo.length === 0}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:shadow-none"
+              >
+                Vincular ao Grupo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ======================= MODAL DE DISPARO EM LOTE ======================= */}
       {modalDisparoAberto && (
@@ -1271,7 +1445,7 @@ export default function CadastroPage() {
                     </button>
                   </div>
 
-                  {/* 🌟 LUPA DE PESQUISA INTERNA NO MODAL */}
+                  {/* LUPA DE PESQUISA INTERNA NO MODAL */}
                   <div className="mb-3 relative">
                     <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1290,7 +1464,6 @@ export default function CadastroPage() {
                       <div key={c.id} className={`flex flex-col p-3 border rounded-xl transition-colors ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
                         
                         <div className="flex items-center justify-between">
-                          {/* Area de clique restrita só ao checkbox e nome */}
                           <div 
                             className="flex items-center gap-3 cursor-pointer flex-1"
                             onClick={() => toggleSelecaoDisparo(c.id)}
@@ -1308,7 +1481,6 @@ export default function CadastroPage() {
                             </div>
                           </div>
                           
-                          {/* Botões do Fundo protegidos do clique da linha */}
                           {selecionadosParaDisparo.includes(c.id) && (
                             <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-inner ml-2 shrink-0">
                               <button 
@@ -1329,7 +1501,6 @@ export default function CadastroPage() {
                           )}
                         </div>
 
-                        {/* NOVO CAMPO: CÓDIGO DO CONTRATO */}
                         {selecionadosParaDisparo.includes(c.id) && (tipoDisparoAtual === "GESTORA" || tipoDisparoAtual === "PORTAL_GESTORA") && (
                           <div className="mt-3 pl-7">
                             <input 
