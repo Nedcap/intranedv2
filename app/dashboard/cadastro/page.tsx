@@ -61,16 +61,6 @@ const VISUAL_STEPS_FIDC = [
   { key: "dt_apto_fidc", label: "Apto Operar" }
 ];
 
-// Campos que devem ser ESPELHADOS quando agrupamos as empresas
-const CAMPOS_HERANCA_GRUPO = [
-  "limite", "taxa", "docs_ok", "obs", "data_5", "data_6", "data_7", "data_8", "data_9", "apto",
-  "comercial", "risco_sec", "risco_fidc", "vencido_sec", "vencido_fidc",
-  "dt_aprovacao_comite", "dt_documentos_sec", "dt_geracao_contrato_sec", "dt_assinatura_contrato_sec", "dt_apto_sec",
-  "dt_documentos_fidc", "dt_geracao_contrato_fidc", "dt_assinatura_contrato_fidc", "dt_envio_gestora_fidc",
-  "dt_aprovacao_gestora_fidc", "dt_envio_admin_fidc", "dt_aprovacao_admin_fidc", "dt_apto_fidc",
-  "responsavel_id", "nao_opera_sec", "nao_opera_fidc", "modalidades_aprovadas"
-];
-
 const formatarDataBr = (dataString: string) => {
   if (!dataString) return "";
   const [ano, mes, dia] = dataString.split("-");
@@ -210,7 +200,7 @@ export default function CadastroPage() {
     carregarCadastro();
   }, [carregarCadastro]);
 
-  // ================= LÓGICA DO GRUPO ECONÔMICO E CLONAGEM DE DADOS =================
+  // ================= LÓGICA DO GRUPO ECONÔMICO =================
   const abrirModalGrupo = () => {
     setNomeGrupoInput("");
     setBuscaModalGrupo("");
@@ -227,39 +217,20 @@ export default function CadastroPage() {
       return alert("Preencha o nome do grupo e selecione pelo menos uma empresa.");
     }
     
-    const empresasSelecionadas = cedentes.filter(c => selecionadosParaGrupo.includes(c.id));
-    
-    // 🌟 ENCONTRA A EMPRESA "MATRIZ": Prioriza a que já tem Limite ou Comitê
-    let empresaMatriz = empresasSelecionadas.find(c => c.limite || c.dt_aprovacao_comite) || empresasSelecionadas[0];
-
+    // Apenas vincula as empresas selecionadas ao nome do grupo
     const novos = cedentes.map(c => {
       if (selecionadosParaGrupo.includes(c.id)) {
-        // Aplica o nome do grupo
-        const clonado = { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
-        
-        // Se a empresa na iteração NÃO for a matriz, copia todos os dados operacionais dela
-        if (c.id !== empresaMatriz.id) {
-          CAMPOS_HERANCA_GRUPO.forEach(campo => {
-            // Verifica deep copy para as modalidades
-            if (campo === "modalidades_aprovadas" && empresaMatriz[campo]) {
-              clonado[campo] = JSON.parse(JSON.stringify(empresaMatriz[campo]));
-            } else if (empresaMatriz[campo] !== undefined) {
-              clonado[campo] = empresaMatriz[campo];
-            }
-          });
-        }
-        return clonado;
+        return { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
       }
       return c;
     });
 
     setCedentes(novos);
     setModalGrupoAberto(false);
-    alert(`Grupo "${nomeGrupoInput.trim().toUpperCase()}" aplicado com sucesso!\nOs dados da empresa [${empresaMatriz.cedente || 'Nova'}] foram replicados para as outras.\n\nLembre-se de clicar em "Salvar Tudo" para gravar.`);
+    alert(`Grupo "${nomeGrupoInput.trim().toUpperCase()}" aplicado com sucesso!\n\nLembre-se de clicar em "Salvar Tudo" para gravar no banco.`);
   };
 
   const cedentesModalGrupoFiltrados = useMemo(() => {
-    // 🌟 Agora permite que as linhas manuais (_isNovo) apareçam na lista para poderem ser vinculadas e receberem os dados
     return cedentes.filter(c => 
       (c.cedente.toLowerCase().includes(buscaModalGrupo.toLowerCase()) ||
       (c.cnpj && c.cnpj.includes(buscaModalGrupo.replace(/\D/g, ""))))
@@ -517,7 +488,6 @@ export default function CadastroPage() {
 
   const adicionarNovaLinha = () => {
     const novaLinha = {
-      // 🌟 ID temporário para permitir seleção no modal de grupo antes de salvar no banco
       id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, 
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
       modalidades_aprovadas: [],
