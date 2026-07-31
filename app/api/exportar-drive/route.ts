@@ -63,7 +63,21 @@ export async function POST(req: Request) {
       const mimeType = isPdf ? "application/pdf" : "image/jpeg";
       const extensao = isPdf ? ".pdf" : ".jpg";
 
-      const nomeFinalDrive = `${doc.nome_descritivo_ia || "Documento Extraido"}${extensao}`;
+      // 🔥 NOVA LÓGICA: Extrair o nome original direto da URL
+      let nomeOriginal = `Documento_Extraido${extensao}`;
+      try {
+        const urlSemParametros = doc.url.split(/[?#]/)[0]; // Tira ? e # do final
+        const partesUrl = urlSemParametros.split('/');
+        nomeOriginal = decodeURIComponent(partesUrl[partesUrl.length - 1]); // Pega a última parte e limpa os %20
+      } catch (e) {
+        console.error("Erro ao extrair nome original da URL", e);
+      }
+
+      // Se a IA gerou um nome descritivo, usa ele + extensão. 
+      // Se não, usa o nome original do arquivo que extraímos da URL.
+      const nomeFinalDrive = doc.nome_descritivo_ia 
+        ? `${doc.nome_descritivo_ia}${extensao}` 
+        : nomeOriginal;
 
       return drive.files.create({
         requestBody: {
