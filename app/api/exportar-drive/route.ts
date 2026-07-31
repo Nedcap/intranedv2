@@ -11,21 +11,22 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 1. AUTENTICAÇÃO VIA OAUTH2 (Usando as suas variáveis da Vercel)
+    // 1. AUTENTICAÇÃO VIA SERVICE ACCOUNT (Robô - Imune a políticas de Workspace)
     // =========================================================================
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GCP_CLIENT_ID,
-      process.env.GCP_CLIENT_SECRET
-    );
+    // Substitui a quebra de linha literal que a Vercel às vezes injeta
+    const privateKey = process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-    // Seta o Refresh Token para ele conseguir gerar novos Access Tokens automaticamente
-    oauth2Client.setCredentials({
-      refresh_token: process.env.GCP_REFRESH_TOKEN,
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GCP_SERVICE_ACCOUNT_EMAIL,
+        private_key: privateKey,
+      },
+      scopes: ["https://www.googleapis.com/auth/drive.file"],
     });
 
-    const drive = google.drive({ version: "v3", auth: oauth2Client });
+    const drive = google.drive({ version: "v3", auth });
     
-    // O ID da sua pasta "00. EM ANALISE" (Você precisa criar essa variável na Vercel)
+    // O ID da sua pasta "00. EM ANALISE" na Vercel
     const PASTA_RAIZ_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
     // =========================================================================
@@ -40,7 +41,6 @@ export async function POST(req: Request) {
     const pastaRes = await drive.files.create({
       requestBody: folderMetadata,
       fields: "id",
-      // 🔥 OBRIGATÓRIO PARA SALVAR EM DRIVES COMPARTILHADOS 🔥
       supportsAllDrives: true, 
     });
     const pastaEmpresaId = pastaRes.data.id;
@@ -63,10 +63,8 @@ export async function POST(req: Request) {
       const mimeType = isPdf ? "application/pdf" : "image/jpeg";
       const extensao = isPdf ? ".pdf" : ".jpg";
 
-      // Usa o nome caprichado da IA
       const nomeFinalDrive = `${doc.nome_descritivo_ia || "Documento Extraido"}${extensao}`;
 
-      // Upload pro Google Drive
       return drive.files.create({
         requestBody: {
           name: nomeFinalDrive,
@@ -77,7 +75,6 @@ export async function POST(req: Request) {
           body: stream,
         },
         fields: "id, name, webViewLink",
-        // 🔥 OBRIGATÓRIO PARA SALVAR EM DRIVES COMPARTILHADOS 🔥
         supportsAllDrives: true,
       });
     });
