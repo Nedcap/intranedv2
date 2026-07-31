@@ -60,34 +60,6 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
   const [abaAtiva, setAbaAtiva] = useState("capa");
   const uploadJsonRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 ESTADO DO VISUALIZADOR DE DOCS
-  const [docAtivo, setDocAtivo] = useState<any>(null);
-
-  // =========================================================================
-  // PREPARAÇÃO DOS DADOS DO VISUALIZADOR
-  // =========================================================================
-  const auditados = (analise as any).dados_consolidados?.auditoria_documentos_lidos || [];
-  const brutos = (analise as any).dados_documentos || [];
-  
-  const listaDocsViewer = auditados.length > 0 
-    ? auditados 
-    : brutos.map((url: string, i: number) => {
-        let nome = `Anexo_${i+1}`;
-        try {
-            const partes = url.split(/[?#]/)[0].split('/');
-            nome = decodeURIComponent(partes[partes.length - 1]);
-        } catch (e) {}
-        return { url, nome_descritivo_ia: nome, categoria_ia: 'N/A' };
-      });
-
-  // Abre o primeiro documento automaticamente quando entra na aba Docs
-  useEffect(() => {
-    if (abaAtiva === "docs" && !docAtivo && listaDocsViewer.length > 0) {
-      setDocAtivo(listaDocsViewer[0]);
-    }
-  }, [abaAtiva, docAtivo, listaDocsViewer]);
-
-
   // =========================================================================
   // FUNÇÕES DE ATUALIZAÇÃO DE ESTADO
   // =========================================================================
@@ -190,6 +162,7 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
   const potComissaria = (faturamentoMedioReferencia / 30) * prazoDiasComissaria * percComissaria * percAPrazo;
   const potencialRealCalculado = Math.round((potDpls + potComissaria) * 100) / 100;
 
+  // Atualiza o potencial na master para o Parent conseguir salvar no banco
   useEffect(() => {
     if (analise.dados_potencial.potencial_estimado !== potencialRealCalculado) {
       setAnalise(prev => ({ ...prev, dados_potencial: { ...prev.dados_potencial, potencial_estimado: potencialRealCalculado }}));
@@ -224,7 +197,7 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
   return (
     <>
       {/* ABAS ESTILO PILLS */}
-      <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto custom-scrollbar">
+      <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto scrollbar-none">
         {[
           { id: "capa", label: "📄 Capa & Proposta" },
           { id: "cadastro", label: "🏢 Dados da Empresa" },
@@ -232,8 +205,7 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
           { id: "fat", label: "📈 Faturamento & Potencial" },
           { id: "endividamento", label: "🏦 Endividamento & Refs" },
           { id: "restritivos", label: "⚖️ Restritivos & Jurídico" },
-          { id: "parecer", label: "📝 Parecer Final" },
-          { id: "docs", label: "📁 Viewer de Arquivos" } // 🔥 NOVA ABA AQUI
+          { id: "parecer", label: "📝 Parecer Final" }
         ].map((tab) => (
           <button 
             key={tab.id} 
@@ -246,82 +218,8 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
       </div>
 
       {/* ÁREA DA PLANILHA */}
-      <div className="flex-1 overflow-y-auto p-6 bg-slate-50 relative scrollbar-thin scrollbar-thumb-slate-300 min-h-[85vh]">
+      <div className="flex-1 overflow-y-auto p-6 bg-slate-50 relative scrollbar-thin scrollbar-thumb-slate-300">
         
-        {/* 🔥 NOVA ABA DO VISUALIZADOR DE DOCUMENTOS */}
-        {abaAtiva === "docs" && (
-           <div className="flex h-full min-h-[75vh] gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-[1600px] mx-auto">
-             
-             {/* BARRA LATERAL (LISTA DE DOCUMENTOS) */}
-             <div className="w-1/3 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden h-full">
-                <div className="p-4 bg-slate-800 text-white text-xs font-black uppercase tracking-wider flex items-center justify-between">
-                   <span>📑 Arquivos Lidos ({listaDocsViewer.length})</span>
-                </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-                   {listaDocsViewer.map((doc: any, i: number) => {
-                      const isActive = docAtivo?.url === doc.url;
-                      const isPdf = doc.url?.toLowerCase().includes('.pdf');
-
-                      return (
-                        <button 
-                          key={i}
-                          onClick={() => setDocAtivo(doc)}
-                          className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-start gap-3 group ${
-                            isActive 
-                              ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-300 shadow-sm' 
-                              : 'bg-white border-slate-200 hover:border-indigo-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          <span className="text-2xl shrink-0 opacity-80">{isPdf ? "📄" : "🖼️"}</span>
-                          <div className="flex flex-col gap-1 overflow-hidden w-full">
-                            <span className={`text-[11px] font-extrabold truncate ${isActive ? 'text-indigo-900' : 'text-slate-700'}`}>
-                              {doc.nome_descritivo_ia}
-                            </span>
-                            <span className="text-[9px] uppercase tracking-widest text-slate-400 font-bold">
-                              {doc.categoria_ia || "N/A"}
-                            </span>
-                          </div>
-                        </button>
-                      )
-                   })}
-                   {listaDocsViewer.length === 0 && (
-                     <div className="p-8 text-center text-slate-400 font-medium italic text-xs border-2 border-dashed border-slate-200 rounded-xl m-2">
-                       Nenhum documento físico foi atrelado a esta análise.
-                     </div>
-                   )}
-                </div>
-             </div>
-             
-             {/* ÁREA PRINCIPAL DO VIEWER */}
-             <div className="w-2/3 bg-slate-200/50 border border-slate-300 rounded-xl shadow-inner flex flex-col overflow-hidden relative h-full min-h-[75vh]">
-                {docAtivo ? (
-                   docAtivo.url.toLowerCase().includes('.pdf') ? (
-                       <iframe 
-                         src={`${docAtivo.url}#toolbar=0&navpanes=0`} 
-                         className="w-full h-full border-0 bg-white" 
-                         title="Visualizador de PDF"
-                       />
-                   ) : (
-                       <div className="w-full h-full flex items-center justify-center bg-slate-100/50 overflow-auto p-4 custom-scrollbar relative">
-                          <img 
-                            src={docAtivo.url} 
-                            alt="Documento" 
-                            className="max-w-full h-auto object-contain rounded-lg shadow-md border border-slate-200 bg-white" 
-                          />
-                       </div>
-                   )
-                ) : (
-                   <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
-                      <span className="text-4xl opacity-50">📂</span>
-                      <span className="font-bold text-xs uppercase tracking-widest">
-                        Selecione um arquivo ao lado para visualizar
-                      </span>
-                   </div>
-                )}
-             </div>
-           </div>
-        )}
-
         {abaAtiva === "capa" && (
           <div className="max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             {analise.status === "em_processamento_ia" && (
