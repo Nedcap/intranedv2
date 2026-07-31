@@ -318,7 +318,8 @@ export default function MotorCreditoPage() {
               fachada_url: urlsImagens.length > 0 ? urlsImagens[0] : "",
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
-            parecer_comite: ""
+            parecer_comite: "",
+            auditoria_documentos_lidos: [] // Inicia a lista vazia pra IA preencher
           }
         })
         .select("id")
@@ -1005,7 +1006,7 @@ export default function MotorCreditoPage() {
                   <div className="flex justify-between items-center">
                     <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                      Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
+                      Documentos Auditados (Classificados pela IA)
                     </h3>
                     
                     {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
@@ -1019,44 +1020,48 @@ export default function MotorCreditoPage() {
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-                    {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
-                      empresaParaDocs.dados_documentos.map((url, i) => {
-                        const isPdf = url.toLowerCase().includes('.pdf');
+                  <div className="grid grid-cols-1 gap-3 mt-2">
+                    {/* 🔥 RENDERIZAÇÃO NOVA COM BASE NA AUDITORIA DA IA */}
+                    {empresaParaDocs.dados_consolidados?.auditoria_documentos_lidos?.length > 0 ? (
+                      empresaParaDocs.dados_consolidados.auditoria_documentos_lidos.map((doc: any, i: number) => {
+                        const isPdf = doc.url?.toLowerCase().includes('.pdf');
                         
-                        let nomeRealArquivo = `Anexo_${i+1}`;
-                        try {
-                          const urlPartes = url.split(/[?#]/)[0].split('/'); 
-                          let ultimoTrecho = urlPartes[urlPartes.length - 1];
-                          nomeRealArquivo = decodeURIComponent(ultimoTrecho); 
-                        } catch (e) {
-                          nomeRealArquivo = `Anexo_Injetado_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
-                        }
-
                         return (
                           <a 
                             key={i} 
-                            href={url} 
+                            href={doc.url} 
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
-                            title={nomeRealArquivo}
+                            title={doc.nome_descritivo_ia}
                           >
-                            <div className="flex items-center gap-2 truncate pr-2">
-                              <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
-                              <span className="text-xs font-bold text-slate-600 truncate group-hover:text-blue-700 transition-colors">
-                                {nomeRealArquivo}
-                              </span>
+                            <div className="flex flex-col gap-1 pr-2 max-w-[85%]">
+                               <div className="flex items-center gap-2 truncate">
+                                 <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
+                                 <span className="text-xs font-bold text-slate-700 truncate group-hover:text-blue-700 transition-colors">
+                                   {doc.nome_descritivo_ia || "Documento Analisado"}
+                                 </span>
+                               </div>
+                               <div className="pl-7">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                                    Cat: {doc.categoria_ia || "N/A"}
+                                  </span>
+                               </div>
                             </div>
-                            <span className="text-[9px] bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
+                            <span className="text-[9px] bg-slate-50 border border-slate-200 px-3 py-2 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
                               Abrir ↗
                             </span>
                           </a>
                         )
                       })
                     ) : (
-                      <div className="col-span-2 p-6 bg-slate-100 rounded-xl border border-slate-200 border-dashed text-center">
-                        <p className="text-xs text-slate-400 italic font-bold">Nenhum arquivo físico de leitura atrelado a este envio.</p>
+                      <div className="p-6 bg-slate-100 rounded-xl border border-slate-200 border-dashed text-center">
+                        <p className="text-xs text-slate-400 italic font-bold">Ainda não há relatórios detalhados de leitura da IA para estes documentos.</p>
+                        
+                        {/* Fallback caso a IA não tenha rodado ainda mas haja arquivos brutos */}
+                        {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
+                           <p className="text-[10px] text-slate-500 mt-2">({empresaParaDocs.dados_documentos.length} arquivo(s) físico(s) no repositório)</p>
+                        )}
                       </div>
                     )}
                   </div>
