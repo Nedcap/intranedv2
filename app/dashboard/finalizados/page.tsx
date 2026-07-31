@@ -5,6 +5,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
 import JSZip from "jszip";
+import ExportarDriveButton from "@/components/ExportarDriveButton"; // 🔥 NOVO: Importando o Botão do Drive
 
 // ============================================================================
 // FUNÇÕES AUXILIARES
@@ -275,13 +276,11 @@ export default function FinalizadosPage() {
   const baixarPdfAnalise = async (item: any) => {
     setGerandoPdfId(item.id);
     try {
-      // 1. Busca os dados reais de Votos e Chat (garantindo que estão atualizados)
       const { data: chat } = await supabase.from("chat_comite").select("*").eq("empresa_nome", item.empresa_nome).order("id", { ascending: true });
       const { data: votos } = await supabase.from("votos").select("*").eq("empresa_nome", item.empresa_nome);
       
       let analiseHtmlText = "";
       
-      // 2. Extrai o HTML da análise
       if (item.dados_consolidados && Object.keys(item.dados_consolidados).length > 0) {
         analiseHtmlText = await gerarHtmlDossie(item);
       } else if (item.caminho_local) {
@@ -302,7 +301,6 @@ export default function FinalizadosPage() {
       const parser = new DOMParser();
       const doc = parser.parseFromString(analiseHtmlText, "text/html");
 
-      // 3. Constrói o visual dos Votos no padrão estético da ferramenta
       let votosHtml = '';
       if (!votos || votos.length === 0) {
          votosHtml = `<div class="card" style="grid-column: span 2; text-align: center; color: var(--muted); font-style: italic; font-weight: 500;">Nenhum voto registrado no comitê para esta análise.</div>`;
@@ -325,7 +323,6 @@ export default function FinalizadosPage() {
          }).join("");
       }
 
-      // 4. Constrói o visual das Atas e Chat
       let chatHtml = '';
       if (!chat || chat.length === 0) {
         chatHtml = `<p style="color: var(--muted); font-style: italic; font-size: 0.95rem; text-align: center; padding: 1rem;">Nenhuma discussão ou ata registrada.</p>`;
@@ -341,10 +338,8 @@ export default function FinalizadosPage() {
       const dataEmissao = new Date().toLocaleDateString('pt-BR');
       const statusAnalise = item.status || item.status_comite || 'FINALIZADO';
       
-      // 5. Monta a Estrutura da Página de Rosto (Capa)
       const coverPageHtml = `
         <div class="cover-page" style="page-break-after: always; margin-bottom: 4rem; display: flex; flex-direction: column;">
-          
           <div class="header" style="background: linear-gradient(135deg, var(--text), var(--blue-dark)); border: none !important; margin-bottom: 3rem;">
             <div style="flex-grow: 1;">
               <h1 style="font-size: 2.2rem; margin-bottom: 0.5rem; color: #fff;">DELIBERAÇÃO OFICIAL DO COMITÊ</h1>
@@ -357,27 +352,22 @@ export default function FinalizadosPage() {
               <div class="meta" style="color: rgba(255,255,255,0.7); font-size: 0.9rem;">Impresso em: ${dataEmissao}</div>
             </div>
           </div>
-
           <h2 style="margin-top: 0;">📋 Votos Registrados (Súmula)</h2>
           <div class="grid-2" style="margin-bottom: 3rem;">
             ${votosHtml}
           </div>
-
           <h2>💬 Fórum de Discussões & Alinhamentos Finais</h2>
           <div class="card" style="padding: 1.5rem; border: 1px solid var(--border); background: #fff;">
             ${chatHtml}
           </div>
-
         </div>
       `;
 
-      // 6. Injeta a capa logo no começo do container principal do Dossie
       const container = doc.querySelector(".container");
       if (container) {
         container.insertAdjacentHTML('afterbegin', coverPageHtml);
       }
 
-      // 7. Garante a quebra de página (A capa vai terminar e forçar o dossiê pra folha 2)
       const printCss = `
         <style>
           @media print {
@@ -388,14 +378,12 @@ export default function FinalizadosPage() {
             .cover-page { 
               page-break-after: always !important; 
             }
-            /* Esconder links nas impressões (opcional para estética limpa) */
             a[href]:after { content: none !important; }
           }
         </style>
       `;
       doc.head.insertAdjacentHTML("beforeend", printCss);
 
-      // 8. Gera e abre a impressão
       const blob = new Blob([doc.documentElement.outerHTML], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const printWindow = window.open(url, "_blank");
@@ -564,7 +552,6 @@ export default function FinalizadosPage() {
           </div>
 
           <div className="w-[30%] h-full py-5 pr-5 flex flex-col space-y-5">
-            
             {/* PAINEL DE VOTOS REGISTRADOS */}
             <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden text-left relative">
               <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-100 pb-2.5 mb-3 flex items-center gap-2">
@@ -899,7 +886,7 @@ export default function FinalizadosPage() {
                 ) : (
                   <div className="p-5 bg-white border border-indigo-100 rounded-xl shadow-sm">
                     <p className="text-xs text-indigo-900 font-medium leading-relaxed">
-                      💡 <strong>Estrutura de Validação Pronta:</strong> Os documentos lidos pelo robô aparecerão listados automaticamente aqui. Nenhuma tag `checklist_ia` encontrada para esta análise.
+                      💡 <strong>Estrutura de Validação Pronta:</strong> Nenhuma tag `checklist_ia` encontrada para esta análise (Análise muito antiga).
                     </p>
                   </div>
                 )}
@@ -912,32 +899,83 @@ export default function FinalizadosPage() {
                 <div className="flex justify-between items-center">
                   <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                    Arquivos Brutos (Cloudflare R2) - {empresaParaDocs.dados_documentos?.length || 0} anexo(s)
+                    Documentos da Análise
                   </h3>
                   
-                  {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
-                    <button 
-                      onClick={baixarTudoZip}
-                      disabled={isZipping}
-                      className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {isZipping ? "⏳ Empacotando..." : "📦 Baixar Todos (.ZIP)"}
-                    </button>
-                  )}
+                  <div className="flex gap-2">
+                     {/* 🔥 NOVO: BOTÃO DE EXPORTAÇÃO PARA O DRIVE */}
+                     {empresaParaDocs.dados_consolidados?.auditoria_documentos_lidos?.length > 0 ? (
+                       <ExportarDriveButton 
+                         empresaNome={empresaParaDocs.empresa_nome}
+                         documentosAuditados={empresaParaDocs.dados_consolidados.auditoria_documentos_lidos}
+                       />
+                     ) : empresaParaDocs.dados_documentos?.length > 0 ? (
+                       // Fallback: se não tiver o nome bonito da IA, manda os originais simulando a estrutura
+                       <ExportarDriveButton 
+                         empresaNome={empresaParaDocs.empresa_nome}
+                         documentosAuditados={empresaParaDocs.dados_documentos.map((url: string, i: number) => ({
+                           url: url,
+                           nome_descritivo_ia: `Anexo_Original_${i+1}`
+                         }))}
+                       />
+                     ) : null}
+
+                     {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 && (
+                       <button 
+                         onClick={baixarTudoZip}
+                         disabled={isZipping}
+                         className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-600 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5"
+                       >
+                         {isZipping ? "⏳ Empacotando..." : "📦 Baixar (.ZIP)"}
+                       </button>
+                     )}
+                  </div>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-                  {empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 mt-2">
+                  {/* 🔥 RENDERIZAÇÃO NOVA COM BASE NA AUDITORIA DA IA OU FALLBACK */}
+                  {empresaParaDocs.dados_consolidados?.auditoria_documentos_lidos?.length > 0 ? (
+                    empresaParaDocs.dados_consolidados.auditoria_documentos_lidos.map((doc: any, i: number) => {
+                      const isPdf = doc.url?.toLowerCase().includes('.pdf');
+                      
+                      return (
+                        <a 
+                          key={i} 
+                          href={doc.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between group"
+                          title={doc.nome_descritivo_ia}
+                        >
+                          <div className="flex flex-col gap-1 pr-2 max-w-[85%]">
+                             <div className="flex items-center gap-2 truncate">
+                               <span className="text-xl shrink-0">{isPdf ? "📄" : "🖼️"}</span>
+                               <span className="text-xs font-bold text-slate-700 truncate group-hover:text-blue-700 transition-colors">
+                                 {doc.nome_descritivo_ia || "Documento Analisado"}
+                               </span>
+                             </div>
+                             <div className="pl-7">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                                  Cat: {doc.categoria_ia || "N/A"}
+                                </span>
+                             </div>
+                          </div>
+                          <span className="text-[9px] bg-slate-50 border border-slate-200 px-3 py-2 rounded-md text-slate-500 font-black uppercase tracking-wider group-hover:bg-blue-50 group-hover:text-blue-700 group-hover:border-blue-200 transition-colors shrink-0">
+                            Abrir ↗
+                          </span>
+                        </a>
+                      )
+                    })
+                  ) : empresaParaDocs.dados_documentos && empresaParaDocs.dados_documentos.length > 0 ? (
                     empresaParaDocs.dados_documentos.map((url: string, i: number) => {
                       const isPdf = url.toLowerCase().includes('.pdf');
                       
                       let nomeRealArquivo = `Anexo_${i+1}`;
                       try {
                         const urlPartes = url.split(/[?#]/)[0].split('/'); 
-                        let ultimoTrecho = urlPartes[urlPartes.length - 1];
-                        nomeRealArquivo = decodeURIComponent(ultimoTrecho); 
+                        nomeRealArquivo = decodeURIComponent(urlPartes[urlPartes.length - 1]); 
                       } catch (e) {
-                        nomeRealArquivo = `Anexo_Injetado_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
+                        nomeRealArquivo = `Anexo_Original_${i+1}${isPdf ? ".pdf" : ".jpg"}`;
                       }
 
                       return (
@@ -963,7 +1001,7 @@ export default function FinalizadosPage() {
                     })
                   ) : (
                     <div className="col-span-2 p-6 bg-slate-100 rounded-xl border border-slate-200 border-dashed text-center">
-                      <p className="text-xs text-slate-400 italic font-bold">Nenhum arquivo físico de leitura atrelado a este envio.</p>
+                      <p className="text-xs text-slate-400 italic font-bold">Nenhum arquivo físico atrelado a este envio.</p>
                     </div>
                   )}
                 </div>
