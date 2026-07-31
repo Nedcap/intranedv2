@@ -910,12 +910,11 @@ export default function FinalizadosPage() {
                          documentosAuditados={empresaParaDocs.dados_consolidados.auditoria_documentos_lidos}
                        />
                      ) : empresaParaDocs.dados_documentos?.length > 0 ? (
-                       // Fallback: se não tiver o nome bonito da IA, manda os originais simulando a estrutura
+                       // Fallback sem mandar "nome_descritivo_ia" para forçar a API a extrair da URL
                        <ExportarDriveButton 
                          empresaNome={empresaParaDocs.empresa_nome}
-                         documentosAuditados={empresaParaDocs.dados_documentos.map((url: string, i: number) => ({
-                           url: url,
-                           nome_descritivo_ia: `Anexo_Original_${i+1}`
+                         documentosAuditados={empresaParaDocs.dados_documentos.map((url: string) => ({
+                           url: url
                          }))}
                        />
                      ) : null}
