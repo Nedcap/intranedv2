@@ -152,7 +152,7 @@ export default function ComitePage() {
 
     } catch (err) {
       console.error("Erro ao carregar dados do comitê:", err);
-    } font-sans {
+    } finally {
       setCarregando(false);
     }
   }, [user, carregarVotosIniciais]);
