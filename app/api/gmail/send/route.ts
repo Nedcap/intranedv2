@@ -97,19 +97,24 @@ export async function POST(request: Request) {
     const emailRemetenteReal = integracao.gmail_conta_conectada || emailTratado;
     const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) ? `Re: ${assunto}` : assunto;
 
+    // 🌟 CORREÇÃO DE ACENTUAÇÃO (MIME Encoded-Word para o Assunto)
+    const assuntoBase64 = Buffer.from(assuntoFormatado, "utf8").toString("base64");
+
     const deString = `From: ${emailRemetenteReal}\r\n`;
     const paraString = `To: ${para}\r\n`;
     const ccString = cc ? `Cc: ${cc}\r\n` : "";
-    const assuntoString = `Subject: ${assuntoFormatado}\r\n`;
+    const assuntoString = `Subject: =?UTF-8?B?${assuntoBase64}?=\r\n`; // 👈 ASSUNTO BLINDADO!
     
     const threadString = mensagemId ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n` : "";
-    const tipoString = `Content-Type: text/html; charset="UTF-8"\r\n\r\n`; 
+    
+    // Garantindo que o corpo também seja forçado a ler como UTF-8
+    const tipoString = `Content-Type: text/html; charset="UTF-8"\r\nMIME-Version: 1.0\r\n\r\n`; 
     const corpoString = `${textoResposta}\r\n`;
 
     const emailBruto = deString + paraString + ccString + assuntoString + threadString + tipoString + corpoString;
     
-    // 🌟 Codificação Base64 URL Safe recomendada para a API do Gmail
-    const base64Safe = Buffer.from(emailBruto)
+    // 🌟 Codificação Base64 URL Safe explícita em UTF-8 recomendada para a API do Gmail
+    const base64Safe = Buffer.from(emailBruto, "utf8")
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
