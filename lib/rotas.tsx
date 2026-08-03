@@ -41,7 +41,6 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Painel de Indicadores (BI)", path: "/dashboard/powerbi", icone: "📊", categoria: "Financeiro", defaultMaster: true },
   { nome: "Controle Financeiro", path: "/dashboard/financeiro", icone: "💰", categoria: "Financeiro", defaultMaster: true },
   { nome: "Cálculo de Comissões", path: "/dashboard/calculo-comissoes", icone: "💵", categoria: "Financeiro", defaultMaster: true },
-  { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Financeiro", defaultMaster: true },
   { nome: "Simulador de Rentabilidade", path: "/dashboard/simulador", icone: "🧮", categoria: "Financeiro", defaultMaster: true },
   { nome: "Importação de Dados", path: "/dashboard/importacao", icone: "📥", categoria: "Financeiro", defaultMaster: true },
 
@@ -53,6 +52,9 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 👥 RH E CONTROLE (NOVO)
   { nome: "Relógio de Ponto", path: "/dashboard/ponto", icone: "🕒", categoria: "RH", defaultMaster: true },
   { nome: "Gestão de Ponto", path: "/dashboard/ponto/gestao", icone: "📋", categoria: "RH", defaultMaster: true },
+
+  // 📝 Checagem
+  { nome: "Controle de Checagem", path: "/dashboard/checagem", icone: "✅", categoria: "Controladoria", defaultMaster: true },
 
   // ⚙️ CONFIGURAÇÕES
   { nome: "Gerenciar Usuários", path: "/dashboard/gerenciar-usuarios", icone: "⚙️", categoria: "Configurações", defaultMaster: true },

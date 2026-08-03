@@ -1,49 +1,59 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { validarRequisicaoApi, supabaseAdmin } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
+import { validarRequisicaoApi, supabaseAdmin } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    // 🔒 BLINDAGEM DA ROTA: Verificando o crachá (Token JWT)
     const { usuario, erro } = await validarRequisicaoApi(request);
     if (erro || !usuario) {
-      return NextResponse.json({ error: erro || "Acesso negado." }, { status: 401 });
+      return NextResponse.json({ error: erro || "Acesso negado (Token JWT)." }, { status: 401 });
     }
 
-    // 🌟 RECEBENDO OS DADOS
     const { userEmail, contaAtiva, mensagemId, para, cc, assunto, textoResposta } = await request.json();
 
-    // 🛡️ VALIDAÇÃO DE IDENTIDADE: O usuário só pode usar a própria integração (exceto Master)
-    if (userEmail.toLowerCase().trim() !== usuario.email.toLowerCase().trim() && usuario.cargo !== 'Master') {
+    // 🌟 TRATAMENTO DE STRING PARA EVITAR ERRO DE BUSCA NO BANCO
+    const emailTratado = userEmail.toLowerCase().trim();
+
+    if (emailTratado !== usuario.email.toLowerCase().trim() && usuario.cargo !== 'Master') {
       return NextResponse.json({ error: "Você não tem permissão para enviar e-mails em nome deste usuário." }, { status: 403 });
     }
 
-    // 🛡️ Usamos o supabaseAdmin para garantir a leitura no banco protegido por RLS
-    const { data: integracao, error: dbError } = await supabaseAdmin
+    // 🛡️ Busca de forma mais segura: prioriza o email do usuário. 
+    // Se você aceita múltiplas contas por usuário, precisa repensar o "contaAtiva".
+    const query = supabaseAdmin
       .from("usuarios_integracoes")
       .select("*")
-      .eq("email_usuario", userEmail)
-      .eq("gmail_conta_conectada", contaAtiva || userEmail)
-      .single();
+      .eq("email_usuario", emailTratado);
+    
+    if (contaAtiva) {
+       query.eq("gmail_conta_conectada", contaAtiva.toLowerCase().trim());
+    }
+
+    const { data: integracoes, error: dbError } = await query;
+
+    // Pega a primeira integração encontrada
+    const integracao = integracoes?.[0];
 
     if (dbError || !integracao) {
-      return NextResponse.json({ error: "Integração não encontrada para esta aba ativa" }, { status: 401 });
+      console.log("❌ [DB Fetch Error] Integração não encontrada para:", emailTratado, "| Erro:", dbError);
+      return NextResponse.json({ error: "Integração do Google não encontrada no banco." }, { status: 401 });
     }
 
     let accessToken = integracao.gmail_access_token;
     const expiraEm = integracao.gmail_token_expira_em ? new Date(integracao.gmail_token_expira_em).getTime() : 0;
     const agora = Date.now();
 
+    // Se o token estiver vazio ou expirando em menos de 5 min
     if (!accessToken || agora > (expiraEm - 5 * 60 * 1000)) {
-      console.log(`🔄 [Token Expirado] Renovando acesso para a conta: ${contaAtiva}`);
+      console.log(`🔄 [Token Expirado] Renovando acesso para: ${emailTratado}`);
       
       if (!integracao.gmail_refresh_token) {
-        return NextResponse.json({ error: "Gmail deslogado (Sem token de renovação. Faça login novamente)" }, { status: 401 });
+        console.log("❌ [Sem Refresh Token] Usuário precisa relogar.");
+        return NextResponse.json({ error: "Sem token de renovação. Reconecte a conta do Google." }, { status: 401 });
       }
 
-      const SITE_URL = "https://intraned.nedcapital.com.br";
       const CLIENT_ID = "286592186985-510m9rsgj1f2ifqas12jegg7are7ddqg.apps.googleusercontent.com";
       const secretParteA = "GOCSPX-";
       const secretParteB = "_oqRbHrrLU0Kev2yG5lRFU64l0ze"; 
@@ -63,13 +73,13 @@ export async function POST(request: Request) {
       const novosTokens = await refreshResponse.json();
 
       if (novosTokens.error) {
-        return NextResponse.json({ error: "Falha ao renovar credenciais com o Google." }, { status: 401 });
+        console.log("❌ [Erro OAuth do Google]:", novosTokens.error);
+        return NextResponse.json({ error: "Falha ao renovar credenciais no Google." }, { status: 401 });
       }
 
       accessToken = novosTokens.access_token;
       const novoLimiteExpira = new Date(Date.now() + novosTokens.expires_in * 1000).toISOString();
 
-      // 🛡️ Atualiza os tokens usando supabaseAdmin
       await supabaseAdmin
         .from("usuarios_integracoes")
         .update({
@@ -77,27 +87,26 @@ export async function POST(request: Request) {
           gmail_token_expira_em: novoLimiteExpira,
           atualizado_em: new Date().toISOString()
         })
-        .eq("email_usuario", userEmail)
-        .eq("gmail_conta_conectada", contaAtiva || userEmail);
+        .eq("id", integracao.id); // Atualiza pelo ID para não ter erro
     }
 
-    const emailRemetenteReal = integracao.gmail_conta_conectada || userEmail;
+    const emailRemetenteReal = integracao.gmail_conta_conectada || emailTratado;
     const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) ? `Re: ${assunto}` : assunto;
 
     const deString = `From: ${emailRemetenteReal}\r\n`;
     const paraString = `To: ${para}\r\n`;
-    // 🌟 INJETANDO O CC AQUI (se existir)
     const ccString = cc ? `Cc: ${cc}\r\n` : "";
     const assuntoString = `Subject: ${assuntoFormatado}\r\n`;
     
     const threadString = mensagemId ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n` : "";
-    const tipoString = `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
+    const tipoString = `Content-Type: text/html; charset="UTF-8"\r\n\r\n`; // Ajustado para text/html caso o roteiro venha formatado
     const corpoString = `${textoResposta}\r\n`;
 
-    // 🌟 CONCATENANDO TUDO
     const emailBruto = deString + paraString + ccString + assuntoString + threadString + tipoString + corpoString;
     
-    const base64Safe = btoa(unescape(encodeURIComponent(emailBruto)))
+    // 🌟 MELHORIA: Forma correta e segura de gerar Base64 URL Safe no Node.js
+    const base64Safe = Buffer.from(emailBruto)
+      .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
@@ -113,12 +122,19 @@ export async function POST(request: Request) {
 
     if (!res.ok) {
       const errData = await res.json();
+      console.log("❌ [Erro API Gmail Send]:", errData);
+      
+      // Se o Gmail rejeitar (ex: scope invalido), ele cai aqui
+      if (errData.error?.status === "UNAUTHENTICATED" || errData.error?.status === "PERMISSION_DENIED") {
+         return NextResponse.json({ error: "Permissões do Google revogadas ou escopo inválido." }, { status: 401 });
+      }
+      
       throw new Error(errData.error?.message || "Falha no motor do Google");
     }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error("❌ Erro no endpoint de envio:", error);
+    console.error("❌ Erro Catch Geral:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
