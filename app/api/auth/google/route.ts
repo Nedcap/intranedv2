@@ -24,7 +24,10 @@ export async function GET(request: Request) {
   // ====================================================================
   if (!code) {
     const redirectUri = `${SITE_URL}/api/auth/google`;
+    
+    // 🌟 CORREÇÃO 1: Adicionando o escopo explícito de SEND para evitar 403
     const scopes = [
+      "https://www.googleapis.com/auth/gmail.send",
       "https://www.googleapis.com/auth/gmail.modify", 
       "https://www.googleapis.com/auth/userinfo.email"
     ];
@@ -67,7 +70,6 @@ export async function GET(request: Request) {
         redirectDeVolta = decoded.origin;
       } catch (e) {
         console.warn("Aviso: Formato de 'state' antigo ou inválido.");
-        // Se falhar o parse, assume que o state é só o e-mail (fluxo antigo)
         stateEmailOwner = stateParam; 
       }
     }
@@ -101,8 +103,10 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${SITE_URL}${redirectDeVolta}?error=${encodeURIComponent("Contas particulares @gmail.com não são permitidas. Use o e-mail institucional!")}`);
     }
 
+    const emailUsuarioFormatado = stateEmailOwner.toLowerCase().trim();
+
     const dadosIntegracao: any = {
-      email_usuario: stateEmailOwner.toLowerCase().trim(), 
+      email_usuario: emailUsuarioFormatado, 
       gmail_conta_conectada: gmailConectado,
       gmail_access_token: tokens.access_token,
       gmail_token_expira_em: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
@@ -113,16 +117,33 @@ export async function GET(request: Request) {
       dadosIntegracao.gmail_refresh_token = tokens.refresh_token;
     }
 
-    // 🛡️ NOVO: Usamos o supabaseAdmin para garantir que a escrita não seja bloqueada pelo RLS
-    const { error: upsertError } = await supabaseAdmin
+    // 🌟 CORREÇÃO 2: Salvando de forma blindada (sem depender do onConflict do Supabase)
+    // Primeiro tentamos achar se já existe essa integração
+    const { data: integracaoExistente } = await supabaseAdmin
       .from("usuarios_integracoes")
-      .upsert(dadosIntegracao, { onConflict: "email_usuario, gmail_conta_conectada" });
+      .select("id")
+      .eq("email_usuario", emailUsuarioFormatado)
+      .eq("gmail_conta_conectada", gmailConectado)
+      .single();
 
-    if (upsertError) {
-      throw new Error(`Erro ao inserir no Supabase: ${upsertError.message}`);
+    if (integracaoExistente) {
+      // Se existe, apenas atualizamos (UPDATE)
+      const { error: updateError } = await supabaseAdmin
+        .from("usuarios_integracoes")
+        .update(dadosIntegracao)
+        .eq("id", integracaoExistente.id);
+        
+      if (updateError) throw new Error(`Erro ao atualizar no Supabase: ${updateError.message}`);
+    } else {
+      // Se não existe, criamos uma nova (INSERT)
+      const { error: insertError } = await supabaseAdmin
+        .from("usuarios_integracoes")
+        .insert(dadosIntegracao);
+        
+      if (insertError) throw new Error(`Erro ao inserir no Supabase: ${insertError.message}`);
     }
 
-    console.log(`✅ Tokens salvos com sucesso no Supabase para o usuário: ${stateEmailOwner}`);
+    console.log(`✅ Tokens salvos com sucesso no Supabase para o usuário: ${emailUsuarioFormatado}`);
 
     // Redireciona de volta para a tela de onde o usuário clicou no botão!
     return NextResponse.redirect(`${SITE_URL}${redirectDeVolta}`);
