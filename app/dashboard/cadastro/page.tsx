@@ -413,10 +413,18 @@ export default function CadastroPage() {
         });
 
         if (!res.ok) {
-          if (res.status === 401 || res.status === 403) {
-            throw new Error("Sessão do Google expirada. Clique em 'Reconectar Google' acima.");
+          let mensagemReal = "Erro desconhecido no servidor";
+          try {
+            const errorData = await res.json();
+            if (errorData.error) mensagemReal = errorData.error;
+          } catch (e) {
+            // Se falhar o parse, mantem a mensagem genérica
           }
-          throw new Error("Falha na API de envio de e-mail");
+
+          if (res.status === 401 || res.status === 403) {
+            throw new Error(`Erro de Permissão: ${mensagemReal}`);
+          }
+          throw new Error(`Falha na API: ${mensagemReal}`);
         }
         
         setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente}) - Via ${fundoSelecionado}`]);
