@@ -1,67 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { gerarHtmlDossie } from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
-
-// ============================================================================
-// FUNÇÕES AUXILIARES
-// ============================================================================
-function calcularDiasUteis(dInicio: Date, dFim: Date) {
-  let count = 0;
-  const atual = new Date(dInicio.getTime());
-  atual.setHours(12, 0, 0, 0);
-  const fim = new Date(dFim.getTime());
-  fim.setHours(12, 0, 0, 0);
-  if (fim < atual) return 0;
-  while (atual < fim) {
-    atual.setDate(atual.getDate() + 1);
-    const diaSemana = atual.getDay();
-    if (diaSemana !== 0 && diaSemana !== 6) {
-      count++;
-    }
-  }
-  return count;
-}
-
-function parseDataSegura(dataStr: string) {
-  if (!dataStr) return null;
-  const apenasData = dataStr.trim().split("T")[0];
-  return new Date(`${apenasData}T12:00:00`);
-}
-
-function simplificarNome(nome: string): string {
-  if (!nome) return "";
-  let n = nome.trim().toUpperCase();
-  n = n.replace(/\b(LTDA|SA|S\/A|EIRELI|ME|EPP|MEI|CIA|SS|INC|CORP)\b/g, "");
-  return n.replace(/\s+/g, " ").trim();
-}
-
-const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
-  if (visitados.has(liderId)) return [];
-  visitados.add(liderId);
-
-  let resultado: string[] = [liderId];
-
-  const subDiretos = usuarios.filter(u => {
-    const lideres = u.permissoes?.lider_ids || (u.permissoes?.lider_id ? [u.permissoes.lider_id] : []);
-    return Array.isArray(lideres) && lideres.includes(liderId);
-  });
-
-  subDiretos.forEach(sub => {
-    resultado = [...resultado, ...obterIdsSubordinados(usuarios, sub.id, visitados)];
-  });
-
-  return Array.from(new Set(resultado));
-};
+import { useAuth } from "@/lib/AuthContext"; // 🛡️ Importando o Crachá Global de Autenticação
 
 // ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
 
 export default function ComitePage() {
+  // 🛡️ Extrai a sessão e cargos diretamente do AuthContext
+  const { user, isMaster, isDiretor, hasPermission } = useAuth();
+  const nomeUsuarioLogado = user?.nome || "Membro Ned";
+
   const [analises, setAnalises] = useState<any[]>([]);
   const [empresasAnalise, setEmpresasAnalise] = useState<any[]>([]); 
   const [carregando, setCarregando] = useState(true);
@@ -75,7 +29,7 @@ export default function ComitePage() {
   const [votosAoVivo, setVotosAoVivo] = useState<Record<string, any[]>>({});
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [novaMsg, setNovaMsg] = useState("");
-  const [diretoresBanco, setDiretoresBanco] = useState<string[]>([]);
+  const [, setDiretoresBanco] = useState<string[]>([]);
 
   // 🎛️ Perfis de voto e Decisão
   const [opcaoVoto, setOpcaoVoto] = useState("");
@@ -83,14 +37,10 @@ export default function ComitePage() {
   const [votoComoDecisao, setVotoComoDecisao] = useState(false); 
   const [enviandoVoto, setEnviandoVoto] = useState(false);
 
-  // 🔥 NOVO ESTADO: MODALIDADES APROVADAS NO VOTO
+  // 🔥 MODALIDADES APROVADAS NO VOTO
   const [modalidadesAprovadas, setModalidadesAprovadas] = useState<{ modalidade: string; limite: string; taxa: string; prazo: string }[]>([]);
   
   const [nomeNovaEmpresa, setNomeNovaEmpresa] = useState("");
-
-  const [isMaster, setIsMaster] = useState(false);
-  const [isDiretor, setIsDiretor] = useState(false); 
-  const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("");
 
   // Controle de Abas na Coluna ESQUERDA (Dossiê x Kappi)
   const [abaEsquerdaFoco, setAbaEsquerdaFoco] = useState<"dossie" | "kappi">("dossie");
@@ -126,7 +76,7 @@ export default function ComitePage() {
         if (idxClientes !== -1 && parts.length > idxClientes + 1) {
           prefixoPasta = `${parts[idxClientes]}/${parts[idxClientes + 1]}/`;
         }
-      } catch(e) { /* ignora */ }
+      } catch { /* ignora */ }
     }
 
     try {
@@ -148,17 +98,15 @@ export default function ComitePage() {
     return [];
   };
 
-  const carregarComite = async () => {
+  const carregarComite = useCallback(async () => {
     try {
       setCarregando(true);
-      const userStr = localStorage.getItem("intraned_user");
       
       let queryComite = supabase.from("analises").select("*");
       let queryEsteira = supabase.from("analises").select("*");
 
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
+      if (user) {
+        const cargoUser = String(user.cargo || "").trim().toLowerCase();
 
         if (cargoUser === "comercial" && user.nome) {
           queryComite = queryComite.ilike("comercial", `%${user.nome}%`);
@@ -169,7 +117,7 @@ export default function ComitePage() {
       // 1. CARREGA O COMITÊ (Apenas status "aberta")
       const { data: dataComite } = await queryComite.eq("status", "aberta").order("criado_em", { ascending: false });
       
-      const idsEmComite = new Set<string>(); // Para impedir que os mesmos apareçam em baixo
+      const idsEmComite = new Set<string>();
       
       if (dataComite) {
         const analisesComImagensR2 = await Promise.all(dataComite.map(async (item) => {
@@ -184,14 +132,14 @@ export default function ComitePage() {
         }
       }
 
-      // 2. CARREGA A ESTEIRA INFERIOR (Filtro JS Absoluto)
+      // 2. CARREGA A ESTEIRA INFERIOR
       const { data: dataAnalise } = await queryEsteira.order("criado_em", { ascending: false });
       
       if (dataAnalise) {
         const esteiraFiltrada = dataAnalise.filter(item => {
           const st = String(item.status || "").toLowerCase().trim();
           return (
-            !idsEmComite.has(item.id) && // Se tá lá em cima no comitê, corta!
+            !idsEmComite.has(item.id) &&
             st !== "aberta" && 
             st !== "aprovado" && 
             st !== "reprovado" && 
@@ -204,26 +152,14 @@ export default function ComitePage() {
 
     } catch (err) {
       console.error("Erro ao carregar dados do comitê:", err);
-    } finally {
+    } font-sans {
       setCarregando(false);
     }
-  };
+  }, [user, carregarVotosIniciais]);
 
   useEffect(() => {
     carregarDiretores();
     carregarComite(); 
-
-    try {
-      const userStr = localStorage.getItem("intraned_user");
-      if (userStr) {
-        const parsed = JSON.parse(userStr);
-        setNomeUsuarioLogado(parsed.nome || "Membro Ned");
-        
-        const cargoLimpo = String(parsed.cargo || parsed.perfil || "").toLowerCase().trim();
-        if (cargoLimpo === "master") setIsMaster(true);
-        if (cargoLimpo === "diretor") setIsDiretor(true);
-      }
-    } catch (e) { console.error(e); }
 
     const canalVotos = supabase
       .channel("votos-live-global")
@@ -236,7 +172,7 @@ export default function ComitePage() {
     return () => {
       supabase.removeChannel(canalVotos);
     };
-  }, [carregarVotosIniciais]);
+  }, [carregarVotosIniciais, carregarComite]);
 
   useEffect(() => {
     if (!idEmpresaExpandida) return;
@@ -255,7 +191,7 @@ export default function ComitePage() {
     };
   }, [idEmpresaExpandida, analises]);
 
-  const obter_emails_notificacao = async (empresaNome: string) => {
+  const obter_emails_notificacao = async () => {
     const emails = new Set<string>();
     try {
       const { data: masters } = await supabase.from("usuarios").select("email").eq("cargo", "Master");
@@ -283,7 +219,7 @@ export default function ComitePage() {
     } catch (err) { console.error("Erro na API de e-mail Resend:", err); }
   };
 
-  // 🔥 FUNÇÕES DE CONTROLE DE MODALIDADES NO VOTO
+  // CONTROLADORES DE MODALIDADES
   const addModalidade = () => {
     setModalidadesAprovadas([...modalidadesAprovadas, { modalidade: "Desconto", limite: "", taxa: "", prazo: "" }]);
   };
@@ -310,7 +246,6 @@ export default function ComitePage() {
     setModalidadesAprovadas(novas);
   };
 
-  // Calcula o limite total e a taxa média ou indicativo para jogar nas colunas raizes
   const processarModalidadesParaBanco = () => {
     let limiteGlobalStr = "R$ 0,00";
     let taxaIndicativa = "";
@@ -326,7 +261,7 @@ export default function ComitePage() {
 
   const processarVotoWeb = async (empresaItem: any) => {
     if (!isMaster && !isDiretor) {
-      alert("🚫 ACESSO NEGADO: Registro restrito a Diretores.");
+      alert("🚫 ACESSO NEGADO: Registro restrito a Diretores e Administradores.");
       return;
     }
     if (!opcaoVoto || !justificativaVoto) {
@@ -334,9 +269,9 @@ export default function ComitePage() {
       return;
     }
     
-    if (opcaoVoto === "Aprovado" && (votoComoDecisao)) {
+    if (opcaoVoto === "Aprovado" && votoComoDecisao) {
        if (modalidadesAprovadas.length === 0) {
-          alert("⚠️ ATENÇÃO: Para cravar a APROVAÇÃO DEFINITIVA do comitê, é OBRIGATÓRIO inserir os Limites e Modalidades Aprovadas na tabela acima.");
+          alert("⚠️ ATENÇÃO: Para cravar a APROVAÇÃO DEFINITIVA do comitê, é OBRIGATÓRIO inserir os Limites e Modalidades Aprovadas.");
           return;
        }
     }
@@ -374,15 +309,15 @@ export default function ComitePage() {
         .update({ 
           dados_consolidados: dcAtual,
           status: statusDestino,
-          status_comite: statusDestino, // Força a propulsão do trigger
-          ...(autorDoVoto === "Decisão" && opcaoVoto === "Aprovado" ? modProcessadas : {}) // Só injeta limite se for o voto decisivo
+          status_comite: statusDestino,
+          ...(autorDoVoto === "Decisão" && opcaoVoto === "Aprovado" ? modProcessadas : {})
         })
         .eq("id", empresaItem.id);
 
       if (error) throw error;
       
       if (autorDoVoto === "Decisão") {
-        const emailsAlvo = await obter_emails_notificacao(e);
+        const emailsAlvo = await obter_emails_notificacao();
         const htmlAta = `<html><body><h2>Ata de Comitê Finalizada: ${e}</h2><p>Status Final: <b>${opcaoVoto}</b></p></body></html>`;
         await dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, htmlAta, emailsAlvo);
         if (modoFocoComite) desativarModoLupaExecutiva();
@@ -420,7 +355,7 @@ export default function ComitePage() {
           status_comite: "reprovado",
           dados_consolidados: dcAtual 
       }).eq("id", item.id).then(() => {
-          obter_emails_notificacao(e).then(emails => {
+          obter_emails_notificacao().then(emails => {
              dispararEmailResend(`🏁 Comitê Finalizado: ${e}`, `<html><body><h2>Ata de Comitê Encerrada: ${e}</h2><p>Veredito Final: <b>Reprovado</b></p></body></html>`, emails);
           });
           alert(`✅ Processo reprovado e removido do comitê.`);
@@ -506,21 +441,21 @@ export default function ComitePage() {
     if (!novaMsg.trim()) return;
     const { data } = await supabase.from("chat_comite").insert({ 
       empresa_nome: empresaNome, 
-      usuario: nomeUsuarioLogado || "Membro (Web)", 
+      usuario: nomeUsuarioLogado, 
       mensagem: novaMsg.trim() 
     }).select();
     if (data) setChatMsgs([...chatMsgs, data[0]]);
     setNovaMsg("");
   };
 
-  // 🔮 MODO COMITÊ TELA CHEIA ATIVO (VISUAL LIGHT & CLEAN)
+  // 🔮 MODO COMITÊ TELA CHEIA ATIVO
   if (modoFocoComite && empresaFocoAtivo) {
     const listaDeVotos = votosAoVivo[empresaFocoAtivo.empresa_nome] || [];
 
     return (
       <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col font-sans h-screen w-screen overflow-hidden text-[13px] animate-in fade-in duration-200">
         
-        {/* CABEÇALHO DO COMITÊ (CLARO) */}
+        {/* CABEÇALHO DO COMITÊ */}
         <div className="bg-white text-slate-800 p-4 px-6 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-4">
             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -550,13 +485,13 @@ export default function ComitePage() {
             <div className="flex gap-2">
                <button 
                   onClick={() => setAbaEsquerdaFoco("dossie")}
-                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm ${abaEsquerdaFoco === "dossie" ? "bg-blue-600 text-white border-blue-700" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
+                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm cursor-pointer ${abaEsquerdaFoco === "dossie" ? "bg-blue-600 text-white border-blue-700" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
                >
                   📄 Dossiê Comercial / Crédito
                </button>
                <button 
                   onClick={() => setAbaEsquerdaFoco("kappi")}
-                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm ${abaEsquerdaFoco === "kappi" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
+                  className={`px-5 py-2 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all shadow-sm cursor-pointer ${abaEsquerdaFoco === "kappi" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-100 border"}`}
                >
                   🕵️‍♂️ Auditoria Kappi
                </button>
@@ -584,14 +519,14 @@ export default function ComitePage() {
             </div>
           </div>
 
-          {/* LADO DIREITO: CHAT E VOTOS (FIXO) */}
+          {/* LADO DIREITO: CHAT E VOTOS */}
           <div className="w-[35%] h-full py-5 pl-2.5 pr-5 flex flex-col space-y-4 overflow-hidden">
             
             <div className="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200 p-4 rounded-2xl shadow-sm relative">
               
               <div className="flex-1 flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 
-                {/* PAINEL DE VOTAÇÃO (COM MODALIDADES) */}
+                {/* PAINEL DE VOTAÇÃO */}
                 <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm space-y-4 shrink-0 text-left overflow-y-auto custom-scrollbar max-h-[50%]">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
                     <span className="text-[12px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
@@ -602,7 +537,7 @@ export default function ComitePage() {
                     </span>
                   </div>
                   
-                  {(!isMaster && !isDiretor) ? (
+                  {(!isMaster && !isDiretor && !hasPermission("/dashboard/comite", "btn_votar")) ? (
                     <div className="p-4 bg-slate-50 text-slate-500 font-bold text-xs rounded-xl border border-slate-200 text-center">
                       🔒 Seu perfil ({nomeUsuarioLogado}) é operacional. Voto desabilitado.
                     </div>
@@ -621,12 +556,12 @@ export default function ComitePage() {
                         </label>
                       )}
 
-                      {/* 🔥 INJEÇÃO DO MÓDULO DE MODALIDADES QUANDO APROVA */}
-                      {opcaoVoto === "Aprovado" && (votoComoDecisao) && (
+                      {/* MODALIDADES APROVADAS */}
+                      {opcaoVoto === "Aprovado" && votoComoDecisao && (
                         <div className="bg-emerald-50/50 border border-emerald-200 p-3 rounded-xl mt-1 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider">💰 Limites Aprovados</span>
-                            <button onClick={addModalidade} className="text-[9px] bg-white border border-emerald-300 text-emerald-700 font-bold px-2 py-1 rounded hover:bg-emerald-100 transition-colors shadow-sm">+ Add Linha</button>
+                            <button onClick={addModalidade} className="text-[9px] bg-white border border-emerald-300 text-emerald-700 font-bold px-2 py-1 rounded hover:bg-emerald-100 transition-colors shadow-sm cursor-pointer">+ Add Linha</button>
                           </div>
                           
                           <div className="space-y-2">
@@ -641,7 +576,7 @@ export default function ComitePage() {
                                 </select>
                                 <input type="text" value={mod.limite} onChange={(e) => handleModalidadeChange(idx, 'limite', e.target.value)} placeholder="Limite (R$)" className="flex-1 p-1.5 border border-slate-200 rounded text-[10px] outline-none font-mono font-bold text-emerald-700" />
                                 <input type="text" value={mod.taxa} onChange={(e) => handleModalidadeChange(idx, 'taxa', e.target.value)} placeholder="Taxa%" className="w-14 p-1.5 border border-slate-200 rounded text-[10px] outline-none text-center font-bold" />
-                                <button onClick={() => removeModalidade(idx)} className="text-rose-500 hover:text-rose-700 font-black px-1.5 text-xs">X</button>
+                                <button onClick={() => removeModalidade(idx)} className="text-rose-500 hover:text-rose-700 font-black px-1.5 text-xs cursor-pointer">X</button>
                               </div>
                             ))}
                             {modalidadesAprovadas.length === 0 && (
@@ -773,7 +708,7 @@ export default function ComitePage() {
                   </td>
                   {isMaster && (
                     <td className="p-4 bg-amber-50/20 border-l border-slate-200 text-center">
-                      <button onClick={() => handleForcarDecisaoPrompt(item)} className="px-3 py-2 bg-white border border-amber-300 hover:bg-amber-50 hover:border-amber-400 text-amber-700 font-bold text-[11px] rounded-xl uppercase tracking-wide transition-all shadow-sm flex items-center justify-center gap-1.5 mx-auto w-[150px]">
+                      <button onClick={() => handleForcarDecisaoPrompt(item)} className="px-3 py-2 bg-white border border-amber-300 hover:bg-amber-50 hover:border-amber-400 text-amber-700 font-bold text-[11px] rounded-xl uppercase tracking-wide transition-all shadow-sm flex items-center justify-center gap-1.5 mx-auto w-[150px] cursor-pointer">
                         ⚡ Forçar Veredito
                       </button>
                     </td>
