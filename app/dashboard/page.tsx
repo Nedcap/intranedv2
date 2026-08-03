@@ -4,14 +4,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { MAPA_DE_ROTAS } from "@/lib/rotas"; 
+import { useAuth } from "@/lib/AuthContext"; // 🛡️ Nosso Crachá de Autenticação Unificado
 
 export default function DashboardHomePage() {
-  const [user, setUser] = useState<any>(null);
-  const [userName, setUserName] = useState("Membro Ned");
+  // 🛡️ Extrai os dados do perfil logado e a função de permissão em tempo real
+  const { user, hasPermission } = useAuth();
+
   const [saudacao, setSaudacao] = useState("Bem-vindo(a)");
   
-  // ⚡ Estados de Customização de Atalhos (agora salvando pelo PATH)
+  // ⚡ Estados de Customização de Atalhos
   const [favoritos, setFavoritos] = useState<string[]>([]);
   const [modoEdicao, setModoEdicao] = useState(false);
 
@@ -21,54 +22,94 @@ export default function DashboardHomePage() {
   const [confirmarNovaSenha, setConfirmarNovaSenha] = useState("");
   const [salvandoSenha, setSalvandoSenha] = useState(false);
 
-  // 🎨 Paleta de cores dinâmica para aplicar nos cards gerados automaticamente
-  const ESTILOS_CARDS = [
-    { badge: "bg-indigo-100 text-indigo-700 border-indigo-200", hover: "hover:border-indigo-400 hover:shadow-indigo-100" },
-    { badge: "bg-blue-100 text-blue-700 border-blue-200", hover: "hover:border-blue-400 hover:shadow-blue-100" },
-    { badge: "bg-emerald-100 text-emerald-700 border-emerald-200", hover: "hover:border-emerald-400 hover:shadow-emerald-100" },
-    { badge: "bg-amber-100 text-amber-700 border-amber-200", hover: "hover:border-amber-400 hover:shadow-amber-100" },
-    { badge: "bg-rose-100 text-rose-700 border-rose-200", hover: "hover:border-rose-400 hover:shadow-rose-100" },
-    { badge: "bg-purple-100 text-purple-700 border-purple-200", hover: "hover:border-purple-400 hover:shadow-purple-100" },
+  // Definição estática de todos os caminhos dos módulos para bater com as permissões do banco
+  const modulosPrincipais = [
+    {
+      id: "powerbi",
+      path: "/dashboard/powerbi",
+      titulo: "Painel de Indicadores (BI)",
+      descricao: "Visão gerencial consolidada de Valores Operados, Receitas, Risco e SLA.",
+      icone: "📊",
+      corBadge: "bg-indigo-100 text-indigo-700 border-indigo-200",
+      corHover: "hover:border-indigo-400 hover:shadow-indigo-100",
+    },
+    {
+      id: "nedhub",
+      path: "/dashboard/nedhub",
+      titulo: "NedHub Comercial",
+      descricao: "Máquina de originação, funil de vendas (Kanban) e gestão inteligente de contatos.",
+      icone: "🚀",
+      corBadge: "bg-blue-100 text-blue-700 border-blue-200",
+      corHover: "hover:border-blue-400 hover:shadow-blue-100",
+    },
+    {
+      id: "carteira",
+      path: "/dashboard/carteira",
+      titulo: "Carteira Dinâmica",
+      descricao: "Análise granular título por título, envelhecimento e simulador de liquidez.",
+      icone: "💼",
+      corBadge: "bg-emerald-100 text-emerald-700 border-emerald-200",
+      corHover: "hover:border-emerald-400 hover:shadow-emerald-100",
+    },
+    {
+      id: "comite",
+      path: "/dashboard/comite",
+      titulo: "Análises e Comitê",
+      descricao: "Esteira de crédito, aprovações, reprovações e chat de debates executivos.",
+      icone: "📋",
+      corBadge: "bg-amber-100 text-amber-700 border-amber-200",
+      corHover: "hover:border-amber-400 hover:shadow-amber-100",
+    },
+    {
+      id: "financeiro",
+      path: "/dashboard/financeiro",
+      titulo: "Controle Financeiro",
+      descricao: "Calendário de pagamentos, contas a pagar e fluxo de caixa consolidado.",
+      icone: "💰",
+      corBadge: "bg-rose-100 text-rose-700 border-rose-200",
+      corHover: "hover:border-rose-400 hover:shadow-rose-100",
+    },
+    {
+      id: "importacao",
+      path: "/dashboard/importacao",
+      titulo: "Importação V2",
+      descricao: "Motor síncrono de upload de planilhas e cruzamento Master Data Management.",
+      icone: "📥",
+      corBadge: "bg-purple-100 text-purple-700 border-purple-200",
+      corHover: "hover:border-purple-400 hover:shadow-purple-100",
+    }
   ];
 
   useEffect(() => {
-    const userStr = localStorage.getItem("intraned_user");
-    if (userStr) {
-      try {
-        const parsedUser = JSON.parse(userStr);
-        setUser(parsedUser);
-        if (parsedUser.nome) {
-          setUserName(parsedUser.nome.split(" ")[0]);
-        }
-        
-        // Carrega a ordenação/atalhos personalizados salvos localmente
-        const favsSalvos = localStorage.getItem(`favs_${parsedUser.id}`);
-        if (favsSalvos) setFavoritos(JSON.parse(favsSalvos));
-      } catch (e) {
-        console.error("Erro ao processar sessão local:", e);
-      }
-    }
-
+    // 1. Calcula a saudação com base no horário do cliente
     const hora = new Date().getHours();
     if (hora >= 5 && hora < 12) setSaudacao("Bom dia");
     else if (hora >= 12 && hora < 18) setSaudacao("Boa tarde");
     else setSaudacao("Boa noite");
-  }, []);
 
-  // 🛡️ Filtra TODAS as telas do sistema baseadas nas permissões reais do banco
-  const modulosPermitidos = MAPA_DE_ROTAS?.filter(rota => {
-    if (!user) return false;
-    if (user.cargo?.toUpperCase() === "MASTER") return true; 
-    return !!user.permissoes?.[rota.path];
-  }) || [];
+    // 2. Carrega as preferências locais de atalhos se houver usuário ativo
+    if (user?.id) {
+      const favsSalvos = localStorage.getItem(`favs_${user.id}`);
+      if (favsSalvos) {
+        try {
+          setFavoritos(JSON.parse(favsSalvos));
+        } catch (e) {
+          console.error("Erro ao carregar atalhos favoritos:", e);
+        }
+      }
+    }
+  }, [user]);
 
-  // ⚡ Alterna exibição personalizada (Agora usando o PATH como ID único)
-  const alternarFavorito = (path: string) => {
+  // 🛡️ Filtra os módulos usando diretamente o nosso utilitário centralizado de permissões
+  const modulosPermitidos = modulosPrincipais.filter(mod => hasPermission(mod.path));
+
+  // ⚡ Alterna exibição personalizada
+  const alternarFavorito = (id: string) => {
     let novosFavs = [...favoritos];
-    if (novosFavs.includes(path)) {
-      novosFavs = novosFavs.filter(f => f !== path);
+    if (novosFavs.includes(id)) {
+      novosFavs = novosFavs.filter(f => f !== id);
     } else {
-      novosFavs.push(path);
+      novosFavs.push(id);
     }
     setFavoritos(novosFavs);
     if (user?.id) {
@@ -104,12 +145,13 @@ export default function DashboardHomePage() {
     }
   };
 
-  // Define quais módulos vão para a tela
   const modulosExibidos = modoEdicao 
     ? modulosPermitidos 
     : favoritos.length > 0 
-      ? modulosPermitidos.filter(m => favoritos.includes(m.path)) 
+      ? modulosPermitidos.filter(m => favoritos.includes(m.id)) 
       : modulosPermitidos;
+
+  const primeiroNome = user?.nome ? user.nome.split(" ")[0] : "Membro Ned";
 
   return (
     <div className="max-w-[1600px] mx-auto pb-10 text-[13px] font-sans text-slate-800 space-y-8 animate-in fade-in duration-500">
@@ -120,13 +162,14 @@ export default function DashboardHomePage() {
         
         <div className="relative z-10 space-y-2">
           <h1 className="text-3xl md:text-4xl font-black tracking-tight">
-            {saudacao}, <span className="text-blue-400">{userName}</span>!
+            {saudacao}, <span className="text-blue-400">{primeiroNome}</span>!
           </h1>
           <p className="text-slate-400 text-sm max-w-2xl font-medium">
             Painel Central Ned Capital • Nível de Alçada: <span className="text-white font-bold uppercase underline decoration-blue-500">{user?.cargo || "Carregando..."}</span>
           </p>
         </div>
 
+        {/* BOTÕES DE GERENCIAMENTO DA CONTA */}
         <div className="flex gap-2 relative z-10 shrink-0">
           <button
             onClick={() => setModoEdicao(!modoEdicao)}
@@ -156,7 +199,7 @@ export default function DashboardHomePage() {
           </h2>
           {favoritos.length > 0 && !modoEdicao && (
             <button 
-              onClick={() => { setFavoritos([]); localStorage.removeItem(`favs_${user?.id}`); }} 
+              onClick={() => { setFavoritos([]); if(user?.id) localStorage.removeItem(`favs_${user.id}`); }} 
               className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase cursor-pointer"
             >
               Limpar Filtros ✕
@@ -166,14 +209,13 @@ export default function DashboardHomePage() {
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {modulosExibidos.map((mod, idx) => {
-            const isFav = favoritos.includes(mod.path);
-            const estiloRotativo = ESTILOS_CARDS[idx % ESTILOS_CARDS.length]; 
+            const isFav = favoritos.includes(mod.id);
             
             return (
-              <div key={mod.path} className="relative group h-full">
+              <div key={idx} className="relative group h-full">
                 {modoEdicao ? (
                   <div 
-                    onClick={() => alternarFavorito(mod.path)}
+                    onClick={() => alternarFavorito(mod.id)}
                     className={`border rounded-2xl p-6 h-full flex flex-col gap-4 select-none cursor-pointer transition-all ${
                       isFav 
                         ? "bg-blue-50/60 border-blue-400 ring-2 ring-blue-100 shadow-sm" 
@@ -181,7 +223,7 @@ export default function DashboardHomePage() {
                     }`}
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-4xl">{mod.icone || "🖥️"}</span>
+                      <span className="text-4xl">{mod.icone}</span>
                       <span className={`px-2 py-1 rounded font-black text-[10px] uppercase border transition-all ${
                         isFav ? "bg-blue-600 text-white border-blue-700" : "bg-slate-100 text-slate-400 border-slate-200"
                       }`}>
@@ -189,29 +231,27 @@ export default function DashboardHomePage() {
                       </span>
                     </div>
                     <div>
-                      <h3 className="text-base font-black text-slate-800 mb-1">{mod.nome}</h3>
-                      <p className="text-slate-500 text-xs font-medium leading-relaxed">
-                        Módulo de {mod.nome} — Diretório: {mod.path}
-                      </p>
+                      <h3 className="text-base font-black text-slate-800 mb-1">{mod.titulo}</h3>
+                      <p className="text-slate-500 font-medium leading-relaxed">{mod.descricao}</p>
                     </div>
                   </div>
                 ) : (
                   <Link href={mod.path}>
-                    <div className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm transition-all duration-300 cursor-pointer h-full flex flex-col gap-4 group ${estiloRotativo.hover}`}>
+                    <div className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm transition-all duration-300 cursor-pointer h-full flex flex-col gap-4 group ${mod.corHover}`}>
                       <div className="flex justify-between items-start">
                         <span className="text-4xl group-hover:scale-110 transition-transform duration-300">
-                          {mod.icone || "🖥️"}
+                          {mod.icone}
                         </span>
-                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${estiloRotativo.badge}`}>
+                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${mod.corBadge}`}>
                           Acessar
                         </span>
                       </div>
                       <div>
                         <h3 className="text-base font-black text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">
-                          {mod.nome}
+                          {mod.titulo}
                         </h3>
-                        <p className="text-slate-500 text-xs font-medium leading-relaxed">
-                          Clique para acessar os controles operacionais e informações desta seção.
+                        <p className="text-slate-500 font-medium leading-relaxed">
+                          {mod.descricao}
                         </p>
                       </div>
                     </div>
@@ -223,7 +263,7 @@ export default function DashboardHomePage() {
 
           {modulosExibidos.length === 0 && (
             <div className="col-span-full border border-dashed border-slate-300 bg-slate-50 rounded-2xl p-10 text-center text-slate-400 font-bold italic">
-              Nenhuma tela está configurada. {modoEdicao ? "Selecione algum módulo acima." : "Clique em 'Customizar Visão' para selecionar seus atalhos."}
+              Nenhuma tela está configurada para exibição rápida. Clique em &quot;Customizar Visão&quot; para selecionar.
             </div>
           )}
         </div>
@@ -239,11 +279,11 @@ export default function DashboardHomePage() {
           </div>
         </div>
         <div className="text-[10px] font-black uppercase text-slate-400 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-xs">
-          NedHub v2.1.0
+          NedHub v2.5
         </div>
       </div>
 
-      {/* 🚨 SIDEBAR DESLIZANTE DE CONFIGURAÇÃO DE SEGURANÇA (MINHA CONTA) */}
+      {/* SIDEBAR DESLIZANTE DE CONFIGURAÇÃO DE SEGURANÇA (MINHA CONTA) */}
       {abrirConfig && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex justify-end z-50 animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-white h-full shadow-2xl border-l border-slate-200 p-6 flex flex-col justify-between animate-in slide-in-from-right duration-200">
@@ -264,8 +304,8 @@ export default function DashboardHomePage() {
               {/* DADOS CADASTRAIS */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
                 <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Perfil Vinculado</span>
-                <div className="font-bold text-slate-800 text-sm uppercase">{user?.nome}</div>
-                <div className="font-mono text-slate-500 text-xs">{user?.email}</div>
+                <div className="font-bold text-slate-800 text-sm uppercase">{user?.nome || "Carregando..."}</div>
+                <div className="font-mono text-slate-500 text-xs">{user?.email || "-"}</div>
               </div>
 
               {/* FORMULÁRIO DE TROCA DE SENHA */}
@@ -312,6 +352,7 @@ export default function DashboardHomePage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
