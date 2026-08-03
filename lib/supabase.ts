@@ -1,14 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-// 🎯 Fix: Validação preventiva para evitar telas brancas e erros silenciosos em produção
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "❌ ERRO CRÍTICO: Variáveis de ambiente do Supabase não localizadas. " +
-    "Verifique se NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY estão configuradas no seu .env ou na Vercel."
-  );
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// 🛡️ SINCRONIZADOR DE SESSÃO COM COOKIES
+// Toda vez que o estado de auth mudar no front (login/logout), injetamos um cookie acessível pelo Middleware
+if (typeof window !== 'undefined') {
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      const maxAge = session.expires_in || 3600;
+      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${maxAge}; SameSite=Lax`;
+    } else {
+      document.cookie = 'sb-access-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+    }
+  });
+}
