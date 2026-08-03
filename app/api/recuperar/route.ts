@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-server"; // 🛡️ Importando a Chave Mestra!
 
 export async function POST(request: Request) {
   try {
@@ -19,8 +19,9 @@ export async function POST(request: Request) {
 
     const emailLimpo = email.trim().toLowerCase();
 
-    // Invoca a procedure no banco de dados
-    const { data, error } = await supabase.rpc("iniciar_recuperacao_senha", {
+    // 🛡️ Usamos a Chave Mestra (supabaseAdmin) porque a tabela está protegida (RLS) 
+    // e o usuário não está logado para furar o bloqueio naturalmente.
+    const { data, error } = await supabaseAdmin.rpc("iniciar_recuperacao_senha", {
       p_email: emailLimpo
     });
 

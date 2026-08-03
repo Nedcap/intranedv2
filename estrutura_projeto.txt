@@ -1,0 +1,172 @@
+intranet-webv2
+├── AGENTS.md
+├── CLAUDE.md
+├── README.md
+├── actions
+│   ├── dashboard-service.ts
+│   └── ponto-actions.ts
+├── app
+│   ├── api
+│   │   ├── auth
+│   │   │   └── google
+│   │   │       └── route.ts
+│   │   ├── buscar-cnpj
+│   │   │   └── route.ts
+│   │   ├── compliance
+│   │   │   └── route.ts
+│   │   ├── email
+│   │   │   └── route.ts
+│   │   ├── exportar-drive
+│   │   │   └── route.ts
+│   │   ├── gerar-organograma
+│   │   │   └── route.ts
+│   │   ├── gmail
+│   │   │   ├── send
+│   │   │   │   └── route.ts
+│   │   │   └── sync
+│   │   │       └── route.ts
+│   │   ├── importacao
+│   │   │   └── route.ts
+│   │   ├── lemmit
+│   │   │   └── route.ts
+│   │   ├── listar-r2
+│   │   │   └── route.ts
+│   │   ├── motor-ia
+│   │   │   └── route.ts
+│   │   ├── planejador-rotas
+│   │   │   └── route.ts
+│   │   ├── prospeccao-ia
+│   │   │   └── route.ts
+│   │   ├── recuperar
+│   │   │   └── route.ts
+│   │   ├── restritivos
+│   │   │   └── route.ts
+│   │   ├── upload
+│   │   │   └── route.ts
+│   │   └── usuarios
+│   │       └── route.ts
+│   ├── dashboard
+│   │   ├── busca-grupo
+│   │   │   └── page.tsx
+│   │   ├── cadastro
+│   │   │   └── page.tsx
+│   │   ├── calculo-comissoes
+│   │   │   └── page.tsx
+│   │   ├── carteira
+│   │   │   └── page.tsx
+│   │   ├── checagem
+│   │   │   └── page.tsx
+│   │   ├── comercial
+│   │   │   └── page.tsx
+│   │   ├── comite
+│   │   │   └── page.tsx
+│   │   ├── configuracoes
+│   │   │   ├── hierarquia
+│   │   │   │   └── page.tsx
+│   │   │   └── templates
+│   │   │       └── page.tsx
+│   │   ├── controle-cadastro
+│   │   │   └── page.tsx
+│   │   ├── estoque-cedentes
+│   │   │   └── page.tsx
+│   │   ├── finalizados
+│   │   │   └── page.tsx
+│   │   ├── financeiro
+│   │   │   └── page.tsx
+│   │   ├── gerenciar-usuarios
+│   │   │   └── page.tsx
+│   │   ├── importacao
+│   │   │   ├── carteira-risco-fidc
+│   │   │   │   └── page.tsx
+│   │   │   ├── carteira-risco-sec
+│   │   │   │   └── page.tsx
+│   │   │   ├── operacoes-fidc
+│   │   │   │   └── page.tsx
+│   │   │   ├── operacoes-sec
+│   │   │   │   └── page.tsx
+│   │   │   ├── page.tsx
+│   │   │   ├── receitas-fidc
+│   │   │   │   └── page.tsx
+│   │   │   └── receitas-sec
+│   │   │       └── page.tsx
+│   │   ├── layout.tsx
+│   │   ├── lemitt
+│   │   │   └── page.tsx
+│   │   ├── manuaisoperacionais
+│   │   │   └── page.tsx
+│   │   ├── monitor-email
+│   │   │   └── page.tsx
+│   │   ├── monitore-diario
+│   │   │   └── page.tsx
+│   │   ├── monitore-historico
+│   │   │   └── page.tsx
+│   │   ├── motor-credito
+│   │   │   ├── analise
+│   │   │   │   └── page.tsx
+│   │   │   ├── envio-analise
+│   │   │   │   └── page.tsx
+│   │   │   └── pre-analise
+│   │   │       └── page.tsx
+│   │   ├── nedhub
+│   │   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   ├── planejador
+│   │   │   └── page.tsx
+│   │   ├── ponto
+│   │   │   ├── gestao
+│   │   │   │   └── page.tsx
+│   │   │   └── page.tsx
+│   │   ├── powerbi
+│   │   │   └── page.tsx
+│   │   ├── prospeccao
+│   │   │   └── page.tsx
+│   │   ├── raiox-serasa
+│   │   │   └── page.tsx
+│   │   ├── restritivos-socios
+│   │   │   └── page.tsx
+│   │   ├── revisao
+│   │   │   └── page.tsx
+│   │   └── simulador
+│   │       └── page.tsx
+│   ├── esqueci-senha
+│   │   └── page.tsx
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── reset-senha
+│   │   └── page.tsx
+│   └── types
+│       └── analise.ts
+├── components
+│   ├── BuscarEmpresa.tsx
+│   ├── DocumentViewerModal.tsx
+│   ├── ExportarDriveButton.tsx
+│   ├── FilaAnalises.tsx
+│   ├── NotificadorGlobal.tsx
+│   ├── UploadDocs.tsx
+│   ├── analise.tsx
+│   ├── gerar-analise.tsx
+│   └── gerar-kappi.tsx
+├── eslint.config.mjs
+├── estrutura_projeto.txt
+├── gerar_dicionario.js
+├── lib
+│   ├── AuthContext.tsx
+│   ├── normalizador.ts
+│   ├── rotas.tsx
+│   ├── supabase-server.ts
+│   └── supabase.ts
+├── middleware.ts
+├── next.config.ts
+├── otimizar.js
+├── package-lock.json
+├── package.json
+├── postcss.config.mjs
+├── public
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── tabela_tom.json
+└── tsconfig.json

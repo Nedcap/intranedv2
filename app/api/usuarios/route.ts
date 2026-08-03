@@ -1,73 +1,150 @@
-import { createClient } from '@supabase/supabase-js';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
+import { supabaseAdmin, validarRequisicaoApi } from '@/lib/supabase-server';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Função auxiliar para validar se o requisitante tem privilégios Master
+async function validarAcessoMaster(request: Request) {
+  const { usuario, erro } = await validarRequisicaoApi(request);
+  if (erro || !usuario) {
+    return { autorizado: false, respostaErro: NextResponse.json({ error: erro || "Acesso negado." }, { status: 401 }) };
+  }
 
-// MANTÉM O SEU POST ORIGINAL DE CRIAÇÃO
-export async function POST(request: Request) {
+  const cargoLimpo = usuario.cargo?.toLowerCase().trim();
+  if (cargoLimpo !== 'master') {
+    return { autorizado: false, respostaErro: NextResponse.json({ error: "Acesso restrito a administradores Master." }, { status: 403 }) };
+  }
+
+  return { autorizado: true, usuario };
+}
+
+// ============================================================================
+// 1. GET: Lista todos os usuários (Restrito a Master)
+// ============================================================================
+export async function GET(request: Request) {
   try {
-    const { nome, email, senha, cargo, permissoes } = await request.json();
+    const check = await validarAcessoMaster(request);
+    if (!check.autorizado) return check.respostaErro!;
 
-    const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: email,
-      password: senha,
-      email_confirm: true 
-    });
-
-    if (authError) return NextResponse.json({ error: authError.message }, { status: 400 });
-
-    const { error: profileError } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('usuarios')
-      .insert([{
-        id: authUser.user.id, 
-        nome,
-        email,
-        cargo,
-        permissoes
-      }]);
+      .select('*')
+      .order('nome', { ascending: true });
 
-    if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 });
+    if (error) throw new Error(error.message);
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json(data);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// 🚨 LOGICA CORRIGIDA: Método PUT para atualizar a senha no Auth e ativar a flag no Banco Público
+// ============================================================================
+// 2. POST: Criação de um novo operador completo (Restrito a Master)
+// ============================================================================
+export async function POST(request: Request) {
+  try {
+    const check = await validarAcessoMaster(request);
+    if (!check.autorizado) return check.respostaErro!;
+
+    const { nome, email, senha, cargo, permissoes, notificacoes_config, bate_ponto } = await request.json();
+
+    if (!email || !senha) {
+      return NextResponse.json({ error: "E-mail e senha são obrigatórios." }, { status: 400 });
+    }
+
+    // 1. Cria usuário no Auth (Cofre de senhas do Supabase)
+    const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: email.trim().toLowerCase(),
+      password: senha.trim(),
+      email_confirm: true 
+    });
+
+    if (authError) return NextResponse.json({ error: authError.message }, { status: 400 });
+
+    // 2. Injeta o perfil complementar na tabela pública com os novos campos
+    const { error: profileError } = await supabaseAdmin
+      .from('usuarios')
+      .insert([{
+        id: authUser.user.id, 
+        nome: nome?.trim(),
+        email: email.trim().toLowerCase(),
+        cargo,
+        permissoes,
+        notificacoes_config: notificacoes_config || {},
+        bate_ponto: bate_ponto || false
+      }]);
+
+    if (profileError) {
+      // Rollback: se falhar no banco, deleta do Auth para não gerar usuário fantasma
+      await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+      return NextResponse.json({ error: profileError.message }, { status: 400 });
+    }
+
+    console.log(`👤 [Novo Usuário] Criado por ${check.usuario!.nome}: ${email}`);
+
+    return NextResponse.json({ success: true, user: { id: authUser.user.id } });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+// ============================================================================
+// 3. PUT: Atualiza Perfil, E-mail e Senha de forma sincronizada (Restrito a Master)
+// ============================================================================
 export async function PUT(request: Request) {
   try {
-    const { userId, senha } = await request.json();
+    const check = await validarAcessoMaster(request);
+    if (!check.autorizado) return check.respostaErro!;
+
+    const { userId, nome, email, senha, cargo, permissoes, notificacoes_config, bate_ponto } = await request.json();
 
     if (!userId) {
       return NextResponse.json({ error: "ID do usuário é obrigatório." }, { status: 400 });
     }
 
-    if (senha && senha.trim().length >= 6) {
-      // 1. Força a alteração de senha no Auth Nativo
-      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-        password: senha.trim()
-      });
+    const emailTratado = email ? email.trim().toLowerCase() : undefined;
+
+    // 1. Atualiza as informações do perfil na tabela pública
+    const { error: dbError } = await supabaseAdmin
+      .from("usuarios")
+      .update({
+        nome: nome?.trim(),
+        email: emailTratado,
+        cargo,
+        permissoes,
+        notificacoes_config,
+        bate_ponto
+      })
+      .eq("id", userId);
+
+    if (dbError) {
+      return NextResponse.json({ error: `Erro ao atualizar perfil: ${dbError.message}` }, { status: 400 });
+    }
+
+    // 2. Sincroniza E-mail e Senha no Auth Nativo
+    const authUpdates: any = {};
+    if (emailTratado) authUpdates.email = emailTratado;
+    if (senha && senha.trim().length >= 6) authUpdates.password = senha.trim();
+
+    if (Object.keys(authUpdates).length > 0) {
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, authUpdates);
 
       if (authError) {
-        return NextResponse.json({ error: `Erro no Auth: ${authError.message}` }, { status: 400 });
+        return NextResponse.json({ error: `Erro ao sincronizar credenciais: ${authError.message}` }, { status: 400 });
       }
 
-      // 2. Ativa o bloqueio de primeiro_acesso no banco público para forçar a troca na tela de login
-      const { error: dbError } = await supabaseAdmin
-        .from("usuarios")
-        .update({ primeiro_acesso: true })
-        .eq("id", userId);
-
-      if (dbError) {
-        return NextResponse.json({ error: `Erro no Banco: ${dbError.message}` }, { status: 400 });
+      // 3. Se houve troca de senha, ativa a flag para o usuário ser forçado a redefinir no login
+      if (authUpdates.password) {
+        await supabaseAdmin
+          .from("usuarios")
+          .update({ primeiro_acesso: true })
+          .eq("id", userId);
       }
     }
 
-    return NextResponse.json({ success: true, message: "Senha redefinida com sucesso!" });
+    console.log(`⚙️ [Usuário Alterado] ID ${userId} atualizado por ${check.usuario!.nome}`);
+
+    return NextResponse.json({ success: true, message: "Operador atualizado com sucesso!" });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

@@ -2,6 +2,7 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,12 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Apenas usuários logados podem gerar URLs de upload para o R2
+    const { usuario, erro } = await validarRequisicaoApi(request);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
+    }
+
     // ⚠️ Agora recebemos um JSON leve apenas com os metadados, e não mais o FormData (o arquivo em si)
     const { fileName, fileType, analiseId } = await request.json();
 
@@ -38,6 +45,9 @@ export async function POST(request: Request) {
 
     // 🔑 Gera a URL de permissão (Presigned URL) válida por 2 minutos
     const url = await getSignedUrl(s3Client, command, { expiresIn: 120 });
+
+    // 🛡️ Bônus de auditoria
+    console.log(`☁️ [R2 Upload] URL gerada para: ${path} (Solicitado por: ${usuario.nome})`);
 
     // Retorna a URL de upload DIRETO e o PATH exato gerado para o frontend
     return NextResponse.json({ success: true, url, path });

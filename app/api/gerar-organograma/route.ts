@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { BigQuery } from "@google-cloud/bigquery";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ O nosso segurança!
 
 export const dynamic = 'force-dynamic';
 
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let credentials: any = {};
 
 if (credentialsEnv) {
@@ -44,6 +46,12 @@ function validarCorrespondenciaNome(nomeBusca: string, nomeReceita: string): boo
 
 export async function POST(req: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Se não tiver o JWT válido, a requisição morre aqui!
+    const { usuario, erro } = await validarRequisicaoApi(req);
+    if (erro) {
+      return NextResponse.json({ error: erro }, { status: 401 });
+    }
+
     const { documentoBusca, tipoBusca, nomeSocio } = await req.json();
     if (!documentoBusca || !tipoBusca) {
       return NextResponse.json({ error: "Parâmetros inválidos." }, { status: 400 });
@@ -56,7 +64,9 @@ export async function POST(req: Request) {
       docLimpo = docLimpo.substring(3, 9);
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodes: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
 
@@ -76,6 +86,7 @@ export async function POST(req: Request) {
       }
 
       const dadosPrincipais = empresaRes[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const listaFiliais = empresaRes.map((emp: any) => ({
         cnpj: emp.cnpj, uf: emp.uf, bairro: emp.bairro,
         nome_fantasia: emp.nome_fantasia || dadosPrincipais.razao_social
@@ -108,6 +119,7 @@ export async function POST(req: Request) {
       
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         const idSocio = socio.doc_socio_limpo ? `${socio.tipo_socio}-${socio.doc_socio_limpo}` : `NOME-${socio.nome_socio_razao_social}`;
@@ -160,6 +172,7 @@ export async function POST(req: Request) {
 
       let empresasValidadas = empresasRes;
       if (nomeSocio) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         empresasValidadas = empresasRes.filter((emp: any) => validarCorrespondenciaNome(nomeSocio, emp.nome_socio_razao_social));
       }
 
@@ -186,9 +199,11 @@ export async function POST(req: Request) {
 
       const angleStep = (2 * Math.PI) / empresasValidadas.length;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       empresasValidadas.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
         const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const filiaisValidas = (emp.todas_as_filiais || []).filter((f: any) => f.cnpj !== null);
 
         nodes.push({

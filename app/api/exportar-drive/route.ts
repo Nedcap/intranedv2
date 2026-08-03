@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { Readable } from "stream";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando o Segurança
 
 export async function POST(req: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Exige o crachá (Token JWT) para acessar
+    const { usuario, erro } = await validarRequisicaoApi(req);
+    if (erro) {
+      return NextResponse.json({ error: erro }, { status: 401 });
+    }
+
     const { empresa_nome, documentos } = await req.json();
 
     if (!documentos || documentos.length === 0) {
@@ -99,6 +106,7 @@ export async function POST(req: Request) {
       .filter((r) => r.status === "fulfilled")
       .map((r: any) => r.value.data);
 
+    // 🛡️ Opcional: A gente poderia até salvar no log interno da Ned Capital que "usuario.nome exportou X empresa pro drive", já que agora sabemos QUEM fez a requisição.
     return NextResponse.json({ 
       success: true, 
       pasta_id: pastaEmpresaId,

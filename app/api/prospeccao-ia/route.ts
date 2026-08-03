@@ -3,10 +3,12 @@ import { OpenAI } from "openai";
 import fs from 'fs';
 import path from 'path';
 import { BigQuery } from "@google-cloud/bigquery";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ O nosso segurança
 
 export const dynamic = 'force-dynamic';
 
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let credentials: any = {};
 
 if (credentialsEnv) {
@@ -27,6 +29,12 @@ const bigquery = new BigQuery({
 
 export async function POST(req: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Se não tiver o crachá JWT, barra na hora antes de gastar cota!
+    const { usuario, erro } = await validarRequisicaoApi(req);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
+    }
+
     const { promptUsuario, limite = 200 } = await req.json();
     if (!promptUsuario) return NextResponse.json({ error: "Texto de busca obrigatório." }, { status: 400 });
 
@@ -64,6 +72,7 @@ export async function POST(req: Request) {
       } catch (err) { console.error("Erro ao ler tabela_tom.json:", err); }
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const queryParams: Record<string, any> = {
       estadoAlvo,
       codigoRealDaReceita,
@@ -76,6 +85,7 @@ export async function POST(req: Request) {
 
     if (temNichoEspecifico) {
       const cnaesLimpos = perfilMercado.codigos_cnae
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((c: any) => String(c).replace(/\D/g, ''))
         .filter((c: string) => c.length >= 2);
 
@@ -102,7 +112,7 @@ export async function POST(req: Request) {
     }
 
     // ⚡ ORDENAÇÃO NÍVEL OURO: Usando a flag oficial de MEI do banco (opcao_mei)
-    let ordenacaoEstrategica = temNichoEspecifico 
+    const ordenacaoEstrategica = temNichoEspecifico 
       ? `CASE WHEN nome_fantasia IS NOT NULL AND nome_fantasia != '' THEN 0 ELSE 1 END, data_abertura ASC`
       : `
          CASE WHEN opcao_mei = 'S' THEN 1 ELSE 0 END ASC, -- MEIs vão pro final da fila com base em dados reais
@@ -131,6 +141,7 @@ export async function POST(req: Request) {
       params: queryParams
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const leads = rows.map((row: any) => ({
       cnpj: row.cnpj,
       cnpj_raiz: row.cnpj_basico,
@@ -152,6 +163,9 @@ export async function POST(req: Request) {
       google_categoria: null, google_endereco: null, website: null, lat: null, lng: null,
       cidadeExtenso: nomeCidadeReal || undefined
     }));
+
+    // 🛡️ Bônus: Agora que sabemos quem pediu (usuario.nome), isso poderia ser salvo em uma tabela de logs/analytics.
+    console.log(`[API Prospecção] Busca efetuada com sucesso pelo operador: ${usuario.nome}`);
 
     return NextResponse.json({ perfilAI: { ...perfilMercado, codigo_municipio: codigoRealDaReceita }, leads });
   } catch (error: any) {

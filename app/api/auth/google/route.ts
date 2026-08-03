@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-server"; // 🛡️ Importamos a Chave Mestra!
 
 export const dynamic = "force-dynamic"; 
 
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const userEmail = searchParams.get("user"); 
   
-  // NOVO: Capturamos a página de origem (se vier na URL)
+  // Capturamos a página de origem (se vier na URL)
   const origin = searchParams.get("origin") || "/dashboard/monitor-email"; 
 
   const SITE_URL = "https://intraned.nedcapital.com.br";
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       "https://www.googleapis.com/auth/userinfo.email"
     ];
     
-    // NOVO: Colocamos o e-mail E a origem dentro do 'state' para não perder na volta
+    // Colocamos o e-mail E a origem dentro do 'state' para não perder na volta
     const stateContent = JSON.stringify({ 
       email: userEmail || "anonimo", 
       origin: origin 
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     let stateEmailOwner = "anonimo";
     let redirectDeVolta = "/dashboard/monitor-email";
 
-    // NOVO: Desempacota o 'state' para recuperar o e-mail e a origem
+    // Desempacota o 'state' para recuperar o e-mail e a origem
     if (stateParam) {
       try {
         const decoded = JSON.parse(Buffer.from(stateParam, 'base64').toString('utf8'));
@@ -113,7 +113,8 @@ export async function GET(request: Request) {
       dadosIntegracao.gmail_refresh_token = tokens.refresh_token;
     }
 
-    const { error: upsertError } = await supabase
+    // 🛡️ NOVO: Usamos o supabaseAdmin para garantir que a escrita não seja bloqueada pelo RLS
+    const { error: upsertError } = await supabaseAdmin
       .from("usuarios_integracoes")
       .upsert(dadosIntegracao, { onConflict: "email_usuario, gmail_conta_conectada" });
 
@@ -123,7 +124,7 @@ export async function GET(request: Request) {
 
     console.log(`✅ Tokens salvos com sucesso no Supabase para o usuário: ${stateEmailOwner}`);
 
-    // NOVO: Redireciona de volta para a tela de onde o usuário clicou no botão!
+    // Redireciona de volta para a tela de onde o usuário clicou no botão!
     return NextResponse.redirect(`${SITE_URL}${redirectDeVolta}`);
 
   } catch (error: any) {

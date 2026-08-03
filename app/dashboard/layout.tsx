@@ -2,24 +2,26 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation"; 
+import { usePathname } from "next/navigation"; 
 import { useEffect, useState } from "react";
 import { MAPA_DE_ROTAS } from "@/lib/rotas"; 
-import NotificadorGlobal from "@/components/NotificadorGlobal"; // 🔔 O novo notificador universal!
+import NotificadorGlobal from "@/components/NotificadorGlobal";
+import { useAuth } from "@/lib/AuthContext"; // 🛡️ Importando o nosso Crachá Global
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter(); 
-  const [usuario, setUsuario] = useState<any>(null);
+  
+  // 🛡️ Extraindo os dados e funções seguras do contexto
+  const { user, loading, hasPermission, signOut } = useAuth();
+  
   const [menuAberto, setMenuAberto] = useState(true);
 
   // 📂 Estado para controlar quais categorias do submenu estão abertas/expandidas
-  // Ajustada a ordem aqui para manter o padrão na renderização
   const [submenusAbertos, setSubmenusAbertos] = useState<Record<string, boolean>>({
     "Geral": true,
     "Comercial": false,
     "Crédito": false,
-    "Cadastro": false, // <-- Cadastro agora logo abaixo de Crédito
+    "Cadastro": false, 
     "Consultas": false,
     "Financeiro": false,
     "RH": false, 
@@ -27,19 +29,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
 
   useEffect(() => {
-    try {
-      const userStr = localStorage.getItem("intraned_user");
-      if (userStr) {
-        setUsuario(JSON.parse(userStr));
-      }
-    } catch (err) {
-      console.error("Erro ao ler sessão do localStorage:", err);
-    }
-
-    if (typeof window !== "undefined") {
-      if (window.innerWidth < 1024) {
-        setMenuAberto(false);
-      }
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMenuAberto(false);
     }
   }, []);
 
@@ -53,38 +44,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }));
     }
   }, [pathname]);
-
-  const perfilAtual = String(usuario?.perfil || usuario?.cargo || "user").toLowerCase();
   
-  // Filtro de permissões nativo mantido intacto
-  const linksPermitidos = MAPA_DE_ROTAS.filter((link) => {
-    if (perfilAtual === "master") return true; 
-    
-    const rotasDoUsuario = usuario?.permissoes || usuario?.abas_permitidas;
-
-    if (Array.isArray(rotasDoUsuario)) {
-      return rotasDoUsuario.includes(link.path);
-    } else if (rotasDoUsuario && typeof rotasDoUsuario === "object") {
-      return rotasDoUsuario[link.path] === true;
-    }
-    
-    return false;
-  });
+  // 🛡️ Filtro de permissões ABSOLUTAMENTE SEGURO (usando a regra validada no servidor)
+  const linksPermitidos = MAPA_DE_ROTAS.filter((link) => hasPermission(link.path));
 
   // 📦 Agrupa os links permitidos por categoria para montar os submenus
-  // A ORDEM em que as chaves são declaradas aqui dita a ordem no menu visual
   const rotasAgrupadas = {
     "Geral": linksPermitidos.filter(l => l.categoria === "Geral"),
     "Comercial": linksPermitidos.filter(l => l.categoria === "Comercial"),
     "Crédito": linksPermitidos.filter(l => l.categoria === "Crédito"),
-    "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"), // <-- Cadastro reposicionado!
+    "Cadastro": linksPermitidos.filter(l => l.categoria === "Cadastro"),
     "Consultas": linksPermitidos.filter(l => l.categoria === "Consultas"),
     "Financeiro": linksPermitidos.filter(l => l.categoria === "Financeiro"),
     "RH": linksPermitidos.filter(l => l.categoria === "RH"),
     "Configurações": linksPermitidos.filter(l => l.categoria === "Configurações"),
   };
 
-  // Alternador de sanfona (abre uma e mantém as outras como o usuário decidir)
   const toggleSubmenu = (categoria: string) => {
     setSubmenusAbertos(prev => ({
       ...prev,
@@ -92,10 +67,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }));
   };
 
-  const handleSair = () => {
-    localStorage.removeItem("intraned_user"); 
-    router.push("/"); 
+  // 🛡️ Logout agora limpa os cookies oficiais da sessão
+  const handleSair = async () => {
+    await signOut(); 
   };
+
+  // ⏳ Evita que a tela pisque vazia ou quebrada enquanto o Contexto verifica o token
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-4 text-slate-500 font-bold uppercase tracking-wider text-sm animate-pulse">
+          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          Verificando credenciais...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-100 font-sans text-slate-800 relative overflow-hidden">
@@ -117,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 flex flex-col h-full min-h-0">
           <div className="mb-6 flex justify-between items-center px-2 pt-2">
             
-            {/* 🎯 LOGO DA NED COM FILTRO DE SILHUETA */}
+            {/* 🎯 LOGO DA NED */}
             <div className="flex items-center gap-3 select-none">
               <img 
                 src="/favicon.ico" 
@@ -142,22 +129,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </div>
 
-          {/* 🧭 CATEGORIAS EM SUBMENU DROP-DOWN RETRÁTIL */}
+          {/* 🧭 CATEGORIAS EM SUBMENU */}
           <nav className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
             {Object.entries(rotasAgrupadas).map(([categoria, links]) => {
-              // Se o usuário não tiver permissão para nenhuma rota dessa categoria, ela nem aparece
               if (links.length === 0) return null;
 
               const estaAberto = submenusAbertos[categoria];
               const contemLinkAtivo = links.some(l => l.path === pathname);
 
-              // 🎯 Renderiza os ícones principais baseados na nova estrutura de categorias
               const getIconeCategoria = (cat: string) => {
                 switch(cat) {
                   case "Geral": return "🏠";
                   case "Comercial": return "🎯";
                   case "Crédito": return "⚖️";
-                  case "Cadastro": return "📝"; // Cadastro colado no Crédito
+                  case "Cadastro": return "📝"; 
                   case "Consultas": return "🔎"; 
                   case "Financeiro": return "💰";
                   case "RH": return "👥"; 
@@ -168,7 +153,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
               return (
                 <div key={categoria} className="space-y-1">
-                  {/* Botão de Disparo do Menu Pai */}
                   <button
                     onClick={() => toggleSubmenu(categoria)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all select-none ${
@@ -186,7 +170,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </span>
                   </button>
 
-                  {/* Links Filhos (O Submenu de fato) */}
                   {estaAberto && (
                     <div className="pl-4 border-l border-slate-800 space-y-0.5 mt-1 transition-all">
                       {links.map((link) => {
@@ -218,8 +201,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 border-t border-slate-800 bg-slate-950/40 space-y-3">
           <div>
             <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Logado como:</p>
-            <p className="text-xs font-black text-white mt-0.5 truncate">{usuario?.nome || "Usuário"}</p>
-            <p className="text-[10px] text-blue-400 font-medium capitalize mt-0.5 truncate">{usuario?.cargo || usuario?.perfil || "Colaborador"}</p>
+            {/* 🛡️ Lendo dados diretamente do banco de forma segura */}
+            <p className="text-xs font-black text-white mt-0.5 truncate">{user?.nome || "Usuário"}</p>
+            <p className="text-[10px] text-blue-400 font-medium capitalize mt-0.5 truncate">{user?.cargo || "Colaborador"}</p>
           </div>
 
           <button 
@@ -252,12 +236,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <main className="flex-1 p-6 md:p-8 overflow-y-auto relative">
           {children}
-          
-          {/* 🔥 Componente Global de Notificações Ativo na Raiz da Dashboard */}
           <NotificadorGlobal />
         </main>
       </div>
-
     </div>
   );
 }

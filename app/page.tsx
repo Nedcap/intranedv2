@@ -11,7 +11,6 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [carregando, setCarregando] = useState(false);
   
-  // Estados para gerenciar a janela de recuperação de senha real
   const [abrirAbasRecuperar, setAbrirAbasRecuperar] = useState(false);
   const [emailRecuperar, setEmailRecuperar] = useState("");
   const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false);
@@ -23,9 +22,15 @@ export default function LoginPage() {
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [usuarioTemporario, setUsuarioTemporario] = useState<any>(null);
 
+  // Verifica se a sessão nativa e segura do Supabase já existe
   useEffect(() => {
-    const logado = localStorage.getItem("intraned_user");
-    if (logado) router.push("/dashboard");
+    const verificarSessaoAtiva = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.push("/dashboard");
+      }
+    };
+    verificarSessaoAtiva();
   }, [router]);
 
   const tratarLogin = async (e: React.FormEvent) => {
@@ -44,37 +49,32 @@ export default function LoginPage() {
 
       if (authError) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
+        // Se der erro, garante que a sessão não fique presa
+        await supabase.auth.signOut(); 
         return;
       }
 
-      // 2. 📑 Puxa o perfil complementar da sua tabela pública
+      // 2. 📑 Puxa o perfil complementar apenas para checar a flag de "primeiro_acesso"
       const { data: perfil, error: perfilError } = await supabase
         .from("usuarios")
-        .select("*")
+        .select("id, primeiro_acesso")
         .eq("id", authData.user.id)
         .maybeSingle();
 
       if (perfilError || !perfil) {
+        await supabase.auth.signOut();
         throw new Error("Perfil de usuário não localizado no banco.");
       }
 
-      // 3. 🚨 Verifica se exige nova senha (tanto primeiro acesso quanto reset administrativo)
+      // 3. 🚨 Verifica se exige nova senha
       if (perfil.primeiro_acesso === true) {
         setUsuarioTemporario(perfil);
-        setExigirNovaSenha(true); // Abre o modal de nova senha e barra o redirecionamento
+        setExigirNovaSenha(true);
         setCarregando(false);
         return;
       }
 
-      // 4. 🚀 Login normal caso esteja tudo correto
-      localStorage.setItem("intraned_user", JSON.stringify({
-        id: perfil.id,
-        nome: perfil.nome,
-        email: perfil.email,
-        cargo: perfil.cargo || "Colaborador",
-        permissoes: perfil.permissoes || {}
-      }));
-
+      // 4. 🚀 Login normal: Redireciona! (O AuthContext pegará os dados com segurança)
       router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
@@ -84,7 +84,6 @@ export default function LoginPage() {
     }
   };
 
-  // 🛠️ Função corrigida que atualiza a senha sem disparar erros de privilégio no cliente
   const salvarNovaSenhaPrimeiroAcesso = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novaSenha.trim() || !confirmarNovaSenha.trim()) return;
@@ -102,14 +101,14 @@ export default function LoginPage() {
     try {
       setTrocandoSenha(true);
 
-      // 1. 🔐 Atualiza apenas a senha do usuário autenticado no cliente atual
+      // 1. 🔐 Atualiza a senha no Auth Nativo
       const { error: authUpdateError } = await supabase.auth.updateUser({
         password: novaSenha.trim()
       });
 
       if (authUpdateError) throw authUpdateError;
 
-      // 2. 🏳️ Desmarca a trava na tabela pública
+      // 2. 🏳️ Desmarca a trava na tabela pública (Usando RLS, permitiremos apenas o próprio user atualizar isso)
       const { error: tabelaError } = await supabase
         .from("usuarios")
         .update({ primeiro_acesso: false })
@@ -117,15 +116,7 @@ export default function LoginPage() {
 
       if (tabelaError) throw tabelaError;
 
-      // 3. 💾 Cria a sessão definitiva e manda pro painel
-      localStorage.setItem("intraned_user", JSON.stringify({
-        id: usuarioTemporario.id,
-        nome: usuarioTemporario.nome,
-        email: usuarioTemporario.email,
-        cargo: usuarioTemporario.cargo || "Colaborador",
-        permissoes: usuarioTemporario.permissoes || {}
-      }));
-
+      // 3. 💾 Redireciona!
       alert("🎉 Senha corporativa definida com sucesso! Acesso liberado.");
       router.push("/dashboard");
     } catch (err: any) {

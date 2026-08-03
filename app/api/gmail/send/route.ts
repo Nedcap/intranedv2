@@ -1,15 +1,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { validarRequisicaoApi, supabaseAdmin } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    // 🌟 RECEBENDO O CAMPO CC AQUI
+    // 🔒 BLINDAGEM DA ROTA: Verificando o crachá (Token JWT)
+    const { usuario, erro } = await validarRequisicaoApi(request);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado." }, { status: 401 });
+    }
+
+    // 🌟 RECEBENDO OS DADOS
     const { userEmail, contaAtiva, mensagemId, para, cc, assunto, textoResposta } = await request.json();
 
-    const { data: integracao, error: dbError } = await supabase
+    // 🛡️ VALIDAÇÃO DE IDENTIDADE: O usuário só pode usar a própria integração (exceto Master)
+    if (userEmail.toLowerCase().trim() !== usuario.email.toLowerCase().trim() && usuario.cargo !== 'Master') {
+      return NextResponse.json({ error: "Você não tem permissão para enviar e-mails em nome deste usuário." }, { status: 403 });
+    }
+
+    // 🛡️ Usamos o supabaseAdmin para garantir a leitura no banco protegido por RLS
+    const { data: integracao, error: dbError } = await supabaseAdmin
       .from("usuarios_integracoes")
       .select("*")
       .eq("email_usuario", userEmail)
@@ -57,7 +69,8 @@ export async function POST(request: Request) {
       accessToken = novosTokens.access_token;
       const novoLimiteExpira = new Date(Date.now() + novosTokens.expires_in * 1000).toISOString();
 
-      await supabase
+      // 🛡️ Atualiza os tokens usando supabaseAdmin
+      await supabaseAdmin
         .from("usuarios_integracoes")
         .update({
           gmail_access_token: accessToken,

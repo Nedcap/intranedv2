@@ -1,5 +1,6 @@
 import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 const s3Client = new S3Client({
   region: "auto",
@@ -12,6 +13,12 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Se não tiver um JWT válido, a requisição é barrada imediatamente
+    const { usuario, erro } = await validarRequisicaoApi(request);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
+    }
+
     const { prefix } = await request.json();
     
     if (!prefix) {

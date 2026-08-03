@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 export const maxDuration = 60; 
 
 export async function POST(request: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Protegendo o Gateway de Inteligência Artificial
+    const { usuario, erro } = await validarRequisicaoApi(request);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
+    }
+
     const body = await request.json();
     
     // 🔥 CORREÇÃO: Extraindo o modo_atualizacao do body
@@ -13,7 +20,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Faltam parâmetros" }, { status: 400 });
     }
 
-    console.log(`[VERCEL API] Encaminhando análise ${analise_id} para o Motor V8 no Render... (Merge/Update: ${!!modo_atualizacao})`);
+    // 🛡️ Log aprimorado com o nome do operador para auditoria
+    console.log(`[VERCEL API] Encaminhando análise ${analise_id} para o Motor V8 no Render... (Merge/Update: ${!!modo_atualizacao}) - Solicitado por: ${usuario.nome}`);
 
     const urlRender = "https://motor-ia-mmlv.onrender.com/api/motor-ia"; 
 

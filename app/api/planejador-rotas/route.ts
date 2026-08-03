@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Protegendo o bolso da empresa (Google Maps + OpenAI)
+    const { usuario, erro } = await validarRequisicaoApi(req);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
+    }
+
     const body = await req.json();
     const { action, origem, destino } = body;
 
@@ -41,6 +48,7 @@ export async function POST(req: Request) {
 
     // 🔥 CORREÇÃO 2: Passamos o texto completo da rota sem o ".substring(0, 1200)"
     const dicasDoGoogle = percurso.steps
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((s: any) => s.html_instructions || "")
       .join(" | ")
       .replace(/<[^>]*>/g, ""); // Remove tags HTML 
@@ -76,6 +84,7 @@ export async function POST(req: Request) {
       const resultadoIA = JSON.parse(completion.choices[0].message.content || "{}");
       const listaCidadesExpanded = resultadoIA.cidades_itinerario || [];
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const cidadesDetalhadas = listaCidadesExpanded.map((c: any, cIdx: number) => ({
         nome: c.nome?.trim(),
         uf: c.uf?.trim()?.toUpperCase(),

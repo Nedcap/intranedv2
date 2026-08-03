@@ -1,19 +1,30 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { validarRequisicaoApi, supabaseAdmin } from "@/lib/supabase-server"; // 🛡️ Importando a blindagem
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Verificando o crachá (Token JWT)
+    const { usuario, erro } = await validarRequisicaoApi(request);
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado." }, { status: 401 });
+    }
+
     const { userEmail, contaAtiva, dataInicio, dataFim } = await request.json();
 
     if (!userEmail || !contaAtiva) {
       return NextResponse.json({ error: "Parâmetros insuficientes" }, { status: 400 });
     }
 
-    // Busca especificamente as chaves da conta da aba selecionada
-    const { data: integracao, error: dbError } = await supabase
+    // 🛡️ VALIDAÇÃO DE IDENTIDADE: Impede que o usuário "A" sincronize e leia a caixa do usuário "B"
+    if (userEmail.toLowerCase().trim() !== usuario.email.toLowerCase().trim() && usuario.cargo !== 'Master') {
+      return NextResponse.json({ error: "Você não tem permissão para sincronizar a caixa deste usuário." }, { status: 403 });
+    }
+
+    // 🛡️ Busca as chaves usando o supabaseAdmin para não esbarrar no RLS
+    const { data: integracao, error: dbError } = await supabaseAdmin
       .from("usuarios_integracoes")
       .select("*")
       .eq("email_usuario", userEmail)
@@ -87,8 +98,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ messages: emailsColetados });
     }
 
+    // 🛡️ Grava as mensagens no banco usando supabaseAdmin
     for (const email of emailsColetados) {
-      await supabase.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
+      await supabaseAdmin.from("caixa_inteligente").upsert(email, { onConflict: "mensagem_id" });
     }
 
     return NextResponse.json({ success: true });

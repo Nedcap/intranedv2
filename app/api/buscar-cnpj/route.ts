@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import { BigQuery } from "@google-cloud/bigquery";
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ O nosso segurança!
 
 export const dynamic = 'force-dynamic';
 
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let credentials: any = {};
 
 if (credentialsEnv) {
@@ -26,6 +28,12 @@ const bigquery = new BigQuery({
 
 export async function POST(req: Request) {
   try {
+    // 🔒 BLINDAGEM DA ROTA: Se não tiver crachá, não consome o BigQuery!
+    const { usuario, erro } = await validarRequisicaoApi(req);
+    if (erro) {
+      return NextResponse.json({ error: erro }, { status: 401 });
+    }
+
     const { cnpj } = await req.json();
     if (!cnpj) return NextResponse.json({ error: "CNPJ obrigatório." }, { status: 400 });
 
@@ -81,7 +89,7 @@ export async function POST(req: Request) {
       console.error("Erro ao ler tabela_tom.json:", err);
     }
 
-    // Retorna o perfil completo de crédito da empresa
+    // Retorna o perfil completo de crédito da empresa, validado de forma segura
     return NextResponse.json({
       found: true,
       empresa: {
