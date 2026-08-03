@@ -22,17 +22,19 @@ export default function LoginPage() {
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [usuarioTemporario, setUsuarioTemporario] = useState<any>(null);
 
-  // Verifica se a sessão nativa e segura do Supabase já existe
+  // Verifica se a sessão nativa do Supabase já existe
   useEffect(() => {
     const verificarSessaoAtiva = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (session) {
-        // Verifica se o usuário tem a flag de trocar senha ativada
+      if (session?.user) {
+        const userEmail = session.user.email?.toLowerCase().trim();
+        
+        // Busca flexível: Tenta casar pelo ID ou pelo E-mail
         const { data: perfil } = await supabase
           .from("usuarios")
           .select("*")
-          .eq("id", session.user.id)
+          .or(`id.eq.${session.user.id},email.eq.${userEmail}`)
           .maybeSingle();
 
         if (perfil?.primeiro_acesso) {
@@ -54,31 +56,35 @@ export default function LoginPage() {
       setCarregando(true);
       const emailTratado = email.trim().toLowerCase();
 
-      // 1. 🔑 Autentica de verdade usando o sistema nativo e criptografado do Supabase
+      // 1. 🔑 Autentica no cofre do Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: emailTratado,
         password: senha.trim(),
       });
 
-      if (authError) {
+      if (authError || !authData.user) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
         await supabase.auth.signOut(); 
+        setCarregando(false);
         return;
       }
 
-      // 2. 📑 Puxa o perfil complementar (Usando SELECT * para não quebrar se a coluna faltar)
+      // 2. 📑 Puxa o perfil com busca híbrida (ID ou E-mail) para evitar travamentos
       const { data: perfil, error: perfilError } = await supabase
         .from("usuarios")
         .select("*")
-        .eq("id", authData.user.id)
+        .or(`id.eq.${authData.user.id},email.eq.${emailTratado}`)
         .maybeSingle();
 
       if (perfilError || !perfil) {
+        console.error("Erro ao localizar perfil:", perfilError);
+        alert("⚠️ Credenciais válidas, mas perfil não encontrado na tabela de usuários.");
         await supabase.auth.signOut();
-        throw new Error("Perfil de usuário não localizado no banco.");
+        setCarregando(false);
+        return;
       }
 
-      // 3. 🚨 Verifica se exige nova senha
+      // 3. 🚨 Verifica se exige troca de senha no primeiro acesso
       if (perfil.primeiro_acesso === true) {
         setUsuarioTemporario(perfil);
         setExigirNovaSenha(true);
@@ -86,11 +92,11 @@ export default function LoginPage() {
         return;
       }
 
-      // 4. 🚀 Login normal: Redireciona! (O AuthContext pegará os dados com segurança)
+      // 4. 🚀 Tudo OK! Redireciona para a Home do Dashboard
       router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
-      alert(`Erro no servidor: ${err.message}`);
+      alert(`Erro inesperado no servidor: ${err.message}`);
     } finally {
       setCarregando(false);
     }
@@ -126,7 +132,7 @@ export default function LoginPage() {
         .update({ primeiro_acesso: false })
         .eq("id", usuarioTemporario.id);
 
-      // 3. 💾 Redireciona!
+      // 3. 💾 Redireciona para o painel
       alert("🎉 Senha corporativa definida com sucesso! Acesso liberado.");
       setExigirNovaSenha(false);
       router.push("/dashboard");
@@ -208,7 +214,7 @@ export default function LoginPage() {
           <button 
             type="submit"
             disabled={carregando}
-            className="w-full p-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg transition-colors uppercase tracking-wider text-xs shadow-md disabled:opacity-50"
+            className="w-full p-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg transition-colors uppercase tracking-wider text-xs shadow-md disabled:opacity-50 cursor-pointer"
           >
             {carregando ? "Autenticando..." : "Entrar no Sistema"}
           </button>
@@ -225,7 +231,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* 🚨 MODAL IMPEDING: CADASTRO DE NOVA SENHA */}
+      {/* 🚨 MODAL DE PRIMEIRA TROCA DE SENHA */}
       {exigirNovaSenha && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
@@ -262,7 +268,7 @@ export default function LoginPage() {
               <button 
                 type="submit"
                 disabled={trocandoSenha}
-                className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md"
+                className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg text-xs uppercase tracking-wider transition-all disabled:opacity-50 shadow-md cursor-pointer"
               >
                 {trocandoSenha ? "⏳ Criptografando & Atualizando..." : "Definir Senha Definitiva"}
               </button>
@@ -277,7 +283,7 @@ export default function LoginPage() {
           <div className="w-full max-w-sm bg-white rounded-xl shadow-2xl border border-slate-200 p-6 space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-900 text-sm">🔒 Recuperar Acesso</h3>
-              <button type="button" onClick={() => setAbrirAbasRecuperar(false)} className="text-slate-400 font-bold text-xs">✕</button>
+              <button type="button" onClick={() => setAbrirAbasRecuperar(false)} className="text-slate-400 font-bold text-xs cursor-pointer">✕</button>
             </div>
             <form onSubmit={dispararRecuperacaoDeSenha} className="space-y-4">
               <div className="flex flex-col space-y-1">
@@ -291,7 +297,7 @@ export default function LoginPage() {
                   className="p-2 border border-slate-200 rounded-lg outline-none font-semibold text-xs focus:border-blue-500 bg-slate-50"
                 />
               </div>
-              <button type="submit" disabled={enviandoRecuperacao} className="w-full p-2 bg-slate-900 text-white font-bold rounded-lg text-xs transition-all disabled:opacity-50">
+              <button type="submit" disabled={enviandoRecuperacao} className="w-full p-2 bg-slate-900 text-white font-bold rounded-lg text-xs transition-all disabled:opacity-50 cursor-pointer">
                 {enviandoRecuperacao ? "⏳ Solicitando..." : "Enviar E-mail de Recuperação"}
               </button>
             </form>
