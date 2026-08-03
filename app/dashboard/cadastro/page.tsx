@@ -376,6 +376,10 @@ export default function CadastroPage() {
 
     const itensParaEnviar = cedentesDisponiveis.filter(c => selecionadosParaDisparo.includes(c.id));
 
+    // 🌟 PEGANDO A SESSÃO DO SUPABASE PARA OBTER O TOKEN JWT!
+    const { data: { session } } = await supabase.auth.getSession();
+    const tokenJwt = session?.access_token;
+
     for (const item of itensParaEnviar) {
       try {
         setLogsDisparo(prev => [...prev, `⏳ Buscando comercial de ${item.cedente}...`]);
@@ -402,7 +406,10 @@ export default function CadastroPage() {
 
         const res = await fetch("/api/gmail/send", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${tokenJwt}` // 👈 O CRACHÁ ESTÁ AQUI AGORA!
+          },
           body: JSON.stringify({
             userEmail: user.email,
             para: emailDestino,
