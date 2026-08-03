@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
+import { useAuth } from "@/lib/AuthContext"; // 🛡️ Nosso Crachá Global
 
 // Função para formatar o CNPJ enquanto digita ou exibe
 const formatarCNPJ = (cnpj: string) => {
@@ -105,6 +106,9 @@ const aplicarTagsDinamicas = (texto: string, item: any, docsSelecionados: string
 };
 
 export default function CadastroPage() {
+  // 🛡️ Integrado com o AuthContext Unificado
+  const { user, verApenasCarteira } = useAuth();
+
   const [cedentes, setCedentes] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -112,7 +116,6 @@ export default function CadastroPage() {
   const [busca, setBusca] = useState("");
   const [cnpjsCopiados, setCnpjsCopiados] = useState<Record<string, boolean>>({});
   
-  const [usuarioAtual, setUsuarioAtual] = useState<{ id: string; nome: string; perfil: string; email: string } | null>(null);
   const [gmailConectado, setGmailConectado] = useState(false); 
 
   const [cedentesEmEdicaoDeNome, setCedentesEmEdicaoDeNome] = useState<Record<string, boolean>>({});
@@ -153,25 +156,19 @@ export default function CadastroPage() {
   const carregarCadastro = useCallback(async () => {
     try {
       setCarregando(true);
-      const { data: { user } } = await supabase.auth.getUser();
       
-      if (user) {
-        const { data: perfilData } = await supabase.from('usuarios').select('nome, cargo, email').eq('id', user.id).single();
-        let emailDoUsuario = ""; 
-        
-        if (perfilData) {
-          emailDoUsuario = perfilData.email?.toLowerCase().trim();
-          setUsuarioAtual({ 
-            id: user.id, 
-            nome: perfilData.nome,
-            email: emailDoUsuario,
-            perfil: (perfilData.cargo || "").toLowerCase() 
-          });
-        }
+      if (user?.email) {
+        const emailTratado = user.email.toLowerCase().trim();
+        const { data: integracoes } = await supabase
+          .from("usuarios_integracoes")
+          .select("id")
+          .eq("email_usuario", emailTratado)
+          .limit(1); 
 
-        if (emailDoUsuario) {
-          const { data: integracoes } = await supabase.from("usuarios_integracoes").select("id").eq("email_usuario", emailDoUsuario).limit(1); 
-          if (integracoes && integracoes.length > 0) setGmailConectado(true);
+        if (integracoes && integracoes.length > 0) {
+          setGmailConectado(true);
+        } else {
+          setGmailConectado(false);
         }
       }
 
@@ -185,7 +182,14 @@ export default function CadastroPage() {
         setListaDocsGerais(["Contrato Social", "Balanço Patrimonial / DRE", "Faturamento Fiscal 12 meses", "Documento dos Sócios"]);
       }
 
-      const { data } = await supabase.from("cadastro_cedentes").select("*");
+      let query = supabase.from("cadastro_cedentes").select("*");
+      
+      // 🔒 Isolamento de Carteira Automático
+      if (verApenasCarteira && user) {
+        query = query.or(`responsavel_id.eq.${user.id},comercial.ilike.%${user.nome}%`);
+      }
+
+      const { data } = await query;
       if (data) {
         setCedentes(data.map(item => ({ ...item, _isEditado: false, _isNovo: false })));
       }
@@ -194,7 +198,7 @@ export default function CadastroPage() {
     } finally { 
       setCarregando(false); 
     }
-  }, []);
+  }, [user, verApenasCarteira]);
 
   useEffect(() => {
     carregarCadastro();
@@ -217,7 +221,6 @@ export default function CadastroPage() {
       return alert("Preencha o nome do grupo e selecione pelo menos uma empresa.");
     }
     
-    // Apenas vincula as empresas selecionadas ao nome do grupo
     const novos = cedentes.map(c => {
       if (selecionadosParaGrupo.includes(c.id)) {
         return { ...c, grupo_economico: nomeGrupoInput.trim().toUpperCase(), _isEditado: true };
@@ -362,7 +365,7 @@ export default function CadastroPage() {
   };
 
   const executarDisparoEmLote = async () => {
-    if (selecionadosParaDisparo.length === 0 || !usuarioAtual?.email || !tipoDisparoAtual || !templateSelecionadoId) return;
+    if (selecionadosParaDisparo.length === 0 || !user?.email || !tipoDisparoAtual || !templateSelecionadoId) return;
     if (tipoDisparoAtual === "PENDENCIA" && docsMarcadosParaEnvio.length === 0) return alert("Selecione ao menos um documento pendente para enviar.");
     
     const templateAtivo = templatesEmail.find(t => t.id === templateSelecionadoId);
@@ -401,7 +404,7 @@ export default function CadastroPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            userEmail: usuarioAtual.email,
+            userEmail: user.email,
             para: emailDestino,
             cc: templateAtivo.cc || "", 
             assunto: assuntoFinal,
@@ -409,7 +412,12 @@ export default function CadastroPage() {
           })
         });
 
-        if (!res.ok) throw new Error("Falha na API de envio");
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            throw new Error("Sessão do Google expirada. Clique em 'Reconectar Google' acima.");
+          }
+          throw new Error("Falha na API de envio de e-mail");
+        }
         
         setLogsDisparo(prev => [...prev, `✅ Enviado para ${item.comercial} (${item.cedente}) - Via ${fundoSelecionado}`]);
         await new Promise(r => setTimeout(r, 1000));
@@ -449,7 +457,7 @@ export default function CadastroPage() {
              cedente: nomeLimpo, cnpj: cnpjLimpo, comercial: analise.comercial,
              dt_aprovacao_comite: dtComiteFormatada,
              atualizado_em: new Date().toISOString(),
-             responsavel_id: analise.responsavel_id || usuarioAtual?.id 
+             responsavel_id: analise.responsavel_id || user?.id 
            });
            nomesNaEsteira.add(nomeLimpo);
         }
@@ -487,6 +495,8 @@ export default function CadastroPage() {
   };
 
   const adicionarNovaLinha = () => {
+    const cargoLimpo = user?.cargo?.toLowerCase() || "";
+
     const novaLinha = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, 
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
@@ -496,7 +506,7 @@ export default function CadastroPage() {
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
       nao_opera_sec: false, nao_opera_fidc: false,
       grupo_economico: null,
-      comercial: usuarioAtual?.perfil === "comercial" || usuarioAtual?.perfil === "sdr" ? usuarioAtual.nome : "",
+      comercial: cargoLimpo === "comercial" || cargoLimpo === "sdr" ? user?.nome : "",
       _isNovo: true, _isEditado: true
     };
     
@@ -540,7 +550,6 @@ export default function CadastroPage() {
     setTimeout(() => setCnpjsCopiados(prev => ({ ...prev, [idUnico]: false })), 2000);
   };
 
-  // Função para montar o Payload atualizado e remover o ID temporário
   const montarPayload = (item: any) => {
     const cnpjFinal = item.cnpj ? item.cnpj.replace(/\D/g, "") : null;
     const payload: any = {
@@ -558,8 +567,7 @@ export default function CadastroPage() {
       nao_opera_sec: item.nao_opera_sec || false, nao_opera_fidc: item.nao_opera_fidc || false,
       comercial: item.comercial, atualizado_em: new Date().toISOString()
     };
-    if (item._isNovo) payload.responsavel_id = usuarioAtual?.id;
-    // Só envia o ID se não for o ID falso que geramos
+    if (item._isNovo) payload.responsavel_id = user?.id;
     if (item.id && !String(item.id).startsWith("temp-")) {
       payload.id = item.id;
     }
@@ -657,14 +665,12 @@ export default function CadastroPage() {
     });
 
     resultado.sort((a: any, b: any) => {
-      // Força Grupos Econômicos a ficarem juntos no topo da ordenação primária
       if (a.grupo_economico && b.grupo_economico && a.grupo_economico !== b.grupo_economico) {
         return a.grupo_economico.localeCompare(b.grupo_economico);
       }
       if (a.grupo_economico && !b.grupo_economico) return -1;
       if (!a.grupo_economico && b.grupo_economico) return 1;
 
-      // Ordenação secundária (definida pelo usuário)
       if (sortConfig.key === "status") return sortConfig.direction === "asc" ? getStatusWeight(a) - getStatusWeight(b) : getStatusWeight(b) - getStatusWeight(a);
       let valA = a[sortConfig.key], valB = b[sortConfig.key];
       if (sortConfig.key === "limite") {
@@ -761,6 +767,8 @@ export default function CadastroPage() {
     );
   };
 
+  const linkAuthGoogle = `/api/auth/google?user=${user?.email || ""}&origin=/dashboard/cadastro`;
+
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 sm:p-8 font-sans text-slate-800" style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
       
@@ -782,7 +790,7 @@ export default function CadastroPage() {
             <button 
               onClick={buscarAprovadasDoComite} 
               disabled={sincronizando || carregando} 
-              className="flex-1 md:flex-none px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              className="flex-1 md:flex-none px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
               {sincronizando ? (
                 <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -792,17 +800,17 @@ export default function CadastroPage() {
               Sincronizar Comitê
             </button>
 
-            <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
+            <button onClick={adicionarNovaLinha} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
               + Add CNPJ
             </button>
 
-            <button onClick={abrirModalGrupo} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5">
+            <button onClick={abrirModalGrupo} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
               + Criar Grupo
             </button>
             
-            <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto">
+            <button onClick={salvarAlteracoes} disabled={salvando || carregando} className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 w-full md:w-auto cursor-pointer">
               {salvando ? (
                  <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
               ) : (
@@ -815,30 +823,30 @@ export default function CadastroPage() {
 
         {/* PAINEL DE KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
-          <button onClick={() => setFiltroStatus("TODOS")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md text-slate-800"}`}>
+          <button onClick={() => setFiltroStatus("TODOS")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md text-slate-800"}`}>
             <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Total em Esteira</span>
             <span className="text-4xl font-black">{cedentes.length}</span>
           </button>
           
-          <button onClick={() => setFiltroStatus("PENDENTE_ENVIO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "PENDENTE_ENVIO" ? "bg-rose-50 border-rose-200 shadow-md shadow-rose-100" : "bg-white border-slate-200 hover:border-rose-200 hover:shadow-md"}`}>
+          <button onClick={() => setFiltroStatus("PENDENTE_ENVIO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "PENDENTE_ENVIO" ? "bg-rose-50 border-rose-200 shadow-md shadow-rose-100" : "bg-white border-slate-200 hover:border-rose-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "PENDENTE_ENVIO" ? "bg-rose-500" : "bg-rose-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-rose-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Pendente Comitê</span>
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.pendenteEnvio}</span>
           </button>
 
-          <button onClick={() => setFiltroStatus("AGUARDANDO_ASSINATURA")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "bg-amber-50 border-amber-200 shadow-md shadow-amber-100" : "bg-white border-slate-200 hover:border-amber-200 hover:shadow-md"}`}>
+          <button onClick={() => setFiltroStatus("AGUARDANDO_ASSINATURA")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "bg-amber-50 border-amber-200 shadow-md shadow-amber-100" : "bg-white border-slate-200 hover:border-amber-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "AGUARDANDO_ASSINATURA" ? "bg-amber-500" : "bg-amber-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-amber-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500"></div> Em Assinatura</span>
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.aguardandoAssinatura}</span>
           </button>
 
-          <button onClick={() => setFiltroStatus("EM_ANDAMENTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-50 border-fuchsia-200 shadow-md shadow-fuchsia-100" : "bg-white border-slate-200 hover:border-fuchsia-200 hover:shadow-md"}`}>
+          <button onClick={() => setFiltroStatus("EM_ANDAMENTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-50 border-fuchsia-200 shadow-md shadow-fuchsia-100" : "bg-white border-slate-200 hover:border-fuchsia-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "EM_ANDAMENTO" ? "bg-fuchsia-500" : "bg-fuchsia-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fuchsia-500"></div> Em Andamento</span>
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.emAndamento}</span>
           </button>
 
-          <button onClick={() => setFiltroStatus("APTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border ${filtroStatus === "APTO" ? "bg-emerald-50 border-emerald-200 shadow-md shadow-emerald-100" : "bg-white border-slate-200 hover:border-emerald-200 hover:shadow-md"}`}>
+          <button onClick={() => setFiltroStatus("APTO")} className={`relative overflow-hidden p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "APTO" ? "bg-emerald-50 border-emerald-200 shadow-md shadow-emerald-100" : "bg-white border-slate-200 hover:border-emerald-200 hover:shadow-md"}`}>
             <div className={`absolute top-0 left-0 w-1.5 h-full ${filtroStatus === "APTO" ? "bg-emerald-500" : "bg-emerald-400/50"}`}></div>
             <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-600 block mb-2 flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Aptos a Operar</span>
             <span className="text-4xl font-black text-slate-800">{analiseEsteira.aptos}</span>
@@ -854,7 +862,7 @@ export default function CadastroPage() {
           </div>
         </div>
 
-        {/* =============== BOTÕES DE DISPARO EM LOTE =============== */}
+        {/* =============== BOTÕES DE DISPARO EM LOTE E RECONEXÃO GOOGLE =============== */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="bg-emerald-100 text-emerald-700 p-1.5 rounded-lg">
@@ -866,10 +874,10 @@ export default function CadastroPage() {
             </div>
           </div>
           
-          <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
+          <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0 items-center">
             {!gmailConectado ? (
               <a 
-                href={`/api/auth/google?user=${usuarioAtual?.email}&origin=/dashboard/cadastro`}
+                href={linkAuthGoogle}
                 className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-black transition-colors whitespace-nowrap flex items-center gap-2 uppercase tracking-wide shadow-sm"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.333.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
@@ -877,21 +885,30 @@ export default function CadastroPage() {
               </a>
             ) : (
               <>
-                <button onClick={() => abrirModalDisparo("PENDENCIA")} className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                <button onClick={() => abrirModalDisparo("PENDENCIA")} className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer">
                   <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div> Avisar Pendência (Docs)
                 </button>
-                <button onClick={() => abrirModalDisparo("ASSINATURA")} className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                <button onClick={() => abrirModalDisparo("ASSINATURA")} className="px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer">
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div> Avisar Assinaturas
                 </button>
-                <button onClick={() => abrirModalDisparo("GESTORA")} className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                <button onClick={() => abrirModalDisparo("GESTORA")} className="px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer">
                   <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Pronto p/ Envio (Gestora)
                 </button>
-                <button onClick={() => abrirModalDisparo("PORTAL_GESTORA")} className="px-3 py-1.5 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 border border-fuchsia-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                <button onClick={() => abrirModalDisparo("PORTAL_GESTORA")} className="px-3 py-1.5 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 border border-fuchsia-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer">
                   <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500"></div> Avisar Cadastro Portal
                 </button>
-                <button onClick={() => abrirModalDisparo("APTO")} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5">
+                <button onClick={() => abrirModalDisparo("APTO")} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Avisar Aptos a Operar
                 </button>
+
+                {/* 🔄 BOTÃO DE RECONECTAR / RENOVAR AUTORIZAÇÃO GOOGLE */}
+                <a 
+                  href={linkAuthGoogle}
+                  title="Clique caso as permissões do Google tenham expirado"
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1 shadow-2xs"
+                >
+                  🔄 Reconectar Google
+                </a>
               </>
             )}
           </div>
@@ -918,14 +935,14 @@ export default function CadastroPage() {
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-14">
                   <th className="w-14 px-4 text-center">
-                    <button onClick={handleExpandirTudo} title="Expandir/Recolher" className="w-7 h-7 bg-white text-slate-500 hover:text-indigo-600 hover:border-indigo-300 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center transition-colors">
+                    <button onClick={handleExpandirTudo} title="Expandir/Recolher" className="w-7 h-7 bg-white text-slate-500 hover:text-indigo-600 hover:border-indigo-300 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center transition-colors cursor-pointer">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" /></svg>
                     </button>
                   </th>
                   <th onClick={() => handleSort("cedente")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-72">
                     <div className="flex items-center gap-1">Cedente / CNPJ {sortConfig.key === "cedente" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                   </th>
-                  {usuarioAtual?.perfil !== "comercial" && (
+                  {user?.cargo?.toLowerCase() !== "comercial" && (
                     <th onClick={() => handleSort("comercial")} className="px-4 cursor-pointer hover:text-indigo-600 transition-colors w-32">
                       <div className="flex items-center gap-1">Responsável {sortConfig.key === "comercial" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
                     </th>
@@ -953,14 +970,13 @@ export default function CadastroPage() {
                   const isEditandoNome = !!cedentesEmEdicaoDeNome[identificadorUnico] || item._isNovo;
                   const isOpen = !!linhasExpandidas[identificadorUnico];
 
-                  // 🌟 LÓGICA VISUAL DO GRUPO ECONÔMICO
                   const isGrupo = !!item.grupo_economico;
                   const showGroupHeader = isGrupo && item.grupo_economico !== array[mapIndex - 1]?.grupo_economico;
 
                   return (
                     <React.Fragment key={identificadorUnico}>
                       
-                      {/* HEADER DO GRUPO (Aparece 1 vez no topo das empresas agrupadas) */}
+                      {/* HEADER DO GRUPO */}
                       {showGroupHeader && (
                         <tr>
                           <td colSpan={10} className="bg-indigo-100/60 border-t-2 border-indigo-200 px-4 py-2">
@@ -981,7 +997,7 @@ export default function CadastroPage() {
                         <td className="px-4 py-3 text-center">
                           <button 
                             onClick={() => toggleExpandirLinha(identificadorUnico)}
-                            className={`w-7 h-7 rounded-full flex items-center justify-center font-bold transition-all border ${isOpen ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/30" : "bg-white text-slate-400 border-slate-300 hover:border-indigo-400 hover:text-indigo-600 shadow-sm"}`}
+                            className={`w-7 h-7 rounded-full flex items-center justify-center font-bold transition-all border cursor-pointer ${isOpen ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/30" : "bg-white text-slate-400 border-slate-300 hover:border-indigo-400 hover:text-indigo-600 shadow-sm"}`}
                           >
                             <svg className={`w-4 h-4 transform transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
                           </button>
@@ -1014,7 +1030,7 @@ export default function CadastroPage() {
                                   </span>
                                 )}
 
-                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-all">
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-all cursor-pointer">
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                 </button>
                               </div>
@@ -1022,18 +1038,18 @@ export default function CadastroPage() {
                               {item.cnpj ? (
                                 <div className="flex items-center gap-2">
                                   <span className="text-[11px] font-mono font-semibold text-slate-500 select-all cursor-text" title="Duplo clique para selecionar">{formatarCNPJ(item.cnpj)}</span>
-                                  <button onClick={() => copiarCNPJ(item.cnpj, identificadorUnico)} className={`p-1 rounded transition-colors ${cnpjsCopiados[identificadorUnico] ? "text-emerald-500 bg-emerald-50" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`} title="Copiar CNPJ">
+                                  <button onClick={() => copiarCNPJ(item.cnpj, identificadorUnico)} className={`p-1 rounded transition-colors cursor-pointer ${cnpjsCopiados[identificadorUnico] ? "text-emerald-500 bg-emerald-50" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`} title="Copiar CNPJ">
                                     {cnpjsCopiados[identificadorUnico] ? <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
                                   </button>
                                 </div>
                               ) : (
-                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="text-[10px] text-slate-400 hover:text-indigo-600 hover:border-indigo-400 text-left border border-dashed border-slate-300 rounded px-1.5 py-0.5 w-max transition-colors mt-0.5">+ Add CNPJ</button>
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="text-[10px] text-slate-400 hover:text-indigo-600 hover:border-indigo-400 text-left border border-dashed border-slate-300 rounded px-1.5 py-0.5 w-max transition-colors mt-0.5 cursor-pointer">+ Add CNPJ</button>
                               )}
                             </div>
                           )}
                         </td>
 
-                        {usuarioAtual?.perfil !== "comercial" && (
+                        {user?.cargo?.toLowerCase() !== "comercial" && (
                           <td className="px-4 py-3 align-top pt-4">
                              <input type="text" value={item.comercial || ""} onChange={(e) => handleInputChange(index, "comercial", e.target.value)} 
                                className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-md text-sm font-semibold text-indigo-700 bg-transparent transition-all outline-none" 
@@ -1041,7 +1057,6 @@ export default function CadastroPage() {
                           </td>
                         )}
 
-                        {/* 🌟 LIMITE AGREGADO */}
                         <td className="px-4 py-3 align-top pt-4">
                           {item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0 ? (
                             <div className="w-full p-1.5 border border-transparent rounded-md text-sm font-bold font-mono text-emerald-700 bg-emerald-50 flex items-center justify-between cursor-pointer shadow-sm hover:border-emerald-300 transition-colors" onClick={() => toggleExpandirLinha(identificadorUnico)} title="Soma das Modalidades. Clique para detalhar.">
@@ -1055,7 +1070,6 @@ export default function CadastroPage() {
                           )}
                         </td>
                         
-                        {/* 🌟 TAXA AGREGADA */}
                         <td className="px-4 py-3 align-top pt-4">
                           {item.modalidades_aprovadas && item.modalidades_aprovadas.length > 0 ? (
                             <div className="w-full p-1.5 border border-transparent rounded-md text-[10px] font-bold font-mono text-emerald-700 bg-emerald-50 flex items-center justify-center cursor-pointer shadow-sm hover:border-emerald-300 transition-colors uppercase tracking-wider" onClick={() => toggleExpandirLinha(identificadorUnico)} title="Clique para ver o detalhamento de taxas">
@@ -1085,12 +1099,12 @@ export default function CadastroPage() {
                       {/* CORPO EXPANDIDO (DETALHES) */}
                       {isOpen && (
                         <tr>
-                          <td colSpan={usuarioAtual?.perfil !== "comercial" ? 6 : 5} className={`${isGrupo ? "bg-indigo-50/20" : "bg-slate-50"} border-b-2 border-indigo-100 p-6 shadow-inner`}>
+                          <td colSpan={user?.cargo?.toLowerCase() !== "comercial" ? 6 : 5} className={`${isGrupo ? "bg-indigo-50/20" : "bg-slate-50"} border-b-2 border-indigo-100 p-6 shadow-inner`}>
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                               
                               <div className="xl:col-span-3 space-y-4">
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
-                                  <button onClick={() => excluirCedente(item.id, index, item.cedente)} className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors" title="Excluir Cedente">
+                                  <button onClick={() => excluirCedente(item.id, index, item.cedente)} className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors cursor-pointer" title="Excluir Cedente">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                   </button>
                                   
@@ -1113,7 +1127,6 @@ export default function CadastroPage() {
                                     placeholder="Ex: No aguardo das certidões..." />
                                 </div>
                                 
-                                {/* CONTROLE INDIVIDUAL DO GRUPO */}
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                   <label className="flex items-center gap-2 mb-2 text-[10px] text-slate-500 font-bold uppercase">
                                     <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> 
@@ -1127,14 +1140,14 @@ export default function CadastroPage() {
 
                               <div className="xl:col-span-9 space-y-4">
                                 
-                                {/* 🌟 PAINEL: MODALIDADES APROVADAS */}
+                                {/* MODALIDADES APROVADAS */}
                                 <div className="bg-emerald-50/30 p-5 rounded-xl border border-emerald-100 shadow-sm relative overflow-hidden mb-4">
                                   <div className={`absolute top-0 left-0 w-1.5 h-full bg-emerald-500`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
                                     <span className={`font-black text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-2`}>
                                       💰 Limites e Modalidades Aprovadas
                                     </span>
-                                    <button onClick={() => addModalidade(index)} className="text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all border bg-white text-emerald-600 border-emerald-200 hover:border-emerald-300 hover:shadow-sm">
+                                    <button onClick={() => addModalidade(index)} className="text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all border bg-white text-emerald-600 border-emerald-200 hover:border-emerald-300 hover:shadow-sm cursor-pointer">
                                       + Add Modalidade
                                     </button>
                                   </div>
@@ -1171,7 +1184,7 @@ export default function CadastroPage() {
                                               <input type="text" value={mod.prazo} onChange={(e) => handleModalidadeChange(index, modIdx, 'prazo', e.target.value)} placeholder="Ex: 30 dias" className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200" />
                                             </td>
                                             <td className="p-1.5 border border-emerald-50 text-center">
-                                              <button onClick={() => removeModalidade(index, modIdx)} className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded font-bold transition-colors border border-transparent hover:border-rose-200">X</button>
+                                              <button onClick={() => removeModalidade(index, modIdx)} className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded font-bold transition-colors border border-transparent hover:border-rose-200 cursor-pointer">X</button>
                                             </td>
                                           </tr>
                                         ))}
@@ -1191,7 +1204,7 @@ export default function CadastroPage() {
                                   <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_sec ? "bg-slate-300" : "bg-blue-500"}`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
                                     <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_sec ? "text-slate-400 line-through" : "text-blue-800"}`}>🏦 Fluxo Securitizadora</span>
-                                    <button onClick={() => handleInputChange(index, "nao_opera_sec", !item.nao_opera_sec)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_sec ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
+                                    <button onClick={() => handleInputChange(index, "nao_opera_sec", !item.nao_opera_sec)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border cursor-pointer ${item.nao_opera_sec ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
                                       {item.nao_opera_sec ? "🚫 NÃO OPERA (INATIVO)" : "Desativar Securitizadora"}
                                     </button>
                                   </div>
@@ -1210,7 +1223,7 @@ export default function CadastroPage() {
                                   <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${item.nao_opera_fidc ? "bg-slate-300" : "bg-purple-500"}`}></div>
                                   <div className="flex items-center justify-between gap-2 mb-4 ml-2 mr-2">
                                     <span className={`font-black text-xs uppercase tracking-wider transition-colors ${item.nao_opera_fidc ? "text-slate-400 line-through" : "text-purple-800"}`}>🔮 Fluxo FIDC</span>
-                                    <button onClick={() => handleInputChange(index, "nao_opera_fidc", !item.nao_opera_fidc)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border ${item.nao_opera_fidc ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
+                                    <button onClick={() => handleInputChange(index, "nao_opera_fidc", !item.nao_opera_fidc)} className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all border cursor-pointer ${item.nao_opera_fidc ? "bg-rose-100 text-rose-700 border-rose-200 shadow-inner" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 shadow-sm"}`}>
                                       {item.nao_opera_fidc ? "🚫 NÃO OPERA (INATIVO)" : "Desativar FIDC"}
                                     </button>
                                   </div>
@@ -1230,7 +1243,7 @@ export default function CadastroPage() {
                                 <button 
                                   onClick={() => salvarLinha(item)} 
                                   disabled={salvando || (!item._isEditado && !item._isNovo)} 
-                                  className={`px-5 py-2.5 font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2
+                                  className={`px-5 py-2.5 font-bold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer
                                     ${salvando || (!item._isEditado && !item._isNovo) 
                                       ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none" 
                                       : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30"
@@ -1259,7 +1272,7 @@ export default function CadastroPage() {
 
       </div>
 
-      {/* ======================= MODAL DE CRIAÇÃO DE GRUPO ECONÔMICO ======================= */}
+      {/* MODAL GRUPO ECONÔMICO */}
       {modalGrupoAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full flex flex-col overflow-hidden">
@@ -1271,7 +1284,7 @@ export default function CadastroPage() {
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">Vincule múltiplos CNPJs sob o mesmo grupo.</p>
               </div>
-              <button onClick={() => setModalGrupoAberto(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setModalGrupoAberto(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
@@ -1311,7 +1324,7 @@ export default function CadastroPage() {
                         type="checkbox" 
                         checked={selecionadosParaGrupo.includes(c.id)} 
                         onChange={() => toggleSelecaoParaGrupo(c.id)} 
-                        className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                        className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
                       />
                       <div className="flex-1">
                         <span className="text-sm font-bold text-slate-800 block truncate">{c.cedente || "[NOVA EMPRESA]"}</span>
@@ -1336,7 +1349,7 @@ export default function CadastroPage() {
               <button 
                 onClick={aplicarGrupoLocal}
                 disabled={!nomeGrupoInput.trim() || selecionadosParaGrupo.length === 0}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:shadow-none"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:shadow-none cursor-pointer"
               >
                 Vincular ao Grupo
               </button>
@@ -1345,7 +1358,7 @@ export default function CadastroPage() {
         </div>
       )}
 
-      {/* ======================= MODAL DE DISPARO EM LOTE ======================= */}
+      {/* MODAL DISPARO EM LOTE */}
       {modalDisparoAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
@@ -1358,21 +1371,20 @@ export default function CadastroPage() {
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">Configure o envio automático para os comerciais.</p>
               </div>
-              <button onClick={() => !enviandoLote && setModalDisparoAberto(false)} disabled={enviandoLote} className="text-slate-400 hover:text-slate-600 disabled:opacity-50">
+              <button onClick={() => !enviandoLote && setModalDisparoAberto(false)} disabled={enviandoLote} className="text-slate-400 hover:text-slate-600 disabled:opacity-50 cursor-pointer">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 bg-white space-y-6">
               
-              {/* SELECT DE TEMPLATES */}
               <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
                 <label className="block text-xs font-bold text-indigo-900 mb-2 uppercase">1. Selecione o Roteiro (Template):</label>
                 <select 
                   value={templateSelecionadoId}
                   onChange={(e) => setTemplateSelecionadoId(e.target.value)}
                   disabled={enviandoLote || templatesEmail.length === 0}
-                  className="w-full p-3 bg-white border border-indigo-200 rounded-lg text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  className="w-full p-3 bg-white border border-indigo-200 rounded-lg text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all cursor-pointer"
                 >
                   <option value="" disabled>-- Clique para escolher um template --</option>
                   {templatesEmail.map(t => (
@@ -1382,12 +1394,10 @@ export default function CadastroPage() {
                 {templatesEmail.length === 0 && <p className="text-[10px] text-rose-500 mt-1">Nenhum template cadastrado no banco.</p>}
               </div>
 
-              {/* 🌟 MÓDULO EXCLUSIVO PARA PENDÊNCIAS DE DOCUMENTOS */}
               {tipoDisparoAtual === "PENDENCIA" && (
                 <div className="bg-rose-50 p-4 rounded-xl border border-rose-200">
                   <label className="block text-xs font-bold text-rose-900 mb-2 uppercase">2. Selecione os Documentos Pendentes:</label>
                   
-                  {/* Busca e Adição de Documento */}
                   <div className="flex gap-2 mb-3">
                     <input 
                       type="text" 
@@ -1402,13 +1412,12 @@ export default function CadastroPage() {
                     <button 
                       onClick={salvarNovoDocumentoNoBanco}
                       disabled={!novoDocInput.trim()}
-                      className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg disabled:opacity-50 transition-colors"
+                      className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer"
                     >
                       + Cadastrar Novo
                     </button>
                   </div>
 
-                  {/* Lista de Documentos */}
                   <div className="max-h-40 overflow-y-auto border border-rose-200 rounded-lg bg-white p-2 space-y-1">
                     {listaDocsGerais.filter(d => d.toLowerCase().includes(buscaDoc.toLowerCase())).map(doc => (
                       <label key={doc} className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${docsMarcadosParaEnvio.includes(doc) ? "bg-rose-100" : "hover:bg-slate-50"}`}>
@@ -1417,7 +1426,7 @@ export default function CadastroPage() {
                           checked={docsMarcadosParaEnvio.includes(doc)} 
                           onChange={() => toggleDocMarcado(doc)} 
                           disabled={enviandoLote}
-                          className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500"
+                          className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer"
                         />
                         <span className="text-sm text-slate-700 font-medium flex-1">{doc}</span>
                       </label>
@@ -1426,7 +1435,6 @@ export default function CadastroPage() {
                 </div>
               )}
 
-              {/* SELEÇÃO DE CLIENTES */}
               {cedentesDisponiveis.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
                   Nenhum cliente está nesta fase no momento.
@@ -1440,13 +1448,12 @@ export default function CadastroPage() {
                     <button 
                       onClick={selecionarTodosDisparo} 
                       disabled={enviandoLote}
-                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50 cursor-pointer"
                     >
                       {selecionadosParaDisparo.length === cedentesModalFiltrados.length && cedentesModalFiltrados.length > 0 ? "Desmarcar Todos" : "Selecionar Todos"}
                     </button>
                   </div>
 
-                  {/* LUPA DE PESQUISA INTERNA NO MODAL */}
                   <div className="mb-3 relative">
                     <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1487,14 +1494,14 @@ export default function CadastroPage() {
                               <button 
                                 onClick={() => setarFundoDoDisparo(c.id, "SEC")}
                                 disabled={enviandoLote}
-                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider cursor-pointer ${fundoDisparo[c.id] === "SEC" || !fundoDisparo[c.id] ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
                               >
                                 SEC
                               </button>
                               <button 
                                 onClick={() => setarFundoDoDisparo(c.id, "FIDC")}
                                 disabled={enviandoLote}
-                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                                className={`px-3 py-1.5 text-[10px] font-black rounded-md transition-all uppercase tracking-wider cursor-pointer ${fundoDisparo[c.id] === "FIDC" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
                               >
                                 FIDC
                               </button>
@@ -1523,7 +1530,6 @@ export default function CadastroPage() {
                 </div>
               )}
 
-              {/* LOGS DE ENVIO */}
               {logsDisparo.length > 0 && (
                 <div className="p-3 bg-slate-900 rounded-xl max-h-32 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 border border-slate-700">
                   {logsDisparo.map((log, i) => (
@@ -1541,14 +1547,14 @@ export default function CadastroPage() {
                 <button 
                   onClick={() => setModalDisparoAberto(false)} 
                   disabled={enviandoLote}
-                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   Fechar
                 </button>
                 <button 
                   onClick={executarDisparoEmLote}
                   disabled={enviandoLote || selecionadosParaDisparo.length === 0 || !templateSelecionadoId}
-                  className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:shadow-none"
+                  className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:shadow-none cursor-pointer"
                 >
                   {enviandoLote ? (
                     <>
@@ -1569,7 +1575,6 @@ export default function CadastroPage() {
         </div>
       )}
 
-      {/* ESTILOS DE SCROLL E HIDE */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
