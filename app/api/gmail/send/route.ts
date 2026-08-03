@@ -6,9 +6,11 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    // 🔒 1. VALIDAÇÃO DO CRACHÁ (TOKEN JWT)
+    // Agora o frontend envia o token no header "Authorization", e esta função vai aprovar!
     const { usuario, erro } = await validarRequisicaoApi(request);
     if (erro || !usuario) {
-      return NextResponse.json({ error: erro || "Acesso negado (Token JWT)." }, { status: 401 });
+      return NextResponse.json({ error: erro || "Acesso negado (Token JWT ausente ou inválido)." }, { status: 401 });
     }
 
     const { userEmail, contaAtiva, mensagemId, para, cc, assunto, textoResposta } = await request.json();
@@ -16,12 +18,12 @@ export async function POST(request: Request) {
     // 🌟 TRATAMENTO DE STRING PARA EVITAR ERRO DE BUSCA NO BANCO
     const emailTratado = userEmail.toLowerCase().trim();
 
+    // 🛡️ VALIDAÇÃO DE IDENTIDADE
     if (emailTratado !== usuario.email.toLowerCase().trim() && usuario.cargo !== 'Master') {
       return NextResponse.json({ error: "Você não tem permissão para enviar e-mails em nome deste usuário." }, { status: 403 });
     }
 
-    // 🛡️ Busca de forma mais segura: prioriza o email do usuário. 
-    // Se você aceita múltiplas contas por usuário, precisa repensar o "contaAtiva".
+    // 🛡️ Busca de forma segura a integração do Google
     const query = supabaseAdmin
       .from("usuarios_integracoes")
       .select("*")
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
     const expiraEm = integracao.gmail_token_expira_em ? new Date(integracao.gmail_token_expira_em).getTime() : 0;
     const agora = Date.now();
 
-    // Se o token estiver vazio ou expirando em menos de 5 min
+    // 🔄 RENOVAÇÃO DO TOKEN OAUTH2 (Se expirado ou expirando em < 5 min)
     if (!accessToken || agora > (expiraEm - 5 * 60 * 1000)) {
       console.log(`🔄 [Token Expirado] Renovando acesso para: ${emailTratado}`);
       
@@ -80,6 +82,7 @@ export async function POST(request: Request) {
       accessToken = novosTokens.access_token;
       const novoLimiteExpira = new Date(Date.now() + novosTokens.expires_in * 1000).toISOString();
 
+      // Salva o novo token usando a Chave Mestra para não esbarrar no RLS
       await supabaseAdmin
         .from("usuarios_integracoes")
         .update({
@@ -87,9 +90,10 @@ export async function POST(request: Request) {
           gmail_token_expira_em: novoLimiteExpira,
           atualizado_em: new Date().toISOString()
         })
-        .eq("id", integracao.id); // Atualiza pelo ID para não ter erro
+        .eq("id", integracao.id); 
     }
 
+    // ✉️ MONTAGEM DO E-MAIL
     const emailRemetenteReal = integracao.gmail_conta_conectada || emailTratado;
     const assuntoFormatado = (mensagemId && !assunto.toLowerCase().startsWith("re:")) ? `Re: ${assunto}` : assunto;
 
@@ -99,18 +103,19 @@ export async function POST(request: Request) {
     const assuntoString = `Subject: ${assuntoFormatado}\r\n`;
     
     const threadString = mensagemId ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n` : "";
-    const tipoString = `Content-Type: text/html; charset="UTF-8"\r\n\r\n`; // Ajustado para text/html caso o roteiro venha formatado
+    const tipoString = `Content-Type: text/html; charset="UTF-8"\r\n\r\n`; 
     const corpoString = `${textoResposta}\r\n`;
 
     const emailBruto = deString + paraString + ccString + assuntoString + threadString + tipoString + corpoString;
     
-    // 🌟 MELHORIA: Forma correta e segura de gerar Base64 URL Safe no Node.js
+    // 🌟 Codificação Base64 URL Safe recomendada para a API do Gmail
     const base64Safe = Buffer.from(emailBruto)
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
 
+    // 🚀 DISPARO PARA A API DO GOOGLE
     const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: {
@@ -120,11 +125,11 @@ export async function POST(request: Request) {
       body: JSON.stringify({ raw: base64Safe }), 
     });
 
+    // 🚨 TRATAMENTO DE ERROS DO GOOGLE
     if (!res.ok) {
       const errData = await res.json();
       console.log("❌ [Erro API Gmail Send]:", errData);
       
-      // Se o Gmail rejeitar (ex: scope invalido), ele cai aqui
       if (errData.error?.status === "UNAUTHENTICATED" || errData.error?.status === "PERMISSION_DENIED") {
          return NextResponse.json({ error: "Permissões do Google revogadas ou escopo inválido." }, { status: 401 });
       }
@@ -132,7 +137,9 @@ export async function POST(request: Request) {
       throw new Error(errData.error?.message || "Falha no motor do Google");
     }
 
+    // 🎉 SUCESSO!
     return NextResponse.json({ success: true });
+
   } catch (error: any) {
     console.error("❌ Erro Catch Geral:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
