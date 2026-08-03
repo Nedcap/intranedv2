@@ -26,8 +26,21 @@ export default function LoginPage() {
   useEffect(() => {
     const verificarSessaoAtiva = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      
       if (session) {
-        router.push("/dashboard");
+        // Verifica se o usuário tem a flag de trocar senha ativada
+        const { data: perfil } = await supabase
+          .from("usuarios")
+          .select("*")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (perfil?.primeiro_acesso) {
+          setUsuarioTemporario(perfil);
+          setExigirNovaSenha(true);
+        } else {
+          router.push("/dashboard");
+        }
       }
     };
     verificarSessaoAtiva();
@@ -49,15 +62,14 @@ export default function LoginPage() {
 
       if (authError) {
         alert("❌ Acesso negado. Verifique os dados inseridos.");
-        // Se der erro, garante que a sessão não fique presa
         await supabase.auth.signOut(); 
         return;
       }
 
-      // 2. 📑 Puxa o perfil complementar apenas para checar a flag de "primeiro_acesso"
+      // 2. 📑 Puxa o perfil complementar (Usando SELECT * para não quebrar se a coluna faltar)
       const { data: perfil, error: perfilError } = await supabase
         .from("usuarios")
-        .select("id, primeiro_acesso")
+        .select("*")
         .eq("id", authData.user.id)
         .maybeSingle();
 
@@ -108,16 +120,15 @@ export default function LoginPage() {
 
       if (authUpdateError) throw authUpdateError;
 
-      // 2. 🏳️ Desmarca a trava na tabela pública (Usando RLS, permitiremos apenas o próprio user atualizar isso)
-      const { error: tabelaError } = await supabase
+      // 2. 🏳️ Desmarca a trava na tabela pública
+      await supabase
         .from("usuarios")
         .update({ primeiro_acesso: false })
         .eq("id", usuarioTemporario.id);
 
-      if (tabelaError) throw tabelaError;
-
       // 3. 💾 Redireciona!
       alert("🎉 Senha corporativa definida com sucesso! Acesso liberado.");
+      setExigirNovaSenha(false);
       router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
