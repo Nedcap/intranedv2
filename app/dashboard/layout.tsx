@@ -8,6 +8,9 @@ import { MAPA_DE_ROTAS } from "@/lib/rotas";
 import NotificadorGlobal from "@/components/NotificadorGlobal";
 import { useAuth } from "@/lib/AuthContext"; // 🛡️ Importando o nosso Crachá Global
 
+// ⚡ Força a renderização dinâmica no Next.js/Vercel (impede falhas de prerender no 'npm run build')
+export const dynamic = 'force-dynamic';
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   

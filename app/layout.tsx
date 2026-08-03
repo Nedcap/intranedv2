@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./globals.css"; 
 import { Inter } from "next/font/google";
+import { AuthProvider } from "@/lib/AuthContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,7 +18,11 @@ export default function RootLayout({
   return (
     // 🎯 Fix: suppressHydrationWarning evita quebras e logs de erro causados por extensões de navegadores
     <html lang="pt-BR" suppressHydrationWarning>
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }
