@@ -1,52 +1,32 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
-import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Importando o segurança!
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // Seu segurança!
 
 export async function POST(request: Request) {
   try {
-    // 🔒 BLINDAGEM DA ROTA: Se não tiver o Token do seu sistema logado, barra!
+    // 1. Blindagem de segurança
     const { usuario, erro } = await validarRequisicaoApi(request);
     if (erro) {
-      return NextResponse.json({ error: "Acesso Negado. Autenticação ausente ou inválida." }, { status: 401 });
+      return NextResponse.json({ error: "Acesso Negado." }, { status: 401 });
     }
 
-    const { tipo, documento } = await request.json();
+    // Pega os dados que vieram do Frontend (tipo e documento)
+    const body = await request.json();
 
-    if (!tipo || !documento) {
-      return NextResponse.json({ error: 'Tipo e documento são obrigatórios.' }, { status: 400 });
-    }
+    // 2. 🔥 A URL MÁGICA DO SEU NGROK 
+    const urlDoNgrok = "https://dinghy-many-herself.ngrok-free.dev"; 
 
-    // 🛑 CHAVE BLINDADA PELA VARIÁVEL DE AMBIENTE
-    const apiKey = process.env.LEMIT_API_KEY;
-    if (!apiKey) {
-      console.error("❌ ERRO: A variável LEMIT_API_KEY não foi configurada no servidor.");
-      return NextResponse.json({ error: 'Configuração de servidor pendente.' }, { status: 500 });
-    }
+    console.log(`[VERCEL] ➔ Repassando pacote para o PC Local (Escritório)...`);
 
-    const docLimpo = documento.replace(/\D/g, '');
-    const urlLemit = `https://api.lemit.com.br/api/v1/consulta/${tipo}`;
-    
-    const params = new URLSearchParams();
-    params.append('documento', docLimpo);
+    // 3. Manda para o script rodando no seu PC local
+    // (Ele vai bater na rota /proxy-lemit que criamos no server.js)
+    const resposta = await axios.post(`${urlDoNgrok}/proxy-lemit`, body);
 
-    console.log(`[VERCEL] Executando requisição segura para o Lemit (${tipo}) | Doc: ${docLimpo}`);
-
-    const resposta = await axios.post(urlLemit, params.toString(), {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`, // Usando a chave do .env
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
-    });
-
+    // 4. Devolve para o Frontend o que o PC local retornou da Lemit
     return NextResponse.json(resposta.data);
 
   } catch (error: any) {
-    const dadosErro = error.response?.data || error.message;
-    console.error('❌ ERRO LEMIT:', dadosErro);
-    
-    return NextResponse.json(
-      { error: 'Erro de comunicação com o fornecedor.', detalhes: dadosErro },
-      { status: error.response?.status || 500 }
-    );
+    console.error('❌ ERRO NO TÚNEL VERCEL -> PC LOCAL:', error.message);
+    return NextResponse.json({ error: 'Erro de comunicação no túnel local.' }, { status: 500 });
   }
 }
