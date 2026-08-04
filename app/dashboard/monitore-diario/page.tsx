@@ -276,11 +276,18 @@ export default function MonitoreDiarioPage() {
         }
 
         setStatusProcessamento(`[${fD(dataArquivo)}] Salvando lotes no banco...`);
-        const cnpjsAproximados = Object.keys(clientesHoje).map(c => c + "000100");
+        
+        // CORREÇÃO: Criar a lista de CNPJs exatos que o CRM (cedentesDB) tem
+        const cnpjsParaBuscar = Object.keys(clientesHoje).map(cnpjBase => {
+          const cedenteOficial = cedentesDB?.find(c => extrairRaizCnpj(c.cnpj) === cnpjBase);
+          return cedenteOficial ? cedenteOficial.cnpj : (cnpjBase + "000100");
+        });
+
+        // Trazendo histórico baseado nos CNPJs exatos e formatados
         const { data: histDB } = await supabase
           .from("historico_consolidado")
           .select("*")
-          .in("cnpj_cliente", cnpjsAproximados)
+          .in("cnpj_cliente", cnpjsParaBuscar)
           .order("data_processamento", { ascending: false });
 
         const registrosHistorico: any[] = [];
@@ -303,7 +310,8 @@ export default function MonitoreDiarioPage() {
              dadosHoje.jsonb.comercial = { status_banco: "PROSPECTO_AVULSO" };
           }
 
-          const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjParaSalvar && h.data_processamento <= dataArquivo) || [];
+          // CORREÇÃO: Usar estritamente menor (<) na data para não pegar rodadas duplicadas do mesmo dia
+          const regsAnteriores = histDB?.filter(h => h.cnpj_cliente === cnpjParaSalvar && h.data_processamento < dataArquivo) || [];
           
           let saldoAnterior = 0;
           const vFinais: Record<string, number> = { PEFIN: 0, REFIN: 0, PROTESTO: 0, "AÇÃO JUDICIAL": 0, "DÍVIDA VENCIDA": 0 };
