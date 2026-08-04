@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { supabase } from "@/lib/supabase"; // 🛡️ Importação do Supabase adicionada
 
 export default function LemitDashboardPage() {
   const [tipo, setTipo] = useState<'pessoa' | 'empresa'>('empresa');
@@ -22,14 +23,17 @@ export default function LemitDashboardPage() {
         // Limpa o documento para enviar apenas números
         const docLimpo = documento.replace(/\D/g, '');
 
-        // Monta o formato x-www-form-urlencoded direto no Front-end
-        const params = new URLSearchParams();
-        params.append('documento', docLimpo);
+        // 🛡️ Buscando o token JWT do usuário logado
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
 
-        // FAZ A CHAMADA DIRETO DO NAVEGADOR (Herda o IP Dedicado da extensão!)
-        const response = await fetch('/api/lemmit', {
+        // FAZ A CHAMADA DIRETO DO NAVEGADOR
+        const response = await fetch('/api/lemmit', { // Certifique-se que esta rota bate com o nome do seu arquivo de API
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+          },
           body: JSON.stringify({ tipo, documento }),
         });
 
@@ -56,7 +60,7 @@ export default function LemitDashboardPage() {
       }
     };
 
-  // Atalhos para ler os dados dinamicamente se for Pessoa ou Empresa [cite: 8, 44]
+  // Atalhos para ler os dados dinamicamente se for Pessoa ou Empresa
   const info = dados?.pessoa || dados?.empresa;
   const nomeExibicao = info?.nome || info?.razao_social;
 
@@ -92,29 +96,29 @@ export default function LemitDashboardPage() {
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '20px' }}>
                 <h2 style={{ fontSize: '18px', margin: '0 0 12px 0', color: '#0f172a', textTransform: 'uppercase' }}>{nomeExibicao}</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', fontSize: '14px' }}>
-                  <div><strong>Documento:</strong> <span style={{ fontFamily: 'monospace' }}>{info.cpf || info.cnpj}</span></div> [cite: 8, 44]
-                  {info.situacao_cpf && <div><strong>Situação CPF:</strong> {info.situacao_cpf}</div>} [cite: 8]
-                  {info.situacao && <div><strong>Situação Cadastral:</strong> {info.situacao}</div>} [cite: 44]
-                  {info.renda && <div><strong>Estimativa de Renda:</strong> R$ {info.renda}</div>} [cite: 8]
-                  {dados.risco_credito?.score_credito && <div><strong>Risco de Crédito:</strong> {dados.risco_credito.score_credito}</div>} [cite: 12]
+                  <div><strong>Documento:</strong> <span style={{ fontFamily: 'monospace' }}>{info.cpf || info.cnpj}</span></div>
+                  {info.situacao_cpf && <div><strong>Situação CPF:</strong> {info.situacao_cpf}</div>}
+                  {info.situacao && <div><strong>Situação Cadastral:</strong> {info.situacao}</div>}
+                  {info.renda && <div><strong>Estimativa de Renda:</strong> R$ {info.renda}</div>}
+                  {dados.risco_credito?.score_credito && <div><strong>Risco de Crédito:</strong> {dados.risco_credito.score_credito}</div>}
                 </div>
               </div>
 
               {/* CONTATOS: CELULARES E EMAILS */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
-                  <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: '#64748b' }}>Celulares Vinculados</h3> [cite: 10, 46]
+                  <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: '#64748b' }}>Celulares Vinculados</h3>
                   {info.celulares?.length > 0 ? (
                     <ul style={{ paddingLeft: '20px', margin: 0, fontSize: '14px' }}>
-                      {info.celulares.map((c: any, i: number) => <li key={i} style={{ marginBottom: '4px' }}>({c.ddd}) {c.numero} {c.whatsapp && <span style={{ color: '#16a34a', fontSize: '12px' }}>(WhatsApp)</span>}</li>)} [cite: 10, 19]
+                      {info.celulares.map((c: any, i: number) => <li key={i} style={{ marginBottom: '4px' }}>({c.ddd}) {c.numero} {c.whatsapp && <span style={{ color: '#16a34a', fontSize: '12px' }}>(WhatsApp)</span>}</li>)}
                     </ul>
                   ) : <span style={{ fontSize: '13px', color: '#94a3b8' }}>Nenhum celular localizado.</span>}
                 </div>
                 <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
-                  <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: '#64748b' }}>E-mails Vinculados</h3> [cite: 11, 46]
+                  <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: '#64748b' }}>E-mails Vinculados</h3>
                   {info.emails?.length > 0 ? (
                     <ul style={{ paddingLeft: '20px', margin: 0, fontSize: '14px' }}>
-                      {info.emails.map((e: any, i: number) => <li key={i} style={{ marginBottom: '4px', fontFamily: 'monospace' }}>{e.email}</li>)} [cite: 11, 20]
+                      {info.emails.map((e: any, i: number) => <li key={i} style={{ marginBottom: '4px', fontFamily: 'monospace' }}>{e.email}</li>)}
                     </ul>
                   ) : <span style={{ fontSize: '13px', color: '#94a3b8' }}>Nenhum e-mail localizado.</span>}
                 </div>
