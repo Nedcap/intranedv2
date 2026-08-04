@@ -3,18 +3,30 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Search, Filter, SortDesc } from "lucide-react"; // Se não tiver lucide-react, pode remover os ícones, mas recomendo ter!
 
 // ============================================================================
 // 🧽 UTILS DE FORMATAÇÃO E LIMPEZA
 // ============================================================================
-const formatarMoeda = (valor: any) => {
-  if (valor === undefined || valor === null || valor === "") return "R$ 0,00";
-  let num = Number(valor);
-  if (isNaN(num) && typeof valor === "string") {
-    num = Number(valor.replace(/\./g, "").replace(",", "."));
+
+// NOVO: Limpador blindado para converter strings de banco (ex: "R$ 50.000,00" ou "50000,00") em número real
+const limparValorNumerico = (valor: any) => {
+  if (valor === undefined || valor === null || valor === "") return 0;
+  if (typeof valor === "number") return valor;
+  
+  // Remove tudo que não for número, vírgula, ponto ou sinal de menos
+  let limpo = String(valor).replace(/[^\d.,-]/g, "");
+  
+  // Se tiver vírgula, assume que é padrão BR (ex: 10.000,50 -> 10000.50)
+  if (limpo.includes(",")) {
+    limpo = limpo.replace(/\./g, "").replace(",", ".");
   }
-  if (isNaN(num)) return "R$ 0,00";
+  
+  const numero = parseFloat(limpo);
+  return isNaN(numero) ? 0 : numero;
+};
+
+const formatarMoeda = (valor: any) => {
+  const num = limparValorNumerico(valor);
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num);
 };
 
@@ -104,7 +116,6 @@ export default function RaioXSerasaPage() {
       try {
         setLoading(true);
         
-        // Dispara as duas buscas em paralelo para ganhar tempo
         const [resHist, resCad] = await Promise.all([
           supabase.from("historico_consolidado").select("*").order("data_processamento", { ascending: false }).limit(15000),
           supabase.from("cadastro_cedentes").select("cnpj, limite, risco_sec, risco_fidc").limit(15000)
@@ -115,7 +126,6 @@ export default function RaioXSerasaPage() {
         if (resHist.data) {
           const mapUnicos = new Map();
           
-          // Separa apenas o registro mais recente (com inteligência) de cada CNPJ
           resHist.data.forEach(item => {
             const temInteligencia = item.detalhes_completos && Object.keys(item.detalhes_completos).length > 0;
             if (temInteligencia && !mapUnicos.has(item.cnpj_cliente)) {
@@ -123,15 +133,15 @@ export default function RaioXSerasaPage() {
             }
           });
 
-          // Faz o cruzamento de dados para injetar o LIMITE e o RISCO verdadeiros do CRM
+          // Cruzamento e blindagem com o limparValorNumerico
           const listaFinal = Array.from(mapUnicos.values()).map(item => {
             const raizItem = extrairRaizCnpj(item.cnpj_cliente);
             const cad = resCad.data?.find(c => extrairRaizCnpj(c.cnpj) === raizItem);
             
             return {
               ...item,
-              limite_atualizado: cad ? parseFloat(cad.limite || 0) : (item.detalhes_completos?.comercial?.limite_credito || 0),
-              risco_atualizado: cad ? (parseFloat(cad.risco_sec || 0) + parseFloat(cad.risco_fidc || 0)) : parseFloat(item.risco_aberto || 0)
+              limite_atualizado: cad ? limparValorNumerico(cad.limite) : limparValorNumerico(item.detalhes_completos?.comercial?.limite_credito),
+              risco_atualizado: cad ? (limparValorNumerico(cad.risco_sec) + limparValorNumerico(cad.risco_fidc)) : limparValorNumerico(item.risco_aberto)
             };
           });
 
@@ -152,7 +162,6 @@ export default function RaioXSerasaPage() {
   const registrosFiltrados = useMemo(() => {
     let filtrados = [...registros];
 
-    // 1. Busca por Texto
     if (busca) {
       const b = busca.toLowerCase();
       filtrados = filtrados.filter(r => 
@@ -161,14 +170,12 @@ export default function RaioXSerasaPage() {
       );
     }
 
-    // 2. Filtro de Status (Restritivos)
     if (filtroStatus === "COM_RESTRICAO") {
       filtrados = filtrados.filter(r => parseFloat(r.saldo_atual || 0) > 0);
     } else if (filtroStatus === "NADA_CONSTA") {
       filtrados = filtrados.filter(r => parseFloat(r.saldo_atual || 0) === 0);
     }
 
-    // 3. Ordenação
     filtrados.sort((a, b) => {
       if (ordenacao === "ALFABETICA") {
         return (a.cedente || "").localeCompare(b.cedente || "");
@@ -177,7 +184,7 @@ export default function RaioXSerasaPage() {
         return parseFloat(b.saldo_atual || 0) - parseFloat(a.saldo_atual || 0);
       }
       if (ordenacao === "MAIOR_LIMITE") {
-        return parseFloat(b.limite_atualizado || 0) - parseFloat(a.limite_atualizado || 0);
+        return (b.limite_atualizado || 0) - (a.limite_atualizado || 0);
       }
       return 0;
     });
@@ -217,13 +224,10 @@ export default function RaioXSerasaPage() {
 
     let totalDetalhado = 0;
 
-    // 🧠 Agrupamento de Comportamento por Mês
     const compAgrupado = comportamentoBruto.reduce((acc: any, curr: any) => {
       if (!acc[curr.mes]) acc[curr.mes] = { mes: curr.mes, totalMes: "-", pontual: "-" };
-      
       if (curr.tipo === "TOTAL MES") acc[curr.mes].totalMes = limparTextoComp(curr.avaliacao);
       if (curr.tipo === "PONTUAL") acc[curr.mes].pontual = limparTextoComp(curr.avaliacao);
-      
       return acc;
     }, {});
     
@@ -232,7 +236,6 @@ export default function RaioXSerasaPage() {
     return (
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-10">
         
-        {/* CABEÇALHO DO DOSSIÊ */}
         <div className="bg-gradient-to-br from-slate-900 to-blue-900 text-white p-6 rounded-2xl shadow-lg flex flex-col xl:flex-row justify-between items-start xl:items-stretch gap-4">
           <div className="flex-1">
             <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">{selecionado.cedente || "Empresa Não Informada"}</h1>
@@ -256,11 +259,9 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* INDICADORES FINANCEIROS GLOBAIS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Limite de Crédito Interno</div>
-            {/* Agora usamos o limite_atualizado mapeado do banco CRM */}
             <div className="text-2xl font-black font-mono text-blue-900">{formatarMoeda(selecionado.limite_atualizado)}</div>
             <div className="text-xs text-slate-500 mt-2 font-medium">Baseado no CRM</div>
           </div>
@@ -276,7 +277,6 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* COMPORTAMENTO DE PAGAMENTO (BLOCO 0211) */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4">
             <span className="w-2 h-6 bg-emerald-500 rounded-md inline-block shadow-sm"></span>
@@ -314,7 +314,6 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* MINI-CARDS DE RESTRITIVOS */}
         <div>
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-800 uppercase tracking-wide border-b-2 border-slate-100 pb-2 mb-4 mt-6">
             <span className="w-2 h-6 bg-rose-600 rounded-md inline-block shadow-sm"></span>
@@ -337,7 +336,6 @@ export default function RaioXSerasaPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* TABELA DÍVIDAS DETALHADAS */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
               <div className="bg-slate-50 border-b border-slate-200 p-3.5 font-bold uppercase text-slate-600 tracking-wider text-[10px] text-center">
                 Detalhamento de Protestos e Ações
@@ -377,7 +375,6 @@ export default function RaioXSerasaPage() {
               </div>
             </div>
 
-            {/* TABELA RADAR DE CONSULTAS */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
               <div className="bg-slate-50 border-b border-slate-200 p-3.5 font-bold uppercase text-slate-600 tracking-wider text-[10px] text-center">
                 Radar de Buscas (Mercado)
@@ -418,7 +415,6 @@ export default function RaioXSerasaPage() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-80px)] gap-6 p-4 max-w-[1800px] mx-auto font-sans text-slate-800">
       
-      {/* 📜 SIDEBAR: LISTA DE CEDENTES E FILTROS */}
       <div className="w-full md:w-[340px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden shrink-0">
         
         <div className="p-5 border-b border-slate-200 bg-slate-50/80 space-y-4">
@@ -427,7 +423,6 @@ export default function RaioXSerasaPage() {
             <p className="text-xs text-slate-500 mt-0.5">Dossiê detalhado por cedente</p>
           </div>
 
-          {/* Área de Busca */}
           <div className="relative">
             <input
               type="text"
@@ -436,13 +431,11 @@ export default function RaioXSerasaPage() {
               onChange={(e) => setBusca(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 text-sm font-medium border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all shadow-inner bg-white placeholder:text-slate-400"
             />
-            {/* Se você tiver importado lucide-react, o ícone funciona. Se não, ficará vazio, mas a margem foi ajustada */}
             <span className="absolute left-3 top-3 text-slate-400">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             </span>
           </div>
 
-          {/* Filtros e Ordenação Premium */}
           <div className="flex gap-2">
             <select 
               value={filtroStatus} 
@@ -466,7 +459,6 @@ export default function RaioXSerasaPage() {
           </div>
         </div>
 
-        {/* Lista de Registros */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
           {loading ? (
             <div className="p-8 flex flex-col items-center justify-center text-slate-400 animate-pulse space-y-3">
@@ -512,7 +504,6 @@ export default function RaioXSerasaPage() {
         </div>
       </div>
 
-      {/* 📊 ÁREA PRINCIPAL: DOSSIÊ (RENDERIZAÇÃO) */}
       <div className="flex-1 overflow-y-auto rounded-2xl bg-slate-50/50 border border-slate-200/50">
         {renderizarPainel()}
       </div>
