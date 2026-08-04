@@ -166,15 +166,22 @@ export default function MotorCreditoPage() {
 
     setLoading(true);
     try {
+      // 🛡️ Buscando o token JWT do usuário logado
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const res = await fetch("/api/buscar-cnpj", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+        },
         body: JSON.stringify({ cnpj: cnpjLimpo }),
       });
       
       const data = await res.json();
       
-      if (data.error) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || "Erro ao buscar CNPJ");
 
       if (data.found && data.empresa) {
         setEmpresas([data.empresa]);
@@ -256,7 +263,9 @@ export default function MotorCreditoPage() {
          return; 
       }
 
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: { user, session }, error: authError } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      
       if (authError || !user) {
         throw new Error("Usuário não autenticado. Faça login novamente.");
       }
@@ -334,7 +343,10 @@ export default function MotorCreditoPage() {
         
         await fetch("/api/motor-ia", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+          },
           body: JSON.stringify({
             analise_id: novaAnalise.id,
             urls_documentos: urlsDocumentos,
@@ -394,9 +406,16 @@ export default function MotorCreditoPage() {
       if (urlsDocumentosNovos.length > 0) {
         setStatusTexto("🧠 Robô V8 lendo arquivos extras...");
         
+        // 🛡️ Buscando o token JWT do usuário logado
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
         await fetch("/api/motor-ia", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+          },
           body: JSON.stringify({
             analise_id: analiseAlvoUpload.id,
             urls_documentos: urlsDocumentosNovos,

@@ -1,4 +1,4 @@
-// app/mesa-analise/page.tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
@@ -8,6 +8,7 @@ import GerarAnalise from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
 import SistemaAnalise from "@/components/analise"; // Apontando pro arquivo correto
 import { AnaliseData, FilaItem } from "@/app/types/analise"; // Apontando pra pasta app/types
+import UploadDocs from "@/components/UploadDocs"; // Caso precise, adicione a importação se não estiver lá, já que vi você usando num outro arquivo semelhante. Retirei do render pois esse usa o modal de novos docs.
 
 // Modelo default de inicialização para não dar erro
 const DADOS_MODELO: AnaliseData = {
@@ -245,13 +246,21 @@ function MesaAnaliseConteudo() {
       const urlsNovosDocs: string[] = [];
       const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
+      // 🛡️ Buscando o token JWT do usuário logado
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       for (let i = 0; i < novosArquivos.length; i++) {
         const file = novosArquivos[i];
         const pathDinamicoR2 = `analises/${idSelecionado}/adicionais/${Date.now()}`;
 
+        // 🛡️ Enviando o token na autorização
         const resAuth = await fetch("/api/upload", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) 
+          },
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type || "application/octet-stream",
@@ -291,9 +300,13 @@ function MesaAnaliseConteudo() {
 
       await supabase.from("analises").update({ dados_documentos: docsAtualizados }).eq("id", idSelecionado);
 
+      // 🛡️ Enviando o token na chamada pro motor V8
       const resIA = await fetch("/api/motor-ia", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}) 
+        },
         body: JSON.stringify({
           analise_id: idSelecionado,
           urls_documentos: urlsNovosDocs,
