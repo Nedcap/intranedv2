@@ -91,7 +91,8 @@ export default function MonitoreHistoricoPage() {
           </p>
         </div>
         
-        <div className="relative w-full md:w-80 shrink-0">
+        <div className="relative w-full md:w-[340px] shrink-0">
+          {/* Se você tiver o lucide-react, pode trocar o emoji 🔎 pelo ícone <Search /> */}
           <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400">🔎</span>
           <input 
             type="text" 
@@ -103,25 +104,25 @@ export default function MonitoreHistoricoPage() {
         </div>
       </div>
 
-      {/* 📋 TABELA DE HISTÓRICO (CLEAN UI) */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      {/* 📋 TABELA DE HISTÓRICO (CLEAN UI & CENTRALIZADA) */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-300">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1700px] text-[13px]">
+          <table className="w-full text-center border-collapse min-w-[1700px] text-[13px]">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
-                <th className="p-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Data</th>
-                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-36">CNPJ</th>
-                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Cedente</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50/50 w-36">Risco Aberto</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-32">Saldo Ant.</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-36">Evolução</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-800 bg-slate-100/50 w-36">Saldo Atual</th>
-                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Resumo da Ocorrência</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">PEFIN</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">REFIN</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Protestos</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Ações Jud.</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Dív. Vencida</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Data</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">CNPJ</th>
+                <th className="p-4 text-left text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Cedente</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50/50">Risco Aberto</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Saldo Ant.</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Evolução</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-800 bg-slate-100/50">Saldo Atual</th>
+                <th className="p-4 text-left text-[10px] font-black uppercase tracking-widest text-slate-500 w-64">Resumo da Ocorrência</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">PEFIN</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">REFIN</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Protestos</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Ações Jud.</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Dív. Vencida</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -137,34 +138,39 @@ export default function MonitoreHistoricoPage() {
                   
                   return (
                     <tr key={idx} className="hover:bg-slate-50/70 transition-colors group">
-                      <td className="p-4 text-center text-slate-400 font-mono text-xs whitespace-nowrap">{fD(item.data_processamento)}</td>
+                      <td className="p-4 text-slate-400 font-mono text-xs whitespace-nowrap">{fD(item.data_processamento)}</td>
                       <td className="p-4 font-mono text-slate-400 text-xs whitespace-nowrap group-hover:text-blue-600 transition-colors">{item.cnpj_cliente}</td>
-                      <td className="p-4 font-black text-slate-800 truncate max-w-[250px] uppercase" title={item.cedente_normalizado}>
+                      
+                      {/* Apenas Cedente mantido à esquerda (text-left) */}
+                      <td className="p-4 text-left font-black text-slate-800 truncate max-w-[250px] uppercase" title={item.cedente_normalizado}>
                         {item.isProspecto && <span className="inline-block mr-2 px-1.5 py-0.5 bg-orange-100 text-orange-700 border border-orange-200 text-[9px] rounded uppercase font-black tracking-wider shadow-sm">Avulso</span>}
                         {item.cedente_normalizado}
                       </td>
-                      <td className="p-4 text-right font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
-                      <td className="p-4 text-right text-slate-400 font-mono whitespace-nowrap">{fM(item.saldo_anterior)}</td>
+                      
+                      <td className="p-4 font-mono font-black text-blue-700 bg-blue-50/30 whitespace-nowrap">{fM(item.risco_aberto)}</td>
+                      <td className="p-4 text-slate-400 font-mono whitespace-nowrap">{fM(item.saldo_anterior)}</td>
                       
                       {/* EVOLUÇÃO DESTACADA */}
-                      <td className="p-4 text-right whitespace-nowrap">
-                        <span className={`inline-flex items-center justify-end gap-1 font-black px-2.5 py-1 rounded text-[11px] min-w-[120px] shadow-sm ${
+                      <td className="p-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center justify-center gap-1 font-black px-2.5 py-1 rounded text-[11px] min-w-[100px] shadow-sm ${
                           evo === 0 ? "text-slate-500 bg-slate-100 border border-slate-200" : 
                           evo > 0 ? "text-rose-700 bg-rose-50 border border-rose-200" : 
                           "text-emerald-700 bg-emerald-50 border border-emerald-200"
                         }`}>
-                          {evo === 0 ? "•" : evo > 0 ? "▲" : "▼"} {fM(evo)}
+                          {evo === 0 ? "•" : evo > 0 ? "▲" : "▼"} {fM(Math.abs(evo))}
                         </span>
                       </td>
                       
-                      <td className="p-4 text-right font-mono font-black text-slate-900 bg-slate-50/50 whitespace-nowrap">{fM(item.saldo_atual)}</td>
-                      <td className="p-4 text-slate-500 text-[11px] leading-tight pr-4 font-semibold">{item.resumo_movimento || "Estável"}</td>
+                      <td className="p-4 font-mono font-black text-slate-900 bg-slate-50/50 whitespace-nowrap">{fM(item.saldo_atual)}</td>
+                      
+                      {/* Resumo mantido à esquerda (text-left) */}
+                      <td className="p-4 text-left text-slate-500 text-[11px] leading-tight pr-4 font-semibold">{item.resumo_movimento || "Estável"}</td>
                       
                       {/* COLUNAS RESTRITIVOS (Fundo Rose Dinâmico) */}
                       {["total_pefin", "total_refin", "total_protesto", "total_acao_jud", "total_div_vencida"].map(k => {
                         const val = parseFloat(item[k]);
                         return (
-                          <td key={k} className={`p-4 text-right font-mono text-xs whitespace-nowrap ${
+                          <td key={k} className={`p-4 font-mono text-xs whitespace-nowrap ${
                             val > 0 ? "text-rose-600 font-black bg-rose-50/30" : "text-slate-300 font-medium"
                           }`}>
                             {fM(item[k])}

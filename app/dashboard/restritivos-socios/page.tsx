@@ -93,7 +93,7 @@ export default function RestritivosSociosPage() {
           </p>
         </div>
         
-        <div className="relative w-full md:w-80 shrink-0">
+        <div className="relative w-full md:w-[340px] shrink-0">
           <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400">🔎</span>
           <input 
             type="text" 
@@ -105,20 +105,20 @@ export default function RestritivosSociosPage() {
         </div>
       </div>
 
-      {/* 📋 TABELA (CLEAN UI) */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      {/* 📋 TABELA (CLEAN UI & CENTRALIZADA) */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-300">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1200px] text-[13px]">
+          <table className="w-full text-center border-collapse min-w-[1200px] text-[13px]">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
-                <th className="p-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Data</th>
-                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-80">Sócio Monitorado & Vínculo</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">PEFIN</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">REFIN</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Protestos</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Ações Jud.</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Dív. Vencidas</th>
-                <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-800 bg-slate-100/50 w-40 border-l border-slate-200">Saldo Total</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 w-28">Data</th>
+                <th className="p-4 text-left text-[10px] font-black uppercase tracking-widest text-slate-500 w-80">Sócio Monitorado & Vínculo</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">PEFIN</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">REFIN</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Protestos</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Ações Jud.</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Dív. Vencidas</th>
+                <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-800 bg-slate-100/50 w-40 border-l border-slate-200">Saldo Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -133,12 +133,12 @@ export default function RestritivosSociosPage() {
                   <tr key={idx} className="hover:bg-slate-50/70 transition-colors group">
                     
                     {/* Data Processamento */}
-                    <td className="p-4 text-center text-slate-400 font-mono text-xs whitespace-nowrap">
+                    <td className="p-4 text-slate-400 font-mono text-xs whitespace-nowrap">
                       {fD(item.data_processamento)}
                     </td>
 
                     {/* Sócio Monitorado e Empresa Cruzada */}
-                    <td className="p-4">
+                    <td className="p-4 text-left">
                       <div className="font-black text-slate-900 truncate max-w-[300px] uppercase" title={item.nome_socio}>
                         {item.nome_socio}
                       </div>
@@ -157,7 +157,7 @@ export default function RestritivosSociosPage() {
                       return (
                         <td 
                           key={key} 
-                          className={`p-4 text-right font-mono text-xs whitespace-nowrap ${
+                          className={`p-4 font-mono text-xs whitespace-nowrap ${
                             temApontamento ? "text-rose-600 font-black bg-rose-50/30" : "text-slate-300 font-medium"
                           }`}
                         >
@@ -168,7 +168,7 @@ export default function RestritivosSociosPage() {
                     
                     {/* Saldo Total */}
                     <td 
-                      className={`p-4 text-right font-mono text-[13px] whitespace-nowrap border-l border-slate-100 ${
+                      className={`p-4 font-mono text-[13px] whitespace-nowrap border-l border-slate-100 ${
                         parseFloat(item.saldo_total) > 0 
                           ? "text-rose-700 font-black bg-rose-50/60" 
                           : "text-slate-500 font-bold bg-slate-50/50"
