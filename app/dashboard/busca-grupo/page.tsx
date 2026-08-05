@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import React, { useState, useCallback, useEffect, Suspense } from 'react';
@@ -12,12 +13,13 @@ import {
   Edge,
   Handle,
   Position,
-  useReactFlow
+  useReactFlow,
+  ReactFlowProvider
 } from '@xyflow/react';
 import { useSearchParams } from 'next/navigation';
 import { toPng } from 'html-to-image';
 import '@xyflow/react/dist/style.css';
-import { ReactFlowProvider } from '@xyflow/react';
+import { supabase } from '@/lib/supabase'; // 🛡️ Import do cliente Supabase para extração do JWT
 
 // Componente customizado orbital com área de clique total injetada
 const nodeTypes = {
@@ -60,7 +62,6 @@ function ReactFlowProviderWrapper() {
 function BuscaGrupoConteudo() {
   const searchParams = useSearchParams();
   const cnpjDaUrl = searchParams.get('cnpj');
-  const analiseIdDaUrl = searchParams.get('analise_id');
   const { getNodes, getEdges } = useReactFlow();
 
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -95,9 +96,16 @@ function BuscaGrupoConteudo() {
     setIsLoading(true);
     
     try {
+      // 🔒 Obter token JWT do Supabase para autorização no backend
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const response = await fetch('/api/gerar-organograma', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ 
           documentoBusca: documento, 
           tipoBusca: tipo,
@@ -105,40 +113,49 @@ function BuscaGrupoConteudo() {
         }),
       });
 
-      if (!response.ok) throw new Error('Falha no backend');
       const data = await response.json();
 
-      if (data.error) { alert(data.error); return; }
+      if (!response.ok) {
+        alert(data.error || `Erro (${response.status}): Falha na autenticação ou consulta ao servidor.`);
+        return;
+      }
 
-      let backendNodes = data.nodes || [];
-      let backendEdges = data.edges || [];
+      if (data.error) {
+        alert(data.error); 
+        return; 
+      }
+
+      const backendNodes = data.nodes || [];
+      const backendEdges = data.edges || [];
+
+      if (backendNodes.length === 0) {
+        alert("Nenhum desdobramento pendente cadastrado para este registro.");
+        return;
+      }
 
       // =========================================================================
-      // 🧠 LÓGICA DE ANCORAGEM (CORRIGIDA): Evita duplicar o nó manual ao expandir
+      // 🧠 LÓGICA DE ANCORAGEM: Redireciona arestas e mescla nós sem duplicação
       // =========================================================================
       if (clickedNodeId) {
         const docLimpo = documento.replace(/\D/g, "");
         
-        // Localiza qual nó retornado pelo backend é equivalente ao nó que clicamos
         const rootNode = backendNodes.find((n: any) => {
-            if (docLimpo && n.id.replace(/\D/g, "").includes(docLimpo)) return true;
-            if (nomeSocio && n.data?.label && String(n.data.label).toUpperCase().includes(nomeSocio.toUpperCase())) return true;
-            if (n.data?.isMatriz) return true;
-            return false;
+          if (docLimpo && n.id.replace(/\D/g, "").includes(docLimpo)) return true;
+          if (nomeSocio && n.data?.label && String(n.data.label).toUpperCase().includes(nomeSocio.toUpperCase())) return true;
+          if (n.data?.isMatriz) return true;
+          return false;
         });
 
         if (rootNode && rootNode.id !== clickedNodeId) {
-            const novoIdBackend = rootNode.id;
-            
-            // 1. Redireciona todas as arestas JÁ EXISTENTES na tela para o novo nó rico da API
-            setEdges((prevEdges) => prevEdges.map((e: any) => ({
-                ...e,
-                source: e.source === clickedNodeId ? novoIdBackend : e.source,
-                target: e.target === clickedNodeId ? novoIdBackend : e.target,
-            })));
+          const novoIdBackend = rootNode.id;
+          
+          setEdges((prevEdges) => prevEdges.map((e: any) => ({
+            ...e,
+            source: e.source === clickedNodeId ? novoIdBackend : e.source,
+            target: e.target === clickedNodeId ? novoIdBackend : e.target,
+          })));
 
-            // 2. Remove o nó manual antigo da tela (para não duplicar, pois o backendNodes trará o correto)
-            setNodes((prevNodes) => prevNodes.filter((n: any) => n.id !== clickedNodeId));
+          setNodes((prevNodes) => prevNodes.filter((n: any) => n.id !== clickedNodeId));
         }
       }
 
@@ -162,10 +179,10 @@ function BuscaGrupoConteudo() {
       });
 
       if (posicaoOrigem && novosNosAdicionados === 0) {
-        setTimeout(() => alert("Nenhum desdobramento pendente cadastrado para este nome."), 100);
+        setTimeout(() => alert("Nenhum novo vínculo encontrado para este registro."), 100);
       }
-    } catch (error) {
-      alert("Erro ao expandir teia.");
+    } catch (error: any) {
+      alert(`Erro ao expandir teia: ${error.message || error}`);
     } finally {
       setIsLoading(false);
     }
@@ -190,15 +207,20 @@ function BuscaGrupoConteudo() {
     const partes = node.id.split('-');
     if (partes.length < 2) return;
 
-    const tipoNode = partes[0];
+    const tipoNode = partes[0].toUpperCase();
     const docNode = partes.slice(1).join('-'); 
+    const nomeDoSocio = (node.data?.nomeOriginal || node.data?.label) as string;
 
-    if (tipoNode === "NOME" || (tipoNode !== "CPF" && tipoNode !== "CNPJ" && tipoNode !== "PJ" && tipoNode !== "PF")) return;
-    
-    const nomeDoSocio = node.data?.nomeOriginal || node.data?.label;
-    
-    // Passando o ID do nó clicado como 5º argumento para realizar a ancoragem correta
-    handleBuscarDireto(docNode, tipoNode, node.position, nomeDoSocio as string, node.id);
+    // Se for um nó derivado de busca por Nome
+    if (tipoNode === "NOME") {
+      handleBuscarDireto("", "PF", node.position, nomeDoSocio, node.id);
+      return;
+    }
+
+    // Se o tipo do nó for PF, PJ, CPF ou CNPJ
+    if (["CPF", "CNPJ", "PJ", "PF"].includes(tipoNode)) {
+      handleBuscarDireto(docNode, tipoNode, node.position, nomeDoSocio, node.id);
+    }
   }, []);
 
   const exportarEstruturaEstrategica = () => {
@@ -248,7 +270,6 @@ function BuscaGrupoConteudo() {
     if (!manualNome || !noVinculoAlvo) return;
     
     const docLimpo = manualDoc.replace(/\D/g, "");
-    // Padroniza a criação de ID manual para evitar conflitos
     const novoNoId = docLimpo ? `${manualTipo}-${docLimpo}` : `NOME-${Math.random().toString(36).substring(7)}`;
 
     setNodes((prev) => [...prev, {
