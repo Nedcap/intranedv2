@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { AnaliseData } from "@/app/types/analise";
+import { supabase } from "@/lib/supabase"; // 🔥 ADICIONADO PARA BUSCAR DADOS PAI
 
 // --- COMPONENTE DE APOIO MATEMÁTICO ---
 function MathInput({ value, onChange, className }: { value: any, onChange: (v: string) => void, className: string }) {
@@ -50,6 +51,30 @@ function MathInput({ value, onChange, className }: { value: any, onChange: (v: s
   );
 }
 
+// 🔥 NOVO: COMPONENTE VISUAL DE COMPARAÇÃO (DIFF BADGE)
+function IndicadorEvolucao({ atual, antigo, invertido = false }: { atual: number, antigo: number, invertido?: boolean }) {
+  if (!antigo || antigo === 0) return null;
+  
+  const variacao = ((atual - antigo) / antigo) * 100;
+  const ehPositivo = variacao > 0;
+  
+  // Invertido = true significa que "subir" é ruim (ex: Endividamento, Prazos)
+  const corPositiva = invertido ? "text-rose-600 bg-rose-50 border-rose-200" : "text-emerald-600 bg-emerald-50 border-emerald-200";
+  const corNegativa = invertido ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-rose-600 bg-rose-50 border-rose-200";
+  const corBase = variacao === 0 ? "text-slate-500 bg-slate-50 border-slate-200" : (ehPositivo ? corPositiva : corNegativa);
+  const icone = variacao === 0 ? "➖" : (ehPositivo ? "↗" : "↘");
+
+  return (
+    <div className={`inline-flex flex-col ml-3 border px-2 py-0.5 rounded shadow-sm ${corBase}`}>
+      <span className="text-[9px] font-black uppercase opacity-70 tracking-wider">Últ. Revisão</span>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] font-mono font-bold">R$ {antigo.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+        <span className="text-[10px] font-bold">{icone} {Math.abs(variacao).toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
 // --- COMPONENTE PRINCIPAL DO ESQUELETO ---
 interface SistemaAnaliseProps {
   analise: AnaliseData;
@@ -59,6 +84,28 @@ interface SistemaAnaliseProps {
 export default function SistemaAnalise({ analise, setAnalise }: SistemaAnaliseProps) {
   const [abaAtiva, setAbaAtiva] = useState("capa");
   const uploadJsonRef = useRef<HTMLInputElement>(null);
+
+  // 🔥 NOVO: Estado para armazenar os dados da análise anterior (se for uma reanálise)
+  const [dadosPai, setDadosPai] = useState<any | null>(null);
+
+  // Busca os dados da revisão anterior assim que o componente montar
+  useEffect(() => {
+    const analiseExtendida = analise as any; 
+    if (analiseExtendida.analise_pai_id) {
+      supabase
+        .from("analises")
+        .select("dados_consolidados")
+        .eq("id", analiseExtendida.analise_pai_id)
+        .single()
+        .then(({ data, error }) => {
+          if (!error && data?.dados_consolidados) {
+            setDadosPai(data.dados_consolidados);
+          }
+        });
+    } else {
+      setDadosPai(null);
+    }
+  }, [(analise as any).analise_pai_id]);
 
   // =========================================================================
   // FUNÇÕES DE ATUALIZAÇÃO DE ESTADO
@@ -185,6 +232,11 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
   const totalDplsCP = Math.round(endividamentoFlat.filter(d => d.prazo === "Curto Prazo" && (d.modalidade.toLowerCase().includes("desc") || d.modalidade.toLowerCase().includes("dupl"))).reduce((acc, d) => acc + Number(d.saldo || 0), 0) * 100) / 100;
   const percDplsCP = totEndivGeral > 0 ? (totalDplsCP / totEndivGeral) * 100 : 0;
 
+  // 🔥 CÁLCULOS DO PAI PARA COMPARAÇÃO
+  const totLimitesPai = dadosPai?.propostas?.reduce((acc: number, p: any) => acc + Number(p.limite), 0) || 0;
+  const totEndivGeralPai = dadosPai?.empresas_endividamento?.flatMap((e: any) => e.endividamento || []).reduce((acc: number, d: any) => acc + Number(d.saldo || 0), 0) || 0;
+  const potEstimadoPai = dadosPai?.dados_potencial?.potencial_estimado || 0;
+
   // =========================================================================
   // ESTILOS
   // =========================================================================
@@ -196,25 +248,38 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
 
   return (
     <>
-      {/* ABAS ESTILO PILLS */}
-      <div className="bg-slate-50 border-b border-slate-200 flex gap-1.5 px-4 pt-3 pb-3 overflow-x-auto scrollbar-none">
-        {[
-          { id: "capa", label: "📄 Capa & Proposta" },
-          { id: "cadastro", label: "🏢 Dados da Empresa" },
-          { id: "societario", label: "👥 Societário & Patrimônio" },
-          { id: "fat", label: "📈 Faturamento & Potencial" },
-          { id: "endividamento", label: "🏦 Endividamento & Refs" },
-          { id: "restritivos", label: "⚖️ Restritivos & Jurídico" },
-          { id: "parecer", label: "📝 Parecer Final" }
-        ].map((tab) => (
-          <button 
-            key={tab.id} 
-            onClick={() => setAbaAtiva(tab.id)} 
-            className={`px-4 py-2 font-semibold text-[11px] rounded-full cursor-pointer whitespace-nowrap transition-all shadow-sm ${abaAtiva === tab.id ? "bg-indigo-600 text-white shadow-md" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"}`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* ABAS ESTILO PILLS & HEADER */}
+      <div className="bg-slate-50 border-b border-slate-200 flex items-center justify-between px-4 pt-3 pb-3">
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
+          {[
+            { id: "capa", label: "📄 Capa & Proposta" },
+            { id: "cadastro", label: "🏢 Dados da Empresa" },
+            { id: "societario", label: "👥 Societário & Patrimônio" },
+            { id: "fat", label: "📈 Faturamento & Potencial" },
+            { id: "endividamento", label: "🏦 Endividamento & Refs" },
+            { id: "restritivos", label: "⚖️ Restritivos & Jurídico" },
+            { id: "parecer", label: "📝 Parecer Final" }
+          ].map((tab) => (
+            <button 
+              key={tab.id} 
+              onClick={() => setAbaAtiva(tab.id)} 
+              className={`px-4 py-2 font-semibold text-[11px] rounded-full cursor-pointer whitespace-nowrap transition-all shadow-sm ${abaAtiva === tab.id ? "bg-indigo-600 text-white shadow-md" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ALERTA DE REANÁLISE NA BARRA SUPERIOR */}
+        {(analise as any).revisao_numero > 1 && (
+          <div className="bg-amber-100 border border-amber-300 text-amber-900 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2 shrink-0 animate-in fade-in zoom-in ml-4">
+            <span className="text-lg">🔄</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-[9px] font-black uppercase tracking-wider opacity-80">Modo de Comparação</span>
+              <span className="text-[11px] font-bold">Revisão 0{(analise as any).revisao_numero} Ativa</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ÁREA DA PLANILHA */}
@@ -306,7 +371,11 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
                   ))}
                   <tr className="bg-slate-100 border-t-2 border-slate-300">
                     <td className="p-2 text-right font-bold text-[10px] text-slate-700">LIMITE TOTAL PLEITEADO</td>
-                    <td className="p-2 text-right font-mono font-bold text-indigo-800 text-[12px]">R$ {totLimites.toLocaleString('pt-BR')}</td>
+                    <td className="p-2 text-right font-mono font-bold text-indigo-800 text-[12px] flex items-center justify-end">
+                      R$ {totLimites.toLocaleString('pt-BR')}
+                      {/* 🔥 APLICAÇÃO DO DIFF NO LIMITE */}
+                      <IndicadorEvolucao atual={totLimites} antigo={totLimitesPai} />
+                    </td>
                     <td colSpan={5}></td>
                   </tr>
                 </tbody>
@@ -507,8 +576,22 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="bg-indigo-600 rounded-xl shadow-md p-8 flex flex-col justify-center items-center text-center text-white relative overflow-hidden border border-indigo-700 max-w-4xl mx-auto">
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
-                <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10">Potencial Real de Antecipação (Grupo Consolidado)</span>
-                <span className="font-mono text-4xl font-black drop-shadow-md z-10 my-3">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="text-[12px] font-bold uppercase tracking-widest text-indigo-100 mb-1 z-10 flex items-center gap-2">
+                  Potencial Real de Antecipação (Grupo Consolidado)
+                </span>
+                
+                <div className="flex items-center gap-4 z-10 my-3">
+                  <span className="font-mono text-4xl font-black drop-shadow-md">R$ {potencialRealCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  
+                  {/* 🔥 APLICAÇÃO DO DIFF NO POTENCIAL DA CARTEIRA */}
+                  {dadosPai && (
+                    <div className="bg-white/20 border border-white/30 px-3 py-1.5 rounded-lg flex flex-col items-start backdrop-blur-sm shadow-inner">
+                      <span className="text-[9px] uppercase tracking-wider text-indigo-200 font-bold mb-0.5">Potencial Ano Passado</span>
+                      <span className="text-sm font-mono font-bold text-white">R$ {potEstimadoPai.toLocaleString('pt-BR')}</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="text-[10px] text-indigo-200 mt-6 space-y-1.5 z-10 bg-black/10 p-3 rounded backdrop-blur-sm w-full max-w-sm text-left">
                     <p><strong>Base de Faturamento (YTD/Parcial):</strong> R$ {faturamentoMedioReferencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     <p className="border-t border-indigo-400/30 pt-1.5"><strong>Modelo:</strong> (Fat.Base ÷ 30) × Prazo × Compos(%) × APrazo(%)</p>
@@ -636,7 +719,15 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
                   <tr className="bg-slate-50 font-mono text-[12px] text-center">
                     <td className="p-3 border border-slate-200 text-slate-700">R$ {endivCurtoPrazo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="p-3 border border-slate-200 text-slate-700">R$ {endivLongoPrazo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="p-3 border border-slate-200 text-rose-700 bg-rose-50 font-bold">R$ {totEndivGeral.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-3 border border-slate-200 text-rose-700 bg-rose-50 font-bold flex flex-col items-center justify-center h-full">
+                      <span>R$ {totEndivGeral.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      {/* 🔥 APLICAÇÃO DO DIFF NO ENDIVIDAMENTO COM CORES INVERTIDAS (Subir é ruim) */}
+                      {dadosPai && (
+                        <div className="mt-1">
+                          <IndicadorEvolucao atual={totEndivGeral} antigo={totEndivGeralPai} invertido={true} />
+                        </div>
+                      )}
+                    </td>
                     <td className="p-3 border border-slate-200 text-slate-600">{percDplsCP.toFixed(1)}%</td>
                     <td className="p-3 border border-slate-200 text-slate-600">{percFundos.toFixed(1)}%</td>
                     <td className="p-3 border border-slate-200 text-slate-600">{percBancos.toFixed(1)}%</td>

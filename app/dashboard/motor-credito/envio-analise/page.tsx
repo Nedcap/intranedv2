@@ -28,9 +28,12 @@ interface FilaItem {
   dados_documentos?: string[]; 
   dados_consolidados?: any;    
   checklist_ia?: any; 
+  // 🔥 NOVO: Campos de versionamento
+  revisao_numero?: number;
+  analise_pai_id?: string;
 }
 
-// 🔥 NOVO: Interface completa para tipar os inputs comerciais
+// Interface completa para tipar os inputs comerciais
 interface PropostaComercial {
   relatorio_visita: string;
   propostas: { modalidade: string; limite: number | ""; prazo: string; tranche: number | ""; taxa: string; garantia: string }[];
@@ -89,8 +92,11 @@ export default function MotorCreditoPage() {
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
   
-  // 🔥 ESTADO CENTRALIZADO DA REQUISIÇÃO COMERCIAL
+  // ESTADO CENTRALIZADO DA REQUISIÇÃO COMERCIAL
   const [formComercial, setFormComercial] = useState<PropostaComercial>(PROPOSTA_INICIAL);
+  
+  // 🔥 NOVO: Estado para rastrear se é uma reanálise na UI
+  const [revisaoInfo, setRevisaoInfo] = useState<{numero: number, pai_id: string | null} | null>(null);
 
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
@@ -99,7 +105,7 @@ export default function MotorCreditoPage() {
   const [isUploadExtraOpen, setIsUploadExtraOpen] = useState(false);
   const [analiseAlvoUpload, setAnaliseAlvoUpload] = useState<FilaItem | null>(null);
 
-  // 🔥 NOVO: Estado para o Modal de Relatório de Visitas
+  // Estado para o Modal de Relatório de Visitas
   const [isRelatorioModalOpen, setIsRelatorioModalOpen] = useState(false);
   const [analiseParaRelatorio, setAnaliseParaRelatorio] = useState<FilaItem | null>(null);
 
@@ -108,6 +114,7 @@ export default function MotorCreditoPage() {
     return () => {
       setEmpresaSelecionada(null);
       setFormComercial(PROPOSTA_INICIAL);
+      setRevisaoInfo(null);
     };
   }, []);
 
@@ -117,16 +124,15 @@ export default function MotorCreditoPage() {
   const carregarFilaComercial = async () => {
     try {
       const userStr = localStorage.getItem("intraned_user");
+      // 🔥 Ajuste: Trazendo os campos revisao_numero e analise_pai_id
       let query = supabase
         .from("analises")
-        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia")
+        .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia, revisao_numero, analise_pai_id")
         .in("status", ["aberta", "aguardando_docs", "em_revisao_humana", "em_comite"]);
 
       if (userStr) {
         const user = JSON.parse(userStr);
         const cargoUser = String(user.cargo || user.perfil || "").trim().toLowerCase();
-
-        // Cargos de vendas têm restrição de visão (Vê só os seus e os dos liderados)
         const cargosRestritos = ["comercial", "sdr"];
 
         if (cargosRestritos.includes(cargoUser)) {
@@ -138,10 +144,8 @@ export default function MotorCreditoPage() {
               .filter(u => idsPermitidos.includes(u.id))
               .map(u => u.nome);
             
-            // Filtra a fila para bater com o array de nomes permitidos
             query = query.in("comercial", nomesPermitidos);
           } else {
-            // Fallback de segurança se não achar a tabela de usuários
             query = query.eq("comercial", user.nome);
           }
         }
@@ -166,7 +170,6 @@ export default function MotorCreditoPage() {
 
     setLoading(true);
     try {
-      // 🛡️ Buscando o token JWT do usuário logado
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
@@ -174,7 +177,7 @@ export default function MotorCreditoPage() {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({ cnpj: cnpjLimpo }),
       });
@@ -185,6 +188,41 @@ export default function MotorCreditoPage() {
 
       if (data.found && data.empresa) {
         setEmpresas([data.empresa]);
+
+        // 🔥 NOVO: Verifica se já existe um histórico para este CNPJ
+        const { data: analisesAnteriores } = await supabase
+          .from("analises")
+          .select("id, dados_consolidados, status, revisao_numero")
+          .eq("cnpj", cnpjLimpo)
+          .order("criado_em", { ascending: false });
+
+        if (analisesAnteriores && analisesAnteriores.length > 0) {
+          const ultimaAnalise = analisesAnteriores[0];
+          const estaEmAndamento = ["aberta", "em_revisao_humana", "em_comite", "aguardando_docs"].includes(ultimaAnalise.status);
+
+          if (estaEmAndamento) {
+             alert(`⚠️ ATENÇÃO: Já existe uma análise EM ANDAMENTO (Status: ${ultimaAnalise.status}) para este CNPJ. Você não pode abrir uma nova até que a atual seja concluída.`);
+             setEmpresas([]); // Reseta a tela para impedir avanço
+             setLoading(false);
+             return;
+          } else {
+             // É uma reanálise! Puxa os dados antigos.
+             const numRevisao = (ultimaAnalise.revisao_numero || 1) + 1;
+             setRevisaoInfo({ numero: numRevisao, pai_id: ultimaAnalise.id });
+             alert(`🔄 Histórico Encontrado! Iniciando a Revisão 0${numRevisao}. O formulário comercial foi pré-preenchido com as condições da última análise.`);
+             
+             if (ultimaAnalise.dados_consolidados) {
+               const cons = ultimaAnalise.dados_consolidados;
+               setFormComercial({
+                 relatorio_visita: cons.resumo_visita || "",
+                 propostas: cons.propostas?.length > 0 ? cons.propostas : PROPOSTA_INICIAL.propostas,
+                 dados_potencial: cons.dados_potencial || PROPOSTA_INICIAL.dados_potencial
+               });
+             }
+          }
+        } else {
+          setRevisaoInfo(null); // Empresa nova de verdade
+        }
       } else {
         alert("❌ CNPJ não localizado na base oficial.\n💡 Liberando modo de entrada manual.");
         setEmpresas([{
@@ -194,6 +232,7 @@ export default function MotorCreditoPage() {
           cidadeExtenso: "Curitiba",
           capital_social: 0
         }]);
+        setRevisaoInfo(null);
       }
     } catch (err: any) {
       console.error("Erro ao buscar CNPJ:", err);
@@ -234,27 +273,27 @@ export default function MotorCreditoPage() {
   };
 
   // =========================================================================
-  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA) - Agora injetando o forms todo!
+  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA)
   // =========================================================================
   const registrarAnaliseNoSupabase = async (urlsDocumentos: string[], urlsImagens: string[] = []) => {
     if (!empresaSelecionada) return;
 
     setLoading(true);
-    setStatusTexto("🔍 Verificando duplicidade na mesa de crédito...");
+    setStatusTexto("🔍 Verificando mesa de crédito e histórico...");
     
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
 
-      const { data: analiseAtiva, error: buscaError } = await supabase
+      // 🔥 NOVO: Busca o histórico na hora de inserir, por segurança de concorrência
+      const { data: historico, error: buscaError } = await supabase
         .from("analises")
-        .select("id, status")
+        .select("id, status, revisao_numero")
         .eq("cnpj", cnpjLimpo)
-        .in("status", ["aberta", "em_revisao_humana", "em_comite", "aguardando_docs"])
-        .maybeSingle(); 
+        .order("criado_em", { ascending: false });
 
-      if (buscaError && buscaError.code !== 'PGRST116') {
-        throw new Error("Erro ao verificar duplicidade no banco.");
-      }
+      if (buscaError) throw new Error("Erro ao verificar duplicidade no banco.");
+
+      const analiseAtiva = historico?.find(a => ["aberta", "em_revisao_humana", "em_comite", "aguardando_docs"].includes(a.status));
 
       if (analiseAtiva) {
          alert(`⛔ Operação Bloqueada: Já existe uma análise em andamento (Status: ${analiseAtiva.status}) para este CNPJ na mesa de crédito!`);
@@ -263,7 +302,11 @@ export default function MotorCreditoPage() {
          return; 
       }
 
-      // 🔥 CORREÇÃO APLICADA: Extraindo a sessão primeiro, depois pegando o user de dentro dela.
+      // 🔥 Calcula a versão da reanálise
+      const ultimaAnalise = historico && historico.length > 0 ? historico[0] : null;
+      const novaRevisaoNumero = ultimaAnalise ? (ultimaAnalise.revisao_numero || 1) + 1 : 1;
+      const analisePaiId = ultimaAnalise ? ultimaAnalise.id : null;
+
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       const user = session?.user;
       const token = session?.access_token;
@@ -276,7 +319,7 @@ export default function MotorCreditoPage() {
       const localUser = userStr ? JSON.parse(userStr) : null;
       const nomeComercialLogado = localUser?.nome || "";
 
-      setStatusTexto("🤖 Registrando lote virgem de entrada na mesa com sua proposta...");
+      setStatusTexto(novaRevisaoNumero > 1 ? `🤖 Registrando Revisão 0${novaRevisaoNumero} na mesa...` : "🤖 Registrando lote virgem de entrada na mesa...");
 
       const { data: novaAnalise, error: insertError } = await supabase
         .from("analises")
@@ -287,8 +330,12 @@ export default function MotorCreditoPage() {
           status: "em_revisao_humana", 
           status_comite: "pendente",
           ia_inicio: new Date().toISOString(),
-          responsavel_id: user.id, // 🔥 Agora o user.id existe
+          responsavel_id: user.id, 
           comercial: nomeComercialLogado,
+
+          // 🔥 Dados de Reanálise Injetados aqui
+          revisao_numero: novaRevisaoNumero,
+          analise_pai_id: analisePaiId,
 
           dados_documentos: urlsDocumentos,
           checklist_ia: {}, 
@@ -298,7 +345,6 @@ export default function MotorCreditoPage() {
             capital_social: empresaSelecionada.capital_social || 0,
             dados_gerais: { fundacao: "", ramo: "", site: "", relacionamento: "Prospect", gerente: "" },
             
-            // 🔥 INJETANDO O FORMULÁRIO COMERCIAL DIRETAMENTE AQUI
             propostas: formComercial.propostas.map(p => ({
               ...p,
               limite: Number(p.limite) || 0,
@@ -330,7 +376,7 @@ export default function MotorCreditoPage() {
               fotos_visita_url: urlsImagens.length > 1 ? urlsImagens[1] : (urlsImagens.length === 1 ? urlsImagens[0] : "")
             },
             parecer_comite: "",
-            auditoria_documentos_lidos: [] // Inicia a lista vazia pra IA preencher
+            auditoria_documentos_lidos: [] 
           }
         })
         .select("id")
@@ -347,7 +393,7 @@ export default function MotorCreditoPage() {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
           },
           body: JSON.stringify({
             analise_id: novaAnalise.id,
@@ -357,12 +403,14 @@ export default function MotorCreditoPage() {
         });
       }
 
-      alert("🚀 Nova análise registrada com segurança! O Motor V8 assumiu o processamento.");
+      alert("🚀 Operação registrada com segurança! O Motor V8 assumiu o processamento.");
       
+      // Reset da interface
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
       setFormComercial(PROPOSTA_INICIAL); 
+      setRevisaoInfo(null);
       await carregarFilaComercial();
 
     } catch (err: any) {
@@ -408,7 +456,6 @@ export default function MotorCreditoPage() {
       if (urlsDocumentosNovos.length > 0) {
         setStatusTexto("🧠 Robô V8 lendo arquivos extras...");
         
-        // 🛡️ Buscando o token JWT do usuário logado
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
 
@@ -416,7 +463,7 @@ export default function MotorCreditoPage() {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}) // 🔥 Injetando o JWT aqui
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) 
           },
           body: JSON.stringify({
             analise_id: analiseAlvoUpload.id,
@@ -631,14 +678,22 @@ export default function MotorCreditoPage() {
               {/* 🎯 HEADER DA EMPRESA SELECIONADA */}
               <div className="p-5 border border-emerald-200 bg-emerald-50/50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
                 <div>
-                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg block w-max mb-2 border border-emerald-200">
-                    ✅ CNPJ Vinculado Ativo
-                  </span>
+                  <div className="flex gap-2 flex-wrap mb-2">
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg border border-emerald-200">
+                      ✅ CNPJ Vinculado Ativo
+                    </span>
+                    {/* 🔥 BADGE DE REANÁLISE NO TOPO */}
+                    {revisaoInfo && revisaoInfo.numero > 1 && (
+                      <span className="bg-amber-100 text-amber-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg border border-amber-300 flex items-center gap-1 shadow-sm">
+                        🔄 Reanálise 0{revisaoInfo.numero}
+                      </span>
+                    )}
+                  </div>
                   <h3 className="text-lg font-black text-slate-900 uppercase leading-none">{empresaSelecionada.razao_social}</h3>
                   <span className="font-mono font-bold text-slate-600 text-sm mt-1.5 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
                 </div>
                 <button
-                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setFormComercial(PROPOSTA_INICIAL); }}
+                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setFormComercial(PROPOSTA_INICIAL); setRevisaoInfo(null); }}
                   className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer transition-colors uppercase tracking-wide"
                 >
                   ✕ Trocar Empresa
@@ -832,7 +887,18 @@ export default function MotorCreditoPage() {
                     return (
                       <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
                         <td className="p-4 pl-6">
-                          <p className="font-extrabold text-slate-900 uppercase tracking-tight truncate max-w-[300px]" title={item.empresa_nome}>{item.empresa_nome}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-extrabold text-slate-900 uppercase tracking-tight truncate max-w-[280px]" title={item.empresa_nome}>
+                              {item.empresa_nome}
+                            </p>
+                            {/* 🔥 BADGE DE REANÁLISE NA ESTEIRA */}
+                            {item.revisao_numero && item.revisao_numero > 1 && (
+                              <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-300 shadow-sm flex-shrink-0" title={`Reanálise de crédito vinculada ao histórico`}>
+                                🔄 REV. 0{item.revisao_numero}
+                              </span>
+                            )}
+                          </div>
+                          
                           <div className="flex items-center gap-3 mt-1.5">
                             <p className="font-mono font-bold text-slate-500 text-[11px]">{formatarCnpj(item.cnpj)}</p>
                             {item.comercial && (
@@ -897,7 +963,7 @@ export default function MotorCreditoPage() {
 
                         <td className="p-4 text-center">
                           <div className="flex justify-center items-center gap-2">
-                            {/* 🔥 BOTÃO DE ENVIO COMPLEMENTAR */}
+                            {/* BOTÃO DE ENVIO COMPLEMENTAR */}
                             <button
                               onClick={() => abrirModalEnvioExtra(item)}
                               className="bg-white hover:bg-blue-50 border border-slate-300 hover:border-blue-300 hover:text-blue-700 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wide shadow-sm cursor-pointer transition-all"
@@ -942,7 +1008,7 @@ export default function MotorCreditoPage() {
           </div>
         </div>
 
-        {/* 🔥 MODAL DE ENVIO DE DOCUMENTOS COMPLEMENTARES */}
+        {/* MODAL DE ENVIO DE DOCUMENTOS COMPLEMENTARES */}
         {isUploadExtraOpen && analiseAlvoUpload && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-4xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
@@ -963,7 +1029,6 @@ export default function MotorCreditoPage() {
                   <strong>Atenção:</strong> Os documentos anexados aqui serão <strong>somados</strong> aos que já estão na nuvem. O Motor V8 será notificado para ler apenas os novos arquivos e atualizar a análise sem zerar o status da mesa!
                 </div>
                 
-                {/* Reaproveitamos o componente UploadDocs mapeando os dados da análise! */}
                 <UploadDocs 
                   empresa={{
                     cnpj: analiseAlvoUpload.cnpj,
@@ -977,7 +1042,7 @@ export default function MotorCreditoPage() {
           </div>
         )}
 
-        {/* 🔥 MODAL DE DOCUMENTOS E CHECKLIST */}
+        {/* MODAL DE DOCUMENTOS E CHECKLIST */}
         {isDocsModalOpen && empresaParaDocs && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
@@ -1042,7 +1107,7 @@ export default function MotorCreditoPage() {
                   </div>
                   
                   <div className="grid grid-cols-1 gap-3 mt-2">
-                    {/* 🔥 RENDERIZAÇÃO NOVA COM BASE NA AUDITORIA DA IA */}
+                    {/* RENDERIZAÇÃO NOVA COM BASE NA AUDITORIA DA IA */}
                     {empresaParaDocs.dados_consolidados?.auditoria_documentos_lidos?.length > 0 ? (
                       empresaParaDocs.dados_consolidados.auditoria_documentos_lidos.map((doc: any, i: number) => {
                         const isPdf = doc.url?.toLowerCase().includes('.pdf');
@@ -1093,7 +1158,7 @@ export default function MotorCreditoPage() {
           </div>
         )}
 
-        {/* 🔥 MODAL DE RELATÓRIO DE VISITAS */}
+        {/* MODAL DE RELATÓRIO DE VISITAS */}
         {isRelatorioModalOpen && analiseParaRelatorio && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col overflow-hidden animate-in zoom-in-95">
