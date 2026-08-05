@@ -263,7 +263,9 @@ export default function MotorCreditoPage() {
          return; 
       }
 
-      const { data: { user, session }, error: authError } = await supabase.auth.getSession();
+      // 🔥 CORREÇÃO APLICADA: Extraindo a sessão primeiro, depois pegando o user de dentro dela.
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      const user = session?.user;
       const token = session?.access_token;
       
       if (authError || !user) {
@@ -285,7 +287,7 @@ export default function MotorCreditoPage() {
           status: "em_revisao_humana", 
           status_comite: "pendente",
           ia_inicio: new Date().toISOString(),
-          responsavel_id: user.id,
+          responsavel_id: user.id, // 🔥 Agora o user.id existe
           comercial: nomeComercialLogado,
 
           dados_documentos: urlsDocumentos,
