@@ -4,7 +4,7 @@ export interface RotaSistema {
   nome: string;
   path: string;
   icone: string; // Voltamos para string (Emoji) para não quebrar sua Sidebar!
-  categoria: "Geral" | "Comercial" | "Crédito" | "Consultas" | "Financeiro" | "Cadastro" | "Configurações" | "RH";
+  categoria: "Geral" | "Comercial" | "Crédito" | "Consultas" | "Financeiro" | "Cadastro" | "Configurações" | "RH" | "Controladoria";
   defaultMaster: boolean;
 }
 
@@ -12,7 +12,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🏠 GERAL
   { nome: "Início (Home)", path: "/dashboard", icone: "🏠", categoria: "Geral", defaultMaster: true },
   { nome: "TriageMail (E-mails)", path: "/dashboard/monitor-email", icone: "📬", categoria: "Geral", defaultMaster: true },
-  { nome: "Manuais Operacionais", path: "/dashboard/manuaisoperacionais", icone: "📖", categoria: "Geral", defaultMaster: true }, // 🔥 NOVO MÓDULO ADICIONADO AQUI!
+  { nome: "Manuais Operacionais", path: "/dashboard/manuaisoperacionais", icone: "📖", categoria: "Geral", defaultMaster: true },
 
   // 🎯 COMERCIAL
   { nome: "NedHub Comercial", path: "/dashboard/nedhub", icone: "🚀", categoria: "Comercial", defaultMaster: true },
@@ -24,6 +24,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   { nome: "Pré Análise", path: "/dashboard/motor-credito/pre-analise", icone: "🚦", categoria: "Crédito", defaultMaster: true },
   { nome: "Solicitar Análise", path: "/dashboard/motor-credito/envio-analise", icone: "🚀", categoria: "Crédito", defaultMaster: true },
   { nome: "Mesa de Crédito V8", path: "/dashboard/motor-credito/analise", icone: "🕵️", categoria: "Crédito", defaultMaster: true },
+  { nome: "Diligências Kappi", path: "/dashboard/kappi", icone: "🛡️", categoria: "Crédito", defaultMaster: true }, // 🔥 ADICIONADO AQUI!
   { nome: "Busca Grupo", path: "/dashboard/busca-grupo", icone: "🕸️", categoria: "Crédito", defaultMaster: true },
   { nome: "Análises Em Comitê", path: "/dashboard/comite", icone: "📋", categoria: "Crédito", defaultMaster: true },
   { nome: "Finalizados", path: "/dashboard/finalizados", icone: "🏁", categoria: "Crédito", defaultMaster: true },
@@ -33,7 +34,7 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
   // 🔎 CONSULTAS
   { nome: "Lemitt", path: "/dashboard/lemitt", icone: "🔎", categoria: "Consultas", defaultMaster: true },
   { nome: "Monitore Diário", path: "/dashboard/monitore-diario", icone: "🚨", categoria: "Consultas", defaultMaster: true },
-  { nome: "Raio-X Serasa", path: "/dashboard/raiox-serasa", icone: "🩻", categoria: "Consultas", defaultMaster: true }, // 🔥 NOVA TELA AQUI!
+  { nome: "Raio-X Serasa", path: "/dashboard/raiox-serasa", icone: "🩻", categoria: "Consultas", defaultMaster: true },
   { nome: "Monitore Histórico", path: "/dashboard/monitore-historico", icone: "📚", categoria: "Consultas", defaultMaster: true },
   { nome: "Restritivos Sócios", path: "/dashboard/restritivos-socios", icone: "👥", categoria: "Consultas", defaultMaster: true },
 
@@ -46,10 +47,10 @@ export const MAPA_DE_ROTAS: RotaSistema[] = [
 
   // 📝 CADASTRO
   { nome: "Cadastro Cedentes", path: "/dashboard/cadastro", icone: "📝", categoria: "Cadastro", defaultMaster: true },
-  { nome: "Controle Cadastro", path: "/dashboard/controle-cadastro", icone: "🎛️", categoria: "Cadastro", defaultMaster: true }, // 🔥 NOVA TELA ADICIONADA AQUI!
+  { nome: "Controle Cadastro", path: "/dashboard/controle-cadastro", icone: "🎛️", categoria: "Cadastro", defaultMaster: true },
   { nome: "Revisão Cedentes", path: "/dashboard/revisao", icone: "🔍", categoria: "Cadastro", defaultMaster: true },
 
-  // 👥 RH E CONTROLE (NOVO)
+  // 👥 RH E CONTROLE
   { nome: "Relógio de Ponto", path: "/dashboard/ponto", icone: "🕒", categoria: "RH", defaultMaster: true },
   { nome: "Gestão de Ponto", path: "/dashboard/ponto/gestao", icone: "📋", categoria: "RH", defaultMaster: true },
 
