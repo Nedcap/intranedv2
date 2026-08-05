@@ -6,9 +6,10 @@ import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
 import GerarAnalise from "@/components/gerar-analise";
 import GerarKappiViewer from "@/components/gerar-kappi";
-import SistemaAnalise from "@/components/analise"; // Apontando pro arquivo correto
-import { AnaliseData, FilaItem } from "@/app/types/analise"; // Apontando pra pasta app/types
-import UploadDocs from "@/components/UploadDocs"; // Caso precise, adicione a importação se não estiver lá, já que vi você usando num outro arquivo semelhante. Retirei do render pois esse usa o modal de novos docs.
+import SistemaAnalise from "@/components/analise"; 
+import { AnaliseData, FilaItem } from "@/app/types/analise"; 
+import UploadDocs from "@/components/UploadDocs"; 
+import DocumentViewerModal from "@/components/DocumentViewerModal"; // 🔥 Importação do Visualizador
 
 // Modelo default de inicialização para não dar erro
 const DADOS_MODELO: AnaliseData = {
@@ -67,6 +68,9 @@ function MesaAnaliseConteudo() {
   const [uploadingDocs, setUploadingDocs] = useState(false);
 
   const [isKappiModalOpen, setIsKappiModalOpen] = useState(false);
+  
+  // 🔥 NOVO: Estado para abrir o Visualizador Dinâmico
+  const [isDocViewerOpen, setIsDocViewerOpen] = useState(false);
 
   useEffect(() => {
     buscarFilaSupabase(true);
@@ -467,6 +471,16 @@ function MesaAnaliseConteudo() {
               </div>
               
               <div className="flex items-center gap-2 flex-wrap">
+                {/* 🔥 NOVO: BOTÃO DO VISUALIZADOR DE DOCUMENTOS */}
+                <button 
+                  onClick={() => setIsDocViewerOpen(true)} 
+                  disabled={!idSelecionado || !analise.dados_documentos || analise.dados_documentos.length === 0} 
+                  className={btnSecundario} 
+                  title="Abrir visualizador de PDFs/Imagens lidos pela IA"
+                >
+                  📂 Ver Documentos
+                </button>
+
                 <button 
                   onClick={() => setModalDocsAberto(true)} 
                   disabled={!idSelecionado || processandoDecisao || analise.status === "em_processamento_ia"} 
@@ -576,6 +590,17 @@ function MesaAnaliseConteudo() {
              </div>
           </div>
         </div>
+      )}
+
+      {/* 🔥 NOVO: MODAL VISUALIZADOR DE DOCUMENTOS DINÂMICO */}
+      {isDocViewerOpen && (
+        <DocumentViewerModal
+          isOpen={isDocViewerOpen}
+          onClose={() => setIsDocViewerOpen(false)}
+          empresaNome={analise.razao_social || "Empresa"}
+          documentosBrutos={analise.dados_documentos || []}
+          documentosAuditados={(analise as any).auditoria_documentos_lidos || []} 
+        />
       )}
 
     </div>
