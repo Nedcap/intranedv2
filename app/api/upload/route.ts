@@ -18,38 +18,49 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
-    // 🔒 BLINDAGEM DA ROTA: Apenas usuários logados podem gerar URLs de upload para o R2
+    // 🐛 DEBUG 1: Vamos descobrir se o token está chegando no upload
+    const authHeader = request.headers.get("authorization");
+    console.log("[DEBUG UPLOAD] Header Authorization recebido:", authHeader ? "✅ SIM" : "❌ NÃO");
+
+    // 🔒 BLINDAGEM DA ROTA
     const { usuario, erro } = await validarRequisicaoApi(request);
     if (erro || !usuario) {
+      console.error("[ERRO AUTENTICAÇÃO UPLOAD]:", erro);
       return NextResponse.json({ error: erro || "Acesso negado. Token ausente ou inválido." }, { status: 401 });
     }
 
-    // ⚠️ Agora recebemos um JSON leve apenas com os metadados, e não mais o FormData (o arquivo em si)
-    const { fileName, fileType, analiseId } = await request.json();
+    // 🐛 DEBUG 2: Protegendo o parse do JSON (se o frontend mandar FormData, isso aqui quebra)
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      console.error("[ERRO PARSE JSON] Frontend enviou algo que não é JSON. Talvez FormData?");
+      return NextResponse.json({ error: "Corpo da requisição deve ser um JSON válido." }, { status: 400 });
+    }
+
+    const { fileName, fileType, analiseId } = body;
 
     if (!fileName || !fileType) {
       return NextResponse.json({ error: "Nome ou tipo do arquivo não fornecidos." }, { status: 400 });
     }
 
-    // 🧽 SANITIZAÇÃO: Mantive a sua lógica para remover espaços, acentos e caracteres estranhos
+    // 🧽 SANITIZAÇÃO
     const nomeSeguro = fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
     
-    // 🎯 Mantendo seu padrão limpo de pastas estruturadas no R2
+    // 🎯 PASTA ESTRUTURADA NO R2
     const path = analiseId ? `clientes/${analiseId}/${nomeSeguro}` : `avulsos/${Date.now()}-${nomeSeguro}`;
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME?.trim(),
       Key: path,
-      ContentType: fileType, // Essencial passar o ContentType aqui para o R2 salvar com a extensão correta
+      ContentType: fileType,
     });
 
-    // 🔑 Gera a URL de permissão (Presigned URL) válida por 2 minutos
+    // 🔑 Gera a URL de permissão
     const url = await getSignedUrl(s3Client, command, { expiresIn: 120 });
 
-    // 🛡️ Bônus de auditoria
     console.log(`☁️ [R2 Upload] URL gerada para: ${path} (Solicitado por: ${usuario.nome})`);
 
-    // Retorna a URL de upload DIRETO e o PATH exato gerado para o frontend
     return NextResponse.json({ success: true, url, path });
     
   } catch (error: any) {

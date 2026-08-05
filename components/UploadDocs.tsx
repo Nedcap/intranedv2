@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, ChangeEvent, useRef } from "react";
+import { supabase } from "@/lib/supabase"; // 🔥 IMPORTANDO O SUPABASE
 
 interface UploadDocsProps {
   empresa: {
@@ -68,6 +69,16 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
     const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://sua-url-r2-publica.com";
 
     try {
+      // 🔥 1. CAPTURAR O TOKEN DO SUPABASE ANTES DE COMEÇAR OS UPLOADS
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (!token) {
+        alert("Sua sessão expirou. Por favor, faça login novamente.");
+        setUploading(false);
+        return;
+      }
+
       for (let i = 0; i < arquivos.length; i++) {
         const item = arquivos[i];
         if (item.status === "sucesso") continue;
@@ -78,13 +89,16 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           const subpasta = item.tipo === "imagem" ? "imagens" : "docs";
           const pathDinamicoR2 = `${loteId}/${subpasta}`;
 
-          // ETAPA 1: Pede a URL de autorização pro backend (JSON leve, passa ileso pela Vercel)
+          // ETAPA 1: Pede a URL de autorização pro backend
           const resAuth = await fetch("/api/upload", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}` // 🔥 INJETANDO O TOKEN AQUI!
+            },
             body: JSON.stringify({
               fileName: item.file.name,
-              fileType: item.file.type || "application/octet-stream", // Fallback caso o navegador não identifique o tipo
+              fileType: item.file.type || "application/octet-stream", // Fallback
               analiseId: pathDinamicoR2
             }),
           });
@@ -99,7 +113,8 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
           setArquivos(prev => prev.map(a => a.id === item.id ? { ...a, mensagem: "Fazendo upload direto para o R2..." } : a));
 
-          // ETAPA 2: Upload DIRETO do navegador pro Cloudflare R2 (Aceita até 5GB)
+          // ETAPA 2: Upload DIRETO do navegador pro Cloudflare R2
+          // Aqui NÃO enviamos o Bearer token, pois o R2 usa a própria URL assinada para liberar o acesso.
           const uploadRes = await fetch(url, {
             method: "PUT",
             headers: {
@@ -138,7 +153,6 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           onSucesso(urlsDocumentos, urlsImagens); 
           
           // 🧼 Se sobrou algum arquivo com erro na tela, mantém o MESMO loteId para quando tentar re-enviar.
-          // Se subiu tudo limpo, limpa o loteId para a próxima empresa.
           const temErros = arquivos.some(a => a.status === "erro");
           if (!temErros) {
             setLoteId("");
