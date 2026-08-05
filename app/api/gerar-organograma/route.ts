@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextRequest, NextResponse } from "next/server";
 import { BigQuery } from "@google-cloud/bigquery";
-import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ O nosso segurança!
+import { validarRequisicaoApi } from "@/lib/supabase-server"; // 🛡️ Segurança de JWT
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 const credentialsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let credentials: any = {};
 
 if (credentialsEnv) {
@@ -17,39 +17,37 @@ if (credentialsEnv) {
 }
 
 const bigquery = new BigQuery({
-  projectId: 'credito-489113', 
+  projectId: "credito-489113",
   credentials: {
     client_email: credentials.client_email,
-    private_key: credentials.private_key, 
-  }
+    private_key: credentials.private_key,
+  },
 });
 
-// Validação flexível de nome para proteger contra homônimos, permitindo digitações manuais
 function validarCorrespondenciaNome(nomeBusca: string, nomeReceita: string): boolean {
   if (!nomeBusca || !nomeReceita) return false;
-  
+
   const n1 = nomeBusca.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z\s]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
   const n2 = nomeReceita.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z\s]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
-  
+
   if (n1 === n2) return true;
-  
   if (n2.includes(n1) || n1.includes(n2)) return true;
-  
+
   const tokens1 = n1.split(" ");
   const tokens2 = n2.split(" ");
-  
+
   if (tokens1.length <= 1 || tokens2.length <= 1) return false;
   if (tokens1[0] === tokens2[0] && tokens1[tokens1.length - 1] === tokens2[tokens2.length - 1]) return true;
-  
+
   return false;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    // 🔒 BLINDAGEM DA ROTA: Se não tiver o JWT válido, a requisição morre aqui!
+    // 🔒 BLINDAGEM DA ROTA: Valida o token JWT no cabeçalho ou cookie
     const { usuario, erro } = await validarRequisicaoApi(req);
-    if (erro) {
-      return NextResponse.json({ error: erro }, { status: 401 });
+    if (erro || !usuario) {
+      return NextResponse.json({ error: erro || "Acesso negado." }, { status: 401 });
     }
 
     const { documentoBusca, tipoBusca, nomeSocio } = await req.json();
@@ -58,19 +56,15 @@ export async function POST(req: Request) {
     }
 
     let docLimpo = String(documentoBusca).replace(/\D/g, "");
-    
-    // Extrai o miolo de 6 dígitos se o CPF for enviado completo
+
     if ((tipoBusca === "CPF" || tipoBusca === "PF") && docLimpo.length >= 11) {
       docLimpo = docLimpo.substring(3, 9);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodes: any[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const edges: any[] = [];
     const centerX = 400, centerY = 300, raio = 250;
 
-    // Se for busca de Empresa (CNPJ ou Sócia PJ)
     if (tipoBusca === "CNPJ" || tipoBusca === "PJ") {
       const cnpjBasico = docLimpo.substring(0, 8);
 
@@ -80,34 +74,45 @@ export async function POST(req: Request) {
         WHERE cnpj_basico = @cnpjBasico
       `;
       const [empresaRes] = await bigquery.query({ query: sqlEmpresa, params: { cnpjBasico } });
-      
+
       if (empresaRes.length === 0) {
         return NextResponse.json({ error: "Empresa não localizada." }, { status: 404 });
       }
 
       const dadosPrincipais = empresaRes[0];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const listaFiliais = empresaRes.map((emp: any) => ({
-        cnpj: emp.cnpj, uf: emp.uf, bairro: emp.bairro,
-        nome_fantasia: emp.nome_fantasia || dadosPrincipais.razao_social
+        cnpj: emp.cnpj,
+        uf: emp.uf,
+        bairro: emp.bairro,
+        nome_fantasia: emp.nome_fantasia || dadosPrincipais.razao_social,
       }));
 
       nodes.push({
         id: `CNPJ-${cnpjBasico}`,
         position: { x: centerX, y: centerY },
-        data: { 
-          label: dadosPrincipais.razao_social, 
-          nomeOriginal: dadosPrincipais.razao_social, // Adicionado para ancoragem
+        data: {
+          label: dadosPrincipais.razao_social,
+          nomeOriginal: dadosPrincipais.razao_social,
           isMatriz: true,
-          totalFiliais: listaFiliais.length, 
-          filiais: listaFiliais 
+          totalFiliais: listaFiliais.length,
+          filiais: listaFiliais,
         },
         style: {
-          backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 120, height: 120,
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '12px',
-          border: '4px solid #3b82f6', boxShadow: '0 4px 14px rgba(37,99,235,0.3)'
-        }
+          backgroundColor: "#1e40af",
+          color: "white",
+          borderRadius: "50%",
+          width: 120,
+          height: 120,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          fontWeight: "bold",
+          fontSize: "9px",
+          textAlign: "center",
+          padding: "12px",
+          border: "4px solid #3b82f6",
+          boxShadow: "0 4px 14px rgba(37,99,235,0.3)",
+        },
       });
 
       const sqlSocios = `
@@ -116,10 +121,9 @@ export async function POST(req: Request) {
         WHERE cnpj_basico = @cnpjBasico
       `;
       const [sociosRes] = await bigquery.query({ query: sqlSocios, params: { cnpjBasico } });
-      
+
       const angleStep = (2 * Math.PI) / (sociosRes.length || 1);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       sociosRes.forEach((socio: any, index: number) => {
         const angle = index * angleStep;
         const idSocio = socio.doc_socio_limpo ? `${socio.tipo_socio}-${socio.doc_socio_limpo}` : `NOME-${socio.nome_socio_razao_social}`;
@@ -127,31 +131,38 @@ export async function POST(req: Request) {
         nodes.push({
           id: idSocio,
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
-          data: { 
+          data: {
             label: socio.nome_socio_razao_social,
-            nomeOriginal: socio.nome_socio_razao_social 
+            nomeOriginal: socio.nome_socio_razao_social,
           },
           style: {
-            backgroundColor: socio.tipo_socio === 'PJ' ? '#065f46' : '#9d174d', 
-            color: 'white', borderRadius: '50%', width: 95, height: 95,
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-            fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px',
-            boxShadow: socio.tipo_socio === 'PJ' ? '0 4px 10px rgba(16,185,129,0.2)' : '0 4px 10px rgba(219,39,119,0.2)',
-            border: socio.tipo_socio === 'PJ' ? '2px solid #10b981' : '2px solid #f472b6'
-          }
+            backgroundColor: socio.tipo_socio === "PJ" ? "#065f46" : "#9d174d",
+            color: "white",
+            borderRadius: "50%",
+            width: 95,
+            height: 95,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            fontWeight: "bold",
+            fontSize: "9px",
+            textAlign: "center",
+            padding: "8px",
+            boxShadow: socio.tipo_socio === "PJ" ? "0 4px 10px rgba(16,185,129,0.2)" : "0 4px 10px rgba(219,39,119,0.2)",
+            border: socio.tipo_socio === "PJ" ? "2px solid #10b981" : "2px solid #f472b6",
+          },
         });
 
         edges.push({
           id: `edge-${cnpjBasico}-${socio.doc_socio_limpo || index}`,
-          source: `CNPJ-${cnpjBasico}`, 
+          source: `CNPJ-${cnpjBasico}`,
           target: idSocio,
-          label: `Sócio (${socio.qualificacao_socio || 'NI'})`,
-          animated: true, 
-          style: { stroke: '#94a3b8', strokeWidth: 2 }
+          label: `Sócio (${socio.qualificacao_socio || "NI"})`,
+          animated: true,
+          style: { stroke: "#94a3b8", strokeWidth: 2 },
         });
       });
-
-    } else if (tipoBusca === "CPF" || tipoBusca === "PF") { 
+    } else if (tipoBusca === "CPF" || tipoBusca === "PF") {
       const sqlEmpresas = `
         SELECT 
           s.cnpj_basico, 
@@ -172,7 +183,6 @@ export async function POST(req: Request) {
 
       let empresasValidadas = empresasRes;
       if (nomeSocio) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         empresasValidadas = empresasRes.filter((emp: any) => validarCorrespondenciaNome(nomeSocio, emp.nome_socio_razao_social));
       }
 
@@ -185,49 +195,71 @@ export async function POST(req: Request) {
       nodes.push({
         id: `PF-${docLimpo}`,
         position: { x: centerX, y: centerY },
-        data: { 
+        data: {
           label: `${nomeRealSocio}\n(***${docLimpo}**)`,
-          nomeOriginal: nomeRealSocio // Adicionado para ancoragem
+          nomeOriginal: nomeRealSocio,
         },
         style: {
-          backgroundColor: '#9d174d', color: 'white', borderRadius: '50%', width: 105, height: 105,
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px', whiteSpace: 'pre-wrap',
-          border: '3px solid #f472b6', boxShadow: '0 4px 14px rgba(219,39,119,0.3)'
-        }
+          backgroundColor: "#9d174d",
+          color: "white",
+          borderRadius: "50%",
+          width: 105,
+          height: 105,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          fontWeight: "bold",
+          fontSize: "9px",
+          textAlign: "center",
+          padding: "8px",
+          whiteSpace: "pre-wrap",
+          border: "3px solid #f472b6",
+          boxShadow: "0 4px 14px rgba(219,39,119,0.3)",
+        },
       });
 
       const angleStep = (2 * Math.PI) / empresasValidadas.length;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       empresasValidadas.forEach((emp: any, index: number) => {
         const angle = index * angleStep;
         const idEmpresa = `CNPJ-${emp.cnpj_basico}`;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const filiaisValidas = (emp.todas_as_filiais || []).filter((f: any) => f.cnpj !== null);
 
         nodes.push({
           id: idEmpresa,
           position: { x: centerX + Math.cos(angle) * raio, y: centerY + Math.sin(angle) * raio },
-          data: { 
-            label: `${emp.razao_social || 'Desconhecida'}\n(${filiaisValidas.length} Unid.)`,
-            nomeOriginal: emp.razao_social, // Adicionado para ancoragem
-            totalFiliais: filiaisValidas.length, 
-            filiais: filiaisValidas
+          data: {
+            label: `${emp.razao_social || "Desconhecida"}\n(${filiaisValidas.length} Unid.)`,
+            nomeOriginal: emp.razao_social,
+            totalFiliais: filiaisValidas.length,
+            filiais: filiaisValidas,
           },
           style: {
-            backgroundColor: '#1e40af', color: 'white', borderRadius: '50%', width: 100, height: 100,
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-            fontWeight: 'bold', fontSize: '9px', textAlign: 'center', padding: '8px',
-            whiteSpace: 'pre-wrap', border: filiaisValidas.length > 1 ? '3px double #93c5fd' : '1px solid #3b82f6',
-            boxShadow: '0 4px 10px rgba(37,99,235,0.15)'
-          }
+            backgroundColor: "#1e40af",
+            color: "white",
+            borderRadius: "50%",
+            width: 100,
+            height: 100,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            fontWeight: "bold",
+            fontSize: "9px",
+            textAlign: "center",
+            padding: "8px",
+            whiteSpace: "pre-wrap",
+            border: filiaisValidas.length > 1 ? "3px double #93c5fd" : "1px solid #3b82f6",
+            boxShadow: "0 4px 10px rgba(37,99,235,0.15)",
+          },
         });
 
         edges.push({
           id: `edge-${docLimpo}-${emp.cnpj_basico}`,
-          source: `PF-${docLimpo}`, target: idEmpresa,
-          label: `Participação`, animated: true, style: { stroke: '#94a3b8', strokeWidth: 2 }
+          source: `PF-${docLimpo}`,
+          target: idEmpresa,
+          label: "Participação",
+          animated: true,
+          style: { stroke: "#94a3b8", strokeWidth: 2 },
         });
       });
     }
