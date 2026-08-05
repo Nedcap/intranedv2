@@ -219,32 +219,33 @@ export const gerarHtmlDossie = async (item: any) => {
     }).join("") : '<tr><td colspan="4" class="text-center">Nada Consta</td></tr>';
 
     // 🌟 RENDERIZANDO OS MINICARDS DE RESTRITIVOS (SERASA)
+    // 🔥 AJUSTE: Formatação de Moeda BRL aplicada (formatarMoeda)
     const quad = analise.restritivos_quadro || { pefin: 0, refin: 0, protesto: 0, div_vencida: 0, acao_judicial: 0, cheque_sem_fundo: 0 };
     const restritivosMiniCards = `
     <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-top: 1.5rem; margin-bottom: 2rem;">
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #dc2626;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">PEFIN</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.pefin || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.pefin || 0)}</div>
         </div>
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #dc2626;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">REFIN</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.refin || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.refin || 0)}</div>
         </div>
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #ea580c;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Protestos</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.protesto || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.protesto || 0)}</div>
         </div>
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #ca8a04;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Ações Jud.</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.acao_judicial || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.acao_judicial || 0)}</div>
         </div>
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #9333ea;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Dív. Vencidas</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.div_vencida || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.div_vencida || 0)}</div>
         </div>
         <div class="card hover-card" style="padding: 1rem; text-align: center; border-bottom: 3px solid #000;">
             <div style="font-size: 0.65rem; font-weight: 800; color: var(--muted); text-transform: uppercase;">Chq. S/ Fundo</div>
-            <div style="font-size: 1.5rem; font-weight: 900; color: var(--text);">${quad.cheque_sem_fundo || 0}</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text);">${formatarMoeda(quad.cheque_sem_fundo || 0)}</div>
         </div>
     </div>
     `;
@@ -328,7 +329,6 @@ export const gerarHtmlDossie = async (item: any) => {
 
       const delta1 = val2024 > 0 ? ((val2025 - val2024) / val2024) * 100 : 0;
       
-      // 🔥 AQUI FICA A BLINDAGEM DO MÊS FUTURO (-100%)
       let delta2 = 0;
       let showDelta2 = false;
       if (indexAtual <= limitIndex) {
@@ -478,18 +478,33 @@ export const gerarHtmlDossie = async (item: any) => {
             .org-container { width: 100%; height: 600px; border-radius: 0.5rem; background: #ffffff; border: 1px solid #e2e8f0; }
             .hover-card { transition: box-shadow 0.3s, transform 0.3s; }
             .hover-card:hover { box-shadow: 0 15px 30px -5px rgba(0,0,0,0.1); transform: translateY(-2px); }
-            .expandable-box { position: relative; max-height: 120px; overflow: hidden; transition: max-height 0.6s ease-in-out; }
-            .expandable-fade { position: absolute; bottom: 0; left: 0; right: 0; height: 50px; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1) 90%); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; font-size: 0.75rem; font-weight: 800; color: var(--blue); transition: opacity 0.3s; }
+            
+            /* 🔥 AJUSTE: Scrollbar Customizada para a Área Expansível */
+            .expandable-box { 
+                position: relative; 
+                max-height: 120px; 
+                overflow: hidden; 
+                transition: max-height 0.4s ease-in-out; 
+            }
+            .hover-card:hover .expandable-box { 
+                max-height: 400px; /* Limite vertical antes de rolar */
+                overflow-y: auto;  /* Habilita o scroll */
+            }
+            /* Scrollbar Style */
+            .expandable-box::-webkit-scrollbar { width: 6px; }
+            .expandable-box::-webkit-scrollbar-track { background: transparent; }
+            .expandable-box::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+            
+            .expandable-fade { position: absolute; bottom: 0; left: 0; right: 0; height: 50px; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1) 90%); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; font-size: 0.75rem; font-weight: 800; color: var(--blue); transition: opacity 0.3s; pointer-events: none;}
             .expandable-fade::after { content: "Passar o mouse para expandir ▼"; }
-            .hover-card:hover .expandable-box { max-height: 2000px; }
-            .hover-card:hover .expandable-fade { opacity: 0; pointer-events: none; }
+            .hover-card:hover .expandable-fade { opacity: 0; display: none; }
             
             @media print { 
                 .print-break { page-break-before: always; } 
                 body { background: white; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } 
                 .container { box-shadow: none; border: none; padding: 0; max-width: 100%; }
                 .card, .table-wrap, .parecer-wrapper { box-shadow: none !important; border: 1px solid #cbd5e1 !important; transform: none !important; } 
-                .expandable-box { max-height: none !important; }
+                .expandable-box { max-height: none !important; overflow: visible !important; }
                 .expandable-fade { display: none !important; }
             }
         </style>
@@ -807,7 +822,6 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="font-weight:900; font-size:1rem; color:var(--red); margin-bottom:1rem; text-transform:uppercase;">⚠️ Relatório Jurídico Consolidado (Processos)</div>
                 <div class="expandable-box">
                     <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${safeStr(analise.dados_juridico?.relatorio_completo) || safeStr(analise.juridico_tramitacao) || 'Nenhum apontamento judicial detalhado localizado.'}</div>
-                    <div class="expandable-fade" style="height: 60px;"></div>
                 </div>
             </div>
             
@@ -815,7 +829,6 @@ export const gerarHtmlDossie = async (item: any) => {
                 <div style="font-weight:900; font-size:1rem; color:var(--blue-dark); margin-bottom:1rem; text-transform:uppercase;">🔍 Clipping Mídia / Reputação</div>
                 <div class="expandable-box">
                     <div style="font-size:0.95rem; color:#334155; white-space: pre-wrap; line-height: 1.7;">${safeStr(analise.noticias_midia) || safeStr(analise.noticias_mercado?.panorama_setor) || 'Nada consta em pesquisas reputacionais desabonadoras ativas.'}</div>
-                    <div class="expandable-fade" style="height: 60px;"></div>
                 </div>
             </div>
         </div>
@@ -823,8 +836,8 @@ export const gerarHtmlDossie = async (item: any) => {
         <div class="print-break"></div>
 
         <div class="parecer-wrapper" style="margin-top: 2.5rem; border-left: 6px solid ${analise.recomendacao_analista === 'Aprovado' ? 'var(--green)' : analise.recomendacao_analista === 'Reprovado' ? 'var(--red)' : 'var(--blue)'};">
-            <div class="parecer-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Parecer Técnico Formal - Mesa de Risco</span>
+            <div class="parecer-header" style="display: flex; justify-content: space-between; align-items: center; padding: 1.5rem 2rem; border-bottom: 1px solid var(--border);">
+                <span style="font-weight: 800; color: var(--blue-dark);">Parecer Técnico Formal - Mesa de Risco</span>
                 <span style="background: ${analise.recomendacao_analista === 'Aprovado' ? '#dcfce7' : analise.recomendacao_analista === 'Reprovado' ? '#fee2e2' : '#e0e7ff'}; color: ${analise.recomendacao_analista === 'Aprovado' ? '#166534' : analise.recomendacao_analista === 'Reprovado' ? '#991b1b' : '#1e3a8a'}; padding: 0.4rem 1.25rem; border-radius: 2rem; font-size: 0.85rem; font-weight: 900; border: 1px solid ${analise.recomendacao_analista === 'Aprovado' ? '#86efac' : analise.recomendacao_analista === 'Reprovado' ? '#fca5a5' : '#a5b4fc'}; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                     ${safeUpper(analise.recomendacao_analista) || 'EM ANÁLISE'}
                 </span>
@@ -833,15 +846,13 @@ export const gerarHtmlDossie = async (item: any) => {
             <div class="parecer-body" style="padding: 2.5rem 2rem;">
                 <div style="margin-bottom: 1.5rem;">
                     <strong style="color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.75rem;">Justificativa do Analista de Crédito:</strong>
-                    <div style="font-size: 1rem; color: var(--text); line-height: 1.8;">
-                      ${safeStr(analise.parecer_analista) || '<span style="color: var(--muted); font-style: italic;">Sem parecer técnico elaborado para este dossiê.</span>'}
-                    </div>
+                    <div style="font-size: 1rem; color: var(--text); line-height: 1.8; white-space: pre-wrap;">${safeStr(analise.parecer_analista) || '<span style="color: var(--muted); font-style: italic;">Sem parecer técnico elaborado para este dossiê.</span>'}</div>
                 </div>
 
                 ${analise.parecer_comite ? `
                 <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px dashed #cbd5e1;">
                     <strong style="color: var(--blue-dark); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 0.75rem;">Deliberação Oficial do Comitê:</strong>
-                    <div style="background: #f8fafc; border-left: 4px solid var(--blue); padding: 1.25rem 1.5rem; border-radius: 0 0.5rem 0.5rem 0; color: var(--blue-dark); font-weight: 500; font-size: 0.95rem; line-height: 1.6;">
+                    <div style="background: #f8fafc; border-left: 4px solid var(--blue); padding: 1.25rem 1.5rem; border-radius: 0 0.5rem 0.5rem 0; color: var(--blue-dark); font-weight: 500; font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap;">
                       ${safeStr(analise.parecer_comite)}
                     </div>
                 </div>
