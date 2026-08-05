@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { createClient } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 interface KappiItem {
   id: string;
@@ -16,8 +16,6 @@ interface KappiItem {
 }
 
 export default function KappiDashboardPage() {
-  const supabase = createClient();
-
   // Estados dos Formulários e Filtros
   const [documentoInput, setDocumentoInput] = useState("");
   const [empresaInput, setEmpresaInput] = useState("");
