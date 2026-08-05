@@ -441,7 +441,8 @@ export default function KappiDashboardPage() {
                       </td>
                     </tr>
                   );
-                })}
+                })
+              )}
             </tbody>
           </table>
         </div>
