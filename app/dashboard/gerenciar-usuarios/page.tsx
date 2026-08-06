@@ -195,7 +195,7 @@ export default function GerenciarUsuariosPage() {
 
   const exibeFormulario = isCriando || selecionado;
 
-  if (carregando && usuarios.length === 0) return <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest">Carregando Motor de Acessos...</div>;
+  if (carregando && usuarios.length === 0) return <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest">Carregando Gestorde Acessos...</div>;
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 sm:p-8 font-sans text-[#0f172a]">
@@ -204,7 +204,7 @@ export default function GerenciarUsuariosPage() {
         {/* HEADER GLOBAL (AESTHETIC DOSSIÊ) */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-8 rounded-xl border border-[#e2e8f0] shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)]">
           <div>
-            <h1 className="text-[1.8rem] font-black uppercase tracking-[-0.5px] text-[#1e3a8a] m-0 leading-tight">Motor de Acessos & Segurança</h1>
+            <h1 className="text-[1.8rem] font-black uppercase tracking-[-0.5px] text-[#1e3a8a] m-0 leading-tight">Gestorde Acessos & Segurança</h1>
             <div className="text-[0.95rem] font-medium text-[#64748b] mt-1 font-mono">GERENCIAMENTO ESTRUTURAL DE EQUIPES</div>
           </div>
         </div>
