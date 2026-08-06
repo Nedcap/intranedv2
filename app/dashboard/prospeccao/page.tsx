@@ -137,10 +137,17 @@ export default function ProspeccaoIAPage() {
     setLeadSelecionado(null);
 
     try {
+      // 🌟 OBTENDO O TOKEN JWT DA SESSÃO ATUAL
+      const { data: { session } } = await supabase.auth.getSession();
+      const tokenJwt = session?.access_token;
+
       // ⚡ TRAVADO EM 50 CONSULTAS DIRETAMENTE NO PAYLOAD DE ENVIO
       const response = await fetch("/api/prospeccao-ia", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${tokenJwt}` // 👈 Token JWT inserido no cabeçalho
+        },
         body: JSON.stringify({ promptUsuario: prompt, limite: 50 }),
       });
 
