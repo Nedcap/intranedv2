@@ -22,12 +22,10 @@ import '@xyflow/react/dist/style.css';
 import { supabase } from '@/lib/supabase'; 
 
 // ============================================================================
-// COMPONENTES DE NÓ DO REACT FLOW (CORRIGIDO FORMAS OCULTAS)
+// COMPONENTES DE NÓ DO REACT FLOW (CORRIGIDO: ANCORAGEM CENTRALIZADA)
 // ============================================================================
 const nodeTypes = {
   bolinha: ({ data, style }: any) => {
-    // 🛡️ Extraímos apenas as cores do style injetado pelo React Flow. 
-    // Ignoramos o resto para não herdar formatações quadradas acidentais.
     const bgColor = style?.backgroundColor || style?.background || '#1e3a8a';
     const txtColor = style?.color || '#ffffff';
 
@@ -39,15 +37,16 @@ const nodeTypes = {
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
-        borderRadius: '50%', // 🔥 O SEGREDO DO SUCESSO: Força o círculo perfeito
+        borderRadius: '50%',
         backgroundColor: bgColor,
         color: txtColor,
         boxShadow: data?.isMatriz ? '0 0 0 6px rgba(59, 130, 246, 0.4)' : '0 10px 25px -5px rgba(0,0,0,0.3)',
-        border: data?.isMatriz ? '4px solid #ffffff' : 'none', // 🔥 Borda agora obedece o radius 50%
+        border: data?.isMatriz ? '4px solid #ffffff' : 'none', 
         transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
         padding: '8px',
       }}>
-        <Handle type="target" position={Position.Top} style={{ opacity: 0, border: 'none' }} />
+        {/* 🔥 CORREÇÃO: Handles no top 50% / left 50% forçam as linhas a mirarem o centro do círculo */}
+        <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
         <span style={{ 
           pointerEvents: 'none', 
           userSelect: 'none', 
@@ -60,7 +59,7 @@ const nodeTypes = {
         }}>
           {data?.label}
         </span>
-        <Handle type="source" position={Position.Bottom} style={{ opacity: 0, border: 'none' }} />
+        <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
       </div>
     );
   }
@@ -201,7 +200,7 @@ function BuscaGrupoConteudo() {
             ...n.style,
             width: n.style?.width || 110,
             height: n.style?.height || 110,
-            borderRadius: '50%', // 🔥 Garante que o envelope do React Flow seja redondo
+            borderRadius: '50%', 
             border: 'none',
             background: 'transparent',
           }
@@ -238,7 +237,7 @@ function BuscaGrupoConteudo() {
     if (tipoNode === "CNPJ" && node.data?.filiais) {
       setEmpresaInspecionada({
         nome: node.data.label as string,
-        lista: node.data.filiais as any[]
+        lista: Array.isArray(node.data.filiais) ? node.data.filiais : [] 
       });
     }
   }, []);
@@ -617,7 +616,7 @@ function BuscaGrupoConteudo() {
         </div>
       )}
 
-      {/* 🔥 STYLES GLOBAIS DE SCROLL & LIMPEZA DE BORDAS OCULTAS DO REACT FLOW */}
+      {/* STYLES GLOBAIS DE SCROLL & LIMPEZA DE BORDAS OCULTAS DO REACT FLOW */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
