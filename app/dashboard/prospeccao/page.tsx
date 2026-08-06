@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface Lead {
@@ -18,7 +18,6 @@ interface Lead {
   municipio_rf: string; 
   razao_social: string; 
   nome_fantasia?: string; 
-  
   natureza_juridica?: string;
   capital_social?: number;
   google_categoria?: string;
@@ -26,7 +25,6 @@ interface Lead {
   website?: string;
   lat?: number;
   lng?: number;
-
   score?: number; 
   cidadeExtenso?: string;
 }
@@ -137,16 +135,14 @@ export default function ProspeccaoIAPage() {
     setLeadSelecionado(null);
 
     try {
-      // 🌟 OBTENDO O TOKEN JWT DA SESSÃO ATUAL
       const { data: { session } } = await supabase.auth.getSession();
       const tokenJwt = session?.access_token;
 
-      // ⚡ TRAVADO EM 50 CONSULTAS DIRETAMENTE NO PAYLOAD DE ENVIO
       const response = await fetch("/api/prospeccao-ia", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${tokenJwt}` // 👈 Token JWT inserido no cabeçalho
+          "Authorization": `Bearer ${tokenJwt}` 
         },
         body: JSON.stringify({ promptUsuario: prompt, limite: 50 }),
       });
@@ -270,272 +266,308 @@ export default function ProspeccaoIAPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-700 p-6 font-sans antialiased text-[13px]">
-      <div className="max-w-[1700px] mx-auto space-y-6">
+    // 🔥 AJUSTE: Viewport travado na altura da tela (h-screen)
+    <div className="h-screen bg-slate-50 text-slate-700 p-4 md:p-6 font-sans antialiased text-[13px] flex flex-col overflow-hidden">
+      <div className="max-w-[1700px] mx-auto w-full flex flex-col h-full gap-5">
         
-        {/* HEADER */}
-        <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase animate-pulse">
-                Google BigQuery Active
-              </span>
-              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase">
-                GPT-4o-Mini Active
-              </span>
-            </div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase mt-1.5 flex items-center gap-2">
-              🧠 Motor de Prospecção Avançada <span className="text-indigo-600">BigQuery Mining v2</span>
-            </h1>
-          </div>
-        </div>
-
-        {/* BOX DE ENTRADA / PROMPT */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 transition-all group-hover:h-full"></div>
-          
-          <form onSubmit={executarMineraaoInteligente} className="space-y-4">
+        {/* ================= HEADER & SEARCH (FIXOS NO TOPO) ================= */}
+        <div className="shrink-0 space-y-5">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-              <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-2">
-                Descreva o Alvo Comercial (Segmento, Nicho, Produto e Região)
-              </label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Ex: Quero indústrias farmacêuticas ou laboratórios de manipulação em Maringá PR..."
-                className="w-full p-4 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[85px] resize-none"
-                disabled={carregando}
-              />
-            </div>
-
-            <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 pt-4 border-t border-slate-200 mt-4">
-              {/* INDICADOR VISUAL DO LIMITE FIXO DE SEGURANÇA */}
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-slate-500 text-[11px] uppercase tracking-wider">Profundidade da busca:</span>
-                <span className="bg-amber-50 text-amber-800 border border-amber-200 font-black px-3 py-1.5 rounded-lg text-xs tracking-tight shadow-sm flex items-center gap-1.5">
-                  🛡️ Máx. 50 Registros por Consulta (Modo Econômico)
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md text-[10px] font-black tracking-wider uppercase animate-pulse shadow-sm">
+                  Google BigQuery
+                </span>
+                <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px] font-black tracking-wider uppercase shadow-sm">
+                  GPT-4o-Mini AI
                 </span>
               </div>
-
-              <button
-                type="submit"
-                disabled={carregando || !prompt.trim()}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600 shadow-md flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {carregando ? "Minerando Base BigQuery Cloud..." : "⚡ Iniciar Extração Inteligente"}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* METADADOS DA INTERPRETAÇÃO DA IA */}
-        {perfilAI && (
-          <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 shadow-sm">
-            <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nicho Mapeado</span>
-              <div className="text-xs font-bold text-slate-800 capitalize truncate">{perfilAI.atividade || "Busca Geral"}</div>
-            </div>
-            <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Região Alvo</span>
-              <div className="text-xs font-bold text-indigo-600 uppercase">
-                {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf || "Indefinido"}`}
-              </div>
-            </div>
-            <div className="space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CNAEs Sniper Detectados</span>
-              <div className="flex flex-wrap gap-1 mt-0.5">
-                {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 0 ? (
-                  (perfilAI.codigos_cnae || perfilAI.familias_cnae || []).map(c => (
-                    <span key={c} className="bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200">
-                      {c}*
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs font-semibold text-slate-400">Busca abrangente</span>
-                )}
-              </div>
+              <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
+                🧠 Motor de Prospecção <span className="text-indigo-600">B2B</span>
+              </h1>
             </div>
           </div>
-        )}
 
-        {/* CONTEÚDO PRINCIPAL (TABELA + GAVETA DA DIREITA) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* BOX DE ENTRADA / PROMPT */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
+            <form onSubmit={executarMineraaoInteligente} className="space-y-4 pl-2">
+              <div>
+                <label className="block font-black text-slate-500 uppercase text-[10px] tracking-widest mb-2">
+                  Descreva o Alvo Comercial (Segmento, Nicho, Produto e Região)
+                </label>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Ex: Quero indústrias farmacêuticas ou laboratórios de manipulação em Maringá PR..."
+                  className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl text-[13px] font-medium text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all min-h-[80px] resize-none shadow-inner"
+                  disabled={carregando}
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 pt-3 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-500 text-[10px] uppercase tracking-wider">Profundidade:</span>
+                  <span className="bg-slate-100 text-slate-600 border border-slate-200 font-bold px-2.5 py-1 rounded-lg text-[10px] tracking-tight shadow-sm flex items-center gap-1.5 uppercase">
+                    🛡️ Máx. 50 Registros
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={carregando || !prompt.trim()}
+                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-[11px] uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {carregando ? "⏳ Extraindo do BigQuery..." : "⚡ Iniciar Extração Inteligente"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* METADADOS DA INTERPRETAÇÃO DA IA */}
+          {perfilAI && (
+            <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-4 shadow-sm">
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex flex-col justify-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">🎯 Nicho Mapeado (IA)</span>
+                <div className="text-xs font-bold text-slate-800 capitalize truncate" title={perfilAI.atividade}>{perfilAI.atividade || "Busca Geral"}</div>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex flex-col justify-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">📍 Região Alvo</span>
+                <div className="text-xs font-bold text-indigo-700 uppercase truncate">
+                  {perfilAI.cidade_nome ? `${perfilAI.cidade_nome} / ${perfilAI.uf}` : `Todo o Estado de ${perfilAI.uf || "Indefinido"}`}
+                </div>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex flex-col justify-center overflow-hidden">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">🏷️ CNAEs Sniper</span>
+                <div className="flex flex-wrap gap-1">
+                  {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 0 ? (
+                    (perfilAI.codigos_cnae || perfilAI.familias_cnae || []).slice(0, 3).map(c => (
+                      <span key={c} className="bg-white text-slate-600 font-mono font-bold px-1.5 py-0.5 rounded text-[10px] border border-slate-200 shadow-sm truncate max-w-[80px]">
+                        {c}*
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[10px] font-bold text-slate-400">Busca abrangente</span>
+                  )}
+                  {(perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length > 3 && (
+                    <span className="text-[9px] font-bold text-slate-400 self-center">+{((perfilAI.codigos_cnae || perfilAI.familias_cnae || []).length) - 3}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ================= ÁREA DE CONTEÚDO SCROLLABLE (TABELA E INSPEÇÃO) ================= */}
+        <div className="flex-1 min-h-0 flex gap-5">
           
-          <div className={`bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden transition-all duration-300 ${
-            leadSelecionado ? "lg:col-span-2" : "lg:col-span-3"
+          {/* TABELA DE LEADS */}
+          <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col transition-all duration-300 overflow-hidden ${
+            leadSelecionado ? "w-full lg:w-2/3 shrink-0" : "w-full"
           }`}>
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
               <span className="font-black text-slate-700 uppercase tracking-widest text-[11px] flex items-center gap-2">
-                🎯 Área de Trabalho Ativa <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-mono font-bold text-[10px]">{leads.length} leads</span>
+                🎯 Dossiês Extraídos 
+                <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-mono font-bold text-[10px] shadow-sm">{leads.length} leads</span>
               </span>
               
               {leads.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button 
                     onClick={exportarListaParaCSV}
-                    className="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
+                    className="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-lg hover:bg-slate-50 text-[10px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                   >
-                    📥 Exportar CSV
+                    📥 CSV
                   </button>
                   <button 
                     onClick={limparTodaAEstreia}
-                    className="bg-red-50 border border-red-200 text-red-600 font-bold px-3 py-1 rounded hover:bg-red-100 text-[11px] cursor-pointer"
+                    className="bg-rose-50 border border-rose-200 text-rose-600 font-bold px-3 py-1.5 rounded-lg hover:bg-rose-100 text-[10px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                   >
-                    🗑️ Limpar Lista
+                    🗑️ Limpar
                   </button>
                 </div>
               )}
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
               <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200">
-                    <th className="p-3.5">Score</th>
-                    <th className="p-3.5">CNPJ</th>
+                <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                  <tr className="text-slate-500 uppercase text-[9px] font-black tracking-widest border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm">
+                    <th className="p-3.5 w-16 text-center">Score</th>
+                    <th className="p-3.5 w-36">CNPJ</th>
                     <th className="p-3.5">Razão Social / Identificação</th>
-                    <th className="p-3.5">Cidade/UF</th>
-                    <th className="p-3.5">CNAE Principal</th>
-                    <th className="p-3.5 text-center">Ações</th>
+                    <th className="p-3.5 w-40">Localização</th>
+                    <th className="p-3.5 w-40">CNAE Principal</th>
+                    <th className="p-3.5 w-24 text-center">Ações</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-xs">
+                <tbody className="divide-y divide-slate-100 font-medium text-[11px]">
                   {leads.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center p-12 text-slate-500 font-bold bg-slate-50">
-                        {carregando ? "Cruzando tabelas na nuvem do Google BigQuery..." : "Área de trabalho vazia. Descreva um alvo acima para minerar e acumular leads aqui!"}
+                      <td colSpan={6} className="text-center p-16">
+                        {carregando ? (
+                          <div className="flex flex-col items-center gap-3 text-indigo-500">
+                             <div className="w-8 h-8 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+                             <span className="font-bold uppercase tracking-widest text-xs">Cruzando tabelas na nuvem do Google BigQuery...</span>
+                          </div>
+                        ) : (
+                          <div className="text-slate-400 font-bold uppercase tracking-widest text-xs">Área de trabalho vazia. Descreva um alvo acima para minerar!</div>
+                        )}
                       </td>
                     </tr>
                   ) : (
-                    leads.map((lead) => (
-                      <tr 
-                        key={lead.cnpj} 
-                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${
-                          leadSelecionado?.cnpj === lead.cnpj ? "bg-indigo-50 border-l-2 border-l-indigo-500" : ""
-                        }`}
-                        onClick={() => setLeadSelecionado(lead)}
-                      >
-                        <td className="p-3.5">
-                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded font-black font-mono text-[10px]">
-                            {lead.score} PTS
-                          </span>
-                        </td>
-                        <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
-                        <td className="p-3.5 font-black text-slate-900 uppercase truncate max-w-[280px]">
-                          <div>{lead.razao_social}</div>
-                          {lead.nome_fantasia && lead.nome_fantasia !== lead.razao_social && (
-                            <div className="text-[10px] text-indigo-500 font-semibold lowercase truncate tracking-tight">⭐ {lead.nome_fantasia}</div>
-                          )}
-                        </td>
-                        <td className="p-3.5 uppercase text-slate-500">{lead.cidadeExtenso} / {lead.uf}</td>
-                        <td className="p-3.5 text-slate-500 max-w-[250px] truncate">
-                          <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] mr-1.5 border border-slate-200">
-                            {lead.cnae_principal}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-center flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social || lead.cnpj)}`, "_blank")}
-                            className="bg-white text-slate-700 border border-slate-300 font-bold px-2 py-1 rounded hover:bg-slate-50 text-[11px] cursor-pointer"
-                          >
-                            Google
-                          </button>
-                          <button
-                            onClick={() => eliminarLeadDaLista(lead.cnpj)}
-                            className="bg-white text-red-500 border border-red-200 font-bold px-2 py-1 rounded hover:bg-red-50 text-[11px] cursor-pointer"
-                            title="Remover da lista"
-                          >
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    leads.map((lead) => {
+                      const isSelected = leadSelecionado?.cnpj === lead.cnpj;
+                      return (
+                        <tr 
+                          key={lead.cnpj} 
+                          className={`hover:bg-indigo-50/40 transition-colors cursor-pointer ${
+                            isSelected ? "bg-indigo-50/80 border-l-[4px] border-l-indigo-600 shadow-inner" : "border-l-[4px] border-l-transparent"
+                          }`}
+                          onClick={() => setLeadSelecionado(lead)}
+                        >
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2 py-1 rounded font-black font-mono text-[9px] shadow-sm tracking-wider ${
+                              (lead.score || 0) >= 8 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                              (lead.score || 0) >= 5 ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                              'bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}>
+                              {lead.score} PT
+                            </span>
+                          </td>
+                          <td className="p-3.5 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
+                          <td className="p-3.5">
+                            <div className={`font-black uppercase truncate ${isSelected ? 'text-indigo-900' : 'text-slate-800'}`}>{lead.razao_social}</div>
+                            {lead.nome_fantasia && lead.nome_fantasia !== lead.razao_social && (
+                              <div className="text-[10px] text-slate-500 font-bold lowercase truncate tracking-tight mt-0.5">⭐ {lead.nome_fantasia}</div>
+                            )}
+                          </td>
+                          <td className="p-3.5 uppercase text-slate-500 font-bold text-[10px]">{lead.cidadeExtenso} / {lead.uf}</td>
+                          <td className="p-3.5">
+                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded font-mono font-bold text-[9px] border border-slate-200 shadow-sm truncate max-w-[120px] inline-block" title={lead.cnae_principal}>
+                              {lead.cnae_principal}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social || lead.cnpj)}`, "_blank")}
+                              className="bg-white text-slate-600 border border-slate-300 font-bold px-2 py-1.5 rounded hover:bg-slate-50 text-[10px] cursor-pointer shadow-sm transition-colors"
+                              title="Pesquisar no Google"
+                            >
+                              🔍 G
+                            </button>
+                            <button
+                              onClick={() => eliminarLeadDaLista(lead.cnpj)}
+                              className="bg-rose-50 text-rose-600 border border-rose-200 font-bold px-2 py-1.5 rounded hover:bg-rose-500 hover:text-white text-[10px] cursor-pointer shadow-sm transition-colors"
+                              title="Remover Lead"
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* SIDE GAVETA: DETALHES COMPLETOS DO LEAD SELECIONADO */}
+          {/* SIDE GAVETA: DETALHES COMPLETOS (Ocupa o terço direito, rola interno) */}
           {leadSelecionado && (
-            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-lg animate-in slide-in-from-right-5 duration-200 lg:col-span-1 sticky top-6">
-              <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Painel de Auditoria Enriquecido</span>
-                <button 
-                  onClick={() => setLeadSelecionado(null)}
-                  className="text-slate-400 hover:text-slate-600 font-bold text-xs p-1 cursor-pointer"
-                >
-                  ✕ Fechar
-                </button>
+            <div className="w-full lg:w-1/3 bg-white border border-slate-200 rounded-2xl flex flex-col shadow-lg animate-in slide-in-from-right-8 duration-300 overflow-hidden shrink-0">
+              
+              <div className="bg-indigo-900 p-5 shrink-0 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+                <div className="flex justify-between items-start mb-3 relative z-10">
+                  <span className="bg-indigo-800 text-indigo-200 border border-indigo-700 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest shadow-inner">
+                    Inspeção de Lead
+                  </span>
+                  <button 
+                    onClick={() => setLeadSelecionado(null)}
+                    className="w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-rose-500 rounded-full text-white font-black transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <h3 className="text-base font-black text-white uppercase tracking-tight leading-tight relative z-10">
+                  {leadSelecionado.razao_social}
+                </h3>
+                {leadSelecionado.nome_fantasia && leadSelecionado.nome_fantasia !== leadSelecionado.razao_social && (
+                  <div className="text-xs font-bold text-indigo-300 uppercase mt-1 relative z-10">★ {leadSelecionado.nome_fantasia}</div>
+                )}
+                <div className="font-mono font-bold text-white/80 text-xs mt-2 relative z-10">{formatarCnpj(leadSelecionado.cnpj)}</div>
               </div>
 
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight leading-tight">
-                    {leadSelecionado.razao_social}
-                  </h3>
-                  {leadSelecionado.nome_fantasia && leadSelecionado.nome_fantasia !== leadSelecionado.razao_social && (
-                    <div className="text-xs font-bold text-indigo-600 uppercase mt-0.5">Fantasia: {leadSelecionado.nome_fantasia}</div>
-                  )}
-                  <span className="font-mono font-bold text-slate-500 text-xs">{formatarCnpj(leadSelecionado.cnpj)}</span>
-                </div>
-
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
-                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">Região</span>
-                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.cidadeExtenso} - {leadSelecionado.uf}</span>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5 bg-slate-50/50">
+                
+                {/* Cartão de Dados Cadastrais */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Região / Matriz</span>
+                    <span className="text-slate-800 text-xs uppercase font-black text-right">{leadSelecionado.cidadeExtenso} - {leadSelecionado.uf}</span>
                   </div>
-                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">Bairro</span>
-                    <span className="text-slate-800 uppercase font-semibold">{leadSelecionado.bairro || "NÃO INFORMADO"}</span>
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Bairro</span>
+                    <span className="text-slate-700 text-xs font-bold truncate max-w-[150px]" title={leadSelecionado.bairro}>{leadSelecionado.bairro || "NÃO INFORMADO"}</span>
                   </div>
-                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">Situação Cadastral</span>
-                    <span className="text-slate-800 uppercase font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">
-                      STATUS {leadSelecionado.situacao}
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Situação Cadastral</span>
+                    <span className="text-xs font-black uppercase bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">
+                      {leadSelecionado.situacao}
                     </span>
                   </div>
-                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                    <span className="text-slate-500 font-bold">CNAE Principal</span>
-                    <span className="text-indigo-600 font-mono font-bold">{leadSelecionado.cnae_principal}</span>
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">CNAE Principal</span>
+                    <span className="text-indigo-600 font-mono font-bold text-[11px] truncate max-w-[150px]" title={leadSelecionado.cnae_principal}>{leadSelecionado.cnae_principal}</span>
                   </div>
+                  
                   {leadSelecionado.capital_social && leadSelecionado.capital_social > 0 ? (
-                    <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                      <span className="text-slate-500 font-bold">Capital Social</span>
-                      <span className="text-emerald-600 font-bold">
-                        {leadSelecionado.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Capital Social</span>
+                      <span className="text-emerald-700 font-black font-mono text-[13px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                        {leadSelecionado.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
                       </span>
                     </div>
                   ) : null}
+
                   {leadSelecionado.website && (
-                    <div className="flex justify-between pt-0.5 items-center">
-                      <span className="text-slate-500 font-bold">Website</span>
+                    <div className="flex justify-between items-center pt-1">
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Presença Digital</span>
                       <a 
                         href={leadSelecionado.website.startsWith("http") ? leadSelecionado.website : `https://${leadSelecionado.website}`}
                         target="_blank" 
-                        className="text-indigo-600 font-bold hover:underline text-[11px] truncate max-w-[150px]"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 font-bold hover:underline text-[11px] truncate max-w-[160px] bg-blue-50 px-2 py-1 rounded border border-blue-100 shadow-sm"
                       >
-                        {leadSelecionado.website} 🔗
+                        🌐 Acessar Site
                       </a>
                     </div>
                   )}
                 </div>
 
+                {/* Bloco Google Maps / Classificação */}
                 {leadSelecionado.google_categoria && (
-                  <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg">
-                    <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block mb-0.5">Classificação Comercial Google</span>
-                    <span className="text-xs font-semibold text-slate-800 capitalize">{leadSelecionado.google_categoria}</span>
+                  <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl shadow-sm">
+                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Classificação Comercial (Google Maps)</span>
+                    <span className="text-sm font-black text-indigo-900 capitalize flex items-center gap-2">
+                      <span>📍</span> {leadSelecionado.google_categoria}
+                    </span>
                   </div>
                 )}
 
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-2 mt-4">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    Delegar Lead no NedHub para:
+              </div>
+
+              {/* RODAPÉ DA GAVETA: AÇÕES E DELEGAÇÃO */}
+              <div className="p-5 bg-white border-t border-slate-200 shrink-0 space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    👤 Delegar para Carteira Comercial:
                   </label>
                   <select 
                     value={agenteAlvo}
                     onChange={(e) => setAgenteAlvo(e.target.value)}
-                    className="w-full p-2 bg-white border border-slate-300 rounded text-xs text-slate-800 outline-none cursor-pointer focus:border-indigo-500 uppercase font-bold shadow-sm"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 outline-none cursor-pointer focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all uppercase shadow-sm"
                   >
                     {equipeDisponivel.map(membro => (
                       <option key={membro.id} value={membro.nome}>{membro.nome}</option>
@@ -543,31 +575,38 @@ export default function ProspeccaoIAPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-2">
+                <div className="grid grid-cols-2 gap-3 pt-2">
                   <button
-                    onClick={() => {
-                      const cnpjLimpo = leadSelecionado.cnpj.replace(/\D/g, "");
-                      window.open(`https://cnpj.biz/${cnpjLimpo}`, "_blank");
-                    }}
-                    className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-lg font-bold text-center hover:bg-slate-50 text-[11px] cursor-pointer shadow-sm"
+                    onClick={() => window.open(`https://cnpj.biz/${leadSelecionado.cnpj.replace(/\D/g, "")}`, "_blank")}
+                    className="w-full bg-white text-slate-700 border border-slate-300 py-3 rounded-xl font-black text-center hover:bg-slate-50 text-[10px] uppercase tracking-wider cursor-pointer shadow-sm transition-all"
                   >
-                    Cartão CNPJ ⚡
+                    ⚡ Cartão CNPJ
                   </button>
                   <button
                     onClick={enviarParaNedHub}
                     disabled={vinculando}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-black text-center shadow-md transition-colors cursor-pointer text-[11px] disabled:opacity-50"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-black text-center shadow-md transition-all cursor-pointer text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    {vinculando ? "⏳ Gravando..." : "📤 Enviar p/ NedHub"}
+                    {vinculando ? "⏳ Gravando..." : "📤 Enviar NedHub"}
                   </button>
                 </div>
               </div>
+
             </div>
           )}
 
         </div>
 
       </div>
+
+      {/* GLOBAL SCROLLBAR STYLES */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
+
     </div>
   );
 }
