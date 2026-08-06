@@ -189,6 +189,23 @@ export default function RevisaoPage() {
     setRevisoes(novos);
   };
 
+  // 🎯 NOVO: Recalcula a data final automaticamente ao mudar a data inicial
+  const handleDataUltimaChange = (index: number, novaData: string) => {
+    if (!novaData) return handleInputChange(index, "data_ultima_renovacao", "");
+
+    const novos = [...revisoes];
+    // Adiciona 180 dias à nova data selecionada
+    const dataProxima = new Date(new Date(novaData).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    
+    novos[index] = { 
+      ...novos[index], 
+      data_ultima_renovacao: novaData, 
+      data_proxima_renovacao: dataProxima, 
+      _isEditado: true 
+    };
+    setRevisoes(novos);
+  };
+
   const renovarRapido = async (item: RevisaoCedente) => {
     if (!confirm(`🚀 Confirmar a renovação automática de ${item.cedente} por +180 dias?`)) return;
     try {
@@ -488,8 +505,13 @@ export default function RevisaoPage() {
                           <span className="text-slate-500 text-xs font-bold uppercase block mt-0.5">{item.comercial || "-"}</span>
                         </td>
 
-                        <td className="px-4 py-4 align-top text-center">
-                          <span className="text-slate-500 font-mono text-xs font-semibold block mt-0.5">{fData(item.data_ultima_renovacao)}</span>
+                        <td className="px-4 py-4 align-top text-center relative group/edit">
+                          <div className="flex items-center justify-center gap-1">
+                            <span className="text-slate-500 font-mono text-xs font-semibold block mt-0.5">{fData(item.data_ultima_renovacao)}</span>
+                            <button onClick={() => toggleExpandirLinha(item.id)} className="opacity-0 group-hover/edit:opacity-100 text-indigo-500 hover:bg-indigo-50 p-1 rounded transition-all cursor-pointer" title="Editar data de renovação">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            </button>
+                          </div>
                         </td>
 
                         <td className="px-4 py-4 align-top">
@@ -538,9 +560,13 @@ export default function RevisaoPage() {
                                   <div className="space-y-4">
                                     <div className="flex flex-col gap-1.5">
                                       <label className="text-[10px] text-slate-500 font-bold uppercase">Última Renovação (Início)</label>
-                                      <input type="date" value={item.data_ultima_renovacao || ""} onChange={(e) => handleInputChange(index, "data_ultima_renovacao", e.target.value)} 
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-mono font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all bg-slate-50 hover:bg-white" />
+                                      <input type="date" value={item.data_ultima_renovacao || ""} 
+                                        onChange={(e) => handleDataUltimaChange(index, e.target.value)} 
+                                        className="w-full p-2.5 border border-indigo-300 rounded-lg text-sm font-mono font-black text-indigo-700 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition-all bg-white shadow-inner cursor-text" 
+                                      />
+                                      <p className="text-[9px] text-slate-400 mt-1">Ao alterar esta data, a próxima expiração (+180 dias) será recalculada automaticamente.</p>
                                     </div>
+
                                     <div className="flex flex-col gap-1.5">
                                       <label className="text-[10px] text-slate-500 font-bold uppercase">Próxima Expiração (Teto +180d)</label>
                                       <input type="date" value={item.data_proxima_renovacao || ""} onChange={(e) => handleInputChange(index, "data_proxima_renovacao", e.target.value)} 
@@ -548,7 +574,7 @@ export default function RevisaoPage() {
                                     </div>
                                     
                                     <button onClick={() => renovarRapido(item)} disabled={salvando} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs uppercase cursor-pointer shadow-md transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50">
-                                      🚀 Renovar Automático (+180 Dias)
+                                      🚀 Renovar Automático a partir de HOJE (+180 Dias)
                                     </button>
                                   </div>
                                 </div>
