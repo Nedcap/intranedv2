@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/AuthContext"; // 🛡️ O Crachá Global
 // 🎨 TIPAGENS E INTERFACES
 // ==========================================================================
 interface RevisaoCedente {
+  id: string; // 🎯 Agora usando a PK verdadeira (UUID)
   cedente: string;
   comercial: string | null;
   data_ultima_renovacao: string | null;
@@ -20,8 +21,8 @@ interface RevisaoCedente {
 }
 
 export default function RevisaoPage() {
-  // 🛡️ Integrado com o AuthContext Unificado
-  const { user, verApenasCarteira } = useAuth();
+  // 🛡️ Auth (Usado apenas para pegar o e-mail do disparador no Gmail)
+  const { user } = useAuth();
 
   const [revisoes, setRevisoes] = useState<RevisaoCedente[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -42,7 +43,7 @@ export default function RevisaoPage() {
   const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
 
   // ==========================================================================
-  // 📥 BUSCA DE DADOS
+  // 📥 BUSCA DE DADOS (VISÃO TOTAL - MODO INTERNO)
   // ==========================================================================
   const carregarDados = useCallback(async () => {
     try {
@@ -63,13 +64,8 @@ export default function RevisaoPage() {
       const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
       if (tpls) setTemplatesEmail(tpls);
 
-      // 3. Carrega Cedentes para Revisão
-      let query = supabase.from("revisao_cedentes").select("*");
-      if (verApenasCarteira && user?.nome) {
-        query = query.ilike("comercial", `%${user.nome}%`);
-      }
-
-      const { data, error } = await query;
+      // 3. Carrega TODOS os Cedentes (Sem filtro de carteira)
+      const { data, error } = await supabase.from("revisao_cedentes").select("*");
       if (error) throw error;
       
       if (data) {
@@ -80,7 +76,7 @@ export default function RevisaoPage() {
     } finally {
       setCarregando(false);
     }
-  }, [user, verApenasCarteira]);
+  }, [user]);
 
   useEffect(() => {
     carregarDados();
@@ -110,9 +106,9 @@ export default function RevisaoPage() {
     setModalDisparoAberto(true);
   };
 
-  const toggleSelecaoDisparo = (cedente: string) => {
+  const toggleSelecaoDisparo = (id: string) => {
     setSelecionadosParaDisparo(prev => 
-      prev.includes(cedente) ? prev.filter(i => i !== cedente) : [...prev, cedente]
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
   };
 
@@ -125,7 +121,7 @@ export default function RevisaoPage() {
     setEnviandoLote(true);
     setLogsDisparo(["🚀 Iniciando notificações aos comerciais:", `- Template: ${templateAtivo.nome}`]);
 
-    const itensParaEnviar = revisoes.filter(c => selecionadosParaDisparo.includes(c.cedente));
+    const itensParaEnviar = revisoes.filter(c => selecionadosParaDisparo.includes(c.id));
     
     const { data: { session } } = await supabase.auth.getSession();
     const tokenJwt = session?.access_token;
@@ -165,12 +161,12 @@ export default function RevisaoPage() {
 
         if (!res.ok) throw new Error(`Falha na API Gmail`);
         
-        // Atualiza a flag de último e-mail no banco
+        // 🎯 Atualiza a flag de último e-mail usando o ID único
         const hojeIso = new Date().toISOString().split("T")[0];
-        await supabase.from("revisao_cedentes").update({ ultimo_email_enviado: hojeIso }).eq("cedente", item.cedente);
+        await supabase.from("revisao_cedentes").update({ ultimo_email_enviado: hojeIso }).eq("id", item.id);
 
         setLogsDisparo(prev => [...prev, `✅ Enviado com sucesso para ${item.comercial} (${emailDestino}) -> ${item.cedente}`]);
-        await new Promise(r => setTimeout(r, 1000)); // Delay para não estourar rate limit
+        await new Promise(r => setTimeout(r, 1000));
 
       } catch (err: any) {
         setLogsDisparo(prev => [...prev, `❌ Falha ao notificar sobre ${item.cedente}: ${err.message}`]);
@@ -179,13 +175,13 @@ export default function RevisaoPage() {
 
     setLogsDisparo(prev => [...prev, "🎉 Processo finalizado!"]);
     setEnviandoLote(false);
-    await carregarDados(); // Atualiza a tela para exibir as datas do envio
+    await carregarDados(); 
   };
 
   // ==========================================================================
   // ⚙️ LÓGICA DE ATUALIZAÇÃO E UI
   // ==========================================================================
-  const toggleExpandirLinha = (cedente: string) => setLinhasExpandidas(prev => ({ ...prev, [cedente]: !prev[cedente] }));
+  const toggleExpandirLinha = (id: string) => setLinhasExpandidas(prev => ({ ...prev, [id]: !prev[id] }));
 
   const handleInputChange = (index: number, campo: keyof RevisaoCedente, valor: any) => {
     const novos = [...revisoes];
@@ -201,6 +197,7 @@ export default function RevisaoPage() {
       const dataUltima = hoje.toISOString().split("T")[0];
       const dataProxima = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       
+      // 🎯 Update guiado por ID
       const { error } = await supabase
         .from("revisao_cedentes")
         .update({ 
@@ -210,7 +207,7 @@ export default function RevisaoPage() {
           pendencias: null,
           renovado: true
         })
-        .eq("cedente", item.cedente);
+        .eq("id", item.id);
 
       if (error) throw error;
       alert(`✅ Limite de ${item.cedente} renovado com sucesso!`); 
@@ -221,12 +218,13 @@ export default function RevisaoPage() {
   const salvarLinha = async (item: RevisaoCedente) => {
     try {
       setSalvando(true);
+      // 🎯 Update guiado por ID
       const { error } = await supabase.from("revisao_cedentes").update({
         data_ultima_renovacao: item.data_ultima_renovacao,
         data_proxima_renovacao: item.data_proxima_renovacao,
         pendencias: item.pendencias,
         renovado: item.renovado
-      }).eq("cedente", item.cedente);
+      }).eq("id", item.id);
 
       if (error) throw error;
       alert(`✅ Alterações de ${item.cedente} salvas!`);
@@ -240,12 +238,13 @@ export default function RevisaoPage() {
     try {
       setSalvando(true);
       for (const item of editados) {
+        // 🎯 Updates guiados por ID
         await supabase.from("revisao_cedentes").update({
           data_ultima_renovacao: item.data_ultima_renovacao,
           data_proxima_renovacao: item.data_proxima_renovacao,
           pendencias: item.pendencias,
           renovado: item.renovado
-        }).eq("cedente", item.cedente);
+        }).eq("id", item.id);
       }
       alert("🎉 Todas as alterações foram gravadas!");
       setLinhasExpandidas({});
@@ -299,12 +298,12 @@ export default function RevisaoPage() {
       return false;
     });
 
-    // Ordenação por Comercial para criar os Blocos Visuais
+    // Ordenação Master (Agrupamento por Comercial)
     filtrado.sort((a, b) => {
       const comercialA = (a.comercial || "Sem Comercial").toUpperCase();
       const comercialB = (b.comercial || "Sem Comercial").toUpperCase();
       if (comercialA !== comercialB) return comercialA.localeCompare(comercialB);
-      // Se for o mesmo comercial, ordena por data de vencimento
+      // Desempate pela data
       const dateA = new Date(a.data_proxima_renovacao || "2099-01-01").getTime();
       const dateB = new Date(b.data_proxima_renovacao || "2099-01-01").getTime();
       return dateA - dateB;
@@ -336,9 +335,9 @@ export default function RevisaoPage() {
               <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               </div>
-              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Revisão de Cedentes</h2>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Visão Geral - Revisão de Cedentes</h2>
             </div>
-            <span className="text-sm text-slate-500 font-medium ml-12">Painel de controle de vencimentos e pendências documentais.</span>
+            <span className="text-sm text-slate-500 font-medium ml-12">Painel de controle de vencimentos e pendências documentais (Uso Interno).</span>
           </div>
           
           <div className="flex gap-3 w-full md:w-auto flex-wrap md:flex-nowrap">
@@ -354,7 +353,7 @@ export default function RevisaoPage() {
         {/* =============== PAINEL DE KPIs =============== */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <button onClick={() => setFiltroStatus("TODOS")} className={`p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 shadow-sm"}`}>
-            <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Carteira Total</span>
+            <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Carteira Total (Global)</span>
             <span className="text-4xl font-black">{kpis.total}</span>
           </button>
           
@@ -427,7 +426,7 @@ export default function RevisaoPage() {
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest h-14">
                   <th className="w-14 px-4 text-center">Ação</th>
                   <th className="px-4 w-72">Cedente</th>
-                  {user?.cargo?.toLowerCase() !== "comercial" && <th className="px-4 w-32">Comercial</th>}
+                  <th className="px-4 w-32">Comercial</th>
                   <th className="px-4 text-center w-40">Última Renovação</th>
                   <th className="px-4 w-52">Cronograma (180 dias)</th>
                   <th className="px-4 flex-1 min-w-[250px]">Status / Pendências</th>
@@ -441,19 +440,18 @@ export default function RevisaoPage() {
                   <tr><td colSpan={6} className="text-center py-10 text-slate-500 font-medium">Nenhum cedente encontrado. 🎉</td></tr>
                 ) : revisoesFiltradasEOrdenadas.map((item, mapIndex, array) => {
                   
-                  const index = revisoes.findIndex(r => r.cedente === item.cedente);
-                  const isOpen = !!linhasExpandidas[item.cedente];
+                  const index = revisoes.findIndex(r => r.id === item.id);
+                  const isOpen = !!linhasExpandidas[item.id];
                   const infoData = analiseVencimento(item.data_proxima_renovacao);
                   const temPendencia = item.pendencias && item.pendencias.trim().length > 0;
 
-                  // Lógica Visual: Bloco do Comercial (só aparece se o usuário for Admin/Não Comercial)
-                  const ehAdmin = user?.cargo?.toLowerCase() !== "comercial";
+                  // Lógica Visual: Bloco do Comercial (Aplicada para todos na Visão Interna)
                   const comercialAtual = item.comercial || "Sem Comercial";
                   const comercialAnterior = mapIndex > 0 ? (array[mapIndex - 1].comercial || "Sem Comercial") : null;
-                  const showGroupHeader = ehAdmin && comercialAtual !== comercialAnterior;
+                  const showGroupHeader = comercialAtual !== comercialAnterior;
 
                   return (
-                    <React.Fragment key={item.cedente}>
+                    <React.Fragment key={item.id}>
                       
                       {/* HEADER DO BLOCO COMERCIAL */}
                       {showGroupHeader && (
@@ -468,10 +466,10 @@ export default function RevisaoPage() {
                       )}
 
                       {/* LINHA PRINCIPAL */}
-                      <tr className={`group transition-all duration-200 ${isOpen ? "bg-indigo-50/30" : "hover:bg-slate-50"} ${item._isEditado ? "bg-amber-50/30" : ""} ${ehAdmin ? "border-l-4 border-l-indigo-400" : ""}`}>
+                      <tr className={`group transition-all duration-200 ${isOpen ? "bg-indigo-50/30" : "hover:bg-slate-50"} ${item._isEditado ? "bg-amber-50/30" : ""} border-l-4 border-l-indigo-400`}>
                         
                         <td className="px-4 py-4 text-center align-top">
-                          <button onClick={() => toggleExpandirLinha(item.cedente)} className={`w-7 h-7 rounded-full flex items-center justify-center font-bold transition-all border cursor-pointer ${isOpen ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/30" : "bg-white text-slate-400 border-slate-300 hover:border-indigo-400 hover:text-indigo-600 shadow-sm"}`}>
+                          <button onClick={() => toggleExpandirLinha(item.id)} className={`w-7 h-7 rounded-full flex items-center justify-center font-bold transition-all border cursor-pointer ${isOpen ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/30" : "bg-white text-slate-400 border-slate-300 hover:border-indigo-400 hover:text-indigo-600 shadow-sm"}`}>
                             <svg className={`w-4 h-4 transform transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
                           </button>
                         </td>
@@ -486,11 +484,9 @@ export default function RevisaoPage() {
                           </div>
                         </td>
 
-                        {ehAdmin && (
-                          <td className="px-4 py-4 align-top">
-                            <span className="text-slate-500 text-xs font-bold uppercase block mt-0.5">{item.comercial || "-"}</span>
-                          </td>
-                        )}
+                        <td className="px-4 py-4 align-top">
+                          <span className="text-slate-500 text-xs font-bold uppercase block mt-0.5">{item.comercial || "-"}</span>
+                        </td>
 
                         <td className="px-4 py-4 align-top text-center">
                           <span className="text-slate-500 font-mono text-xs font-semibold block mt-0.5">{fData(item.data_ultima_renovacao)}</span>
@@ -512,7 +508,7 @@ export default function RevisaoPage() {
 
                         <td className="px-4 py-4 align-top">
                           {temPendencia ? (
-                            <div className="flex gap-2 items-start text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 shadow-sm text-xs font-medium cursor-pointer" onClick={() => !isOpen && toggleExpandirLinha(item.cedente)}>
+                            <div className="flex gap-2 items-start text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 shadow-sm text-xs font-medium cursor-pointer" onClick={() => !isOpen && toggleExpandirLinha(item.id)}>
                               <span>⚠️</span>
                               <span className="truncate max-w-[200px]" title={item.pendencias || ""}>{item.pendencias}</span>
                             </div>
@@ -528,7 +524,7 @@ export default function RevisaoPage() {
                       {/* AREA EXPANDIDA (Detalhes e Edição) */}
                       {isOpen && (
                         <tr>
-                          <td colSpan={ehAdmin ? 6 : 5} className={`${ehAdmin ? "bg-indigo-50/20" : "bg-slate-50"} border-b-2 border-indigo-100 p-6 shadow-inner`}>
+                          <td colSpan={6} className={`bg-indigo-50/20 border-b-2 border-indigo-100 p-6 shadow-inner`}>
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                               <div className="xl:col-span-4 space-y-4">
                                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative">
@@ -641,7 +637,7 @@ export default function RevisaoPage() {
                   <div className="flex justify-between items-center mb-3">
                     <label className="block text-xs font-bold text-slate-700 uppercase">2. Selecione as Empresas ({cedentesModalFiltrados.length}):</label>
                     <button 
-                      onClick={() => setSelecionadosParaDisparo(selecionadosParaDisparo.length === cedentesModalFiltrados.length ? [] : cedentesModalFiltrados.map(c => c.cedente))} 
+                      onClick={() => setSelecionadosParaDisparo(selecionadosParaDisparo.length === cedentesModalFiltrados.length ? [] : cedentesModalFiltrados.map(c => c.id))} 
                       disabled={enviandoLote}
                       className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50 cursor-pointer"
                     >
@@ -662,11 +658,11 @@ export default function RevisaoPage() {
 
                   <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                     {cedentesModalFiltrados.map(c => (
-                      <div key={c.cedente} className={`flex flex-col p-3 border rounded-xl transition-colors cursor-pointer ${selecionadosParaDisparo.includes(c.cedente) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => !enviandoLote && toggleSelecaoDisparo(c.cedente)}>
+                      <div key={c.id} className={`flex flex-col p-3 border rounded-xl transition-colors cursor-pointer ${selecionadosParaDisparo.includes(c.id) ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => !enviandoLote && toggleSelecaoDisparo(c.id)}>
                         <div className="flex items-center gap-3">
                           <input 
                             type="checkbox" 
-                            checked={selecionadosParaDisparo.includes(c.cedente)} 
+                            checked={selecionadosParaDisparo.includes(c.id)} 
                             readOnly
                             className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer pointer-events-none"
                           />
