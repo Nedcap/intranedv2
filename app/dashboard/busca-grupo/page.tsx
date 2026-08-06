@@ -22,30 +22,45 @@ import '@xyflow/react/dist/style.css';
 import { supabase } from '@/lib/supabase'; 
 
 // ============================================================================
-// COMPONENTES DE NÓ DO REACT FLOW (BLINDADO CONTRA CRASHES)
+// COMPONENTES DE NÓ DO REACT FLOW (CORRIGIDO FORMAS OCULTAS)
 // ============================================================================
 const nodeTypes = {
   bolinha: ({ data, style }: any) => {
-    // 🔥 CORREÇÃO DO CRASH: O React Flow pode passar o style como undefined.
-    // Isso evita o erro "Cannot read properties of undefined (reading 'border')"
-    const safeStyle = style || {}; 
+    // 🛡️ Extraímos apenas as cores do style injetado pelo React Flow. 
+    // Ignoramos o resto para não herdar formatações quadradas acidentais.
+    const bgColor = style?.backgroundColor || style?.background || '#1e3a8a';
+    const txtColor = style?.color || '#ffffff';
 
     return (
       <div style={{
-        ...safeStyle,
+        width: '100%',
+        height: '100%',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        width: '100%',
-        height: '100%',
         position: 'relative',
-        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        border: data?.isMatriz ? '4px solid #fff' : (safeStyle.border || 'none'), // Blindado
+        borderRadius: '50%', // 🔥 O SEGREDO DO SUCESSO: Força o círculo perfeito
+        backgroundColor: bgColor,
+        color: txtColor,
+        boxShadow: data?.isMatriz ? '0 0 0 6px rgba(59, 130, 246, 0.4)' : '0 10px 25px -5px rgba(0,0,0,0.3)',
+        border: data?.isMatriz ? '4px solid #ffffff' : 'none', // 🔥 Borda agora obedece o radius 50%
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        padding: '8px',
       }}>
-        <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
-        <span style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center', lineHeight: '1.2', letterSpacing: '-0.02em', padding: '8px' }}>{data?.label}</span>
-        <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
+        <Handle type="target" position={Position.Top} style={{ opacity: 0, border: 'none' }} />
+        <span style={{ 
+          pointerEvents: 'none', 
+          userSelect: 'none', 
+          textAlign: 'center', 
+          lineHeight: '1.1', 
+          letterSpacing: '-0.02em',
+          fontWeight: '900',
+          fontSize: style?.fontSize || '9px',
+          wordBreak: 'break-word'
+        }}>
+          {data?.label}
+        </span>
+        <Handle type="source" position={Position.Bottom} style={{ opacity: 0, border: 'none' }} />
       </div>
     );
   }
@@ -184,7 +199,11 @@ function BuscaGrupoConteudo() {
           position: { x: n.position.x + xOffset, y: n.position.y + yOffset },
           style: {
             ...n.style,
-            boxShadow: n.data?.isMatriz ? '0 0 0 6px rgba(59, 130, 246, 0.3)' : '0 10px 25px -5px rgba(0,0,0,0.2)'
+            width: n.style?.width || 110,
+            height: n.style?.height || 110,
+            borderRadius: '50%', // 🔥 Garante que o envelope do React Flow seja redondo
+            border: 'none',
+            background: 'transparent',
           }
         }))];
       });
@@ -219,7 +238,7 @@ function BuscaGrupoConteudo() {
     if (tipoNode === "CNPJ" && node.data?.filiais) {
       setEmpresaInspecionada({
         nome: node.data.label as string,
-        lista: Array.isArray(node.data.filiais) ? node.data.filiais : [] // Blindagem contra arrays nulos
+        lista: node.data.filiais as any[]
       });
     }
   }, []);
@@ -301,15 +320,8 @@ function BuscaGrupoConteudo() {
           borderRadius: '50%', 
           width: 105, 
           height: 105, 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          fontWeight: '900', 
-          fontSize: '9px', 
-          textAlign: 'center', 
-          padding: '8px', 
-          border: `3px solid ${manualTipo === 'CNPJ' ? '#60a5fa' : '#c084fc'}`,
-          boxShadow: '0 0 20px rgba(147, 51, 234, 0.4)'
+          border: 'none',
+          background: 'transparent'
       }
     }]);
 
@@ -510,7 +522,7 @@ function BuscaGrupoConteudo() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto custom-scrollbar-dark p-4 space-y-3">
-                  {(empresaInspecionada.lista || []).map((filial: any, idx: number) => (
+                  {empresaInspecionada.lista.map((filial: any, idx: number) => (
                     <div key={idx} className="bg-[#334155]/40 border border-[#475569] p-4 rounded-xl">
                       <div className="flex justify-between items-center border-b border-[#475569]/50 pb-2 mb-2">
                         <span className="font-mono font-bold text-[#60a5fa] text-[11px]">{filial.cnpj || 'Matriz Cnpj Oculto'}</span>
@@ -605,7 +617,7 @@ function BuscaGrupoConteudo() {
         </div>
       )}
 
-      {/* STYLES GLOBAIS DE SCROLL E ESCONDER LOGO REACT FLOW */}
+      {/* 🔥 STYLES GLOBAIS DE SCROLL & LIMPEZA DE BORDAS OCULTAS DO REACT FLOW */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -617,6 +629,14 @@ function BuscaGrupoConteudo() {
         .custom-scrollbar-dark::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
         
         .react-flow__attribution { display: none !important; }
+        
+        /* 🔥 ISSO AQUI MATA OS QUADRADOS FANTASMAS DA LIBRARY */
+        .react-flow__node {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+          border-radius: 50% !important;
+        }
       `}} />
 
     </div>
