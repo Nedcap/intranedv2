@@ -22,13 +22,17 @@ import '@xyflow/react/dist/style.css';
 import { supabase } from '@/lib/supabase'; 
 
 // ============================================================================
-// COMPONENTES DE NÓ DO REACT FLOW
+// COMPONENTES DE NÓ DO REACT FLOW (BLINDADO CONTRA CRASHES)
 // ============================================================================
 const nodeTypes = {
   bolinha: ({ data, style }: any) => {
+    // 🔥 CORREÇÃO DO CRASH: O React Flow pode passar o style como undefined.
+    // Isso evita o erro "Cannot read properties of undefined (reading 'border')"
+    const safeStyle = style || {}; 
+
     return (
       <div style={{
-        ...style,
+        ...safeStyle,
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
@@ -37,10 +41,10 @@ const nodeTypes = {
         position: 'relative',
         boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        border: data.isMatriz ? '4px solid #fff' : style.border, // Highlight para Matriz
+        border: data?.isMatriz ? '4px solid #fff' : (safeStyle.border || 'none'), // Blindado
       }}>
         <Handle type="target" position={Position.Top} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
-        <span style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center', lineHeight: '1.2', letterSpacing: '-0.02em' }}>{data.label}</span>
+        <span style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center', lineHeight: '1.2', letterSpacing: '-0.02em', padding: '8px' }}>{data?.label}</span>
         <Handle type="source" position={Position.Bottom} style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0, border: 'none', pointerEvents: 'none' }} />
       </div>
     );
@@ -180,7 +184,6 @@ function BuscaGrupoConteudo() {
           position: { x: n.position.x + xOffset, y: n.position.y + yOffset },
           style: {
             ...n.style,
-            // Adicionando glow via style se for nó de interesse
             boxShadow: n.data?.isMatriz ? '0 0 0 6px rgba(59, 130, 246, 0.3)' : '0 10px 25px -5px rgba(0,0,0,0.2)'
           }
         }))];
@@ -191,7 +194,7 @@ function BuscaGrupoConteudo() {
         return [...prevEdges, ...novasEdges.map((e: Edge) => ({ 
           ...e, 
           type: 'straight', 
-          animated: e.label === "Sócio" ? false : true, // Sócios linha sólida, outros pontilhada animada
+          animated: e.label === "Sócio" ? false : true, 
           style: { stroke: '#475569', strokeWidth: e.label === "Sócio" ? 3 : 2 } 
         }))];
       });
@@ -216,7 +219,7 @@ function BuscaGrupoConteudo() {
     if (tipoNode === "CNPJ" && node.data?.filiais) {
       setEmpresaInspecionada({
         nome: node.data.label as string,
-        lista: node.data.filiais as any[]
+        lista: Array.isArray(node.data.filiais) ? node.data.filiais : [] // Blindagem contra arrays nulos
       });
     }
   }, []);
@@ -507,7 +510,7 @@ function BuscaGrupoConteudo() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto custom-scrollbar-dark p-4 space-y-3">
-                  {empresaInspecionada.lista.map((filial: any, idx: number) => (
+                  {(empresaInspecionada.lista || []).map((filial: any, idx: number) => (
                     <div key={idx} className="bg-[#334155]/40 border border-[#475569] p-4 rounded-xl">
                       <div className="flex justify-between items-center border-b border-[#475569]/50 pb-2 mb-2">
                         <span className="font-mono font-bold text-[#60a5fa] text-[11px]">{filial.cnpj || 'Matriz Cnpj Oculto'}</span>
@@ -602,7 +605,7 @@ function BuscaGrupoConteudo() {
         </div>
       )}
 
-      {/* STYLES GLOBAIS DE SCROLL */}
+      {/* STYLES GLOBAIS DE SCROLL E ESCONDER LOGO REACT FLOW */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
