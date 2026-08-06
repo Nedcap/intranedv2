@@ -273,12 +273,12 @@ export default function ProspeccaoIAPage() {
         <div className="shrink-0 flex flex-col xl:flex-row gap-6 items-start xl:items-stretch">
           
           {/* TÍTULO E BADGES */}
-          <div className="flex flex-col justify-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-[320px]">
+          <div className="flex flex-col justify-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-[320px] shrink-0">
             <div className="flex items-center gap-2 mb-3">
-              <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase animate-pulse shadow-sm">
+              <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase animate-pulse shadow-sm whitespace-nowrap">
                 Google BigQuery
               </span>
-              <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase shadow-sm">
+              <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase shadow-sm whitespace-nowrap">
                 GPT-4o-Mini
               </span>
             </div>
@@ -288,7 +288,7 @@ export default function ProspeccaoIAPage() {
           </div>
 
           {/* INPUT PRINCIPAL */}
-          <div className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between group">
+          <div className="flex-1 w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between group">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
             <div className="mb-4">
               <label className="block font-black text-slate-500 uppercase text-[11px] tracking-widest mb-2 ml-1">
@@ -304,23 +304,23 @@ export default function ProspeccaoIAPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-              <span className="bg-slate-100 text-slate-600 font-bold px-3 py-1.5 rounded-lg text-[11px] tracking-wide shadow-sm flex items-center gap-2 uppercase">
+              <span className="bg-slate-100 text-slate-600 font-bold px-3 py-2 rounded-lg text-[11px] tracking-wide shadow-sm flex items-center gap-2 uppercase whitespace-nowrap shrink-0">
                 🛡️ Profundidade: Máx. 50 Registros
               </span>
 
               <button
                 onClick={executarMineraaoInteligente}
                 disabled={carregando || !prompt.trim()}
-                className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-[0_4px_14px_rgba(79,70,229,0.3)] disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2 cursor-pointer w-full sm:w-auto"
+                className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-[0_4px_14px_rgba(79,70,229,0.3)] disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2 cursor-pointer w-full sm:w-auto shrink-0 whitespace-nowrap"
               >
-                {carregando ? "⏳ Extraindo do BigQuery..." : "⚡ Iniciar Extração Inteligente"}
+                {carregando ? "⏳ Extraindo..." : "⚡ Iniciar Extração Inteligente"}
               </button>
             </div>
           </div>
           
           {/* METADADOS DA IA (OPCIONAL, SE EXISTIREM) */}
           {perfilAI && (
-            <div className="hidden xl:flex flex-col bg-white border border-slate-200 rounded-2xl p-5 shadow-sm min-w-[320px] max-w-[380px] gap-3">
+            <div className="hidden xl:flex flex-col bg-white border border-slate-200 rounded-2xl p-5 shadow-sm min-w-[320px] max-w-[380px] gap-3 shrink-0">
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">🎯 Nicho Mapeado (IA)</span>
                 <div className="text-xs font-bold text-slate-800 capitalize truncate" title={perfilAI.atividade}>{perfilAI.atividade || "Busca Geral"}</div>
@@ -345,20 +345,20 @@ export default function ProspeccaoIAPage() {
             <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
               <span className="font-black text-slate-800 uppercase tracking-widest text-sm flex items-center gap-3">
                 🎯 Dossiês Extraídos 
-                <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-mono font-black text-[11px] shadow-sm">{leads.length} leads</span>
+                <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-mono font-black text-[11px] shadow-sm whitespace-nowrap">{leads.length} leads</span>
               </span>
               
               {leads.length > 0 && (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <button 
                     onClick={exportarListaParaCSV}
-                    className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-2"
+                    className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0"
                   >
                     📥 Exportar CSV
                   </button>
                   <button 
                     onClick={limparTodaAEstreia}
-                    className="bg-rose-50 border border-rose-200 text-rose-600 font-bold px-4 py-2 rounded-xl hover:bg-rose-100 text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-2"
+                    className="bg-rose-50 border border-rose-200 text-rose-600 font-bold px-4 py-2 rounded-xl hover:bg-rose-100 text-[11px] uppercase tracking-wider shadow-sm transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0"
                   >
                     🗑️ Limpar
                   </button>
@@ -367,15 +367,15 @@ export default function ProspeccaoIAPage() {
             </div>
 
             <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar">
-              <table className="w-full text-left border-collapse min-w-[800px]">
+              <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead className="bg-white sticky top-0 z-10 shadow-sm">
                   <tr className="text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-200 bg-slate-50/90 backdrop-blur-md">
                     <th className="p-4 w-20 text-center">Score</th>
                     <th className="p-4 w-40">CNPJ</th>
                     <th className="p-4 min-w-[250px]">Razão Social / Fantasia</th>
                     <th className="p-4 w-48">Localização</th>
-                    <th className="p-4 w-56">CNAE Principal</th>
-                    <th className="p-4 w-32 text-center">Ações</th>
+                    <th className="p-4 w-48">CNAE Principal</th>
+                    <th className="p-4 w-24 text-center">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-xs text-slate-700">
@@ -407,7 +407,7 @@ export default function ProspeccaoIAPage() {
                           onClick={() => setLeadSelecionado(lead)}
                         >
                           <td className="p-4 text-center">
-                            <span className={`px-2.5 py-1 rounded-md font-black font-mono text-[10px] shadow-sm tracking-wider ${
+                            <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-lg font-black font-mono text-[10px] shadow-sm tracking-wider ${
                               (lead.score || 0) >= 8 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
                               (lead.score || 0) >= 5 ? 'bg-amber-100 text-amber-700 border border-amber-200' :
                               'bg-rose-100 text-rose-700 border border-rose-200'
@@ -415,30 +415,30 @@ export default function ProspeccaoIAPage() {
                               {lead.score} PT
                             </span>
                           </td>
-                          <td className="p-4 font-mono font-bold text-slate-600 select-all">{formatarCnpj(lead.cnpj)}</td>
+                          <td className="p-4 font-mono font-bold text-slate-600 select-all whitespace-nowrap">{formatarCnpj(lead.cnpj)}</td>
                           <td className="p-4">
                             <div className={`font-black uppercase truncate max-w-[280px] ${isSelected ? 'text-indigo-900' : 'text-slate-800'}`}>{lead.razao_social}</div>
                             {lead.nome_fantasia && lead.nome_fantasia !== lead.razao_social && (
                               <div className="text-[10px] text-slate-500 font-bold lowercase truncate max-w-[280px] mt-1 tracking-tight">⭐ {lead.nome_fantasia}</div>
                             )}
                           </td>
-                          <td className="p-4 uppercase text-slate-600 font-bold text-[11px] truncate max-w-[180px]">{lead.cidadeExtenso} / {lead.uf}</td>
+                          <td className="p-4 uppercase text-slate-600 font-bold text-[11px] truncate max-w-[180px] whitespace-nowrap">{lead.cidadeExtenso} / {lead.uf}</td>
                           <td className="p-4">
-                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-mono font-bold text-[10px] border border-slate-200 shadow-sm truncate max-w-[200px] inline-block" title={lead.cnae_principal}>
+                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-mono font-bold text-[10px] border border-slate-200 shadow-sm truncate max-w-[180px] inline-block whitespace-nowrap" title={lead.cnae_principal}>
                               {lead.cnae_principal}
                             </span>
                           </td>
                           <td className="p-4 text-center flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <button
                               onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.razao_social || lead.cnpj)}`, "_blank")}
-                              className="bg-white text-slate-600 border border-slate-300 font-black px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-[11px] cursor-pointer shadow-sm transition-colors"
+                              className="bg-white text-slate-600 border border-slate-300 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-50 cursor-pointer shadow-sm transition-colors shrink-0"
                               title="Pesquisar no Google"
                             >
-                              🔍 G
+                              🔍
                             </button>
                             <button
                               onClick={() => eliminarLeadDaLista(lead.cnpj)}
-                              className="bg-white text-rose-500 border border-slate-300 font-black px-2.5 py-1.5 rounded-lg hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-[11px] cursor-pointer shadow-sm transition-colors"
+                              className="bg-white text-rose-500 border border-slate-300 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 cursor-pointer shadow-sm transition-colors shrink-0"
                               title="Remover Lead"
                             >
                               ✕
@@ -460,12 +460,12 @@ export default function ProspeccaoIAPage() {
               <div className="bg-indigo-900 p-6 shrink-0 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
                 <div className="flex justify-between items-start mb-4 relative z-10">
-                  <span className="bg-indigo-800 text-indigo-100 border border-indigo-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-inner">
+                  <span className="bg-indigo-800 text-indigo-100 border border-indigo-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-inner whitespace-nowrap">
                     Inspeção de Lead
                   </span>
                   <button 
                     onClick={() => setLeadSelecionado(null)}
-                    className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-rose-500 rounded-xl text-white font-black transition-colors cursor-pointer"
+                    className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-rose-500 rounded-xl text-white font-black transition-colors cursor-pointer shrink-0"
                   >
                     ✕
                   </button>
@@ -474,7 +474,7 @@ export default function ProspeccaoIAPage() {
                   {leadSelecionado.razao_social}
                 </h3>
                 {leadSelecionado.nome_fantasia && leadSelecionado.nome_fantasia !== leadSelecionado.razao_social && (
-                  <div className="text-sm font-bold text-indigo-300 uppercase mt-2 relative z-10">★ {leadSelecionado.nome_fantasia}</div>
+                  <div className="text-sm font-bold text-indigo-300 uppercase mt-2 relative z-10 truncate">★ {leadSelecionado.nome_fantasia}</div>
                 )}
                 <div className="font-mono font-bold text-white/80 text-xs mt-3 relative z-10 bg-black/20 inline-block px-2.5 py-1 rounded-md">{formatarCnpj(leadSelecionado.cnpj)}</div>
               </div>
@@ -490,7 +490,7 @@ export default function ProspeccaoIAPage() {
                   </div>
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Status Receita</span>
-                    <span className="text-[11px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md shadow-sm">
+                    <span className="text-[11px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md shadow-sm whitespace-nowrap">
                       {leadSelecionado.situacao}
                     </span>
                   </div>
@@ -502,7 +502,7 @@ export default function ProspeccaoIAPage() {
                   {leadSelecionado.capital_social && leadSelecionado.capital_social > 0 ? (
                     <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Cap. Social</span>
-                      <span className="text-slate-800 font-black font-mono text-sm">
+                      <span className="text-emerald-700 font-black font-mono text-[13px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 whitespace-nowrap">
                         {leadSelecionado.capital_social.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
                       </span>
                     </div>
@@ -515,7 +515,7 @@ export default function ProspeccaoIAPage() {
                         href={leadSelecionado.website.startsWith("http") ? leadSelecionado.website : `https://${leadSelecionado.website}`}
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="text-blue-600 font-black hover:underline text-[11px] truncate max-w-[160px] bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 shadow-sm transition-colors"
+                        className="text-blue-600 font-black hover:underline text-[11px] truncate max-w-[140px] bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-100 shadow-sm transition-colors whitespace-nowrap"
                       >
                         🌐 Acessar Site
                       </a>
@@ -555,14 +555,14 @@ export default function ProspeccaoIAPage() {
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <button
                     onClick={() => window.open(`https://cnpj.biz/${leadSelecionado.cnpj.replace(/\D/g, "")}`, "_blank")}
-                    className="w-full bg-white text-slate-700 border border-slate-300 py-3.5 rounded-xl font-black text-center hover:bg-slate-50 text-[11px] uppercase tracking-widest cursor-pointer shadow-sm transition-all"
+                    className="w-full bg-white text-slate-700 border border-slate-300 py-3.5 rounded-xl font-black text-center hover:bg-slate-50 text-[10px] uppercase tracking-wider cursor-pointer shadow-sm transition-all whitespace-nowrap"
                   >
-                    ⚡ Info CNPJ
+                    ⚡ Cartão CNPJ
                   </button>
                   <button
                     onClick={enviarParaNedHub}
                     disabled={vinculando}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 rounded-xl font-black text-center shadow-md transition-all cursor-pointer text-[11px] uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 rounded-xl font-black text-center shadow-md transition-all cursor-pointer text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
                   >
                     {vinculando ? "⏳ Gravando..." : "📤 Ir pro CRM"}
                   </button>
@@ -580,7 +580,7 @@ export default function ProspeccaoIAPage() {
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; border: 2px solid #fff; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; border: 2px solid #f8fafc; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}} />
 
