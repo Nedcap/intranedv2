@@ -195,36 +195,38 @@ export default function GerenciarUsuariosPage() {
 
   const exibeFormulario = isCriando || selecionado;
 
-  if (carregando && usuarios.length === 0) return <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest">Carregando Gestorde Acessos...</div>;
+  if (carregando && usuarios.length === 0) return <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest">Carregando Gestor de Acessos...</div>;
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] p-4 sm:p-8 font-sans text-[#0f172a]">
-      <div className="max-w-[1600px] mx-auto space-y-8">
+    // 🔥 AJUSTE: Tela agora trava na altura do monitor e não permite rolagem global
+    <div className="h-screen bg-[#f8fafc] p-4 sm:p-6 font-sans text-[#0f172a] flex flex-col overflow-hidden">
+      <div className="max-w-[1600px] w-full mx-auto flex flex-col flex-1 min-h-0 gap-6">
         
-        {/* HEADER GLOBAL (AESTHETIC DOSSIÊ) */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-8 rounded-xl border border-[#e2e8f0] shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)]">
+        {/* HEADER GLOBAL FIXO */}
+        <div className="shrink-0 flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 md:px-8 rounded-xl border border-[#e2e8f0] shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)]">
           <div>
-            <h1 className="text-[1.8rem] font-black uppercase tracking-[-0.5px] text-[#1e3a8a] m-0 leading-tight">Gestorde Acessos & Segurança</h1>
-            <div className="text-[0.95rem] font-medium text-[#64748b] mt-1 font-mono">GERENCIAMENTO ESTRUTURAL DE EQUIPES</div>
+            <h1 className="text-2xl md:text-[1.8rem] font-black uppercase tracking-[-0.5px] text-[#1e3a8a] m-0 leading-tight">Gestor de Acessos & Segurança</h1>
+            <div className="text-[0.85rem] md:text-[0.95rem] font-medium text-[#64748b] mt-1 font-mono">GERENCIAMENTO ESTRUTURAL DE EQUIPES</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
           
           {/* ========================================== */}
-          {/* LEFT COL: LISTA (Estilo Cards Sólidos) */}
+          {/* LEFT COL: LISTA FIXA */}
           {/* ========================================== */}
-          <div className="lg:col-span-4 flex flex-col gap-5">
+          <div className="lg:col-span-4 flex flex-col h-full min-h-0 gap-5">
             
             <button 
               onClick={iniciarCriacao}
-              className="w-full py-4 bg-[#2563eb] hover:bg-[#1e3a8a] text-white font-black rounded-xl text-sm uppercase tracking-widest transition-all shadow-[0_10px_30px_-5px_rgba(37,99,235,0.3)] border border-[#1e3a8a]"
+              className="shrink-0 w-full py-4 bg-[#2563eb] hover:bg-[#1e3a8a] text-white font-black rounded-xl text-sm uppercase tracking-widest transition-all shadow-[0_10px_30px_-5px_rgba(37,99,235,0.3)] border border-[#1e3a8a]"
             >
               + Adicionar Operador
             </button>
 
-            <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)] overflow-hidden">
-              <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
+            {/* Container da Lista de Usuários que rola internamente */}
+            <div className="flex-1 min-h-0 flex flex-col bg-white border border-[#e2e8f0] rounded-xl shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)] overflow-hidden">
+              <div className="shrink-0 p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
                 <input 
                   type="text" 
                   placeholder="FILTRAR NOME OU E-MAIL..." 
@@ -234,7 +236,8 @@ export default function GerenciarUsuariosPage() {
                 />
               </div>
 
-              <div className="flex flex-col max-h-[700px] overflow-y-auto custom-scrollbar">
+              {/* Só a lista Rola */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {usuariosFiltrados.length === 0 ? (
                   <div className="p-8 text-center text-[#64748b] font-bold uppercase text-[10px] tracking-widest">
                     Nenhum registro localizado.
@@ -272,33 +275,34 @@ export default function GerenciarUsuariosPage() {
           </div>
 
           {/* ========================================== */}
-          {/* RIGHT COL: DETAIL (Estilo Dossiê Header) */}
+          {/* RIGHT COL: DETAIL FIXO (Só o Formulario rola) */}
           {/* ========================================== */}
-          <div className="lg:col-span-8">
+          <div className="lg:col-span-8 flex flex-col h-full min-h-0">
             {!exibeFormulario ? (
-              <div className="bg-white border border-[#e2e8f0] rounded-2xl p-16 text-center shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)] h-full flex flex-col items-center justify-center min-h-[500px]">
+              <div className="bg-white border border-[#e2e8f0] rounded-2xl p-16 text-center shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)] h-full flex flex-col items-center justify-center">
                 <div className="text-[4rem] mb-4 opacity-50">🛡️</div>
                 <h3 className="text-xl font-black text-[#1e3a8a] uppercase tracking-wide">Área de Configuração</h3>
                 <p className="text-sm text-[#64748b] font-medium mt-2 max-w-sm mx-auto">Selecione um operador no menu lateral para mapear alçadas e políticas de segurança.</p>
               </div>
             ) : (
-              <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-[0_20px_25px_-5px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
+              // Container Externo Fixo
+              <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-[0_20px_25px_-5px_rgba(0,0,0,0.05)] flex flex-col h-full overflow-hidden">
                 
-                {/* HEADER TIPO DOSSIÊ */}
-                <div className="bg-gradient-to-br from-[#1e3a8a] to-[#2563eb] text-white p-8 md:p-10 flex flex-col md:flex-row justify-between items-start md:items-stretch gap-6 relative overflow-hidden">
+                {/* HEADER TIPO DOSSIÊ (FIXO) */}
+                <div className="shrink-0 bg-gradient-to-br from-[#1e3a8a] to-[#2563eb] text-white p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
                   
                   <div className="z-10">
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70 mb-2">
                       {isCriando ? "Novo Cadastro de Operador" : "Credenciais de Acesso"}
                     </div>
-                    <h2 className="text-3xl font-black uppercase tracking-tight mb-2 leading-none">
+                    <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2 leading-none">
                       {nome || "NOVO OPERADOR"}
                     </h2>
                     {selecionado && <div className="font-mono text-[11px] text-white/80 bg-black/20 inline-block px-3 py-1 rounded">ID: {selecionado.id}</div>}
                   </div>
                   
-                  <div className="flex flex-col items-end gap-3 z-10 min-w-[200px]">
+                  <div className="flex flex-col items-end gap-3 z-10 w-full md:w-auto md:min-w-[200px]">
                     <div className="bg-white/20 backdrop-blur-md border border-white/30 px-6 py-3 rounded-lg font-black uppercase tracking-widest text-xs w-full text-center shadow-lg">
                       PERFIL: <span className="text-[#fde047]">{cargo}</span>
                     </div>
@@ -308,8 +312,8 @@ export default function GerenciarUsuariosPage() {
                   </div>
                 </div>
 
-                {/* FORM BODY */}
-                <form onSubmit={salvarUsuario} className="p-8 bg-[#f8fafc] space-y-10">
+                {/* FORM BODY (ÚNICA PARTE QUE ROLA) */}
+                <form className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 bg-[#f8fafc] space-y-10">
                   
                   {/* SEÇÃO 1 */}
                   <section>
@@ -442,12 +446,12 @@ export default function GerenciarUsuariosPage() {
 
                 </form>
 
-                {/* FOOTER ACTIONS */}
-                <div className="bg-[#e2e8f0]/40 p-6 border-t border-[#e2e8f0] flex justify-end gap-4">
-                  <button type="button" onClick={() => { setSelecionado(null); setIsCriando(false); }} className="px-8 py-3 bg-white hover:bg-[#f8fafc] border border-[#cbd5e1] text-[#0f172a] font-black text-[11px] uppercase tracking-widest rounded-xl transition-all shadow-sm">
+                {/* FOOTER ACTIONS (FIXO NO BOTTOM) */}
+                <div className="shrink-0 bg-[#e2e8f0]/40 p-4 md:p-6 border-t border-[#e2e8f0] flex justify-end gap-4">
+                  <button type="button" onClick={() => { setSelecionado(null); setIsCriando(false); }} className="px-6 md:px-8 py-3 bg-white hover:bg-[#f8fafc] border border-[#cbd5e1] text-[#0f172a] font-black text-[11px] uppercase tracking-widest rounded-xl transition-all shadow-sm">
                     Cancelar
                   </button>
-                  <button type="button" onClick={salvarUsuario} disabled={salvando} className="px-10 py-3 bg-[#1e3a8a] hover:bg-[#2563eb] text-white font-black text-[11px] uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_14px_rgba(30,58,138,0.4)] disabled:opacity-50 flex items-center gap-2">
+                  <button type="button" onClick={salvarUsuario} disabled={salvando} className="px-6 md:px-10 py-3 bg-[#1e3a8a] hover:bg-[#2563eb] text-white font-black text-[11px] uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_14px_rgba(30,58,138,0.4)] disabled:opacity-50 flex items-center gap-2">
                     {salvando ? "PROCESSANDO..." : (isCriando ? "EFETIVAR CADASTRO" : "SALVAR DIRETRIZES")}
                   </button>
                 </div>
