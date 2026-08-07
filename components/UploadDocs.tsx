@@ -32,7 +32,9 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
   
   const docInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null); // 🔥 NOVO: Ref para a pasta
 
+  // Tratador para seleção padrão de arquivos pingados
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>, tipo: "documento" | "imagem") => {
     if (e.target.files) {
       
@@ -51,6 +53,37 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
         status: "pendente",
         mensagem: "Pronto para processamento"
       }));
+      setArquivos(prev => [...prev, ...novos]);
+    }
+    e.target.value = "";
+  };
+
+  // 🔥 NOVO: Tratador inteligente para varredura de pastas inteiras
+  const handleFolderChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      if (!loteId) {
+        const cnpjLimpo = empresa.cnpj.replace(/\D/g, "");
+        const randomHash = Math.random().toString(36).substring(2, 8);
+        setLoteId(`lote-${cnpjLimpo || "geral"}-${Date.now()}-${randomHash}`);
+      }
+
+      const filesArray = Array.from(e.target.files);
+      
+      // Filtra arquivos inúteis de sistema operacional (ex: .DS_Store do Mac, Thumbs.db)
+      const validFiles = filesArray.filter(f => !f.name.startsWith('.'));
+
+      const novos: ArquivoFila[] = validFiles.map((f, i) => {
+        // Separa sozinho o que é imagem do que é documento baseado no MIME Type
+        const isImage = f.type.startsWith("image/");
+        return {
+          id: `${Date.now()}-folder-${i}`,
+          file: f,
+          tipo: isImage ? "imagem" : "documento",
+          status: "pendente",
+          mensagem: "Pronto para processamento (Varredura)"
+        };
+      });
+
       setArquivos(prev => [...prev, ...novos]);
     }
     e.target.value = "";
@@ -173,33 +206,46 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
 
   return (
     <div className="space-y-4 font-sans text-slate-700">
-      <div className="flex flex-col md:flex-row gap-3">
-        <input
-          type="file"
-          accept="application/pdf, .xlsx, .xls, .csv" 
-          multiple
-          ref={docInputRef}
-          onChange={(e) => handleFileChange(e, "documento")}
-          className="hidden"
-          disabled={uploading}
-        />
-        <input
-          type="file"
-          accept="image/png, image/jpeg, image/jpg, image/webp"
-          multiple
-          ref={imgInputRef}
-          onChange={(e) => handleFileChange(e, "imagem")}
-          className="hidden"
-          disabled={uploading}
-        />
+      
+      {/* OS INPUTS INVISÍVEIS */}
+      <input
+        type="file"
+        accept="application/pdf, .xlsx, .xls, .csv" 
+        multiple
+        ref={docInputRef}
+        onChange={(e) => handleFileChange(e, "documento")}
+        className="hidden"
+        disabled={uploading}
+      />
+      <input
+        type="file"
+        accept="image/png, image/jpeg, image/jpg, image/webp"
+        multiple
+        ref={imgInputRef}
+        onChange={(e) => handleFileChange(e, "imagem")}
+        className="hidden"
+        disabled={uploading}
+      />
+      {/* 🔥 Mágica do webkitdirectory: forçamos via spread para driblar a tipagem estrita do React */}
+      <input
+        type="file"
+        multiple
+        {...{ webkitdirectory: "true", directory: "true" }}
+        ref={folderInputRef}
+        onChange={handleFolderChange}
+        className="hidden"
+        disabled={uploading}
+      />
 
+      {/* BOTÕES DE AÇÃO */}
+      <div className="flex flex-col md:flex-row gap-3">
         <button 
           type="button"
           onClick={() => docInputRef.current?.click()}
           disabled={uploading}
           className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
-          📄 Anexar Documentos (PDF, Excel, CSV)
+          📄 Anexar Documentos
         </button>
         
         <button 
@@ -208,29 +254,39 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
           disabled={uploading}
           className="flex-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
-          📸 Anexar Fotos da Empresa
+          📸 Anexar Fotos
         </button>
       </div>
 
+      <button 
+        type="button"
+        onClick={() => folderInputRef.current?.click()}
+        disabled={uploading}
+        className="w-full bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold py-3 px-4 rounded-lg text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+      >
+        📂 Varredura Completa de Pasta (Auto-Separar)
+      </button>
+
+      {/* FILA DE PROCESSAMENTO */}
       {arquivos.length > 0 && (
-        <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+        <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50 mt-4">
           <div className="bg-slate-100 p-2 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-wider flex justify-between">
             <span>📋 Fila de Entrada de Arquivos para o R2</span>
             <span>{arquivos.length} arquivo(s)</span>
           </div>
-          <div className="divide-y divide-slate-200">
+          <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto custom-scrollbar">
             {arquivos.map((item) => (
-              <div key={item.id} className="p-2.5 flex justify-between items-center text-xs">
-                <div className="flex items-center gap-2 truncate max-w-[400px]">
-                  <span className="text-[16px]">{item.tipo === "documento" ? "📄" : "🖼️"}</span>
+              <div key={item.id} className="p-2.5 flex justify-between items-center text-xs hover:bg-slate-100 transition-colors">
+                <div className="flex items-center gap-2 truncate max-w-[60%]">
+                  <span className="text-[16px] shrink-0">{item.tipo === "documento" ? "📄" : "🖼️"}</span>
                   <div className="truncate">
-                    <p className="font-bold text-slate-800 truncate">{item.file.name}</p>
-                    <p className={`text-[10px] font-medium font-mono ${
+                    <p className="font-bold text-slate-800 truncate" title={item.file.name}>{item.file.name}</p>
+                    <p className={`text-[10px] font-medium font-mono truncate ${
                       item.status === "erro" ? "text-red-500 font-bold" : item.status === "sucesso" ? "text-emerald-600" : "text-slate-400"
                     }`}>{item.mensagem}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
                     item.status === "sucesso" ? "bg-emerald-100 text-emerald-800" :
                     item.status === "erro" ? "bg-red-100 text-red-800" :
@@ -256,10 +312,17 @@ export default function UploadDocs({ empresa, onSucesso }: UploadDocsProps) {
       <button
         onClick={executarEsteiraUpload}
         disabled={uploading || arquivos.length === 0}
-        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40"
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs uppercase tracking-widest transition-all shadow-md cursor-pointer disabled:opacity-40 mt-2"
       >
         {uploading ? "Enviando Lote para Armazenamento..." : "🚀 Disparar Lote para a Nuvem e Mesa V8"}
       </button>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
     </div>
   );
 }
