@@ -6,6 +6,125 @@ import { supabase } from "@/lib/supabase";
 import { limparNome } from "@/lib/normalizador";
 import { useAuth } from "@/lib/AuthContext"; // 🛡️ Nosso Crachá Global
 
+// =========================================================================
+// 🚀 COMPONENTE MINI VIEWER DO DRIVE (INTEGRADO À API DO ROBÔ)
+// =========================================================================
+const PASTA_RAIZ_ID = "1hgVuaxj0iCvwi2vfrGfm8nxBINgwOBbS"; // 👈 SEU LINK OFICIAL DA RAIZ
+
+function MiniViewerDrive({ folderIdAtual, onFolderSelected }: { folderIdAtual: string | null, onFolderSelected: (id: string | null) => void }) {
+  const [arquivos, setArquivos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pastaAlvo, setPastaAlvo] = useState(folderIdAtual || PASTA_RAIZ_ID);
+
+  const carregarArquivos = useCallback(async (idDaPasta: string) => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/drive?folderId=${idDaPasta}`, {
+        headers: { "Authorization": `Bearer ${session?.access_token}` }
+      });
+      const data = await res.json();
+      if (data.files) setArquivos(data.files);
+    } catch (err) {
+      console.error("Erro ao carregar drive", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarArquivos(pastaAlvo);
+  }, [pastaAlvo, carregarArquivos]);
+
+  // MODO 1: SELETOR DE PASTA (Na pasta Raiz)
+  if (!folderIdAtual) {
+    return (
+      <div className="flex flex-col h-full">
+        <h4 className="text-xs font-bold text-slate-700 mb-2 uppercase flex items-center gap-2">
+          <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+          Vincular Pasta (Drive)
+        </h4>
+        {loading ? (
+          <p className="text-[10px] text-slate-500 animate-pulse mt-2">O Robô está lendo as pastas...</p>
+        ) : (
+          <div className="max-h-48 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1 custom-scrollbar">
+            {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").map(pasta => (
+              <button 
+                key={pasta.id} 
+                onClick={() => {
+                  setPastaAlvo(pasta.id);
+                  onFolderSelected(pasta.id);
+                }}
+                className="w-full text-left flex items-center gap-2 p-2 hover:bg-emerald-100 text-[11px] font-semibold text-slate-700 rounded transition-colors cursor-pointer border border-transparent hover:border-emerald-200"
+              >
+                <img src={pasta.iconLink} alt="icon" className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{pasta.name}</span>
+              </button>
+            ))}
+            {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").length === 0 && (
+              <p className="text-[10px] text-slate-400 p-2 italic text-center">Nenhuma subpasta encontrada.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // MODO 2: MINI VIEWER (Dentro da pasta do Cliente)
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex justify-between items-center mb-3">
+        <h4 className="text-[11px] font-bold text-slate-700 uppercase flex items-center gap-1.5">
+          <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
+          Documentos no Drive
+        </h4>
+        <div className="flex gap-2 items-center">
+          <a href={`https://drive.google.com/drive/folders/${folderIdAtual}`} target="_blank" rel="noopener noreferrer" className="text-[9px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded hover:bg-blue-100 transition-colors uppercase border border-blue-200" title="Abrir em Nova Guia">
+            Abrir ↗
+          </a>
+          <button 
+            onClick={() => {
+              onFolderSelected(null);
+              setPastaAlvo(PASTA_RAIZ_ID);
+            }} 
+            className="text-[9px] font-bold text-slate-400 hover:text-rose-500 underline cursor-pointer"
+          >
+            Desvincular
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 max-h-48 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+        {loading ? (
+          <p className="text-[10px] text-slate-500 animate-pulse flex items-center gap-1.5 mt-2">
+            <svg className="animate-spin w-3.5 h-3.5 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Sincronizando...
+          </p>
+        ) : arquivos.length === 0 ? (
+          <p className="text-[10px] text-slate-400 italic bg-slate-50 p-2 rounded text-center border border-slate-100">Pasta vazia.</p>
+        ) : (
+          arquivos.map(arq => (
+            <a 
+              key={arq.id} 
+              href={arq.webViewLink} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-100 group"
+            >
+              <img src={arq.iconLink} alt="icon" className="w-4 h-4 shrink-0" />
+              <span className="text-[10px] font-semibold text-slate-700 truncate group-hover:text-blue-700">{arq.name}</span>
+            </a>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =========================================================================
+// CÓDIGO ORIGINAL (COM AS MODIFICAÇÕES APLICADAS)
+// =========================================================================
+
 // Função para formatar o CNPJ enquanto digita ou exibe
 const formatarCNPJ = (cnpj: string) => {
   if (!cnpj) return "";
@@ -516,6 +635,7 @@ export default function CadastroPage() {
       id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, 
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
       modalidades_aprovadas: [],
+      drive_folder_id: null, // 👈 Nova Propriedade
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
@@ -570,6 +690,7 @@ export default function CadastroPage() {
     const payload: any = {
       cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
       cnpj: cnpjFinal === "" ? null : cnpjFinal,
+      drive_folder_id: item.drive_folder_id || null, // 👈 NOVA PROPRIEDADE AQUI
       modalidades_aprovadas: item.modalidades_aprovadas || [],
       grupo_economico: item.grupo_economico || null, 
       dt_aprovacao_comite: item.dt_aprovacao_comite || null,
@@ -1045,7 +1166,14 @@ export default function CadastroPage() {
                                   </span>
                                 )}
 
-                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-all cursor-pointer">
+                                {/* BOTÃO ATALHO DRIVE */}
+                                {item.drive_folder_id && (
+                                  <a href={`https://drive.google.com/drive/folders/${item.drive_folder_id}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-md transition-all cursor-pointer shadow-sm border border-blue-100" title="Abrir Pasta no Google Drive">
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5l-2-2z" /></svg>
+                                  </a>
+                                )}
+
+                                <button onClick={() => toggleEditarNome(identificadorUnico)} className="opacity-0 group-hover:opacity-100 text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-1 rounded-md transition-all cursor-pointer" title="Editar Nome/CNPJ">
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                 </button>
                               </div>
@@ -1150,6 +1278,14 @@ export default function CadastroPage() {
                                   <input type="text" value={item.grupo_economico || ""} onChange={(e) => handleInputChange(index, "grupo_economico", e.target.value.toUpperCase())} 
                                     className="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 uppercase outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all bg-slate-50 hover:bg-white" 
                                     placeholder="NOME DO GRUPO" />
+                                </div>
+
+                                {/* CARD DO GOOGLE DRIVE */}
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                  <MiniViewerDrive 
+                                    folderIdAtual={item.drive_folder_id} 
+                                    onFolderSelected={(idDaPasta) => handleInputChange(index, "drive_folder_id", idDaPasta)} 
+                                  />
                                 </div>
                               </div>
 
