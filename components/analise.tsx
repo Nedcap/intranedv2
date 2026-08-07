@@ -1,4 +1,4 @@
-// components/sistema-analise.tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -294,10 +294,35 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
               </div>
             )}
 
+            {/* 🎯 EMPRESAS DO GRUPO (AGORA COM CONTROLE DE IS_GRUPO_ECONOMICO) */}
             <div className="bg-white rounded-md shadow-sm border border-slate-200">
               <div className={sectionHeaderStyle}>
-                <span>Empresas (Principal e Coobrigados Base)</span>
-                <button onClick={() => addArray('empresas_principais', {razao_social:"", cnpj:""})} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Linha</button>
+                <div className="flex items-center gap-4">
+                  <span>Empresas (Principal e Coobrigados Base)</span>
+                  
+                  {/* 🔥 NOVO: CHECKBOX DE GRUPO ECONÔMICO EXPÔSTO PARA O USUÁRIO */}
+                  <label className="flex items-center gap-1.5 cursor-pointer bg-indigo-900/50 px-2 py-0.5 rounded border border-indigo-700 transition-colors hover:bg-indigo-800">
+                    <input 
+                      type="checkbox" 
+                      checked={analise.is_grupo_economico || false}
+                      onChange={(e) => setAnalise({...analise, is_grupo_economico: e.target.checked})}
+                      className="w-3 h-3 text-indigo-500 rounded border-indigo-700 bg-indigo-900 cursor-pointer"
+                    />
+                    <span className="text-[9px] text-indigo-100 font-bold uppercase tracking-wider">Grupo Econômico</span>
+                  </label>
+
+                  {/* 🔥 NOVO: DIFF BADGE DE QUANTIDADE DE EMPRESAS SE FOR REANÁLISE */}
+                  {dadosPai && dadosPai.empresas_principais && (
+                    <span className="text-[9px] text-indigo-300 font-mono font-bold px-2 py-0.5 border border-indigo-300/30 rounded bg-indigo-900/30" title="Quantidade de empresas na revisão anterior">
+                      Rev Anterior: {dadosPai.empresas_principais.length} CNPJ(s)
+                    </span>
+                  )}
+                </div>
+
+                <button onClick={() => {
+                  const novaLista = [...analise.empresas_principais, {razao_social:"", cnpj:""}];
+                  setAnalise(prev => ({...prev, empresas_principais: novaLista, is_grupo_economico: true})); // Auto-ativa grupo
+                }} className="bg-indigo-800 hover:bg-indigo-700 px-2 py-0.5 rounded text-[10px] transition-colors shadow">+ Adicionar Linha</button>
               </div>
               <table className="w-full border-collapse">
                 <tbody>
@@ -308,7 +333,17 @@ export default function SistemaAnalise({ analise, setAnalise }: SistemaAnalisePr
                       <td className={`${thStyle} w-1/6 text-right`}>CNPJ</td>
                       <td className={`${tdStyle} w-2/6 relative`}>
                         <input value={emp.cnpj} onChange={(e)=>updateArray('empresas_principais', i, 'cnpj', e.target.value)} className={`${cellStyle} font-mono bg-slate-50/50 pr-8`} />
-                        {i > 0 && <button onClick={()=>rmArray('empresas_principais', i)} className="absolute right-0 top-0 text-red-500 font-bold hover:bg-red-50 w-8 h-full border-l border-slate-200 transition-colors">X</button>}
+                        {i > 0 && (
+                          <button 
+                            onClick={() => {
+                              const novaLista = analise.empresas_principais.filter((_, idx) => idx !== i);
+                              setAnalise(prev => ({...prev, empresas_principais: novaLista, is_grupo_economico: novaLista.length > 1})); // Auto-desativa se cair pra 1
+                            }} 
+                            className="absolute right-0 top-0 text-red-500 font-bold hover:bg-red-50 w-8 h-full border-l border-slate-200 transition-colors"
+                          >
+                            X
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

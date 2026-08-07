@@ -28,12 +28,11 @@ interface FilaItem {
   dados_documentos?: string[]; 
   dados_consolidados?: any;    
   checklist_ia?: any; 
-  // 🔥 NOVO: Campos de versionamento
   revisao_numero?: number;
   analise_pai_id?: string;
+  is_grupo_economico?: boolean; // 🔥 Adicionado para tipagem
 }
 
-// Interface completa para tipar os inputs comerciais
 interface PropostaComercial {
   relatorio_visita: string;
   propostas: { modalidade: string; limite: number | ""; prazo: string; tranche: number | ""; taxa: string; garantia: string }[];
@@ -61,9 +60,6 @@ const PROPOSTA_INICIAL: PropostaComercial = {
   }
 };
 
-// ============================================================================
-// FUNÇÃO DE HIERARQUIA COMERCIAL (Liderança e Subordinados)
-// ============================================================================
 const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new Set<string>()): string[] => {
   if (visitados.has(liderId)) return [];
   visitados.add(liderId);
@@ -82,7 +78,6 @@ const obterIdsSubordinados = (usuarios: any[], liderId: string, visitados = new 
   return Array.from(new Set(resultado));
 };
 
-
 export default function MotorCreditoPage() {
   const router = useRouter();
   const [cnpjBusca, setCnpjBusca] = useState("");
@@ -92,11 +87,12 @@ export default function MotorCreditoPage() {
   const [empresaSelecionada, setEmpresaSelecionada] = useState<Empresa | null>(null);
   const [filaReal, setFilaReal] = useState<FilaItem[]>([]);
   
-  // ESTADO CENTRALIZADO DA REQUISIÇÃO COMERCIAL
   const [formComercial, setFormComercial] = useState<PropostaComercial>(PROPOSTA_INICIAL);
   
-  // 🔥 NOVO: Estado para rastrear se é uma reanálise na UI
   const [revisaoInfo, setRevisaoInfo] = useState<{numero: number, pai_id: string | null} | null>(null);
+  
+  // 🔥 NOVO: Estado para armazenar os dados do Grupo Econômico herdados
+  const [grupoHerdado, setGrupoHerdado] = useState<{ is_grupo: boolean, empresas: any[] } | null>(null);
 
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [empresaParaDocs, setEmpresaParaDocs] = useState<FilaItem | null>(null);
@@ -105,7 +101,6 @@ export default function MotorCreditoPage() {
   const [isUploadExtraOpen, setIsUploadExtraOpen] = useState(false);
   const [analiseAlvoUpload, setAnaliseAlvoUpload] = useState<FilaItem | null>(null);
 
-  // Estado para o Modal de Relatório de Visitas
   const [isRelatorioModalOpen, setIsRelatorioModalOpen] = useState(false);
   const [analiseParaRelatorio, setAnaliseParaRelatorio] = useState<FilaItem | null>(null);
 
@@ -115,16 +110,13 @@ export default function MotorCreditoPage() {
       setEmpresaSelecionada(null);
       setFormComercial(PROPOSTA_INICIAL);
       setRevisaoInfo(null);
+      setGrupoHerdado(null);
     };
   }, []);
 
-  // =========================================================================
-  // CARREGAMENTO SEGURO COM FILTRO DE CARTEIRA (COMERCIAL VÊ SÓ O DELE)
-  // =========================================================================
   const carregarFilaComercial = async () => {
     try {
       const userStr = localStorage.getItem("intraned_user");
-      // 🔥 Ajuste: Trazendo os campos revisao_numero e analise_pai_id
       let query = supabase
         .from("analises")
         .select("id, empresa_nome, cnpj, status, criado_em, ia_inicio, ia_fim, status_comite, comercial, dados_documentos, dados_consolidados, checklist_ia, revisao_numero, analise_pai_id")
@@ -189,10 +181,10 @@ export default function MotorCreditoPage() {
       if (data.found && data.empresa) {
         setEmpresas([data.empresa]);
 
-        // 🔥 NOVO: Verifica se já existe um histórico para este CNPJ
+        // 🔥 Trazendo is_grupo_economico na query de histórico
         const { data: analisesAnteriores } = await supabase
           .from("analises")
-          .select("id, dados_consolidados, status, revisao_numero")
+          .select("id, dados_consolidados, status, revisao_numero, is_grupo_economico")
           .eq("cnpj", cnpjLimpo)
           .order("criado_em", { ascending: false });
 
@@ -202,17 +194,29 @@ export default function MotorCreditoPage() {
 
           if (estaEmAndamento) {
              alert(`⚠️ ATENÇÃO: Já existe uma análise EM ANDAMENTO (Status: ${ultimaAnalise.status}) para este CNPJ. Você não pode abrir uma nova até que a atual seja concluída.`);
-             setEmpresas([]); // Reseta a tela para impedir avanço
+             setEmpresas([]); 
              setLoading(false);
              return;
           } else {
-             // É uma reanálise! Puxa os dados antigos.
              const numRevisao = (ultimaAnalise.revisao_numero || 1) + 1;
              setRevisaoInfo({ numero: numRevisao, pai_id: ultimaAnalise.id });
-             alert(`🔄 Histórico Encontrado! Iniciando a Revisão 0${numRevisao}. O formulário comercial foi pré-preenchido com as condições da última análise.`);
              
-             if (ultimaAnalise.dados_consolidados) {
-               const cons = ultimaAnalise.dados_consolidados;
+             // 🔥 NOVO: Mapeando os dados do Grupo Econômico para herança!
+             const cons = ultimaAnalise.dados_consolidados || {};
+             const isGrupoHerdado = ultimaAnalise.is_grupo_economico || cons.is_grupo_economico || false;
+             
+             if (isGrupoHerdado && cons.empresas_principais) {
+               setGrupoHerdado({
+                 is_grupo: true,
+                 empresas: cons.empresas_principais
+               });
+             } else {
+               setGrupoHerdado(null);
+             }
+
+             alert(`🔄 Histórico Encontrado! Iniciando a Revisão 0${numRevisao}. Os dados comerciais e eventuais grupos econômicos foram pré-carregados.`);
+             
+             if (cons) {
                setFormComercial({
                  relatorio_visita: cons.resumo_visita || "",
                  propostas: cons.propostas?.length > 0 ? cons.propostas : PROPOSTA_INICIAL.propostas,
@@ -221,7 +225,8 @@ export default function MotorCreditoPage() {
              }
           }
         } else {
-          setRevisaoInfo(null); // Empresa nova de verdade
+          setRevisaoInfo(null);
+          setGrupoHerdado(null);
         }
       } else {
         alert("❌ CNPJ não localizado na base oficial.\n💡 Liberando modo de entrada manual.");
@@ -233,6 +238,7 @@ export default function MotorCreditoPage() {
           capital_social: 0
         }]);
         setRevisaoInfo(null);
+        setGrupoHerdado(null);
       }
     } catch (err: any) {
       console.error("Erro ao buscar CNPJ:", err);
@@ -242,9 +248,6 @@ export default function MotorCreditoPage() {
     }
   };
 
-  // =========================================================================
-  // FUNÇÕES DE ATUALIZAÇÃO DO FORMULÁRIO COMERCIAL
-  // =========================================================================
   const atualizarPropostaArray = (index: number, campo: string, valor: any) => {
     const novasPropostas = [...formComercial.propostas];
     (novasPropostas[index] as any)[campo] = valor;
@@ -272,9 +275,6 @@ export default function MotorCreditoPage() {
     });
   };
 
-  // =========================================================================
-  // 🚀 CRIAÇÃO DE NOVA ANÁLISE (LARGADA)
-  // =========================================================================
   const registrarAnaliseNoSupabase = async (urlsDocumentos: string[], urlsImagens: string[] = []) => {
     if (!empresaSelecionada) return;
 
@@ -284,7 +284,6 @@ export default function MotorCreditoPage() {
     try {
       const cnpjLimpo = empresaSelecionada.cnpj.replace(/\D/g, "");
 
-      // 🔥 NOVO: Busca o histórico na hora de inserir, por segurança de concorrência
       const { data: historico, error: buscaError } = await supabase
         .from("analises")
         .select("id, status, revisao_numero")
@@ -302,7 +301,6 @@ export default function MotorCreditoPage() {
          return; 
       }
 
-      // 🔥 Calcula a versão da reanálise
       const ultimaAnalise = historico && historico.length > 0 ? historico[0] : null;
       const novaRevisaoNumero = ultimaAnalise ? (ultimaAnalise.revisao_numero || 1) + 1 : 1;
       const analisePaiId = ultimaAnalise ? ultimaAnalise.id : null;
@@ -311,15 +309,20 @@ export default function MotorCreditoPage() {
       const user = session?.user;
       const token = session?.access_token;
       
-      if (authError || !user) {
-        throw new Error("Usuário não autenticado. Faça login novamente.");
-      }
+      if (authError || !user) throw new Error("Usuário não autenticado. Faça login novamente.");
 
       const userStr = localStorage.getItem("intraned_user");
       const localUser = userStr ? JSON.parse(userStr) : null;
       const nomeComercialLogado = localUser?.nome || "";
 
       setStatusTexto(novaRevisaoNumero > 1 ? `🤖 Registrando Revisão 0${novaRevisaoNumero} na mesa...` : "🤖 Registrando lote virgem de entrada na mesa...");
+
+      // 🔥 INJEÇÃO DOS DADOS DO GRUPO ECONÔMICO (Caso Herdados)
+      const isGrupoOficial = grupoHerdado?.is_grupo || false;
+      const empresasPrincipaisInjetar = grupoHerdado?.empresas || [{ 
+        razao_social: empresaSelecionada.razao_social.toUpperCase(), 
+        cnpj: cnpjLimpo 
+      }];
 
       const { data: novaAnalise, error: insertError } = await supabase
         .from("analises")
@@ -333,9 +336,10 @@ export default function MotorCreditoPage() {
           responsavel_id: user.id, 
           comercial: nomeComercialLogado,
 
-          // 🔥 Dados de Reanálise Injetados aqui
           revisao_numero: novaRevisaoNumero,
           analise_pai_id: analisePaiId,
+          
+          is_grupo_economico: isGrupoOficial, // 👈 Salva na coluna oficial do banco
 
           dados_documentos: urlsDocumentos,
           checklist_ia: {}, 
@@ -345,6 +349,10 @@ export default function MotorCreditoPage() {
             capital_social: empresaSelecionada.capital_social || 0,
             dados_gerais: { fundacao: "", ramo: "", site: "", relacionamento: "Prospect", gerente: "" },
             
+            // 👈 Salva o Array completo de CNPJs do grupo no JSON para renderização na Mesa
+            is_grupo_economico: isGrupoOficial,
+            empresas_principais: empresasPrincipaisInjetar,
+
             propostas: formComercial.propostas.map(p => ({
               ...p,
               limite: Number(p.limite) || 0,
@@ -405,12 +413,12 @@ export default function MotorCreditoPage() {
 
       alert("🚀 Operação registrada com segurança! O Motor V8 assumiu o processamento.");
       
-      // Reset da interface
       setEmpresaSelecionada(null);
       setEmpresas([]);
       setCnpjBusca("");
       setFormComercial(PROPOSTA_INICIAL); 
       setRevisaoInfo(null);
+      setGrupoHerdado(null);
       await carregarFilaComercial();
 
     } catch (err: any) {
@@ -682,10 +690,15 @@ export default function MotorCreditoPage() {
                     <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg border border-emerald-200">
                       ✅ CNPJ Vinculado Ativo
                     </span>
-                    {/* 🔥 BADGE DE REANÁLISE NO TOPO */}
                     {revisaoInfo && revisaoInfo.numero > 1 && (
                       <span className="bg-amber-100 text-amber-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg border border-amber-300 flex items-center gap-1 shadow-sm">
                         🔄 Reanálise 0{revisaoInfo.numero}
+                      </span>
+                    )}
+                    {/* 🔥 BADGE DO GRUPO ECONÔMICO HERDADO */}
+                    {grupoHerdado?.is_grupo && (
+                      <span className="bg-blue-100 text-blue-800 text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-lg border border-blue-300 shadow-sm flex items-center gap-1">
+                        🏢 Grupo Econômico Pré-Mapeado ({grupoHerdado.empresas.length} Empresas)
                       </span>
                     )}
                   </div>
@@ -693,8 +706,8 @@ export default function MotorCreditoPage() {
                   <span className="font-mono font-bold text-slate-600 text-sm mt-1.5 block">{formatarCnpj(empresaSelecionada.cnpj)}</span>
                 </div>
                 <button
-                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setFormComercial(PROPOSTA_INICIAL); setRevisaoInfo(null); }}
-                  className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer transition-colors uppercase tracking-wide"
+                  onClick={() => { setEmpresaSelecionada(null); setEmpresas([]); setCnpjBusca(""); setFormComercial(PROPOSTA_INICIAL); setRevisaoInfo(null); setGrupoHerdado(null); }}
+                  className="bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 text-[11px] shadow-sm cursor-pointer transition-colors uppercase tracking-wide shrink-0"
                 >
                   ✕ Trocar Empresa
                 </button>
