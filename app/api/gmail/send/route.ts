@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     // 🔒 1. VALIDAÇÃO DO CRACHÁ (TOKEN JWT)
-    // Agora o frontend envia o token no header "Authorization", e esta função vai aprovar!
     const { usuario, erro } = await validarRequisicaoApi(request);
     if (erro || !usuario) {
       return NextResponse.json({ error: erro || "Acesso negado (Token JWT ausente ou inválido)." }, { status: 401 });
@@ -34,8 +33,6 @@ export async function POST(request: Request) {
     }
 
     const { data: integracoes, error: dbError } = await query;
-
-    // Pega a primeira integração encontrada
     const integracao = integracoes?.[0];
 
     if (dbError || !integracao) {
@@ -82,7 +79,6 @@ export async function POST(request: Request) {
       accessToken = novosTokens.access_token;
       const novoLimiteExpira = new Date(Date.now() + novosTokens.expires_in * 1000).toISOString();
 
-      // Salva o novo token usando a Chave Mestra para não esbarrar no RLS
       await supabaseAdmin
         .from("usuarios_integracoes")
         .update({
@@ -103,17 +99,22 @@ export async function POST(request: Request) {
     const deString = `From: ${emailRemetenteReal}\r\n`;
     const paraString = `To: ${para}\r\n`;
     const ccString = cc ? `Cc: ${cc}\r\n` : "";
-    const assuntoString = `Subject: =?UTF-8?B?${assuntoBase64}?=\r\n`; // 👈 ASSUNTO BLINDADO!
-    
+    const assuntoString = `Subject: =?UTF-8?B?${assuntoBase64}?=\r\n`; 
     const threadString = mensagemId ? `In-Reply-To: <${mensagemId}@mail.gmail.com>\r\nReferences: <${mensagemId}@mail.gmail.com>\r\n` : "";
-    
-    // Garantindo que o corpo também seja forçado a ler como UTF-8
     const tipoString = `Content-Type: text/html; charset="UTF-8"\r\nMIME-Version: 1.0\r\n\r\n`; 
-    const corpoString = `${textoResposta}\r\n`;
+
+    // 🔥🔥🔥 A MÁGICA ACONTECE AQUI 🔥🔥🔥
+    // 1. Troca as quebras de linha \n por tags <br />
+    // 2. Troca os blocos **texto** por <strong>texto</strong> para pegar os negritos do seu template
+    const textoFormatadoHtml = textoResposta
+      .replace(/\r?\n/g, "<br />")
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+
+    const corpoString = `${textoFormatadoHtml}\r\n`;
 
     const emailBruto = deString + paraString + ccString + assuntoString + threadString + tipoString + corpoString;
     
-    // 🌟 Codificação Base64 URL Safe explícita em UTF-8 recomendada para a API do Gmail
+    // 🌟 Codificação Base64 URL Safe explícita em UTF-8
     const base64Safe = Buffer.from(emailBruto, "utf8")
       .toString("base64")
       .replace(/\+/g, "-")
