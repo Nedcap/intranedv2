@@ -5,11 +5,206 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/AuthContext"; // 🛡️ O Crachá Global
 
+// =========================================================================
+// 🚀 COMPONENTE MINI VIEWER DO DRIVE (COM PREVIEW E NAVEGAÇÃO)
+// =========================================================================
+const PASTA_RAIZ_ID = "1hgVuaxj0iCvwi2vfrGfm8nxBINgwOBbS"; // 👈 SEU LINK OFICIAL DA RAIZ
+
+function MiniViewerDrive({ folderIdAtual, onFolderSelected }: { folderIdAtual: string | null, onFolderSelected: (id: string | null) => void }) {
+  const [arquivos, setArquivos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pastaAlvo, setPastaAlvo] = useState(folderIdAtual || PASTA_RAIZ_ID);
+  
+  const [historicoPastas, setHistoricoPastas] = useState<string[]>([]);
+  const [previewArquivo, setPreviewArquivo] = useState<{nome: string, url: string} | null>(null);
+
+  const carregarArquivos = useCallback(async (idDaPasta: string) => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/drive?folderId=${idDaPasta}`, {
+        headers: { "Authorization": `Bearer ${session?.access_token}` }
+      });
+      const data = await res.json();
+      if (data.files) setArquivos(data.files);
+    } catch (err) {
+      console.error("Erro ao carregar drive", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarArquivos(pastaAlvo);
+  }, [pastaAlvo, carregarArquivos]);
+
+  const entrarNaPasta = (id: string) => {
+    setHistoricoPastas(prev => [...prev, pastaAlvo]);
+    setPastaAlvo(id);
+  };
+
+  const subirNivel = () => {
+    const novoHistorico = [...historicoPastas];
+    const pastaAnterior = novoHistorico.pop();
+    if (pastaAnterior) {
+      setHistoricoPastas(novoHistorico);
+      setPastaAlvo(pastaAnterior);
+    }
+  };
+
+  const abrirVisualizador = (arq: any) => {
+    let urlEmbed = arq.webViewLink;
+    if (urlEmbed.includes("/view")) {
+      urlEmbed = urlEmbed.replace(/\/view(\?.*)?$/, "/preview");
+    }
+    setPreviewArquivo({ nome: arq.name, url: urlEmbed });
+  };
+
+  const renderPreviewModal = () => {
+    if (!previewArquivo) return null;
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-8">
+        <div className="bg-white w-full max-w-6xl h-full max-h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl relative border border-slate-700">
+          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <h3 className="font-black text-slate-800 flex items-center gap-2 truncate pr-4">
+              <svg className="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
+              {previewArquivo.nome}
+            </h3>
+            <button onClick={() => setPreviewArquivo(null)} className="text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 shadow-sm rounded-lg px-4 py-1.5 text-xs font-bold transition-colors cursor-pointer">
+              X Fechar Visualização
+            </button>
+          </div>
+          <div className="flex-1 bg-slate-200/50">
+            <iframe src={previewArquivo.url} className="w-full h-full border-none" allow="autoplay" title="Preview" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // MODO 1: SELETOR
+  if (!folderIdAtual) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 p-4 rounded-xl border border-slate-200">
+        {renderPreviewModal()}
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-sm font-bold text-slate-700 uppercase flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            Selecione a Pasta do Cedente
+          </h4>
+          {historicoPastas.length > 0 && (
+            <button onClick={subirNivel} className="text-xs font-bold bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer">
+              ⬅ Subir Nível
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-xs text-slate-500 animate-pulse mt-2 flex items-center gap-2">Sincronizando Drive...</p>
+        ) : (
+          <div className="max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-xl p-2 custom-scrollbar grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+            {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").map(pasta => (
+              <div key={pasta.id} className="flex flex-col border border-slate-200 hover:border-emerald-300 rounded-lg p-2 hover:bg-emerald-50 transition-colors group">
+                <button 
+                  onClick={() => entrarNaPasta(pasta.id)}
+                  className="w-full text-left flex items-center gap-2 text-[11px] font-bold text-slate-700 mb-2 truncate cursor-pointer"
+                  title="Dar duplo clique ou abrir pasta"
+                >
+                  <img src={pasta.iconLink} alt="icon" className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{pasta.name}</span>
+                </button>
+                <button 
+                  onClick={() => onFolderSelected(pasta.id)}
+                  className="w-full mt-auto text-[10px] uppercase tracking-widest font-black bg-emerald-600 text-white py-1.5 rounded shadow-sm hover:bg-emerald-700 transition-colors cursor-pointer"
+                >
+                  Vincular Aqui
+                </button>
+              </div>
+            ))}
+            {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").length === 0 && (
+              <p className="text-xs text-slate-400 p-4 col-span-full text-center">Nenhuma subpasta encontrada aqui.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // MODO 2: VIEWER
+  return (
+    <div className="flex flex-col h-full bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+      {renderPreviewModal()}
+      <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-3">
+          <h4 className="text-sm font-black text-slate-700 uppercase flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
+            Dossiê de Documentos
+          </h4>
+          {historicoPastas.length > 0 && (
+            <button onClick={subirNivel} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded hover:bg-slate-200 transition-colors flex items-center gap-1 border border-slate-200 cursor-pointer">
+              ⬅ Subir Nível
+            </button>
+          )}
+        </div>
+
+        <div className="flex gap-2 items-center">
+          <a href={`https://drive.google.com/drive/folders/${pastaAlvo}`} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors uppercase border border-blue-200 shadow-sm flex items-center gap-1" title="Abrir pasta no próprio Google Drive">
+            Abrir Externo ↗
+          </a>
+          <button 
+            onClick={() => {
+              onFolderSelected(null);
+              setPastaAlvo(PASTA_RAIZ_ID);
+              setHistoricoPastas([]);
+            }} 
+            className="text-[10px] font-bold text-slate-400 hover:text-rose-500 underline cursor-pointer ml-2"
+          >
+            Desvincular
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 max-h-64 min-h-[160px] overflow-y-auto custom-scrollbar">
+        {loading ? (
+          <div className="flex items-center justify-center h-full gap-2 text-slate-500 font-medium">
+            <svg className="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Sincronizando Drive...
+          </div>
+        ) : arquivos.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-xs text-slate-400 italic bg-slate-50 rounded-lg border border-slate-100 m-2">
+            A pasta está vazia.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-1">
+            {arquivos.map(arq => {
+              const isPasta = arq.mimeType === "application/vnd.google-apps.folder";
+              return (
+                <button 
+                  key={arq.id} 
+                  onClick={() => isPasta ? entrarNaPasta(arq.id) : abrirVisualizador(arq)}
+                  className={`flex items-center gap-3 p-3 rounded-xl transition-all border group text-left cursor-pointer
+                    ${isPasta ? "bg-slate-50 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300" : "bg-white border-slate-200 hover:bg-blue-50 hover:border-blue-300 hover:shadow-sm"}
+                  `}
+                >
+                  <img src={arq.iconLink} alt="icon" className="w-6 h-6 shrink-0" />
+                  <span className={`text-xs font-semibold truncate ${isPasta ? "text-slate-700" : "text-slate-600 group-hover:text-blue-700"}`}>
+                    {arq.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ==========================================================================
-// 🎨 TIPAGENS E INTERFACES
+// 🎨 TIPAGENS E INTERFACES DA REVISÃO
 // ==========================================================================
 interface RevisaoCedente {
-  id: string; // 🎯 Agora usando a PK verdadeira (UUID)
+  id: string; 
   cedente: string;
   comercial: string | null;
   data_ultima_renovacao: string | null;
@@ -17,11 +212,11 @@ interface RevisaoCedente {
   pendencias: string | null;
   ultimo_email_enviado: string | null;
   renovado: boolean | null;
+  drive_folder_id?: string | null; // 👈 Adicionamos a prop aqui
   _isEditado?: boolean;
 }
 
 export default function RevisaoPage() {
-  // 🛡️ Auth (Usado apenas para pegar o e-mail do disparador no Gmail)
   const { user } = useAuth();
 
   const [revisoes, setRevisoes] = useState<RevisaoCedente[]>([]);
@@ -31,7 +226,6 @@ export default function RevisaoPage() {
   const [filtroStatus, setFiltroStatus] = useState<"TODOS" | "EM_DIA" | "ALERTA" | "VENCIDO">("TODOS");
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<string, boolean>>({});
 
-  // ================= ESTADOS DO E-MAIL & DISPARO =================
   const [gmailConectado, setGmailConectado] = useState(false);
   const [templatesEmail, setTemplatesEmail] = useState<any[]>([]);
   const [modalDisparoAberto, setModalDisparoAberto] = useState(false);
@@ -42,14 +236,10 @@ export default function RevisaoPage() {
   const [logsDisparo, setLogsDisparo] = useState<string[]>([]);
   const [buscaModalDisparo, setBuscaModalDisparo] = useState("");
 
-  // ==========================================================================
-  // 📥 BUSCA DE DADOS (VISÃO TOTAL - MODO INTERNO)
-  // ==========================================================================
   const carregarDados = useCallback(async () => {
     try {
       setCarregando(true);
 
-      // 1. Checa a Integração do Gmail
       if (user?.email) {
         const emailTratado = user.email.toLowerCase().trim();
         const { data: integracoes } = await supabase
@@ -60,11 +250,9 @@ export default function RevisaoPage() {
         setGmailConectado(!!(integracoes && integracoes.length > 0));
       }
 
-      // 2. Carrega Templates
       const { data: tpls } = await supabase.from("crm_email_templates").select("*").order("created_at", { ascending: false });
       if (tpls) setTemplatesEmail(tpls);
 
-      // 3. Carrega TODOS os Cedentes (Sem filtro de carteira)
       const { data, error } = await supabase.from("revisao_cedentes").select("*");
       if (error) throw error;
       
@@ -82,9 +270,6 @@ export default function RevisaoPage() {
     carregarDados();
   }, [carregarDados]);
 
-  // ==========================================================================
-  // ✉️ LÓGICA DE DISPARO DE E-MAIL
-  // ==========================================================================
   const aplicarTagsDinamicas = (texto: string, item: RevisaoCedente) => {
     if (!texto) return "";
     const primeiroNomeComercial = item.comercial ? item.comercial.split(' ')[0] : "Equipe";
@@ -161,7 +346,6 @@ export default function RevisaoPage() {
 
         if (!res.ok) throw new Error(`Falha na API Gmail`);
         
-        // 🎯 Atualiza a flag de último e-mail usando o ID único
         const hojeIso = new Date().toISOString().split("T")[0];
         await supabase.from("revisao_cedentes").update({ ultimo_email_enviado: hojeIso }).eq("id", item.id);
 
@@ -178,9 +362,6 @@ export default function RevisaoPage() {
     await carregarDados(); 
   };
 
-  // ==========================================================================
-  // ⚙️ LÓGICA DE ATUALIZAÇÃO E UI
-  // ==========================================================================
   const toggleExpandirLinha = (id: string) => setLinhasExpandidas(prev => ({ ...prev, [id]: !prev[id] }));
 
   const handleInputChange = (index: number, campo: keyof RevisaoCedente, valor: any) => {
@@ -189,12 +370,10 @@ export default function RevisaoPage() {
     setRevisoes(novos);
   };
 
-  // 🎯 NOVO: Recalcula a data final automaticamente ao mudar a data inicial
   const handleDataUltimaChange = (index: number, novaData: string) => {
     if (!novaData) return handleInputChange(index, "data_ultima_renovacao", "");
 
     const novos = [...revisoes];
-    // Adiciona 180 dias à nova data selecionada
     const dataProxima = new Date(new Date(novaData).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     
     novos[index] = { 
@@ -214,7 +393,6 @@ export default function RevisaoPage() {
       const dataUltima = hoje.toISOString().split("T")[0];
       const dataProxima = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       
-      // 🎯 Update guiado por ID
       const { error } = await supabase
         .from("revisao_cedentes")
         .update({ 
@@ -235,12 +413,12 @@ export default function RevisaoPage() {
   const salvarLinha = async (item: RevisaoCedente) => {
     try {
       setSalvando(true);
-      // 🎯 Update guiado por ID
       const { error } = await supabase.from("revisao_cedentes").update({
         data_ultima_renovacao: item.data_ultima_renovacao,
         data_proxima_renovacao: item.data_proxima_renovacao,
         pendencias: item.pendencias,
-        renovado: item.renovado
+        renovado: item.renovado,
+        drive_folder_id: item.drive_folder_id // 👈 Salva o ID da pasta
       }).eq("id", item.id);
 
       if (error) throw error;
@@ -255,12 +433,12 @@ export default function RevisaoPage() {
     try {
       setSalvando(true);
       for (const item of editados) {
-        // 🎯 Updates guiados por ID
         await supabase.from("revisao_cedentes").update({
           data_ultima_renovacao: item.data_ultima_renovacao,
           data_proxima_renovacao: item.data_proxima_renovacao,
           pendencias: item.pendencias,
-          renovado: item.renovado
+          renovado: item.renovado,
+          drive_folder_id: item.drive_folder_id // 👈 Salva o ID da pasta
         }).eq("id", item.id);
       }
       alert("🎉 Todas as alterações foram gravadas!");
@@ -269,9 +447,6 @@ export default function RevisaoPage() {
     } catch (err: any) { alert(`❌ Erro no salvamento: ${err.message}`); } finally { setSalvando(false); }
   };
 
-  // ==========================================================================
-  // 🎨 UTILS DE FORMATAÇÃO E REGRAS DE NEGÓCIO
-  // ==========================================================================
   const fData = (str: string | null) => str ? str.split("-").reverse().join("/") : "Não definida";
 
   const analiseVencimento = (dataStr: string | null) => {
@@ -290,9 +465,6 @@ export default function RevisaoPage() {
     return { status: "EM_DIA", cor: "bg-emerald-50 text-emerald-700 border-emerald-200", icone: "🟢", diffDias, percent };
   };
 
-  // ==========================================================================
-  // 📊 PROCESSAMENTO DE FILTROS E KPIS
-  // ==========================================================================
   const kpis = useMemo(() => {
     let emDia = 0, alerta = 0, vencido = 0;
     revisoes.forEach(r => {
@@ -315,12 +487,10 @@ export default function RevisaoPage() {
       return false;
     });
 
-    // Ordenação Master (Agrupamento por Comercial)
     filtrado.sort((a, b) => {
       const comercialA = (a.comercial || "Sem Comercial").toUpperCase();
       const comercialB = (b.comercial || "Sem Comercial").toUpperCase();
       if (comercialA !== comercialB) return comercialA.localeCompare(comercialB);
-      // Desempate pela data
       const dateA = new Date(a.data_proxima_renovacao || "2099-01-01").getTime();
       const dateB = new Date(b.data_proxima_renovacao || "2099-01-01").getTime();
       return dateA - dateB;
@@ -345,7 +515,6 @@ export default function RevisaoPage() {
     <div className="min-h-screen bg-slate-50/50 p-4 sm:p-8 font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto space-y-8">
         
-        {/* HEADER MODERNO */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -367,7 +536,6 @@ export default function RevisaoPage() {
           </div>
         </div>
 
-        {/* =============== PAINEL DE KPIs =============== */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <button onClick={() => setFiltroStatus("TODOS")} className={`p-5 rounded-2xl text-left transition-all duration-300 border cursor-pointer ${filtroStatus === "TODOS" ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20" : "bg-white border-slate-200 hover:border-slate-300 shadow-sm"}`}>
             <span className={`text-[11px] font-bold uppercase tracking-widest block mb-2 ${filtroStatus === "TODOS" ? "text-slate-400" : "text-slate-500"}`}>Carteira Total (Global)</span>
@@ -390,7 +558,6 @@ export default function RevisaoPage() {
           </button>
         </div>
 
-        {/* =============== BOTÕES DE E-MAIL E BUSCA =============== */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="bg-indigo-100 text-indigo-700 p-1.5 rounded-lg">
@@ -435,7 +602,6 @@ export default function RevisaoPage() {
           />
         </div>
 
-        {/* =============== ÁREA DA TABELA =============== */}
         <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto pb-6">
             <table className="w-full text-left border-collapse min-w-[1200px]">
@@ -462,7 +628,6 @@ export default function RevisaoPage() {
                   const infoData = analiseVencimento(item.data_proxima_renovacao);
                   const temPendencia = item.pendencias && item.pendencias.trim().length > 0;
 
-                  // Lógica Visual: Bloco do Comercial (Aplicada para todos na Visão Interna)
                   const comercialAtual = item.comercial || "Sem Comercial";
                   const comercialAnterior = mapIndex > 0 ? (array[mapIndex - 1].comercial || "Sem Comercial") : null;
                   const showGroupHeader = comercialAtual !== comercialAnterior;
@@ -493,7 +658,16 @@ export default function RevisaoPage() {
 
                         <td className="px-4 py-4 align-top">
                           <div className="flex flex-col">
-                            <span className="font-extrabold text-slate-800 tracking-tight block truncate" title={item.cedente}>{item.cedente}</span>
+                            {/* 👇 NOVO: ÍCONE DO DRIVE NA LINHA PRINCIPAL */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-extrabold text-slate-800 tracking-tight block truncate" title={item.cedente}>{item.cedente}</span>
+                              {item.drive_folder_id && (
+                                <a href={`https://drive.google.com/drive/folders/${item.drive_folder_id}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-1 rounded-md transition-all cursor-pointer shadow-sm border border-blue-100" title="Abrir Pasta no Google Drive">
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5l-2-2z" /></svg>
+                                </a>
+                              )}
+                            </div>
+                            
                             <div className="flex items-center gap-2 mt-1">
                               {item.renovado && <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">Ciclo Ativo</span>}
                               {item.ultimo_email_enviado && <span className="text-[9px] text-slate-400 font-medium border border-slate-200 rounded px-1.5 py-0.5" title="Último aviso de cobrança enviado">Cobrado: {fData(item.ultimo_email_enviado)}</span>}
@@ -574,7 +748,7 @@ export default function RevisaoPage() {
                                     </div>
                                     
                                     <button onClick={() => renovarRapido(item)} disabled={salvando} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs uppercase cursor-pointer shadow-md transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50">
-                                      🚀 Renovar Automático a partir de HOJE (+180 Dias)
+                                      🚀 Renovar Automático (+180 Dias)
                                     </button>
                                   </div>
                                 </div>
@@ -594,7 +768,15 @@ export default function RevisaoPage() {
                                 </div>
                               </div>
 
-                              <div className="xl:col-span-12 flex justify-end mt-2 pt-4 border-t border-slate-200/60">
+                              {/* 👇 NOVO: GIGANTE EMBAIXO OCUPANDO A LINHA INTEIRA */}
+                              <div className="xl:col-span-12 mt-2">
+                                <MiniViewerDrive 
+                                  folderIdAtual={item.drive_folder_id || null} 
+                                  onFolderSelected={(idDaPasta) => handleInputChange(index, "drive_folder_id", idDaPasta)} 
+                                />
+                              </div>
+
+                              <div className="xl:col-span-12 flex justify-end pt-4 border-t border-slate-200/60 mt-2">
                                 <button 
                                   onClick={() => salvarLinha(item)} 
                                   disabled={salvando || !item._isEditado} 
@@ -621,7 +803,7 @@ export default function RevisaoPage() {
       </div>
 
       {/* ========================================================================== */}
-      {/* 📧 MODAL DE DISPARO DE E-MAILS (IDÊNTICO AO CADASTRO) */}
+      {/* 📧 MODAL DE DISPARO DE E-MAILS */}
       {/* ========================================================================== */}
       {modalDisparoAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
