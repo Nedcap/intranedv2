@@ -7,7 +7,7 @@ import { limparNome } from "@/lib/normalizador";
 import { useAuth } from "@/lib/AuthContext"; // 🛡️ Nosso Crachá Global
 
 // =========================================================================
-// 🚀 COMPONENTE MINI VIEWER DO DRIVE (INTEGRADO À API DO ROBÔ)
+// 🚀 COMPONENTE MINI VIEWER DO DRIVE (COM PREVIEW E NAVEGAÇÃO)
 // =========================================================================
 const PASTA_RAIZ_ID = "1hgVuaxj0iCvwi2vfrGfm8nxBINgwOBbS"; // 👈 SEU LINK OFICIAL DA RAIZ
 
@@ -15,6 +15,12 @@ function MiniViewerDrive({ folderIdAtual, onFolderSelected }: { folderIdAtual: s
   const [arquivos, setArquivos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [pastaAlvo, setPastaAlvo] = useState(folderIdAtual || PASTA_RAIZ_ID);
+  
+  // Histórico para conseguir "Subir de Nível"
+  const [historicoPastas, setHistoricoPastas] = useState<string[]>([]);
+  
+  // Estado do Visualizador Nativo (Modal)
+  const [previewArquivo, setPreviewArquivo] = useState<{nome: string, url: string} | null>(null);
 
   const carregarArquivos = useCallback(async (idDaPasta: string) => {
     setLoading(true);
@@ -36,33 +42,97 @@ function MiniViewerDrive({ folderIdAtual, onFolderSelected }: { folderIdAtual: s
     carregarArquivos(pastaAlvo);
   }, [pastaAlvo, carregarArquivos]);
 
-  // MODO 1: SELETOR DE PASTA (Na pasta Raiz)
+  const entrarNaPasta = (id: string) => {
+    setHistoricoPastas(prev => [...prev, pastaAlvo]);
+    setPastaAlvo(id);
+  };
+
+  const subirNivel = () => {
+    const novoHistorico = [...historicoPastas];
+    const pastaAnterior = novoHistorico.pop();
+    if (pastaAnterior) {
+      setHistoricoPastas(novoHistorico);
+      setPastaAlvo(pastaAnterior);
+    }
+  };
+
+  const abrirVisualizador = (arq: any) => {
+    // Transforma a URL de view em URL de preview pro iframe não ser bloqueado pelo Google
+    let urlEmbed = arq.webViewLink;
+    if (urlEmbed.includes("/view")) {
+      urlEmbed = urlEmbed.replace(/\/view(\?.*)?$/, "/preview");
+    }
+    setPreviewArquivo({ nome: arq.name, url: urlEmbed });
+  };
+
+  // =====================================
+  // MODAL DE PREVIEW (IFRAME)
+  // =====================================
+  const renderPreviewModal = () => {
+    if (!previewArquivo) return null;
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-8">
+        <div className="bg-white w-full max-w-6xl h-full max-h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl relative border border-slate-700">
+          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <h3 className="font-black text-slate-800 flex items-center gap-2 truncate pr-4">
+              <svg className="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
+              {previewArquivo.nome}
+            </h3>
+            <button onClick={() => setPreviewArquivo(null)} className="text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 shadow-sm rounded-lg px-4 py-1.5 text-xs font-bold transition-colors cursor-pointer">
+              X Fechar Visualização
+            </button>
+          </div>
+          <div className="flex-1 bg-slate-200/50">
+            <iframe src={previewArquivo.url} className="w-full h-full border-none" allow="autoplay" title="Preview" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // =====================================
+  // MODO 1: SELETOR DE PASTA RAIZ
+  // =====================================
   if (!folderIdAtual) {
     return (
-      <div className="flex flex-col h-full">
-        <h4 className="text-xs font-bold text-slate-700 mb-2 uppercase flex items-center gap-2">
-          <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-          Vincular Pasta (Drive)
-        </h4>
+      <div className="flex flex-col h-full bg-slate-50 p-4 rounded-xl border border-slate-200">
+        {renderPreviewModal()}
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-sm font-bold text-slate-700 uppercase flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            Selecione a Pasta do Cedente
+          </h4>
+          {historicoPastas.length > 0 && (
+            <button onClick={subirNivel} className="text-xs font-bold bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer">
+              ⬅ Subir Nível
+            </button>
+          )}
+        </div>
+
         {loading ? (
-          <p className="text-[10px] text-slate-500 animate-pulse mt-2">O Robô está lendo as pastas...</p>
+          <p className="text-xs text-slate-500 animate-pulse mt-2 flex items-center gap-2">Sincronizando Drive...</p>
         ) : (
-          <div className="max-h-48 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1 custom-scrollbar">
+          <div className="max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-xl p-2 custom-scrollbar grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
             {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").map(pasta => (
-              <button 
-                key={pasta.id} 
-                onClick={() => {
-                  setPastaAlvo(pasta.id);
-                  onFolderSelected(pasta.id);
-                }}
-                className="w-full text-left flex items-center gap-2 p-2 hover:bg-emerald-100 text-[11px] font-semibold text-slate-700 rounded transition-colors cursor-pointer border border-transparent hover:border-emerald-200"
-              >
-                <img src={pasta.iconLink} alt="icon" className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{pasta.name}</span>
-              </button>
+              <div key={pasta.id} className="flex flex-col border border-slate-200 hover:border-emerald-300 rounded-lg p-2 hover:bg-emerald-50 transition-colors group">
+                <button 
+                  onClick={() => entrarNaPasta(pasta.id)}
+                  className="w-full text-left flex items-center gap-2 text-[11px] font-bold text-slate-700 mb-2 truncate cursor-pointer"
+                  title="Dar duplo clique ou abrir pasta"
+                >
+                  <img src={pasta.iconLink} alt="icon" className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{pasta.name}</span>
+                </button>
+                <button 
+                  onClick={() => onFolderSelected(pasta.id)}
+                  className="w-full mt-auto text-[10px] uppercase tracking-widest font-black bg-emerald-600 text-white py-1.5 rounded shadow-sm hover:bg-emerald-700 transition-colors cursor-pointer"
+                >
+                  Vincular Aqui
+                </button>
+              </div>
             ))}
             {arquivos.filter(f => f.mimeType === "application/vnd.google-apps.folder").length === 0 && (
-              <p className="text-[10px] text-slate-400 p-2 italic text-center">Nenhuma subpasta encontrada.</p>
+              <p className="text-xs text-slate-400 p-4 col-span-full text-center">Nenhuma subpasta encontrada aqui.</p>
             )}
           </div>
         )}
@@ -70,51 +140,73 @@ function MiniViewerDrive({ folderIdAtual, onFolderSelected }: { folderIdAtual: s
     );
   }
 
-  // MODO 2: MINI VIEWER (Dentro da pasta do Cliente)
+  // =====================================
+  // MODO 2: VISUALIZADOR NATIVO (MINI VIEWER)
+  // =====================================
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-3">
-        <h4 className="text-[11px] font-bold text-slate-700 uppercase flex items-center gap-1.5">
-          <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
-          Documentos no Drive
-        </h4>
+    <div className="flex flex-col h-full bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+      {renderPreviewModal()}
+      
+      <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-3">
+          <h4 className="text-sm font-black text-slate-700 uppercase flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.43 6 6.55-11.5M9.73 3.5h13.12l-3.43 6H6.28l3.45-6zm.56 12.5l3.43 6h10.28l-3.43-6H10.29z"/></svg>
+            Dossiê de Documentos
+          </h4>
+          {historicoPastas.length > 0 && (
+            <button onClick={subirNivel} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded hover:bg-slate-200 transition-colors flex items-center gap-1 border border-slate-200 cursor-pointer">
+              ⬅ Subir Nível
+            </button>
+          )}
+        </div>
+
         <div className="flex gap-2 items-center">
-          <a href={`https://drive.google.com/drive/folders/${folderIdAtual}`} target="_blank" rel="noopener noreferrer" className="text-[9px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded hover:bg-blue-100 transition-colors uppercase border border-blue-200" title="Abrir em Nova Guia">
-            Abrir ↗
+          <a href={`https://drive.google.com/drive/folders/${pastaAlvo}`} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors uppercase border border-blue-200 shadow-sm flex items-center gap-1" title="Abrir pasta no próprio Google Drive">
+            Abrir Externo ↗
           </a>
           <button 
             onClick={() => {
               onFolderSelected(null);
               setPastaAlvo(PASTA_RAIZ_ID);
+              setHistoricoPastas([]);
             }} 
-            className="text-[9px] font-bold text-slate-400 hover:text-rose-500 underline cursor-pointer"
+            className="text-[10px] font-bold text-slate-400 hover:text-rose-500 underline cursor-pointer ml-2"
           >
             Desvincular
           </button>
         </div>
       </div>
 
-      <div className="flex-1 max-h-48 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+      <div className="flex-1 max-h-64 min-h-[160px] overflow-y-auto custom-scrollbar">
         {loading ? (
-          <p className="text-[10px] text-slate-500 animate-pulse flex items-center gap-1.5 mt-2">
-            <svg className="animate-spin w-3.5 h-3.5 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            Sincronizando...
-          </p>
+          <div className="flex items-center justify-center h-full gap-2 text-slate-500 font-medium">
+            <svg className="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Sincronizando Drive...
+          </div>
         ) : arquivos.length === 0 ? (
-          <p className="text-[10px] text-slate-400 italic bg-slate-50 p-2 rounded text-center border border-slate-100">Pasta vazia.</p>
+          <div className="flex items-center justify-center h-full text-xs text-slate-400 italic bg-slate-50 rounded-lg border border-slate-100 m-2">
+            A pasta está vazia.
+          </div>
         ) : (
-          arquivos.map(arq => (
-            <a 
-              key={arq.id} 
-              href={arq.webViewLink} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-100 group"
-            >
-              <img src={arq.iconLink} alt="icon" className="w-4 h-4 shrink-0" />
-              <span className="text-[10px] font-semibold text-slate-700 truncate group-hover:text-blue-700">{arq.name}</span>
-            </a>
-          ))
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-1">
+            {arquivos.map(arq => {
+              const isPasta = arq.mimeType === "application/vnd.google-apps.folder";
+              return (
+                <button 
+                  key={arq.id} 
+                  onClick={() => isPasta ? entrarNaPasta(arq.id) : abrirVisualizador(arq)}
+                  className={`flex items-center gap-3 p-3 rounded-xl transition-all border group text-left cursor-pointer
+                    ${isPasta ? "bg-slate-50 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300" : "bg-white border-slate-200 hover:bg-blue-50 hover:border-blue-300 hover:shadow-sm"}
+                  `}
+                >
+                  <img src={arq.iconLink} alt="icon" className="w-6 h-6 shrink-0" />
+                  <span className={`text-xs font-semibold truncate ${isPasta ? "text-slate-700" : "text-slate-600 group-hover:text-blue-700"}`}>
+                    {arq.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
@@ -635,7 +727,7 @@ export default function CadastroPage() {
       id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, 
       cedente: "", cnpj: null, limite: "", taxa: "", obs: "", dt_aprovacao_comite: null,
       modalidades_aprovadas: [],
-      drive_folder_id: null, // 👈 Nova Propriedade
+      drive_folder_id: null, 
       dt_documentos_sec: null, dt_geracao_contrato_sec: null, dt_assinatura_contrato_sec: null, dt_apto_sec: null,
       dt_documentos_fidc: null, dt_geracao_contrato_fidc: null, dt_assinatura_contrato_fidc: null, 
       dt_envio_gestora_fidc: null, dt_aprovacao_gestora_fidc: null, dt_envio_admin_fidc: null, dt_aprovacao_admin_fidc: null, dt_apto_fidc: null,
@@ -690,7 +782,7 @@ export default function CadastroPage() {
     const payload: any = {
       cedente: limparNome(item.cedente), limite: item.limite || "", taxa: item.taxa || "", obs: item.obs || "",
       cnpj: cnpjFinal === "" ? null : cnpjFinal,
-      drive_folder_id: item.drive_folder_id || null, // 👈 NOVA PROPRIEDADE AQUI
+      drive_folder_id: item.drive_folder_id || null, 
       modalidades_aprovadas: item.modalidades_aprovadas || [],
       grupo_economico: item.grupo_economico || null, 
       dt_aprovacao_comite: item.dt_aprovacao_comite || null,
@@ -1279,14 +1371,6 @@ export default function CadastroPage() {
                                     className="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 uppercase outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all bg-slate-50 hover:bg-white" 
                                     placeholder="NOME DO GRUPO" />
                                 </div>
-
-                                {/* CARD DO GOOGLE DRIVE */}
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                  <MiniViewerDrive 
-                                    folderIdAtual={item.drive_folder_id} 
-                                    onFolderSelected={(idDaPasta) => handleInputChange(index, "drive_folder_id", idDaPasta)} 
-                                  />
-                                </div>
                               </div>
 
                               <div className="xl:col-span-9 space-y-4">
@@ -1388,6 +1472,14 @@ export default function CadastroPage() {
                                     ))}
                                   </div>
                                 </div>
+                              </div>
+
+                              {/* NEW DRIVE SECTION FULL WIDTH */}
+                              <div className="xl:col-span-12 mt-2">
+                                <MiniViewerDrive 
+                                  folderIdAtual={item.drive_folder_id} 
+                                  onFolderSelected={(idDaPasta) => handleInputChange(index, "drive_folder_id", idDaPasta)} 
+                                />
                               </div>
 
                               <div className="xl:col-span-12 flex justify-end mt-2 pt-4 border-t border-slate-200/60">
